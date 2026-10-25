@@ -17,11 +17,13 @@ All projects target `net11.0` and live in `src/Bork2d/`, listed in
 | `Bork2d.Assets` | `Bork2d.Api`, `Bork2d.Common` | `Empty` (wired) | Pack VFS, overlays, loaders, descriptors, sprite assets, bake support. |
 | `Bork2d.Render` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets` | `Empty` (wired) | Vulkan device, swapchain or offscreen targets, pipelines, bindless textures, draws, present. |
 | `Bork2d.AotSmoke` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Runtime` | `Current` | NativeAOT one-tick smoke executable; the local publish/run gate. Not a game template project. |
-| `Bork2d.Tests` | all five engine projects plus `Bork2d.AotSmoke` | `Current` | 135 deterministic xUnit tests, including the dependency matrix. The smoke reference copies the app next to the tests; the dependency test loads it by name to check its references. |
+| `Bork2d.Tests` | all five engine projects plus `Bork2d.AotSmoke` | `Current` | 160 deterministic xUnit tests, including the dependency matrix. The smoke reference copies the app next to the tests; the dependency test loads it by name to check its references. |
 | `Bork2d.Editor` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets` (+ Avalonia) | `Planned` (M5) | Avalonia editor library/app; JIT. |
 
 `Bork2d.Runtime` references `Microsoft.Extensions.Logging` `11.0.0-rc.1.26425.128` and `ZLogger`
-`2.5.10`; `Bork2d.Common` references `Nerdbank.MessagePack` `1.4.95` (generated shapes only, no
+`2.5.10`; it also pins `Silk.NET.SDL` `2.23.0` for the internal windowed platform. No SDL type
+leaves `Bork2d.Runtime`, `Bork2d.Api` stays SDL-free, and the project-reference matrix above is
+unchanged. `Bork2d.Common` references `Nerdbank.MessagePack` `1.4.95` (generated shapes only, no
 reflection resolver). `Bork2d.Api` uses `Microsoft.Extensions.Logging.Abstractions` from the
 .NET 11 shared framework and has no package reference. `Bork2d.AotSmoke` is the only executable
 and the only project that sets `PublishAot`; libraries do not publish independently.
