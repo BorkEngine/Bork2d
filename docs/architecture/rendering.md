@@ -30,7 +30,7 @@ It consumes flattened snapshot data and an immutable resource table.
 | Graphics API | Vulkan 1.3 | `Planned` |
 | Rendering path | Dynamic rendering (core 1.3) | `Planned` |
 | Texture access | Descriptor indexing / bindless array | `Planned` |
-| Sprite geometry | Instanced 4-vertex quads from sprite assets | `Planned` |
+| Sprite geometry | Instanced shader-generated 4-corner quads from sprite assets | `Planned` |
 | Shader compilation | Offline GLSL → SPIR-V (compiler `Open`) | `Planned` |
 | Memory allocation | VMA or a minimal suballocator (`Open`) | `Open` |
 | Presentation | Windowed: FIFO default. Offscreen: none | `Planned` |
@@ -129,13 +129,13 @@ The render thread owns all of this; the tick thread only supplies immutable snap
    - filter by `(camera.CullingMask & sprite.Layer) != 0`;
    - skip `Sprite.Empty`;
    - resolve the `Sprite` handle to a sprite asset (texture descriptor, UVs, pixels-per-unit
-     scale, pivot, topology);
+     scale, pivot, topology, optional indices);
    - skip if the sprite/texture/payload/GPU page is not ready;
-   - for `Quad`, generate four corners from the UV span × texture size ÷ scale around the
-     pivot; non-Quad is rejected in v1;
+   - for `Quad`, compute the world-unit quad size and append an instance (UVs, pivot, size,
+     transform, tint, texture index); non-Quad assets are not drawn by the v1 renderer;
    - append one instance to the camera's contiguous range.
 
-Multiple cameras may see the same sprite. Resource lookup and local geometry can be cached per
+Multiple cameras may see the same sprite. Resource lookup and instance data can be cached per
 sprite for the frame; each camera gets its own instance because the view-projection and
 viewport differ.
 
@@ -146,30 +146,38 @@ Logical per-instance fields (exact layout implementation detail):
 | Field | Meaning |
 | --- | --- |
 | `Transform` | 2×3 world transform from the snapshot (includes parent hierarchy). |
-| `Vertices[4]` | Generated quad corners in sprite-local **world-unit** space, from UV span × texture size ÷ `scale`, offset by `pivot`, converted to Y-up. |
-| `Uvs[4]` | Normalized UVs, top-left origin, in generated corner order. |
+| `Size` | World-unit quad size: `(uvSpan × textureSize) / scale`. |
+| `Pivot` | Normalized pivot, top-left origin. |
+| `Uvs[4]` | Normalized UVs, top-left origin, in top-left/top-right/bottom-right/bottom-left order. |
 | `Tint` | Linear RGBA multiplied with the sampled texel. |
 | `TextureIndex` | Index into the bindless texture page array. |
 
-The render thread generates `(uvSpan × textureSize) / scale` local corners and offsets them by
-the sprite pivot before writing the instance. The shader does not need slice metadata.
+There is no `Vertices[4]` field. The vertex shader derives the four local corners from `Size`,
+`Pivot`, and `gl_VertexIndex`; the asset stores no vertex positions.
 
-### 4.3 Quads now, meshes later
+### 4.3 Quads now, indexed topologies later
 
-v1 supports `topology = Quad` only. It generates four corners per sprite; this is still
-**instanced**, with `gl_VertexIndex` selecting one generated corner.
+v1 draws `topology = Quad` as a four-corner triangle strip. It is still **instanced**, with
+`gl_VertexIndex` selecting one generated corner.
 
-`TriangleStrip` and `Triangles` are reserved enum values for a future mesh asset that carries
-vertices/indices. They do not fit the fixed four-corner instanced path; v1 rejects them. A mesh
-renderer path is a later design and is not silently approximated as a quad.
+The sprite asset also carries `indices` (`ushort[]?`): null for `Quad`, non-null for
+`TriangleStrip`/`Triangles`, indexing the four generated corners. The v1 renderer validates and
+preserves those assets but does not draw them yet. The indexed draw path is a later M8
+extension; it is not silently approximated as a quad, and there is no separate mesh asset.
 
 ### 4.4 Shader
 
-- Four generated corners, drawn as a triangle-strip primitive.
-- `gl_VertexIndex` 0..3 selects corner/UV from the instance.
-- Vertex shader: `gl_Position = viewProj * vec4(instance.Transform * localVertex, 0, 1)`.
+- Four corners are generated in the vertex shader; no vertex buffer.
+- `gl_VertexIndex` 0..3 selects the corner (top-left, top-right, bottom-right, bottom-left) and
+  its UV from the instance.
+- Vertex shader:
+  - `corner = corners[gl_VertexIndex]` where `corners = { (0,0), (1,0), (1,1), (0,1) }`
+    (top-left, top-right, bottom-right, bottom-left);
+  - `local = ((corner.x - pivot.x) * size.x, (pivot.y - corner.y) * size.y)`;
+  - `gl_Position = viewProj * vec4(instance.Transform * local, 0, 1)`.
 - Fragment shader: sample `textures[TextureIndex]`, multiply by `Tint`, output.
-- No vertex buffer, no index buffer, no per-sprite descriptor updates.
+- No vertex buffer, no index buffer, no per-sprite descriptor updates in v1.
+- The future indexed path consumes the asset's `indices`; it does not add a vertex array.
 
 ## 5. The one-draw contract
 
@@ -219,8 +227,8 @@ addresses the same record. There is no index buffer.
 - **One draw:** one instance range + one `vkCmdDraw` per camera.
 
 The debug counter enforces at most `C` draws for `C` cameras. A feature that needs a second
-draw per camera (custom material, meshes with variable topology) must be designed, documented,
-and excluded from the one-draw promise until it is.
+draw per camera (custom material, a different pipeline) must be designed, documented, and
+excluded from the one-draw promise until it is.
 
 ## 6. Texture pages and bindless textures
 
@@ -300,8 +308,8 @@ zNdc = 0
 ```
 
 The Y negation is the only place the Y-up API meets Vulkan's Y-down clip space. Sprite quad
-corners are generated in Y-up world-local space from UVs, texture size, scale, and pivot; the
-renderer does not read a vertices array.
+corners are generated in Y-up world-local space by the vertex shader from UVs, texture size,
+scale, and pivot; the asset has no vertices array.
 
 ### 7.4 Screen ↔ world (planned)
 
@@ -435,7 +443,7 @@ resources.
 - GLSL 450/460, compiled offline to SPIR-V. Compiler choice is `Open`; runtime does not
   compile GLSL.
 - Shaders:
-  - `sprite.vert` — instance SSBO fetch, vertex/UV selection by `gl_VertexIndex`, world
+  - `sprite.vert` — instance SSBO fetch, corner/UV generation by `gl_VertexIndex`, world
     transform, push-constant view-projection;
   - `sprite.frag` — bindless sample, tint multiply.
 - Pipeline creation uses `VkPipelineRenderingCreateInfo` with the color format and no
@@ -504,7 +512,7 @@ Provisional targets (validate in M8, not commitments):
 
 The 165 Hz target is a measurement goal, not a cap: if the machine cannot sustain it, record
 the measured ceiling and optimize. The architectural requirements are one draw per camera and
-no per-sprite CPU work.
+linear instance packing with zero steady-state allocations.
 
 ## 15. Open decisions
 
@@ -523,7 +531,7 @@ no per-sprite CPU work.
 | Device selection | Override policy for multi-GPU. |
 | Transfer queue | Uploads stay on graphics queue in v1? |
 | Validation policy | Fail on warnings or only errors in CI. |
-| Mesh path | How variable-vertex sprite meshes will be drawn. |
+| Indexed path | How `indices` for `TriangleStrip`/`Triangles` will be uploaded/drawn. |
 
 ## 16. Current status
 

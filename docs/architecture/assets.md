@@ -31,13 +31,13 @@ Key rules:
 
 - The shipped runtime reads **only** `assets.pck` files. TOML is a source/editor format.
 - The runtime is NativeAOT: pack parsing, texture descriptors, sprite assets, and custom data
-  use [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) generated shapes
-  or its low-level reader/writer, not reflection.
+  use [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) generated shapes,
+  not reflection.
 - Game code holds `Sprite` handles, not textures or asset objects. The renderer resolves
   handles and skips anything whose resources are not ready.
 - A source texture is stored in the pack as raw bytes (RGBA8 now; KTX2 later). Sprite
-  definitions are MessagePack assets with UVs, a pivot, a topology, and a **pixels-per-unit**
-  scale; there is no vertices array.
+  definitions are MessagePack assets with UVs, a pivot, a topology, optional indices, and a
+  **pixels-per-unit** scale; there is no vertices array.
 - `assets.pck` has an always-compressed header with an XXH3-64 checksum; asset payloads have
   no checksum.
 - Packs overlay: `assets.pck` is the base; `IAssets.LoadPack(path)` mounts another pack above
@@ -92,20 +92,23 @@ Rules:
 
 ### 4.1 Binary layout
 
-All fixed-width binary fields are little-endian. The header is Zstd-compressed MessagePack;
-its internal integers use MessagePack's encoding.
+All fixed-width binary fields are little-endian. The header is a Zstd-compressed MessagePack
+object; its internal integers use MessagePack's encoding.
 
 | Offset | Size | Field | Notes |
 | --- | ---: | --- | --- |
 | `0` | 8 | `magic` | ASCII `BORK2DPK` |
-| `8` | 4 | `version` | `uint32`, currently `1` |
+| `8` | 4 | `version` | `uint32`, currently `1`; **outside** the compressed header |
 | `12` | 4 | `headerCompressedLength` | `uint32`, byte length of the compressed header |
 | `16` | 4 | `headerUncompressedLength` | `uint32`, byte length after decompression |
 | `20` | 8 | `headerChecksum` | `uint64`, XXH3-64 of the uncompressed header |
-| `28` | `headerCompressedLength` | `header` | Zstd-compressed MessagePack array of asset entries |
+| `28` | `headerCompressedLength` | `header` | Zstd-compressed MessagePack `PackHeader` |
 | `28 + headerCompressedLength` | … | `data` | Asset payloads, addressed by absolute offsets |
 
 - The 28-byte prefix is fixed.
+- `version` is deliberately in the **fixed prefix**, not in `PackHeader`. A future loader can
+  read it and choose the v1/v2 parser **before** deserializing; changing `PackHeader` in v2
+  cannot break v1 parsing. Only the prefix layout is promised stable across versions.
 - The header is **always** compressed, in debug and release builds. Compression level is
   maximum for determinism.
 - `headerCompressedLength` is the stored length; `headerUncompressedLength` is the expected
@@ -114,8 +117,8 @@ its internal integers use MessagePack's encoding.
   **uncompressed** header, computed with the Microsoft
   [`System.IO.Hashing`](https://www.nuget.org/packages/System.IO.Hashing) package
   ([`XxHash3`](https://learn.microsoft.com/dotnet/api/system.io.hashing.xxhash3)). The loader
-  decompresses the header, verifies the hash, then parses MessagePack. A mismatch rejects the
-  pack before any asset entry is trusted.
+  decompresses the header, verifies the hash, then deserializes MessagePack. A mismatch rejects
+  the pack before any asset entry is trusted.
 - `dataStart = 28 + headerCompressedLength`.
 - `offset` in each entry is absolute from the start of the pack file. A valid `offset` is at
   least `dataStart`; `offset + length` must not exceed the file size.
@@ -123,38 +126,67 @@ its internal integers use MessagePack's encoding.
   declared sizes, and bounds checks; a raw uncompressed payload has no integrity check (by
   design in v1).
 
-### 4.2 Header
+### 4.2 Header classes
 
-The header is a MessagePack **array** of entries. Each entry is a six-element array:
+The header is a MessagePack **object**, not an array. For **version 1**, the header and every
+entry are classes serialized with
+[Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) generated shapes:
 
+```csharp
+[GenerateShape]
+internal sealed partial class PackHeader
+{
+    public PackEntry[] Entries { get; init; } = [];
+}
+
+[GenerateShape]
+internal sealed partial class PackEntry
+{
+    public string Path { get; init; } = "";
+    public bool IsRaw { get; init; }
+    public bool IsCompressed { get; init; }
+    public ulong Offset { get; init; }
+    public ulong Length { get; init; }
+    public ulong Size { get; init; }
+}
 ```
-[ path, isRaw, isCompressed, offset, length, size ]
-```
 
-| Index | Field | Type | Meaning |
-| ---: | --- | --- | --- |
-| 0 | `path` | string | Canonical asset path. |
-| 1 | `isRaw` | bool | `true`: raw bytes; `false`: MessagePack. |
-| 2 | `isCompressed` | bool | Whether the stored bytes are Zstd-compressed. |
-| 3 | `offset` | uint64 | Absolute byte offset from the start of the pack. |
-| 4 | `length` | uint64 | Number of bytes stored at `offset` (compressed length when compressed). |
-| 5 | `size` | uint64 | Number of bytes after decompression. Equal to `length` when not compressed. |
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `PackHeader.Entries` | `PackEntry[]` | Asset entries; must not be null. |
+| `PackEntry.Path` | string | Canonical asset path. |
+| `PackEntry.IsRaw` | bool | `true`: raw bytes; `false`: MessagePack. |
+| `PackEntry.IsCompressed` | bool | Whether the stored bytes are Zstd-compressed. |
+| `PackEntry.Offset` | uint64 | Absolute byte offset from the start of the pack. |
+| `PackEntry.Length` | uint64 | Number of bytes stored at `Offset` (compressed length when compressed). |
+| `PackEntry.Size` | uint64 | Number of bytes after decompression. Equal to `Length` when not compressed. |
 
-The header is MessagePack, written/read with
-[Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) (its low-level
-writer/reader for the six-element arrays). The order of entries is not semantically significant,
-but the builder sorts by path for deterministic output. The loader builds a dictionary keyed by
-canonical path.
+`PackHeader` is the **v1 shape only**. A future v2 header is a different class/parser selected
+from the fixed-prefix `version`; the loader must never assume the v1 shape before checking the
+version.
 
-Example (conceptual, header bytes compressed on disk):
+The order of entries is not semantically significant, but the builder sorts by `Path` for
+deterministic output. The loader builds a dictionary keyed by canonical path. Because the
+header is compressed and checksummed, the loader must not attempt to parse entries until both
+checks pass.
 
-```
-[
-  ["data/enemies/boss", false, true,  4096, 812, 2048],
-  ["sprites/player/idle", false, false, 4908, 96, 96],
-  ["textures/player", false, false, 5004, 72, 72],
-  ["textures/raw/player", true, false, 5076, 4194304, 4194304]
-]
+Example (conceptual v1 object, serialized and compressed on disk):
+
+```csharp
+new PackHeader
+{
+    Entries =
+    [
+        new PackEntry { Path = "data/enemies/boss", IsRaw = false, IsCompressed = true,
+                        Offset = 4096, Length = 812, Size = 2048 },
+        new PackEntry { Path = "sprites/player/idle", IsRaw = false, IsCompressed = false,
+                        Offset = 4908, Length = 96, Size = 96 },
+        new PackEntry { Path = "textures/player", IsRaw = false, IsCompressed = false,
+                        Offset = 5004, Length = 72, Size = 72 },
+        new PackEntry { Path = "textures/raw/player", IsRaw = true, IsCompressed = false,
+                        Offset = 5076, Length = 4194304, Size = 4194304 },
+    ],
+}
 ```
 
 ### 4.3 Validation
@@ -162,16 +194,17 @@ Example (conceptual, header bytes compressed on disk):
 The loader must reject a pack when any of these fails:
 
 - magic is not `BORK2DPK`;
-- version is unknown;
+- `version` is unknown (checked from the fixed prefix before decompressing);
 - `headerCompressedLength`/`headerUncompressedLength` exceed configured limits or the file
   size;
 - header decompression does not produce exactly `headerUncompressedLength` bytes;
 - `headerChecksum` does not match XXH3-64 of the uncompressed header;
-- the header is not a MessagePack array of six-element arrays;
+- the uncompressed header is not a deserializable v1 `PackHeader`;
+- `Entries` is null;
 - a path is empty, non-canonical, duplicated, or escapes the virtual root;
-- `offset < dataStart`, `offset + length > fileSize`, or entries overlap;
-- `isCompressed == false` and `length != size`;
-- `isCompressed == true` and decompression does not produce exactly `size` bytes;
+- `Offset < dataStart`, `Offset + Length > fileSize`, or entries overlap;
+- `IsCompressed == false` and `Length != Size`;
+- `IsCompressed == true` and decompression does not produce exactly `Size` bytes;
 - the decompressed size exceeds the configured safety limit;
 - the same path occurs more than once.
 
@@ -240,16 +273,19 @@ bool Exists(string assetPath);
   diagnostics, not per-frame gameplay.
 - `Exists` applies the same overlay rules as `LoadSprite`/`LoadAsset`.
 
-### 6.3 Default pack missing
+### 6.3 Missing or malformed pack
 
-This is `Open`. The proposed behaviour is:
+This is **accepted**: the game must throw.
 
-- missing default `assets.pck` is a startup error (deploy/build mistake);
-- an explicit builder option can start with an empty filesystem for tests or a game that
-  mounts packs manually;
-- a malformed default pack is always a startup error.
+- A missing base pack (`assets.pck` or the path passed to `WithAssetsPack`) is a startup error.
+  `Build()` throws a `Bork2dException` with the resolved path before window/GPU startup; it
+  does not silently fall back to an empty filesystem.
+- A malformed base pack is also a startup error; the asset service throws `Bork2dException`
+  during startup, identifying the pack path and the failing validation rule.
+- `IAssets.LoadPack(path)` throws for a missing or malformed overlay.
+- Tests and tools that need no assets use a valid empty pack, not a missing file.
 
-The final choice will be recorded in the decision log before M3.
+There is no implicit empty-FS mode in v1.
 
 ### 6.4 Loose files
 
@@ -353,25 +389,26 @@ payload path.
 ## 9. Sprite assets
 
 A sprite is a **MessagePack asset** at a path such as `sprites/player/idle`. It describes a
-generated quad (and later, a mesh) using a texture, UVs, a per-sprite pixels-per-unit scale,
-a pivot, and a topology.
+textured quad using UVs, a per-sprite pixels-per-unit scale, a pivot, a topology, and optional
+indices.
 
 Logical fields:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `texture` | string | Texture descriptor path (`textures/player`). |
-| `uvs` | Vector2[] | Normalized UVs, top-left origin. Exactly four for `Quad`. |
+| `uvs` | Vector2[] | Normalized UVs, top-left origin. Exactly four. |
 | `scale` | float | **Pixels per world unit** for this sprite. |
 | `pivot` | Vector2 | Normalized origin inside the quad; default `(0.5, 0.5)` (center). |
 | `topology` | enum | `Quad`, `TriangleStrip`, or `Triangles`. |
+| `indices` | `ushort[]?` | `null` for `Quad`; required for `TriangleStrip`/`Triangles`. |
 
-There is no `vertices` array and no `indices` array in v1.
+There is no `vertices` array. Vertex positions are generated in the vertex shader from the
+UVs, texture size, scale, and pivot.
 
 v1 rules:
 
-- **`topology = Quad` is the only supported value.** It generates four corners from the UV
-  span and the texture descriptor:
+- The four corners are derived from the UV span and the texture descriptor:
   - `pixelWidth = (maxU - minU) * textureWidth`;
   - `pixelHeight = (maxV - minV) * textureHeight`;
   - `worldWidth = pixelWidth / scale`, `worldHeight = pixelHeight / scale`.
@@ -380,14 +417,16 @@ v1 rules:
 - `pivot` is normalized with a top-left origin: `(0,0)` is the quad's top-left, `(1,1)` the
   bottom-right. `(0.5,0.5)` is the default center. The generated quad is positioned around
   the pivot and converted to world Y-up; UVs remain top-left origin.
-- The four UVs are ordered top-left, top-right, bottom-right, bottom-left. The generated quad
-  uses the same order. UVs are normalized inside the texture page.
-- `TriangleStrip` and `Triangles` are reserved for a future mesh asset that carries vertices
-  and indices. A v1 sprite asset with either value is rejected/skipped with a diagnostic; it
-  is not silently treated as a quad.
-- Later auto-generated meshes add a mesh geometry record (vertices/indices); the sprite asset
-  will reference it and keep its UV/scale/pivot/topology semantics. That renderer path is not
-  v1.
+- The four UVs are ordered top-left, top-right, bottom-right, bottom-left.
+- `topology = Quad`: `indices` must be **null**; the quad is drawn as a four-corner triangle
+  strip.
+- `topology = TriangleStrip`: `indices` is required; each value is `0..3` and selects one of
+  the four generated corners.
+- `topology = Triangles`: `indices` is required; each value is `0..3`, and the length must be a
+  multiple of 3.
+- The v1 renderer draws `Quad`. Non-Quad assets are valid and validated, but are not silently
+  treated as quads; the indexed draw path lands with M8.
+- `indices` is never generated by the Quad editor path; it is absent in TOML for a Quad.
 
 Source TOML example:
 
@@ -396,7 +435,7 @@ Source TOML example:
 texture = "textures/player"
 scale = 16.0          # 16 source pixels = 1 world unit
 pivot = [0.5, 0.5]    # normalized, top-left origin
-topology = "quad"
+topology = "quad"     # indices must be absent/null for Quad
 
 uvs = [
   [0.0, 0.0],         # top-left
@@ -404,6 +443,10 @@ uvs = [
   [0.25, 0.25],       # bottom-right
   [0.0, 0.25],        # bottom-left
 ]
+
+# Non-Quad only, for example:
+# topology = "triangles"
+# indices = [0, 1, 2, 0, 2, 3]
 ```
 
 The editor writes this TOML; M4 bakes it to a MessagePack sprite asset. The pack contains the
@@ -468,7 +511,7 @@ Project.Common/
 The asset baker (M4) runs on the JIT build tool:
 
 1. parse and validate TOML data (custom classes);
-2. parse sprite TOML and validate UVs/scale/pivot/topology/texture references;
+2. parse sprite TOML and validate UVs/scale/pivot/topology/indices/texture references;
 3. read the texture sidecar and source image/raw RGBA, produce the runtime RGBA8 payload (or
    KTX2 later), and write the texture descriptor;
 4. emit MessagePack assets for data, sprites, and texture descriptors;
@@ -483,11 +526,13 @@ The pack builder:
 
 1. collects the baked MessagePack assets and raw payloads;
 2. establishes canonical paths, rejects duplicates, sorts entries;
-3. serializes the header with Nerdbank.MessagePack, compresses it with Zstd maximum
-   compression, and computes XXH3-64 over the uncompressed header bytes;
+3. serializes the `PackHeader`/`PackEntry` objects with Nerdbank.MessagePack, compresses the
+   header with Zstd maximum compression, and computes XXH3-64 over the uncompressed header
+   bytes;
 4. compresses asset payloads in release builds (Zstd max, only if smaller) or stores them
    uncompressed in debug;
-5. writes the 28-byte prefix, compressed header, and data with absolute offsets;
+5. writes the 28-byte prefix (including the fixed-prefix version), compressed header, and data
+   with absolute offsets;
 6. writes `assets.pck` deterministically.
 
 Build modes:
@@ -515,7 +560,7 @@ Build modes:
 
 - browse source textures/data under `Project.Common/Assets`;
 - define sprite slices as quads: rectangle, pivot, pixels-per-unit scale, topology, texture;
-- generate the sprite TOML (`texture`, `uvs`, `scale`, `pivot`, `topology`);
+- generate the sprite TOML (`texture`, `uvs`, `scale`, `pivot`, `topology`, optional `indices`);
 - edit texture sidecars (`<file>.toml` filter/wrap/import settings);
 - edit custom serializable classes in TOML with a property grid and raw TOML fallback;
 - validate asset references and slice rectangles;
@@ -528,9 +573,8 @@ The editor does not edit the binary pack and does not run the Vulkan renderer. S
 
 The runtime/game is NativeAOT (editor and baker are JIT; see [NativeAOT](nativeaot.md)):
 
-- pack header entries, texture descriptors, sprite assets, and custom data use
-  [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) generated shapes where
-  applicable (low-level writer for the six-element header entries);
+- pack header/entry classes, texture descriptors, sprite assets, and custom data use
+  [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) generated shapes;
 - `LoadAsset<T>` requires a generated shape; there is no reflection resolver at runtime;
 - no `Type.GetType`, assembly scanning, or dynamic code in pack/asset loading;
 - Zstd is the .NET 11 built-in implementation, so no extra native codec is needed;
@@ -588,13 +632,10 @@ Proposed v1 limits (final values `Open`):
 
 | Topic | Question | Proposed default |
 | --- | --- | --- |
-| Default pack missing | Startup error, empty FS, or builder option? | Startup error; explicit empty FS option for tools. |
-| Header entry encoding | Six-element array vs a named map? | Six-element array `[path, isRaw, isCompressed, offset, length, size]`. |
 | Texture descriptor path | Descriptor at `textures/<name>`, payload at `textures/raw/<name>`? | Yes; raw namespace is reserved. |
 | Sprite geometry | Quad corner generation from UVs + texture size + pivot? | Four corners, `scale` in pixels/unit, pivot default center. |
-| Mesh schema | How `TriangleStrip`/`Triangles` will carry vertices/indices? | Future mesh asset; v1 rejects non-Quad. |
+| Indexed path | When does the renderer consume `indices` for `TriangleStrip`/`Triangles`? | Schema carries indices now; v1 renderer is `Quad` only; indexed path in M8. |
 | KTX2 migration | Which descriptor fields become optional? | Width/height/format validation relaxed; sampler fields remain. |
-| Header checksum | Confirm XXH3-64 seed/field encoding? | XXH3-64, seed 0, uint64 little-endian, over uncompressed header. |
 | Memory mapping | Map packs or read into memory? | Read header, stream/decompress payloads; no full-file requirement. |
 | Overlay after load | Mounting a pack after handles resolved? | New lookups see it; existing handles unchanged. |
 | Unload | Pack/asset unload in v1? | No; load-and-keep. |
@@ -612,7 +653,7 @@ Proposed v1 limits (final values `Open`):
 | `assets.pck` | Does not exist | Format above (M3) |
 | Overlays / browse | No API | `LoadPack`, `Browse`, `Exists` (M3) |
 | Texture descriptor | Not implemented | MessagePack descriptor + raw payload (M3/M4) |
-| Sprite asset | `Sprite` handle only | MessagePack quad with UVs/scale/pivot/topology (M3/M4) |
+| Sprite asset | `Sprite` handle only | MessagePack quad with UVs/scale/pivot/topology/indices (M3/M4) |
 | TOML → MessagePack bake | None | M4 |
 | Editor slicing | None | M5 |
 | Runtime rendering of assets | None | M8 |

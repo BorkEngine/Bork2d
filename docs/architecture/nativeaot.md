@@ -64,10 +64,10 @@ The runtime must not depend on:
 It may use:
 
 - static generics and `typeof(T)` metadata that the AOT compiler can see;
-- source-generated Nerdbank.MessagePack shapes;
+- source-generated Nerdbank.MessagePack shapes, including `PackHeader`/`PackEntry`;
 - explicit builder registrations (`WithGame(instance)`, `WithAssetType<T>()`,
   `WithWindow<T>()`);
-- hand-written parsers for the pack header and known asset kinds;
+- bounded validation around the generated pack header/entry shapes and known asset kinds;
 - `DllImport`/Silk.NET bindings for SDL2/Vulkan.
 
 ### Game startup
@@ -95,8 +95,8 @@ AOT and also allows arbitrary constructor injection.
   shapes**.
 - `LoadAsset<T>` works only for types with a generated shape (for example `[GenerateShape]` on
   the root type). A missing shape is a build/startup error; there is no reflection fallback.
-- Pack header entries, texture descriptors, and sprite assets use Nerdbank generated shapes or
-  hand-written readers; they are part of the engine, not user types.
+- Pack header/entry classes, texture descriptors, and sprite assets use Nerdbank generated
+  shapes; they are part of the engine, not user types.
 - Custom game data uses the Nerdbank generated-shape path; TOML exists only in
   `Project.Common` and is consumed by the JIT baker/editor.
 - Zstd uses the .NET 11 built-in implementation; the pack header checksum uses the

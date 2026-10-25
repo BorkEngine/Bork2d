@@ -141,7 +141,7 @@ The editor works on `Project.Common/Assets`:
 - texture source (an image or raw RGBA) plus its Unity-style sidecar
   (`textures/player.png.toml`) with filter/wrap metadata;
 - sprite TOML (`sprites/player/idle.toml`) with texture path, UVs, pixels-per-unit scale,
-  pivot, and topology;
+  pivot, topology, and optional indices;
 - custom data TOML (`data/enemies/boss.toml`).
 
 Slicing workflow:
@@ -150,7 +150,7 @@ Slicing workflow:
 2. draw a rectangle (manual) or use a grid (planned);
 3. set the sprite pivot (normalized, default center);
 4. set pixels-per-unit scale; the renderer divides by it;
-5. set topology (`Quad` in v1);
+5. set topology (`Quad` in v1; `indices` is written only for non-Quad);
 6. set texture filter/wrap in the sidecar;
 7. name the sprite asset (`sprites/player/idle`);
 8. preview the quad and its pivot;
@@ -164,6 +164,7 @@ uvs      = [ [u0,v0], [u1,v0], [u1,v1], [u0,v1] ] # top-left origin
 scale    = 16.0                                    # pixels per world unit
 pivot    = [0.5, 0.5]                              # normalized, top-left origin
 topology = "quad"
+# indices = [0, 1, 2, 0, 2, 3]  # non-Quad only; absent/null for Quad
 ```
 
 The renderer generates the four corners from the UV span, texture size, scale, and pivot.
@@ -237,7 +238,7 @@ predictable and make a future AOT editor possible without changing user code.
 | Pack inspection | Should the editor ever open a built pack for read-only inspection? |
 | Preview | Static sprite preview versus a lightweight non-Vulkan compositor. |
 | Grid slicing | Manual only in v1, or grid/auto-slicing too? |
-| Validation rules | Bounds/overlap/pivot rules and whether they are warnings or errors. |
+| Validation rules | Bounds/overlap/pivot/indices rules and whether they are warnings or errors. |
 | Multiple projects | One project per editor process in v1? |
 
 ## 12. Current status

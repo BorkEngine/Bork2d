@@ -57,8 +57,8 @@ These are explicitly out of scope until the roadmap says otherwise:
 - Hot reload of assets or shaders (a later optimization).
 - Multi-window hosting; one app process, with windowed, offscreen, or headless mode.
 - Linux/macOS as supported targets at v1. The abstractions must not block them.
-- A visual shader/material system, per-sprite custom materials, or variable-topology sprite
-  meshes in v1.
+- A visual shader/material system, per-sprite custom materials, or indexed non-Quad sprite
+  drawing in v1 (the asset schema carries `indices`; the draw path is later).
 - Persisting runtime `Sprite` handles. Assets are referenced by stable keys in data.
 
 ## 4. System context
@@ -220,14 +220,14 @@ is an architecture bug, not a code-style preference.
 5. **Snapshots carry handles, not assets.** `Sprite` is an opaque ID; the renderer resolves it
    against the pack-backed resource table at draw time and skips anything not ready.
 6. **A camera draws its visible sprites with at most one instanced draw call.** Empty cameras
-   draw zero calls. The total is one per non-empty camera, not one per sprite or texture. Each
-   instance carries four corners generated from the sprite's UV span, texture size, scale, and
-   pivot, plus its UVs.
+   draw zero calls. The total is one per non-empty camera, not one per sprite or texture. The
+   instanced vertex shader generates four corners from the sprite's UVs, world-unit size, and
+   pivot; the asset stores no vertices.
 7. **Layers are single bits; culling masks are combinations.** A renderable with layer `0` or
    more than one bit set is invalid and is skipped with a debug diagnostic.
 8. **World units are abstract, Y-up, with CCW radians.** `Camera.Size` is the half visible
-   height. Sprite assets carry UVs, a normalized pivot, a topology enum, and a per-sprite
-   pixels-per-unit scale; there is no vertices array and no global setting.
+   height. Sprite assets carry UVs, a normalized pivot, a topology enum, optional indices, and a
+   per-sprite pixels-per-unit scale; there is no vertices array and no global setting.
 9. **There is no depth buffer in v1.** Draw order is layer, then z-index, then stable entity
    order. `ClearKind.Depth` is reserved and does nothing.
 10. **At most one window and one app process in v1.** Modes are windowed, offscreen, or
@@ -238,8 +238,9 @@ is an architecture bug, not a code-style preference.
     runtime TOML, or dynamic code; Nerdbank.MessagePack shapes are source-generated. The
     editor/baker are JIT.
 13. **`assets.pck` is the runtime asset source.** TOML and source images live in
-    `Project.Common`; only baked MessagePack/raw assets ship. The header is always compressed
-    and XXH3-64 checksummed; asset payloads have no checksum. Overlays are packs, later wins.
+    `Project.Common`; only baked MessagePack/raw assets ship. The header is a compressed
+    `PackHeader`/`PackEntry` object with an XXH3-64 checksum; asset payloads have no checksum.
+    Overlays are packs, later wins; a missing base pack throws at startup.
 14. **Logging is available everywhere through `IEngine.LoggerFactory`**, configured with
     ZLogger by the builder; the default is a pretty console provider.
 15. **Warnings and C# style violations are build errors** in every project, with a format gate

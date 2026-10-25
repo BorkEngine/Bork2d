@@ -62,10 +62,12 @@ Start at the [documentation index](docs/README.md).
 - Windowed, offscreen (windowless Vulkan), and headless (no GPU/SDL) modes.
 - NativeAOT runtime; Nerdbank.MessagePack generated shapes; game passed to the builder as an instance.
 - Logging: Microsoft.Extensions.Logging + ZLogger; `IEngine.LoggerFactory`; pretty console default.
-- Assets: `assets.pck` with a compressed, XXH3-64-checksummed header and uint64 offsets; later
-  pack overlays win; header always compressed, debug assets uncompressed, release Zstd when smaller.
+- Assets: `assets.pck` with a compressed, XXH3-64-checksummed header (`PackHeader`/`PackEntry`
+  MessagePack classes) and uint64 offsets; later pack overlays win; debug assets uncompressed,
+  release Zstd when smaller. A missing base pack throws at startup.
 - Textures: MessagePack descriptors + raw RGBA8 payloads. Sprites: MessagePack quads with UVs,
-  pivot, topology, and pixels-per-unit scale; TOML source, baked. No vertices array.
+  pivot, topology, optional indices, and pixels-per-unit scale; TOML source, baked. No vertices
+  array; the shader generates quad corners.
 - One instanced draw per non-empty camera, generated sprite quads, bindless texture pages, dynamic rendering.
 - Layers are `[Flags]` bits (one per renderable, mask per camera).
 - Abstract world units, Y-up; `Camera.Size` is half the visible height; no global PPU.

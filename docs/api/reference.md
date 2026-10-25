@@ -53,6 +53,7 @@ boundaries, not arbitrary data races.
 | Sprite asset UVs | Normalized, top-left origin. |
 | Sprite asset `scale` | Pixels per world unit; renderer divides by it. |
 | Sprite asset pivot | Normalized, top-left origin; default center. |
+| Sprite asset `indices` | `ushort[]?`: null for `Quad`; required for `TriangleStrip`/`Triangles`. |
 | Input mouse | Framebuffer pixels, top-left origin. |
 | Time | Seconds; monotonic; `DeltaTime` clamped. |
 | Color | Linear RGBA, components `[0,1]`. |
@@ -287,7 +288,8 @@ Rules:
 - `LoadAsset<T>` requires a Nerdbank generated shape. No reflection fallback (NativeAOT).
 - `LoadPack`/`Browse`/`Exists` are thread-safe; mount packs during `Setup`/before loading.
 - No public pack/asset unload in v1; load-and-keep.
-- Default pack is `assets.pck`; missing/malformed behaviour is `Open` (proposed startup error).
+- Default pack is `assets.pck`; a missing or malformed base pack throws at startup. There is no
+  empty-FS fallback.
 
 ## 8. `ICamera<TLayer>`
 
@@ -343,8 +345,9 @@ public interface ISpriteRender<TLayer> : ITransform, IDisposable
 | `FlipX`, `FlipY` | `Planned` | Mirrors the sprite without changing the transform. |
 | `Dispose()` | `Current` | Unregisters; inside `Tick`/`Teardown` (main or owning worker; same entity sync). Disappears from the next snapshot. |
 
-- The sprite asset supplies UVs, pivot, topology, texture path, and a **pixels-per-unit**
-  scale. `LocalScale` multiplies. There is no global PPU and no vertices array.
+- The sprite asset supplies UVs, pivot, topology, optional indices, texture path, and a
+  **pixels-per-unit** scale. `LocalScale` multiplies. There is no global PPU and no vertices
+  array.
 - Hide with `Sprite = Sprite.Empty` (keep entity) or `Dispose()`.
 - Sorting: layer numeric → `ZIndex` → entity ID. A not-ready asset yields no instance.
 - Headless: entities can exist but never produce an instance.
@@ -523,7 +526,7 @@ Asset completion callbacks are not on the tick thread; marshal scene changes to 
 | Missing game instance | `Build()` throws. |
 | No Vulkan 1.3 device (windowed/offscreen) | `Run()` throws after cleanup. |
 | Headless tries GPU/SDL | Configuration error; headless must not initialize them. |
-| Missing/corrupt default pack | `Open`: proposed startup error. `LoadPack` throws. |
+| Missing/corrupt default pack | Startup error: `Bork2dException`; `LoadPack` throws. |
 | Missing/invalid asset path | Log + `Sprite.Empty` (proposed); not fatal. |
 | Asset not ready | No exception; renderer skips. |
 | Raw asset passed to `LoadAsset<T>` | Throws; use `LoadData`. |
@@ -555,7 +558,7 @@ exceptions remain for argument/programming errors.
 | Camera defaults | Scaffold uses cyan/zero mask; target black/all layers. |
 | Entity ownership | Weak references; target strong until `Dispose`. |
 | Layer semantics | Undefined; target one bit/mask with validation. |
-| Sprite sizing | No assets; target UVs/pivot/topology/pixels-per-unit scale. |
+| Sprite sizing | No assets; target UVs/pivot/topology/optional indices/pixels-per-unit scale. |
 | Assets/PCK | `Bork2d.Assets` empty. |
 | Threading | Single-threaded placeholder; target bounded ring. |
 

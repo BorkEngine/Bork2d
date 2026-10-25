@@ -169,12 +169,13 @@ Scope:
 
 - implement the `assets.pck` reader/writer from
   [Assets and pack files](architecture/assets.md):
-  - magic `BORK2DPK`, version 1, compressed/uncompressed header lengths, XXH3-64 checksum;
-  - always-Zstd-compressed MessagePack header;
+  - magic `BORK2DPK`, 28-byte prefix, compressed/uncompressed header lengths, XXH3-64 checksum;
+  - fixed-prefix `version` selects the header parser (v1 `PackHeader`);
+  - always-Zstd-compressed MessagePack `PackHeader`/`PackEntry` classes (Nerdbank shapes);
   - `System.IO.Hashing` package for `XxHash3`;
-  - six-element entries `[path, isRaw, isCompressed, offset, length, size]`;
   - uint64 offsets/lengths/sizes, little-endian binary fields;
   - path validation, duplicate/overlap checks, bounds/checksum validation;
+  - missing/malformed base pack throws at startup;
 - virtual filesystem: default `assets.pck`, `LoadPack`, later-wins overlays, no unload;
 - `Browse`/`Exists` with merged shadowed view;
 - compression: .NET 11 Zstd; header always compressed; debug assets uncompressed; release
@@ -182,18 +183,20 @@ Scope:
 - asset loader threads, immutable resource table, readiness/skipping;
 - texture descriptor assets + raw RGBA8 payloads (`textures/<name>`,
   `textures/raw/<name>`);
-- sprite asset schema (texture, UVs, pixels-per-unit scale, pivot, topology) with Nerdbank
-  generated shapes; v1 `Quad` only; no vertices array;
+- sprite asset schema (texture, UVs, pixels-per-unit scale, pivot, topology, optional
+  `indices`) with Nerdbank generated shapes; v1 renderer is `Quad` only; no vertices array;
 - `IAssets.LoadData`/`Exists`/`Browse`; `LoadAsset<T>` for built-in MessagePack types;
 - pack builder that can pack pre-baked MessagePack assets and raw payloads;
 - headless tests: create packs with raw textures, descriptors, sprites, data; overlay and
-  browse; corrupt-pack/header-checksum failures; AOT smoke.
+  browse; corrupt-pack/header-checksum/missing-pack failures; AOT smoke.
 
 Exit criteria:
 
 - a pack with a raw texture, texture descriptor, sprite asset, and data asset loads;
 - later pack overlays shadow earlier paths; browsing hides shadowed entries;
-- header is compressed and XXH3-64 verified; a corrupt checksum is rejected;
+- header is compressed, checksummed, and deserializes to `PackHeader`/`PackEntry`;
+- a corrupt checksum or malformed header is rejected;
+- a missing base pack throws at startup (no empty FS);
 - debug assets are uncompressed; release assets compress only when smaller;
 - corrupted magic/version/offset/length/path/checksum cases fail safely;
 - loader runs on background threads and the resource table is race-free under stress;
@@ -211,7 +214,8 @@ Scope:
 - TOML parser/writer (Tomlyn proposed) for the JIT baker/editor;
 - custom data TOML → MessagePack;
 - texture sidecar (`<file>.toml`) → MessagePack descriptor + raw RGBA8 payload;
-- sprite TOML → MessagePack sprite asset (UVs/scale/pivot/topology, no vertices);
+- sprite TOML → MessagePack sprite asset (UVs/scale/pivot/topology/optional indices, no
+  vertices);
 - asset baker: validation, image import, Nerdbank serialization, deterministic output;
 - pack builder integration: `assets.pck`, compressed header + XXH3-64, release max Zstd,
   debug asset payloads uncompressed;
@@ -245,8 +249,8 @@ Scope:
 - asset browser over `Project.Common/Assets`;
 - texture viewer: zoom/pan, manual (and optionally grid) slicing, pivot, pixels-per-unit
   scale, topology (Quad), filter/wrap, validation;
-- writes sprite TOML (UVs/scale/pivot/topology) and texture sidecar import settings; previews
-  source slices with Avalonia imaging;
+- writes sprite TOML (UVs/scale/pivot/topology/optional indices) and texture sidecar import
+  settings; previews source slices with Avalonia imaging;
 - custom data editing: property grid + raw TOML, validation, save;
 - bake/pack invocation through M4 code; diagnostics panel;
 - no Vulkan, no scene editing, no play mode;
@@ -337,14 +341,14 @@ Scope:
 - sprite pipeline using real MessagePack sprite assets (UVs, pixels-per-unit scale, pivot,
   `Quad` topology; no vertices array);
 - texture descriptors + raw RGBA8 payloads → bindless texture pages;
-- generate four quad corners from UV span × texture size ÷ scale and pivot; instance SSBO
-  carries generated corners/UVs, world transform, tint, texture index;
+- instance SSBO carries UVs, world-unit size, pivot, world transform, tint, texture index;
+- vertex shader generates the four corners from UVs/size/pivot; no vertex array in the asset;
 - camera projection (Size half-height, Y-up), viewport/aspect, screen/world helpers;
 - layers, z-order, tint, transforms, generated quads, no depth buffer;
 - one dynamic rendering pass, one draw per non-empty camera; clear/overlap semantics;
 - multi-camera/split-screen; offscreen rendering; windowed present;
 - debug counters, validation, labels, capture; golden/screenshot tests;
-- non-Quad topology rejected with a diagnostic in v1;
+- validate `indices`; v1 draws `Quad`; non-Quad assets are preserved for the indexed path;
 - performance benchmark on the 165 Hz test machine; no artificial cap;
 - AOT publish windowed/offscreen.
 
@@ -432,15 +436,16 @@ Size: L (ongoing). Risk: medium.
 
 **Assets**
 
-- `assets.pck` version 1 with magic, compressed/uncompressed header lengths, XXH3-64 checksum,
-  compressed MessagePack header, uint64 offsets, six-element entries.
+- `assets.pck` with magic, 28-byte prefix (fixed version, compressed/uncompressed header
+  lengths, XXH3-64 checksum), compressed `PackHeader`/`PackEntry` classes, uint64 offsets.
 - Header always compressed/checksummed; debug asset payloads uncompressed; release payloads
   Zstd-compressed only when smaller.
+- Missing/malformed base pack throws at startup; no empty FS.
 - Overlays: later `LoadPack` wins; `Browse`/`Exists` merged view; no unload in v1.
 - Texture descriptors (width/height/format/filter/wrap) + raw RGBA8 payloads; source sidecars
   carry import settings.
-- Sprite assets (texture, UVs, pixels-per-unit scale, pivot, topology) baked from TOML;
-  `Quad` only; no vertices array.
+- Sprite assets (texture, UVs, pixels-per-unit scale, pivot, topology, optional `indices`)
+  baked from TOML; v1 `Quad` only; no vertices array.
 - TOML source → MessagePack → pack pipeline; runtime reads MessagePack only.
 - Missing/not-ready assets are skipped with diagnostics; no placeholders.
 - NativeAOT serialization uses Nerdbank.MessagePack generated shapes only.
@@ -471,8 +476,8 @@ Size: L (ongoing). Risk: medium.
 **Explicit non-goals for v1**
 
 3D, HDR, MSAA, post-processing, physics, audio, in-game UI, networking, scene editor, hot
-reload, multi-window, Linux/macOS guarantees, variable-topology sprite meshes, asset/pack
-unloading, and public offscreen readback.
+reload, multi-window, Linux/macOS guarantees, indexed non-Quad sprite drawing in v1 (the schema
+carries indices), asset/pack unloading, and public offscreen readback.
 
 ## 8. Risks
 
@@ -499,7 +504,6 @@ unloading, and public offscreen readback.
 | --- | --- | --- |
 | Builder names/signatures, `Run` return shape | M1 | Use the reference proposal. |
 | SDK pin/roll-forward; globalization | M1 | Pin current SDK; decide globalization in M1. |
-| Default `assets.pck` missing behaviour | M1/M3 | Startup error; explicit empty FS option for tools. |
 | Nerdbank.MessagePack shape setup | M3/M4 | `[GenerateShape]` roots; no reflection resolver. |
 | Zstd built-in API shape | M3 | Adapter behind pack reader/writer; keep format. |
 | Texture descriptor/payload paths | M3 | `textures/<name>` + `textures/raw/<name>`. |

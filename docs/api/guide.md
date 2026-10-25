@@ -46,7 +46,8 @@ app.Run();
   delay. Headless is timer-paced via `WithHeadless(ticksPerSecond)` (default 60, `0` uncapped).
 - Logging is configured with `WithLogging`; if omitted, a pretty ZLogger console provider is
   installed, and `IEngine.LoggerFactory` is always available.
-- The default pack is `assets.pck`; `WithAssetsPack` can point elsewhere.
+- The default pack is `assets.pck`; `WithAssetsPack` can point elsewhere. A missing/malformed
+  base pack is a startup error that throws `Bork2dException`; there is no empty-FS fallback.
 
 ### Modes
 
@@ -273,9 +274,11 @@ Semantics:
 - `Sprite.Empty` means no sprite.
 - `ZIndex` orders within a layer; higher draws later. Equal z is tie-broken by entity ID.
 - `Tint` multiplies the texture; `Color.White` is neutral.
-- The sprite asset stores UVs, pivot, topology, texture path, and a **pixels-per-unit scale**;
-  the renderer divides by that scale. `LocalScale` multiplies it. There is no global PPU and
-  no vertices array.
+- The sprite asset stores UVs, pivot, topology, optional indices, texture path, and a
+  **pixels-per-unit scale**; the renderer divides by that scale. `LocalScale` multiplies it.
+  There is no global PPU and no vertices array.
+- `indices` is null for `Quad`; `TriangleStrip`/`Triangles` carry indices for the future
+  indexed path.
 - Pivot/origin is normalized inside the generated quad; default center.
 - Planned `FlipX`/`FlipY` mirrors the sprite.
 - Dispose a sprite when no longer needed, inside a tick/teardown; a worker may dispose an

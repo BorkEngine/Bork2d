@@ -94,9 +94,9 @@ These are the rules the rest of the documentation assumes. Details/alternatives 
 | Threads | Main thread runs the tick; game workers may create/mutate distinct entities inside a tick and must join; a render thread owns Vulkan in windowed/offscreen; asset loaders are background. |
 | Modes | Windowed, offscreen (windowless Vulkan, frames discarded), headless (no SDL/Vulkan/render thread; timer-paced, default 60, 0 = uncapped). |
 | Frame pacing | Bounded run-ahead in windowed/offscreen. No target tick rate, deadline timer, or `Sleep` there. Headless uses its configured tick rate. |
-| Assets | `assets.pck` (magic/version/compressed header with XXH3-64 checksum, uint64 offsets); later `LoadPack` overlays win; browse merged; no unload in v1. |
+| Assets | `assets.pck` (magic/28-byte prefix with fixed-prefix version, compressed `PackHeader`/`PackEntry` classes with XXH3-64 checksum, uint64 offsets); later `LoadPack` overlays win; browse merged; no unload in v1; missing base pack throws. |
 | Compression | Header always Zstd-compressed. Debug assets uncompressed; release assets maximum Zstd, stored only when smaller. |
-| Textures/sprites | Separate MessagePack texture descriptor + raw RGBA8 payload; sprite MessagePack assets with UVs, pivot, topology, and pixels-per-unit scale. TOML source, baked. |
+| Textures/sprites | Separate MessagePack texture descriptor + raw RGBA8 payload; sprite MessagePack assets with UVs, pivot, topology, optional indices, and pixels-per-unit scale. TOML source, baked. |
 | Layers | `[Flags]` enum. One layer bit per renderable; camera culling mask. 32 flags maximum. |
 | Cameras | N cameras → N instanced draws, one per non-empty camera/viewport. |
 | World | Abstract units, Y-up, CCW radians. `Camera.Size` = half visible height. Per-sprite pixels-per-unit scale; no global PPU. |
@@ -153,10 +153,10 @@ the first NativeAOT target.
 | **Bounded run-ahead** | The tick runs until the snapshot ring is full, then waits for a GPU fence; no fixed rate or artificial delay. |
 | **Windowed / offscreen / headless** | Normal SDL+Vulkan+present; windowless Vulkan with discarded frames; no SDL/Vulkan/render thread, timer-paced. |
 | **Game worker** | Game-owned thread spawned inside a tick; distinct entities; must join before `Tick` returns. |
-| **Pack** | `assets.pck` file containing a compressed/checksummed MessagePack header and payloads. |
+| **Pack** | `assets.pck` file containing a compressed/checksummed `PackHeader`/`PackEntry` MessagePack header and payloads. |
 | **Overlay** | A pack mounted above the base pack; later packs win; browsing hides shadowed paths. |
 | **Texture descriptor** | MessagePack texture metadata (payload, width, height, format, filter, wrap). |
-| **Sprite asset** | MessagePack quad definition: texture path, UVs, pivot, topology, pixels-per-unit scale. |
+| **Sprite asset** | MessagePack quad definition: texture path, UVs, pivot, topology, optional indices, pixels-per-unit scale. |
 | **Bindless** | Indexing a descriptor array from the shader, so all texture pages are available in one draw. |
 | **ZLogger** | Structured logging provider; the builder's default console configuration. |
 | **NativeAOT** | Ahead-of-time publish mode for the runtime/game; no runtime reflection/dynamic code. |

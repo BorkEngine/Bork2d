@@ -26,7 +26,7 @@ The binary pack format and runtime filesystem are specified in
 ```
 Project.Common/Assets/
   data/**.toml          custom data
-  sprites/**.toml       sprite definitions (texture, UVs, scale, pivot, topology)
+  sprites/**.toml       sprite definitions (texture, UVs, scale, pivot, topology, indices)
   textures/*            source image or raw RGBA
   textures/*.toml       Unity-style sidecar import settings
         │
@@ -98,8 +98,9 @@ Sprite and texture TOML are first-class asset sources, not custom game classes:
 - `textures/<file>.toml` is a Unity-style sidecar for the source texture; it carries import
   settings (filter/wrap), not sprite slices. The baker writes a MessagePack descriptor at
   `textures/<name>` and a raw payload at `textures/raw/<name>`.
-- `sprites/<...>.toml` describes a quad: texture path, UVs, pixels-per-unit scale, pivot, and
-  topology; the baker writes a MessagePack sprite asset at `sprites/<...>`.
+- `sprites/<...>.toml` describes a quad: texture path, UVs, pixels-per-unit scale, pivot,
+  topology, and optional indices; the baker writes a MessagePack sprite asset at
+  `sprites/<...>`.
 - Both are generated/edited by `Bork2d.Editor` and validated by the same baker.
 
 Schemas are in [Assets: texture descriptors](assets.md#8-texture-descriptors) and

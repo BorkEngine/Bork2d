@@ -118,12 +118,13 @@
   **half** visible height; viewport aspect determines width. Each sprite asset carries a
   **pixels-per-unit** `scale`; world size divides by it, and `Transform.LocalScale` multiplies.
   No global PPU. Input is framebuffer pixels, top-left, converted through camera helpers.
-  Sprites have no vertices array: a `Quad` is generated from UVs, texture size, scale, and a
-  normalized pivot (default center); `topology` is a `Quad`/`TriangleStrip`/`Triangles` enum,
-  with only `Quad` in v1.
+  Sprites have no vertices array: the shader generates the `Quad` corners from UVs, texture
+  size, scale, and a normalized pivot (default center). `topology` is a
+  `Quad`/`TriangleStrip`/`Triangles` enum; `indices` is null for `Quad` and non-null for the
+  other topologies.
 - **Consequences:** Pixel art and arbitrary unit scales coexist. Camera numbers are Unity-like
-  (half-height). Sprite size depends on asset data; unready sprites are skipped. Non-Quad
-  topology needs a future mesh asset and renderer path.
+  (half-height). Sprite size depends on asset data; unready sprites are skipped. v1 draws
+  `Quad`; non-Quad indices are preserved for the indexed path.
 - **Alternatives:** Global PPU; Y-down world; full-height Size; pixel-sized world; explicit
   vertices array.
 - **Docs:** [Rendering](architecture/rendering.md#7-coordinates-camera-and-projection),
@@ -148,21 +149,25 @@
 
 ## D-010 Packed assets and virtual filesystem
 
-- **Status:** Accepted; header entry encoding and missing-pack policy proposed
+- **Status:** Accepted
 - **Context:** Assets must ship compactly, be loadable in the background, support overlays, and
   avoid filesystem/path ambiguity.
-- **Decision:** Runtime assets live in `assets.pck` (magic `BORK2DPK`, version 1, 28-byte
-  prefix: compressed/uncompressed header lengths plus XXH3-64 checksum, then the
-  Zstd-compressed MessagePack header, then data). Entries are six-element arrays with uint64
-  offsets/lengths/sizes. `assets.pck` is the base pack; `IAssets.LoadPack` mounts later packs
-  above it (later wins, no unload in v1). Browsing is a merged, shadowed-hidden view. The header
-  is always compressed and checksummed; asset payloads have no checksum, are uncompressed in
+- **Decision:** Runtime assets live in `assets.pck` (magic `BORK2DPK`, 28-byte prefix:
+  fixed-prefix `version`, compressed/uncompressed header lengths, XXH3-64 checksum, then a
+  Zstd-compressed MessagePack `PackHeader` object, then data). The version is **outside** the
+  compressed header so a future loader can select a v1/v2 parser before deserializing.
+  `PackHeader` is the v1 shape and contains a `PackEntry[]`; each `PackEntry` is a class with
+  path/raw/compressed/offset/length/size, not a positional array. Both are Nerdbank.MessagePack
+  generated shapes. `assets.pck` is the base pack; `IAssets.LoadPack` mounts later packs above
+  it (later wins, no unload in v1). Browsing is a merged, shadowed-hidden view. The header is
+  always compressed and checksummed; asset payloads have no checksum, are uncompressed in
   debug, and use max Zstd in release only when smaller. Paths are lowercase `/` keys without
-  source extensions. TOML never ships.
+  source extensions. TOML never ships. A missing or malformed base pack throws at startup; there
+  is no empty-FS fallback.
 - **Consequences:** Deterministic, bounded loading; overlays for DLC/tests. Format becomes a
   compatibility surface from M3. No unload means memory is load-and-keep in v1. Header
-  corruption is detected; raw asset corruption is not. Default pack missing policy remains
-  open.
+  corruption is detected; raw asset corruption is not. Deployments must include a valid base
+  pack.
 - **Alternatives:** Loose files; ZIP; one uncompressed blob; first-wins overlays; runtime TOML.
 - **Docs:** [Assets and pack files](architecture/assets.md)
 
@@ -287,12 +292,14 @@
 - **Decision:** Textures use a separate MessagePack descriptor (`textures/<name>`) plus a raw
   payload (`textures/raw/<name>`): width, height, format (`rgba8` now/KTX2 later), filter,
   wrap. Sprites are MessagePack assets with texture path, UVs, a **pixels-per-unit** scale, a
-  normalized pivot (default center), and a `topology` enum (`Quad`/`TriangleStrip`/`Triangles`);
-  there is no vertices array. Source is TOML, baked by M4. v1 supports `Quad` only; non-Quad
-  needs a future mesh asset.
+  normalized pivot (default center), a `topology` enum (`Quad`/`TriangleStrip`/`Triangles`), and
+  `indices` (`ushort[]?`): null for `Quad`, non-null for the other topologies. There is no
+  vertices array; the shader generates the four corners from UVs/texture size/scale/pivot.
+  Source is TOML, baked by M4. v1 draws `Quad` only; non-Quad indices are preserved for the
+  future indexed path, not a separate mesh asset.
 - **Consequences:** Textures can be shared; descriptors carry sampler metadata; KTX2 migration
-  is contained. The renderer generates per-instance quad corners from UV span, texture size,
-  scale, and pivot. Variable-topology meshes need a future renderer path.
+  is contained. Quad corners are generated in the vertex shader; the indexed path consumes
+  `indices` and needs no vertex array.
 - **Alternatives:** Metadata in sprite asset; self-describing raw header; KTX2 only.
 - **Docs:** [Assets: texture descriptors](architecture/assets.md#8-texture-descriptors),
   [Assets: sprite assets](architecture/assets.md#9-sprite-assets)
@@ -352,8 +359,8 @@ change before the milestone that implements them.
 | Layer cap | 32, `int`-backed flags, validation at `Build` | M1 |
 | Max delta | 0.25 s safety clamp (not a pacing delay) | M2/M7 |
 | DPI | physical pixels, no logical scaling | M2 |
-| Default pack missing | Startup error; explicit empty FS option for tools | M1/M3 |
-| Header entry encoding | Six-element array `[path, isRaw, isCompressed, offset, length, size]` | M3 |
+| Default pack missing | Accepted: startup error; game throws, no empty FS | M1/M3 |
+| Header representation | Fixed-prefix version + `PackHeader`/`PackEntry` classes via Nerdbank.MessagePack | M3 |
 | Header checksum | XXH3-64 seed 0 over uncompressed header, uint64 LE | M3 |
 | Texture descriptor paths | `textures/<name>` descriptor, `textures/raw/<name>` payload | M3 |
 | Zstd API | .NET 11 built-in; adapter if API differs | M3 |

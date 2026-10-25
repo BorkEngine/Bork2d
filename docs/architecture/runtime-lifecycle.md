@@ -101,8 +101,8 @@ Validation performed by `Build()`:
    non-empty.
 7. Logging configuration, if supplied, is non-null; otherwise the pretty ZLogger default is
    used.
-7. The pack file exists and parses, or the selected mode explicitly permits an empty filesystem
-   (final missing-pack policy is `Open`).
+7. The configured pack path exists; a missing base pack is a startup error that throws
+   `Bork2dException` (no empty-FS fallback). Parsing/checksum failures also throw at startup.
 
 ## 4. Startup sequences
 
@@ -289,7 +289,7 @@ sequenceDiagram
 | Game instance missing | `Build()` | Throw. |
 | SDL init/window failure | Windowed startup | Throw; clean up. |
 | No Vulkan 1.3 device / missing feature | Windowed/offscreen init | Fatal; `Run()` throws. |
-| Pack missing/corrupt | Asset service startup / `LoadPack` | Fatal for the default pack (proposed); `LoadPack` throws. |
+| Pack missing/corrupt | Asset service startup / `LoadPack` | Fatal; throws `Bork2dException`. |
 | Shader/pipeline failure | Render init | Fatal. |
 | Game exception in `Setup`/`Tick`/`Teardown` | Main thread | Capture, shut down, rethrow original from `Run()`. |
 | Asset load/decode failure | Asset thread | Per-asset diagnostic; handle not renderable; not fatal. |
@@ -348,7 +348,6 @@ thread callbacks.
 ## 12. Open questions
 
 - Exact builder method names/signatures and `Run()` return shape.
-- Default pack missing: fatal vs empty FS vs builder option.
 - Window shown before the first frame or only after the first present.
 - Fullscreen: exclusive, borderless, or configurable.
 - DPI policy and what `IWindow.Size` means under scaling.
