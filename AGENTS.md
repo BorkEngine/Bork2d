@@ -24,13 +24,13 @@
 
 | Area | State |
 | --- | --- |
-| Branch | `develop`; `AGENTS.md` is committed separately. Integration branch `m-1/common` exists; task branches are `m-1/wp-1` … `m-1/wp-5`. M1 is **paused** for human decisions. |
-| M1 progress | WP1–WP4 are merged into `m-1/common`. WP5 (logging) is implemented on `m-1/wp-5` but **unmerged** pending human approval. WP6–WP8 are not started. |
+| Branch | `develop`; `AGENTS.md` is committed separately. Integration branch `m-1/common`; task/fix branches `m-1/wp-1` … `m-1/wp-5`, `m-1/fix-ci`, `m-1/fix-scene`. |
+| M1 progress | WP1–WP5 are merged into `m-1/common`. The scene correction pass (`m-1/fix-scene`: degrees/normalization, non-virtual properties, independent `SceneRoot`) is in progress. WP6–WP8 are not started. |
 | Solution | `src/Bork2d/Bork2d.slnx`: API/Common/Runtime have M1 code; Assets/Render are wired but empty; tests project exists. Builds with 0 warnings. |
-| Tests | 101 tests on `m-1/common`; 114 on the unmerged `m-1/wp-5` branch. |
+| Tests | 114 tests on `m-1/common`; the scene correction branch will add normalization/non-virtual/SceneRoot tests. |
 | Build baseline | `Directory.Build.props`, `.editorconfig`, `.gitattributes`, `global.json`, warnings-as-errors/style gates are active. `dotnet format --verify-no-changes` passes on `m-1/common`. |
-| CI | GitHub Actions enabled; one workflow exists. Current triggers are obsolete (old branch/PR triggers); branch CI is dormant after the ref rename. Policy: CI only on push to `develop`; WP7 must update the workflow. |
-| Documentation | M0 complete; M1 in progress/paused. API/architecture docs partially updated by WP1–WP5; WP8 final pass pending. |
+| CI | GitHub Actions enabled; workflow now triggers **only on push to `develop`** (`m-1/fix-ci`, merged at `d38b1dc`). No PR/branch CI. |
+| Documentation | M0 complete; M1 in progress. API/architecture docs partially updated by WP1–WP5 and the correction pass; WP8 final pass pending. |
 | GitHub | `develop` unprotected; 0 open PRs. |
 
 This is a snapshot, not a live status board. Live milestone status is tracked in the milestone
@@ -362,8 +362,9 @@ pack, or asset system (M2/M3/M6+).
 
 ### 8.2 Work packages and waves
 
-**Status (paused):** WP1–WP4 are merged into `m-1/common`; WP5 is implemented on `m-1/wp-5`
-but unmerged; WP6–WP8 are not started. M1 is paused pending the decisions in §8.7.
+**Status:** WP1–WP5 are merged into `m-1/common`. The scene correction branch `m-1/fix-scene`
+implements the approved degrees/normalization, non-virtual property, and independent-`SceneRoot`
+changes. WP6–WP8 are not started.
 
 | WP | Branch | Scope | Depends on | Wave |
 | --- | --- | --- | --- | --- |
@@ -373,7 +374,7 @@ but unmerged; WP6–WP8 are not started. M1 is paused pending the decisions in �
 | WP4 | `m-1/wp-4` | `Bork2dAppBuilder<TLayer>`, `Bork2dApp`, validation, one-tick `Run`, idempotent `Dispose`, no window/GPU | WP3 | 3 |
 | WP5 | `m-1/wp-5` | `IEngine.LoggerFactory`, `WithLogging`, pretty ZLogger default, startup logs, categories | WP4 | 4 |
 | WP6 | `m-1/wp-6` | NativeAOT/trim settings, AOT smoke app, Nerdbank.MessagePack policy + generated-shape smoke | WP5 | 5 |
-| WP7 | `m-1/wp-7` | Complete xUnit coverage, concurrency/GC/dependency tests, CI trigger policy (push to develop only), local AOT checks | WP6 | 6 |
+| WP7 | `m-1/wp-7` | Complete xUnit coverage, concurrency/GC/dependency tests, AOT local checks, preserve develop-only CI | WP6 | 6 |
 | WP8 | `m-1/wp-8` | Documentation final pass: API/guide, architecture, decisions, roadmap, READMEs, status markers, resolve M1 doc conflicts | WP7 | 7 |
 
 Do not renumber branches; the spec's WP numbers are the contract. One branch per WP, one
@@ -410,12 +411,11 @@ Additional gates:
 - M1 spec §9 checklist items that apply are demonstrated.
 
 **CI policy (human decision 2026-10-25):** CI runs **only on push to `develop`** — i.e. after a
-milestone PR is merged. Do not run CI on pull requests, `m-<N>/common`, or `m-<N>/wp-<K>`
-branches. The workflow triggers must be exactly `on: push: branches: [develop]`. WP7 owns
-updating `.github/workflows/ci.yml`; the current file still has obsolete branch/PR triggers, so
-branch/PR CI must remain dormant until WP7 changes it. AOT publish/run is **not** in CI; it is a
-required local gate for WP6+, WP7, and the final `m-1/common` verification. Because CI does not
-catch AOT regressions, run the AOT gate locally on every runtime-affecting change.
+milestone PR is merged. Do not run CI on pull requests, `m-<N>/common`, or task branches. The
+workflow triggers are now exactly `on: push: branches: [develop]` (`m-1/fix-ci`, merged at
+`d38b1dc`). AOT publish/run is **not** in CI; it is a required local gate for WP6+, WP7, and the
+final `m-1/common` verification. Because CI does not catch AOT regressions, run the AOT gate
+locally on every runtime-affecting change.
 
 Install SDK `11.0.100-rc.1` explicitly in CI; hosted Windows runners do not ship it by default.
 Do not weaken a gate to make CI green; fix the code or record a justified, narrow suppression.
@@ -448,16 +448,16 @@ Do not propagate these; fix them in WP8 and in same-change docs where a contract
     only. Document AOT as a local/release gate and keep the M1 exit evidence honest.
 12. `AGENTS.md` is global process documentation committed separately to `develop`; docs may
     mention it, but it is not part of the M1 PR.
-13. CI triggers: update `.github/workflows/ci.yml` to `on: push: branches: [develop]` only (no
-    pull-request or milestone/task branch triggers); document that CI runs after the milestone
-    merge.
-14. Rotation units: the public API will be **degrees**, normalized on assignment. Update all
-    API/architecture docs, tests, and the transform implementation after the normalization range
-    is confirmed.
+13. CI triggers: fixed in `m-1/fix-ci` (develop push only). Keep it that way.
+14. Rotation units: **degrees**, normalized to `[0, 360)` on assignment; `LocalRotation` and
+    `WorldRotation` return normalized values. Implemented by the scene correction branch.
 15. SceneGraph design: the separate `SceneGraph` holder and the parent-change structural lock are
     under human review (see §8.7). Do not change until decided.
-16. WP5 logging is unmerged; its default format, versions, ownership wrapper, and startup-log
-    choices need human approval before merge.
+16. WP5 logging is approved and merged; its default format/versions/ownership wrapper are now
+    the logging contract.
+17. `Transform` hot properties are **non-virtual**; `SceneRoot` does **not** inherit `Transform`.
+    Performance is a first-class constraint; no virtual dispatch/unnecessary inheritance on
+    scene hot paths.
 
 ### 8.5 Adopted M1 decisions (human, 2026-10-25)
 
@@ -473,7 +473,9 @@ These are settled; changes require a new human decision.
 | CI | GitHub Actions **only on push to `develop`** (after milestone merge); no PR or branch CI. AOT publish/run is a required local gate. |
 | Human decision gate | Agents/subagents must stop and ask; no autonomous product/API/architecture/semantic decisions. |
 | `AGENTS.md` | Global process document; committed separately to `develop`, not in the M1 PR. |
-| Rotation unit | **Degrees** (human decision); normalize on assignment. Exact normalization range is pending (§8.7); code is still radians until approved. |
+| Rotation unit | **Degrees**, normalized to `[0, 360)` on assignment. `LocalRotation` and `WorldRotation` return normalized values. |
+| Hot-path performance | `Transform` hot properties are **non-virtual**; no virtual dispatch on scene property access. |
+| `SceneRoot` | Does **not** inherit `Transform`; implements `ISceneRoot` directly via an internal node abstraction. |
 | `DetachAll` scope | Direct children. |
 | `CreateTransform` parent | Optional (`null` allowed). |
 | Pack path validation | Non-empty/path shape only; pack implementation is M3. |
@@ -501,21 +503,15 @@ These are settled; changes require a new human decision.
 - [ ] CI is green on `develop` after the milestone merge; no PR/branch CI; local AOT evidence is attached to the PR.
 - [ ] Final ready-for-review PR `m-1/common` → `develop` is open; **not merged**; human review pending.
 
-### 8.7 Pending human decisions (M1 paused)
+### 8.7 Open design decision: SceneGraph
 
-Do not implement these until the human answers. Each is a product/API/architecture decision,
-not an implementation detail.
+M1 is proceeding on the other approved corrections; this is the only remaining architecture
+question. Do not change `SceneGraph`/the structural lock until the human answers.
 
 | Decision | Current state | Options / question |
 | --- | --- | --- |
-| Rotation normalization range | Human decided **degrees**, normalized on assignment; code still uses radians. | Which range: `[0, 360)`, `(-180, 180]`, or `[-180, 180)`? Should `WorldRotation` be normalized too? Should `LocalRotation` preserve the authored value or always return normalized? |
 | SceneGraph holder | `SceneGraph` is an internal per-engine holder of the structural `Lock` and monotonic ID allocator; it holds **no** entity list. `SceneRoot` owns children. | (A) keep it, optionally rename to `SceneContext`/`SceneState`; (B) remove it and put the lock/ID allocator on `SceneRoot`/`Scene`; (C) remove the structural lock and require single-threaded scene mutation (would change D-024 and invalidate concurrency tests). Which ownership/concurrency model do you want? |
 | Why lock parent changes | Attach/detach mutates shared parent/child lists and must serialize cycle/single-parent/traversal invariants when workers call the API from any thread. Per-object locks cover local properties only. | Keep the structural lock, narrow it, or drop any-thread mutation? |
-| WP5 logging | Branch `m-1/wp-5` is unmerged; 114 tests green. | Approve or change: ZLogger 2.5.10 + MEL 11.0.0-rc.1; default local-time prefix (`yyyy-MM-dd HH:mm:ss.fff [Level] Category:`), no colors; custom `WithLogging` suppresses default provider; `OwnedLoggerFactory` wrapper disposes `AddProvider(instance)` providers because MEL 11 does not. |
-| CI workflow task | Current workflow still has obsolete PR/branch triggers; branch CI is dormant. | WP7 owns the trigger rewrite to `on: push: branches: [develop]`. Do you want a separate `m-1/wp-ci` task now instead? |
-
-Please answer these before any further M1 implementation. The AGENTS decision gate applies to
-every subsequent task.
 
 ## 9. Engineering rules (global)
 
@@ -543,8 +539,8 @@ every subsequent task.
 - Re-parenting preserves world transform; reject self/cycles/root parent; root cannot be
   parented.
 - Entity IDs are monotonic and non-reused; discovery order is entity-ID order.
-- Rotation public unit is **degrees** (human decision); normalize on assignment. The exact
-  normalization range is pending (§8.7); code is still radians until the human approves.
+- Rotation public unit is **degrees**, normalized to `[0, 360)` on assignment; `LocalRotation`
+  and `WorldRotation` return normalized values.
 - The `SceneGraph` holder and parent-change structural lock are under human review (§8.7); do
   not change until decided.
 - No thread-affinity assertions.
@@ -577,11 +573,19 @@ every subsequent task.
 ### Logging
 
 - Microsoft.Extensions.Logging + ZLogger. `IEngine.LoggerFactory` is the public seam.
-- Default: pretty ZLogger console, local time, milliseconds, colors when interactive; minimum
-  level Debug in Debug builds, Information in Release; no file sink by default.
+- Default: ZLogger console with local-time milliseconds, level, and category prefix; no colors;
+  minimum level Debug in Debug builds, Information in Release; no file sink by default.
 - Categories: `Bork2d.Runtime`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`.
 - Log startup mode and validation outcome. Do not log per sprite/per frame in hot paths.
 - AOT smoke must exercise the default logging path with zero trim/AOT warnings.
+
+### Performance
+
+- Scene/transform hot paths must avoid virtual dispatch and unnecessary inheritance. `Transform`
+  properties are non-virtual; `SceneRoot` is not a `Transform`.
+- Prefer sealed/internal types, direct fields/accessors, and structs where they do not fight the
+  ownership model. Do not add per-access locks or allocations on hot paths without a measurement.
+- Measure before/after performance-sensitive changes; report the method used.
 
 ### Style and tests
 
@@ -617,7 +621,7 @@ every subsequent task.
 | MSVC / AOT | Visual Studio 18 Community; `dotnet publish -r win-x64` works and runs locally. |
 | Git | 2.53.0.windows.2; remote `https://github.com/BorkEngine/Bork2d.git`; push/admin via GCM. |
 | `gh` CLI | **Not installed.** Use the REST API; GitHub API access verified (`permissions.push=true`). |
-| GitHub Actions | Enabled; one workflow exists. It still has obsolete branch/PR triggers; branch CI is dormant. Policy: run only on push to `develop`; WP7 must rewrite the triggers. `develop` unprotected; 0 open PRs. |
+| GitHub Actions | Enabled; workflow triggers **only on push to `develop`** (merged `m-1/fix-ci` at `d38b1dc`). No PR/branch CI. `develop` unprotected; 0 open PRs. |
 | NuGet | nuget.org reachable; other configured sources: BeGet, Local, VS Offline. |
 | Test toolchain | xUnit 2.9.3 + `Microsoft.NET.Test.Sdk` 17.14.1 + runner 3.1.5 works. |
 | AOT logging spike | ZLogger 2.5.10 + MEL 11.0.0-rc.1 + `AddZLoggerConsole` publishes/runs AOT clean. |
