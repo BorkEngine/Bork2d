@@ -8,27 +8,62 @@ namespace Bork2d.Tests;
 /// minimize/resize transitions, and input state without loading SDL.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The fake is the deterministic platform for windowed runtime tests. It never touches the native
-/// library or a desktop session. Events are queued in call order; <see cref="TryPollEvent"/> and
-/// <see cref="TryWaitEvent"/> drain the queue in that order, and <see cref="TryPushEvent"/> appends
-/// to it so tests can simulate close and wake-up events.
+/// library or a desktop session. Events are queued in call order; <see cref="TryPollEvent"/> drains
+/// the queue in that order and <see cref="TryWaitEvent"/> blocks until an event arrives, mirroring
+/// the SDL wait contract without a timeout. <see cref="TryPushEvent"/> appends to the queue and
+/// wakes the waiter, so tests can simulate close, wake-up, and window events.
+/// </para>
+/// <para>
+/// <see cref="Calls"/> records the seam calls in order, which lets tests prove hint ordering and
+/// shutdown ordering. All queue and call-log access is serialized so the fake can be used from the
+/// platform's OS thread and the test thread.
+/// </para>
 /// </remarks>
 internal sealed class FakeSdlApi : ISdlApi
 {
+    private readonly Lock _gate = new();
     private readonly Queue<SdlEvent> _events = new();
+    private readonly SemaphoreSlim _eventAvailable = new(initialCount: 0);
+    private readonly List<string> _calls = [];
     private readonly byte[] _keyboardState = new byte[512];
     private int _nextUserEventType = 0x8000;
-    private bool _videoInitialized;
-    private bool _disposed;
+    private volatile bool _videoInitialized;
+    private volatile bool _disposed;
 
     /// <summary>Gets the windows created through <see cref="CreateWindow"/> in creation order.</summary>
     internal List<FakeSdlWindow> Windows { get; } = [];
 
-    /// <summary>Gets the hints set through <see cref="SetHint"/> in call order.</summary>
+    /// <summary>Gets or sets the hints set through <see cref="SetHint"/> in call order.</summary>
     internal List<(string Name, string Value)> Hints { get; } = [];
+
+    /// <summary>Gets a snapshot of the seam calls in call order.</summary>
+    internal IReadOnlyList<string> Calls
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _calls.ToArray();
+            }
+        }
+    }
+
+    /// <summary>Gets the managed thread id that called <see cref="InitializeVideo"/>.</summary>
+    internal int InitializeVideoThreadId { get; private set; }
+
+    /// <summary>Gets the managed thread id that called <see cref="CreateWindow"/>.</summary>
+    internal int CreateWindowThreadId { get; private set; }
 
     /// <summary>Gets or sets the version reported by <see cref="Version"/>.</summary>
     public SdlVersion Version { get; set; } = new(2, 30, 8);
+
+    /// <summary>Gets or sets the video driver reported by <see cref="VideoDriver"/>.</summary>
+    internal string VideoDriverName { get; set; } = "fake";
+
+    /// <summary>Gets or sets the <c>SDL_GetError</c> text returned by <see cref="GetError"/>.</summary>
+    internal string ErrorText { get; set; } = string.Empty;
 
     /// <summary>Gets a value indicating whether <see cref="InitializeVideo"/> succeeded.</summary>
     internal bool VideoInitialized => _videoInitialized;
@@ -58,17 +93,25 @@ internal sealed class FakeSdlApi : ISdlApi
     internal string? CreateWindowFailure { get; set; }
 
     /// <inheritdoc/>
+    public string VideoDriver => VideoDriverName;
+
+    /// <inheritdoc/>
     public string GetError()
     {
         ThrowIfDisposed();
-        return string.Empty;
+        return ErrorText;
     }
 
     /// <inheritdoc/>
     public bool SetHint(string name, string value)
     {
         ThrowIfDisposed();
-        Hints.Add((name, value));
+        lock (_gate)
+        {
+            _calls.Add($"SetHint({name}={value})");
+            Hints.Add((name, value));
+        }
+
         return true;
     }
 
@@ -76,6 +119,12 @@ internal sealed class FakeSdlApi : ISdlApi
     public void InitializeVideo()
     {
         ThrowIfDisposed();
+        InitializeVideoThreadId = Environment.CurrentManagedThreadId;
+        lock (_gate)
+        {
+            _calls.Add("InitializeVideo");
+        }
+
         if (InitializeFailure is not null)
         {
             throw new Bork2dException(InitializeFailure);
@@ -87,6 +136,7 @@ internal sealed class FakeSdlApi : ISdlApi
     /// <inheritdoc/>
     public void Quit()
     {
+        RecordCall("Quit");
         QuitCalled = true;
         _videoInitialized = false;
     }
@@ -95,6 +145,9 @@ internal sealed class FakeSdlApi : ISdlApi
     public ISdlWindow CreateWindow(string title, int width, int height, SdlWindowFlags flags)
     {
         ThrowIfDisposed();
+        CreateWindowThreadId = Environment.CurrentManagedThreadId;
+        RecordCall($"CreateWindow({title},{width},{height},{(uint)flags:X8})");
+
         if (CreateWindowFailure is not null)
         {
             throw new Bork2dException(CreateWindowFailure);
@@ -105,7 +158,8 @@ internal sealed class FakeSdlApi : ISdlApi
             title,
             new SdlWindowSize(width, height),
             WindowScale,
-            flags | SdlWindowFlags.Shown);
+            flags | SdlWindowFlags.Shown,
+            RecordCall);
         Windows.Add(window);
         return window;
     }
@@ -114,21 +168,44 @@ internal sealed class FakeSdlApi : ISdlApi
     public bool TryPollEvent(out SdlEvent sdlEvent)
     {
         ThrowIfDisposed();
-        return _events.TryDequeue(out sdlEvent);
+        lock (_gate)
+        {
+            return _events.TryDequeue(out sdlEvent);
+        }
     }
 
     /// <inheritdoc/>
     public bool TryWaitEvent(out SdlEvent sdlEvent)
     {
         ThrowIfDisposed();
-        return _events.TryDequeue(out sdlEvent);
+        while (true)
+        {
+            _eventAvailable.Wait();
+            lock (_gate)
+            {
+                if (_events.TryDequeue(out sdlEvent))
+                {
+                    return true;
+                }
+
+                if (_disposed)
+                {
+                    return false;
+                }
+            }
+        }
     }
 
     /// <inheritdoc/>
     public bool TryPushEvent(in SdlEvent sdlEvent)
     {
         ThrowIfDisposed();
-        _events.Enqueue(sdlEvent);
+        lock (_gate)
+        {
+            _events.Enqueue(sdlEvent);
+        }
+
+        _eventAvailable.Release();
         return true;
     }
 
@@ -136,6 +213,7 @@ internal sealed class FakeSdlApi : ISdlApi
     public int RegisterEvents(int count)
     {
         ThrowIfDisposed();
+        RecordCall($"RegisterEvents({count})");
         var first = _nextUserEventType;
         _nextUserEventType += count;
         return first;
@@ -145,8 +223,17 @@ internal sealed class FakeSdlApi : ISdlApi
     public void ShowCursor(bool visible)
     {
         ThrowIfDisposed();
+        RecordCall($"ShowCursor({visible})");
+        if (ShowCursorFailure is not null)
+        {
+            throw new Bork2dException(ShowCursorFailure);
+        }
+
         CursorVisible = visible;
     }
+
+    /// <summary>Gets or sets the message <see cref="ShowCursor"/> fails with.</summary>
+    internal string? ShowCursorFailure { get; set; }
 
     /// <inheritdoc/>
     public void StartTextInput()
@@ -185,12 +272,36 @@ internal sealed class FakeSdlApi : ISdlApi
         }
 
         Quit();
-        _disposed = true;
+        lock (_gate)
+        {
+            _disposed = true;
+            _calls.Add("Dispose");
+        }
+
+        _eventAvailable.Release();
     }
 
-    /// <summary>Adds an event to the queue.</summary>
+    /// <summary>Adds an event to the queue and wakes a blocked wait.</summary>
     /// <param name="sdlEvent">The event to append.</param>
-    internal void Enqueue(SdlEvent sdlEvent) => _events.Enqueue(sdlEvent);
+    internal void Enqueue(SdlEvent sdlEvent)
+    {
+        lock (_gate)
+        {
+            _events.Enqueue(sdlEvent);
+        }
+
+        _eventAvailable.Release();
+    }
+
+    /// <summary>Records one seam call for ordering assertions.</summary>
+    /// <param name="call">The call description.</param>
+    internal void RecordCall(string call)
+    {
+        lock (_gate)
+        {
+            _calls.Add(call);
+        }
+    }
 
     /// <summary>Sets one keyboard scancode in the SDL keyboard state.</summary>
     /// <param name="scancode">The physical scancode.</param>

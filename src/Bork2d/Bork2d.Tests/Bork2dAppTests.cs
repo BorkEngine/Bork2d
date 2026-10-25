@@ -203,6 +203,7 @@ public sealed class Bork2dAppTests
         Assert.Throws<NotSupportedException>(() => { engine.Window.Fullscreen = true; });
         Assert.Throws<NotSupportedException>(() => { _ = engine.Window.CursorVisible; });
         Assert.Throws<NotSupportedException>(() => { engine.Window.CursorVisible = false; });
+        Assert.Throws<NotSupportedException>(() => { _ = engine.Window.IsMinimized; });
         Assert.Throws<NotSupportedException>(() => { _ = engine.Input; });
         Assert.Throws<NotSupportedException>(() => { _ = engine.Assets.LoadSprite("sprite.png"); });
         Assert.Throws<NotSupportedException>(() => { _ = engine.Assets.LoadData("data.bin"); });

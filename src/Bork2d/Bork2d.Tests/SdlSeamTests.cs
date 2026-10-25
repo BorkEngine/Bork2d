@@ -138,7 +138,7 @@ public sealed class SdlSeamTests
         Assert.Equal(SdlEventType.UserEvent, wakeup.Type);
         Assert.Equal(0x8000, wakeup.UserCode);
         Assert.Equal(SdlEventType.Quit, quit.Type);
-        Assert.False(api.TryWaitEvent(out _));
+        Assert.False(api.TryPollEvent(out _));
     }
 
     [Fact]

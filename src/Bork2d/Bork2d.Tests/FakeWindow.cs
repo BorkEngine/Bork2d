@@ -12,4 +12,6 @@ internal sealed class FakeWindow : IWindow
     public bool Fullscreen { get; set; }
 
     public bool CursorVisible { get; set; } = true;
+
+    public bool IsMinimized { get; set; }
 }

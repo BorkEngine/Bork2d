@@ -25,6 +25,10 @@ internal interface ISdlApi : IDisposable
     /// <summary>Gets the SDL library version reported by <c>SDL_GetVersion</c>.</summary>
     SdlVersion Version { get; }
 
+    /// <summary>Gets the active SDL video driver name reported by <c>SDL_GetCurrentVideoDriver</c>.</summary>
+    /// <remarks>Returns an empty string when SDL has no current video driver.</remarks>
+    string VideoDriver { get; }
+
     /// <summary>Reads the current <c>SDL_GetError</c> message.</summary>
     /// <returns>The error text, or an empty string when SDL has no error.</returns>
     string GetError();
@@ -59,6 +63,7 @@ internal interface ISdlApi : IDisposable
     /// <summary>Waits for one event.</summary>
     /// <param name="sdlEvent">The next event when the method returns <see langword="true"/>.</param>
     /// <returns><see langword="false"/> when SDL reports an error.</returns>
+    /// <remarks>The call blocks until an event arrives; it is not a pacing wait.</remarks>
     bool TryWaitEvent(out SdlEvent sdlEvent);
 
     /// <summary>Pushes an event into the SDL queue.</summary>

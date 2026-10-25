@@ -112,6 +112,27 @@ Bork2d starting: mode={Mode}, validation=passed, layers={LayerType}
 `Mode` is the selected `Bork2dAppMode`; `LayerType` is the game layer enum's full name. The
 message uses parameters, not interpolation; never log per sprite or per frame in hot paths.
 
+### 5.1 Windowed platform (M2 WP2)
+
+The internal windowed platform logs from `Bork2d.Runtime`. One startup line and one stop line are
+emitted per window; window commands and state transitions are Debug, and SDL failures are Error.
+There is no per-frame, per-key, or per-mouse-move logging.
+
+| Event | Level | Fields |
+| --- | --- | --- |
+| Windowed platform started | Information | `mode=Windowed`, `sdlVersion` (the `SDL_GetVersion` the loaded binary reports), `videoDriver`, `windowPoints`, `framebufferPixels`, `scale`, `fullscreen`, `resizable`, `vsync` (stored builder value, not applied in M2). |
+| Window command applied | Debug | `command` (`Title`/`Size`/`Fullscreen`/`CursorVisible`), `confirmed` value. |
+| Focus gained/lost, minimized/restored/maximized, DPI scale changed | Debug | the new state, plus points/framebuffer for a scale change. |
+| `IWindow.Size` ignored while fullscreen, or deferred while minimized | Debug | the requested framebuffer size. |
+| SDL failure (startup or after startup) | Error | the SDL operation and the `SDL_GetError` text; the exception also carries the failure. |
+| Windowed platform stopped | Information | `reason` (`Exit`/`Close`/`Error`), `finalFramebuffer`. Tick count and elapsed seconds are added by the runtime host (M2 WP4). |
+
+Example of the startup line at 150% display scaling:
+
+```text
+2026-10-26 01:40:39.981 [Information] Bork2d.Runtime: Bork2d windowed platform started: mode=Windowed, sdlVersion=2.30.8, videoDriver=windows, windowPoints=853x480, framebufferPixels=1280x720, scale=1.5006, fullscreen=False, resizable=True, vsync=True
+```
+
 ## 6. NativeAOT
 
 - Microsoft.Extensions.Logging is trim/AOT-friendly; the ZLogger console provider is validated
