@@ -88,6 +88,26 @@ public sealed class DependencyMatrixTests
     }
 
     [Fact]
+    public void RuntimeExposesOnlyTheBuilderAndApp()
+    {
+        // The SDL adapter is internal to the composition root: adding Silk.NET.SDL must not leak a
+        // public type, and the public surface stays the M1 builder/app pair.
+        var exported = typeof(Bork2d.Runtime.Bork2dApp).Assembly
+            .GetExportedTypes()
+            .Select(type => type.FullName ?? type.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "Bork2d.Runtime.Bork2dApp",
+                "Bork2d.Runtime.Bork2dAppBuilder`1",
+            },
+            exported);
+    }
+
+    [Fact]
     public void TestsMayReferenceEveryProject()
     {
         AssertReferenceMatrix(
