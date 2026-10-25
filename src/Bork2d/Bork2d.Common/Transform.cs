@@ -8,10 +8,10 @@ namespace Bork2d.Common;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Structural changes (attach, detach, traversal) are serialized by the graph's structural
-/// <see cref="SceneGraph.StructuralLock"/>; the local matrix is serialized by the per-object
-/// <see cref="Sync"/> lock. The lock order is structural lock first, per-object lock second; no
-/// code path acquires the structural lock while holding a per-object lock.
+/// Structural changes (attach, detach) are serialized by the engine-owned global structural
+/// <see cref="Lock"/>; the local matrix is serialized by the per-object <see cref="Sync"/> lock.
+/// The lock order is structural lock first, per-object lock second; no code path acquires the
+/// structural lock while holding a per-object lock.
 /// </para>
 /// <para>
 /// The local affine matrix is the world source of truth: <see cref="WorldMatrix"/> composes it
@@ -40,6 +40,7 @@ internal class Transform : ITransform, ISceneNode
     private const float DegreesPerRadian = 180f / MathF.PI;
     private const float RadiansPerDegree = MathF.PI / 180f;
 
+    private readonly Lock _structuralLock;
     private readonly Lock _sync = new();
     private ISceneNode? _parent;
     private List<Transform>? _children;
@@ -48,26 +49,15 @@ internal class Transform : ITransform, ISceneNode
     private float _localRotation;
     private Vector2 _localScale = Vector2.One;
 
-    internal Transform(SceneGraph graph)
-        : this(graph, graph.NextEntityId())
+    internal Transform(Lock structuralLock)
     {
-    }
-
-    internal Transform(SceneGraph graph, uint id)
-    {
-        Graph = graph;
-        Id = id;
+        _structuralLock = structuralLock;
     }
 
     /// <summary>
-    /// Gets the entity ID: monotonic and never reused. The scene root has ID 0.
+    /// Gets the engine-owned global structural lock shared by every node in the scene.
     /// </summary>
-    internal uint Id { get; }
-
-    /// <summary>
-    /// Gets the scene graph this node belongs to.
-    /// </summary>
-    internal SceneGraph Graph { get; }
+    internal Lock StructuralLock => _structuralLock;
 
     /// <summary>
     /// Gets the per-object property lock.
@@ -150,10 +140,6 @@ internal class Transform : ITransform, ISceneNode
         }
     }
 
-    SceneGraph ISceneNode.Graph => Graph;
-
-    uint ISceneNode.Id => Id;
-
     ISceneNode? ISceneNode.ParentNode => Volatile.Read(ref _parent);
 
     /// <summary>
@@ -161,7 +147,7 @@ internal class Transform : ITransform, ISceneNode
     /// </summary>
     internal Matrix3x2 WorldMatrix()
     {
-        using var scope = Graph.StructuralLock.EnterScope();
+        using var scope = _structuralLock.EnterScope();
         return WorldMatrixCore();
     }
 
@@ -170,7 +156,7 @@ internal class Transform : ITransform, ISceneNode
     /// </summary>
     internal Vector2 WorldPosition()
     {
-        using var scope = Graph.StructuralLock.EnterScope();
+        using var scope = _structuralLock.EnterScope();
         return WorldMatrixCore().Translation;
     }
 
@@ -180,7 +166,7 @@ internal class Transform : ITransform, ISceneNode
     /// </summary>
     internal float WorldRotation()
     {
-        using var scope = Graph.StructuralLock.EnterScope();
+        using var scope = _structuralLock.EnterScope();
         Decompose(WorldMatrixCore(), out _, out var rotation);
         return NormalizeDegrees(rotation * DegreesPerRadian);
     }
@@ -190,14 +176,14 @@ internal class Transform : ITransform, ISceneNode
     /// </summary>
     internal Vector2 WorldScale()
     {
-        using var scope = Graph.StructuralLock.EnterScope();
+        using var scope = _structuralLock.EnterScope();
         Decompose(WorldMatrixCore(), out var scale, out _);
         return scale;
     }
 
     public void DetachAll()
     {
-        using var scope = Graph.StructuralLock.EnterScope();
+        using var scope = _structuralLock.EnterScope();
         var children = _children;
         if (children is null || children.Count == 0)
         {
@@ -225,13 +211,13 @@ internal class Transform : ITransform, ISceneNode
     {
         ArgumentNullException.ThrowIfNull(parent);
 
-        var graph = Graph;
-        if (!ReferenceEquals(parent.Graph, graph))
+        if (!SharesStructuralLock(parent))
         {
-            throw new Bork2dException("Cannot attach to a node that belongs to a different scene graph.");
+            throw new Bork2dException(
+                "Cannot attach to a node that belongs to a different engine scene.");
         }
 
-        using var scope = graph.StructuralLock.EnterScope();
+        using var scope = _structuralLock.EnterScope();
         if (ReferenceEquals(_parent, parent))
         {
             return;
@@ -264,8 +250,6 @@ internal class Transform : ITransform, ISceneNode
 
     void ISceneNode.RemoveChildCore(Transform child) => RemoveChildCore(child);
 
-    void ISceneNode.CollectChildrenCore(List<Transform> results) => CollectChildrenCore(results);
-
     private void SetParent(ITransform? parent)
     {
         ISceneNode? newParent;
@@ -283,8 +267,7 @@ internal class Transform : ITransform, ISceneNode
                 $"A parent must be an engine-owned scene node; got '{parent.GetType().FullName}'.");
         }
 
-        var graph = Graph;
-        using var scope = graph.StructuralLock.EnterScope();
+        using var scope = _structuralLock.EnterScope();
 
         if (ReferenceEquals(_parent, newParent))
         {
@@ -293,10 +276,10 @@ internal class Transform : ITransform, ISceneNode
 
         if (newParent is not null)
         {
-            if (!ReferenceEquals(newParent.Graph, graph))
+            if (!SharesStructuralLock(newParent))
             {
                 throw new Bork2dException(
-                    "A transform cannot be parented to a node from a different scene graph.");
+                    "A transform cannot be parented to a node from a different engine scene.");
             }
 
             if (ReferenceEquals(newParent, this))
@@ -309,7 +292,7 @@ internal class Transform : ITransform, ISceneNode
                 if (ReferenceEquals(ancestor, this))
                 {
                     throw new InvalidOperationException(
-                        "The parent assignment would create a cycle in the scene graph.");
+                        "The parent assignment would create a cycle in the scene tree.");
                 }
             }
         }
@@ -382,16 +365,16 @@ internal class Transform : ITransform, ISceneNode
         children.RemoveAt(last);
     }
 
-    private void CollectChildrenCore(List<Transform> results)
+    private static Lock StructuralLockOf(ISceneNode node) => node switch
     {
-        var children = _children;
-        if (children is null || children.Count == 0)
-        {
-            return;
-        }
+        Transform transform => transform._structuralLock,
+        SceneRoot root => root.StructuralLock,
+        _ => throw new Bork2dException(
+            $"A parent must be an engine-owned scene node; got '{node.GetType().FullName}'."),
+    };
 
-        results.AddRange(children);
-    }
+    private bool SharesStructuralLock(ISceneNode node)
+        => StructuralLockOf(node) == _structuralLock;
 
     private Matrix3x2 WorldMatrixCore()
     {

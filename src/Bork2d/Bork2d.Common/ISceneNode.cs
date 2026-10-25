@@ -4,7 +4,7 @@ namespace Bork2d.Common;
 
 /// <summary>
 /// The internal structural contract shared by every node that can own children in one scene
-/// graph: <see cref="Transform"/> and <see cref="SceneRoot"/>.
+/// tree: <see cref="Transform"/> and <see cref="SceneRoot"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -13,22 +13,14 @@ namespace Bork2d.Common;
 /// contract directly. It is never part of the public API.
 /// </para>
 /// <para>
-/// The <c>*Core</c> members run under <see cref="SceneGraph.StructuralLock"/>; callers must
-/// already hold it. The lock order is structural lock first, per-object lock second.
+/// The <c>*Core</c> members run under the engine-owned structural lock; callers must already
+/// hold it. The lock order is structural lock first, per-object lock second. The interface
+/// deliberately exposes no child enumeration or traversal helper and no entity identity: the
+/// tree is unordered and snapshots are not implemented in M1.
 /// </para>
 /// </remarks>
 internal interface ISceneNode
 {
-    /// <summary>
-    /// Gets the scene graph this node belongs to.
-    /// </summary>
-    SceneGraph Graph { get; }
-
-    /// <summary>
-    /// Gets the entity ID. The scene root is 0; every transform gets a monotonic, never-reused ID.
-    /// </summary>
-    uint Id { get; }
-
     /// <summary>
     /// Gets the parent node, or <see langword="null"/> when the node is unparented or is the root.
     /// </summary>
@@ -53,9 +45,4 @@ internal interface ISceneNode
     /// Removes <paramref name="child"/> from this node's child list with swap-back removal.
     /// </summary>
     void RemoveChildCore(Transform child);
-
-    /// <summary>
-    /// Appends this node's direct children to <paramref name="results"/>.
-    /// </summary>
-    void CollectChildrenCore(List<Transform> results);
 }

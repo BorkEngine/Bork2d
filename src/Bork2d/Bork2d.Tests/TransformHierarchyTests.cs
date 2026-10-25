@@ -40,10 +40,6 @@ public sealed class TransformHierarchyTests
         TestAssertions.Close(worldPosition, ((Transform)child).WorldPosition());
         TestAssertions.Close(worldRotation, ((Transform)child).WorldRotation());
         TestAssertions.Close(worldScale, ((Transform)child).WorldScale());
-
-        var rooted = Assert.IsType<SceneRoot>(engine.Root).GetRootedTransformsInIdOrder();
-        Assert.Contains(rooted, transform => ReferenceEquals(transform, child));
-        Assert.Equal(3, rooted.Count);
     }
 
     [Fact]
@@ -275,7 +271,7 @@ public sealed class TransformHierarchyTests
     }
 
     [Fact]
-    public void ParentsFromAnotherSceneGraphAreRejected()
+    public void ParentsFromAnotherEngineAreRejected()
     {
         var engine = TestEngineFactory.Create();
         var otherEngine = TestEngineFactory.Create();

@@ -20,18 +20,16 @@ public sealed class SceneRootTests
     }
 
     [Fact]
-    public void RootIsAnIdentityTransformWithIdZero()
+    public void RootIsAnIdentityTransform()
     {
         var engine = TestEngineFactory.Create();
 
         var root = Assert.IsType<SceneRoot>(engine.Root);
 
-        Assert.Equal(0u, root.Id);
         Assert.Null(root.Parent);
         Assert.Equal(Vector2.Zero, root.LocalPosition);
         Assert.Equal(0f, root.LocalRotation);
         Assert.Equal(Vector2.One, root.LocalScale);
-        Assert.Empty(root.GetRootedTransformsInIdOrder());
     }
 
     [Fact]
@@ -64,14 +62,12 @@ public sealed class SceneRootTests
 
         Assert.Null(first.Parent);
         Assert.Null(second.Parent);
-        Assert.Empty(Assert.IsType<SceneRoot>(engine.Root).GetRootedTransformsInIdOrder());
 
         var third = engine.CreateSpriteRender(engine.Root);
 
         Assert.Same(engine.Root, third.Parent);
-        var rooted = Assert.IsType<SceneRoot>(engine.Root).GetRootedTransformsInIdOrder();
-        Assert.Single(rooted);
-        Assert.Same(third, rooted[0]);
+        Assert.Null(first.Parent);
+        Assert.Null(second.Parent);
     }
 
     [Fact]

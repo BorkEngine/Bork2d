@@ -141,8 +141,8 @@ Consequences:
 | Concern | Project | Examples |
 | --- | --- | --- |
 | Public contracts | `Api` | Interfaces, `Sprite`, `Color`, `KeyCode`, serialization attributes, `Bork2dException`. |
-| Value semantics and math | `Common` | Transform hierarchy, matrix helpers, layer validation, frame snapshot DTOs, entity IDs. |
-| Engine state and loop | `Common` | Root-owned scene tree, snapshot builder, tick timing, `Engine<TLayer, TGame>`. |
+| Value semantics and math | `Common` | Transform hierarchy, matrix helpers, layer validation. Frame snapshot structs are internal value types planned for M7. |
+| Engine state and loop | `Common` | Root-owned unordered scene tree, internal snapshot builder (M7), tick timing, `Engine<TLayer, TGame>`. |
 | Platform and composition | `Runtime` | Builder, app host, windowed SDL, Vulkan bootstrap, headless/offscreen mode selection, lifecycle. |
 | GPU rendering | `Render` | Device, swapchain (windowed) or offscreen targets, dynamic rendering, descriptor sets, bindless textures, instance buffers, pipeline, present. |
 | Assets and data | `Assets` | Pack VFS, overlays, decompression, descriptors, sprite assets, resource table, Nerdbank.MessagePack shapes, bake support. |

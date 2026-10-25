@@ -7,7 +7,7 @@ namespace Bork2d.Tests;
 /// references, so they must not overlap with other test classes.
 /// </summary>
 [CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class SceneGraphGcCollection
+public sealed class SceneGcCollection
 {
-    public const string Name = "Scene graph GC";
+    public const string Name = "Scene GC";
 }

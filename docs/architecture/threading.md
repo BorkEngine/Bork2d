@@ -1,6 +1,6 @@
 # Threading and Frame Handoff
 
-> **Status:** target design for frame handoff. The M1 scene graph (WP3) is implemented with the
+> **Status:** target design for frame handoff. The M1 scene tree (WP3) is implemented with the
 > structural + per-object `System.Threading.Lock` rules in §2; there is still no render thread,
 > no snapshot ring, and `Engine.Run()` is a placeholder. This document defines the thread
 > contract the implementation must satisfy.
@@ -34,15 +34,16 @@ logical ordering rules:
 
 - creating, attaching, detaching, and clearing cameras/sprite renderables;
 - changing transform local values or parents (including the root's direct children);
-- changing camera properties (`Size`, `Viewport`, `CullingMask`, `Clear`, `ClearColor`);
+- changing camera properties (`Size`, `Viewport`, `CullingMask`, `Clear`, `ClearColor`, `ZIndex`);
 - changing sprite properties (`Sprite`, `Layer`, `ZIndex`, `Tint`, planned flip flags);
 - changing `IWindow` state (windowed only, any thread, marshaled).
 
 The guarantee is deliberately precise:
 
-- **Structural state is serialized during the tick window.** Entity ID allocation and
-  parent/child attach/detach are protected by the scene graph's structural
-  `System.Threading.Lock`. Entity creation and parenting from multiple game workers are safe.
+- **Structural state is serialized during the tick window.** Parent/child attach/detach is
+  protected by the engine's single global structural `System.Threading.Lock`. Entity creation
+  and parenting from multiple game workers are safe. The tree is unordered and has no entity
+  IDs or ordered discovery.
 - **Distinct entities can be created and mutated concurrently.** Two workers may move
   different sprites, detach different cameras, etc.
 - **Individual property access is serialized per object.** Each object uses a `Lock` for
@@ -80,7 +81,10 @@ that spans multiple locked operations; that is the game's responsibility.
 ## 3. Frame snapshot
 
 A snapshot is the renderer's complete input for one tick. It is immutable after publication
-and contains no references to live entities.
+and contains no references to live entities. The snapshot structs are **internal** (never
+`Bork2d.Api`) and are **planned for M7** (frame handoff); camera ordering lands in M8. The
+engine builds them with an unordered traversal of the scene tree after `Tick` returns (workers
+joined); no `Transform`/`Camera`/`SpriteRender` reference crosses the boundary.
 
 ```
 FrameSnapshot
@@ -91,7 +95,7 @@ FrameSnapshot
   Sprites         SpriteSnapshot[]
 
 CameraSnapshot
-  EntityId        uint
+  ZIndex          int         camera order; higher applies later
   WorldTransform  Matrix3x2   camera position/rotation/scale in world space
   Size            float       half visible height in world units
   Viewport        Vector4     normalized x,y,w,h; top-left origin
@@ -100,7 +104,6 @@ CameraSnapshot
   ClearColor      Color       linear RGBA
 
 SpriteSnapshot
-  EntityId        uint
   Sprite          Sprite      opaque handle; may be Empty or not ready
   WorldTransform  Matrix3x2   position/rotation/scale, including parent hierarchy
   Tint            Color       linear RGBA
@@ -111,17 +114,22 @@ SpriteSnapshot
 
 Rules:
 
+- **Internal and value-only.** The snapshot structs are engine-internal, contain only copied
+  values, and are not part of `Bork2d.Api`. There are no entity IDs.
+- **Built after `Tick`.** Capture runs after `Tick` returns with all game workers joined.
+  Workers must not write scene state after `Tick` returns; the tick is the quiescence boundary.
 - **Asset-agnostic.** A snapshot never contains textures, vertices, or sprite metadata. The
   renderer resolves the `Sprite` handle against the resource table at draw time.
 - **World transforms only.** The tick thread evaluates the parent hierarchy and writes the
   final local-to-world matrix. The renderer never walks parents.
 - **Generic layer erased.** `TLayer` is converted to a `uint` mask/bit at capture. The
   renderer is non-generic.
-- **Rooted tree.** Capture walks `IEngine.Root` and copies cameras/sprites/transforms that are
-  still rooted. There is no weak registry; unparented/unreachable objects are not part of the
-  scene.
-- **Sorted by the renderer.** Cameras are captured in entity-ID order; sprites in entity-ID
-  order. The renderer sorts sprites by layer, `ZIndex`, and entity ID, then filters per camera.
+- **Unordered traversal.** Capture walks `IEngine.Root` and copies cameras/sprites/transforms
+  that are still rooted, in no specified order. There is no weak registry and no entity-ID
+  order; unparented/unreachable objects are not part of the scene.
+- **Sorted by the renderer.** Sprites are sorted by `(Layer, ZIndex)` ascending; ties are
+  unspecified. Cameras are applied in ascending `ZIndex`; ties are unspecified. The renderer
+  then filters sprites per camera.
 - **Detached entities are absent.** A renderable detached during `Tick` is not copied into the
   snapshot published at the end of that tick. It remains valid and can be re-attached.
 - **No readiness filtering at capture.** A sprite whose asset is not ready is still in the
@@ -389,7 +397,8 @@ See [Assets and pack files](assets.md#14-threading).
    faster than the ring allows, waits only when full, never sleeps/delays artificially, and
    drops superseded snapshots.
 3. **Concurrency tests.** N workers create/mutate distinct entities, join; all appear exactly
-   once; IDs unique; snapshot matches; detach/remove and re-attach from workers are safe.
+   once with distinct references; snapshot matches; detach/remove and re-attach from workers are
+   safe. There are no entity IDs or order assertions.
 4. **Shutdown tests.** Stop during publish, take, or simulated GPU work; all threads exit
    within a timeout; all slots end `Free`.
 5. **Mode tests.** Headless creates no SDL/render thread and paces to its configured tick rate
@@ -412,15 +421,16 @@ The threading milestone is not done until tests 1–4 pass reliably under stress
 | Snapshot slots | None | Three slots held until frame fence. |
 | Headless | None | No SDL/GPU/render thread; timer-paced (default 60, 0 = uncapped). |
 | Offscreen | None | Windowless Vulkan; internal target. |
-| Entity storage | Root-owned strong scene tree (`Bork2d.Common`, WP3): the internal `ISceneNode` structural contract is shared by the dedicated root node and transform entities; structural `System.Threading.Lock`. | — |
+| Entity storage | Root-owned strong, **unordered** scene tree (`Bork2d.Common`, WP3): the internal `ISceneNode` structural contract is shared by the dedicated root node and transform entities; one engine-owned structural `System.Threading.Lock`. No entity IDs, no graph holder. | — |
 | Input | Interface only | Windowed SDL state + edges. |
 | Control channel | None | SPSC windowed control queue. |
 | Assets | Empty | Pack VFS + loader threads (M3). |
 
-The weak-reference registry is gone: the scene is a root-owned strong scene tree (a dedicated root
-node plus transform entities), so parented objects persist, unparented objects are collectible,
-`ITransform.DetachAll()` detaches direct children, and `Root.DetachAll()` is scene teardown.
-Discovery walks the rooted tree in entity-ID order. See [Scene ownership](scene-ownership.md).
+The weak-reference registry is gone: the scene is a root-owned strong, unordered tree (a
+dedicated root node plus transform entities), so parented objects persist, unparented objects are
+collectible, `ITransform.DetachAll()` detaches direct children, and `Root.DetachAll()` is scene
+teardown. There are no entity IDs or ordered discovery. Snapshot capture is deferred to M7; see
+[Scene ownership](scene-ownership.md).
 
 ## 13. Related documents
 

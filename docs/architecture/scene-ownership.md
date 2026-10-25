@@ -99,7 +99,8 @@ Rules:
 - `ITransform.DetachAll()` detaches direct children; their `Parent` becomes `null`.
   Grandchildren stay attached to those children.
 - Any `ITransform` can have children; `DetachAll()` is not root-only.
-- Entity IDs are monotonic and not reused. Snapshot/render order remains entity-ID based.
+- The tree is **unordered**. There are no entity IDs, no ordered discovery, and no public child
+  enumeration in M1. Snapshot capture and render order are deferred to M7/M8 (D-026).
 
 ## 4. Lifetime cases
 
@@ -120,15 +121,19 @@ it from the scene is the explicit release; `Root.DetachAll()` bounds the whole s
 
 ## 5. Renderer and snapshot relationship
 
-- Snapshot capture walks the rooted tree and collects cameras, sprite renderables, and
-  transforms. The renderer never walks the live tree.
-- Cameras and sprites are sorted by entity ID before snapshot output, preserving the existing
-  ordering contract.
+- The renderer never walks the live tree. After `Tick` (workers joined), the engine traverses
+  the rooted tree in no specified order and builds internal **value-only** `CameraSnapshot` /
+  `SpriteSnapshot` structs. No `Transform`/`Camera`/`SpriteRender` reference crosses the
+  boundary.
+- The snapshot structs are internal, are not part of `Bork2d.Api`, and are not implemented in
+  M1: snapshot capture belongs to M7 (frame handoff) and camera ordering to M8.
+- Cameras are applied in ascending `ZIndex`; higher draws later, default `0`, ties unspecified.
+  Sprites are sorted by `(Layer, ZIndex)`; ties unspecified. There are no entity IDs.
 - Renderers copy the values they need. Holding a game reference to a live entity never gives
   the render thread access to it.
 - Scene mutation is logically tick-window scoped: `Setup`, `Tick` (including joined workers), or
   `Teardown`. The API itself has no thread affinity; engine locks make concurrent calls safe.
-- Structural attach/detach uses a scene-graph structural `System.Threading.Lock`. Individual
+- Structural attach/detach uses one engine-owned structural `System.Threading.Lock`. Individual
   property access uses per-object `Lock`s; prefer `Interlocked`/immutable paths where practical.
   A logical multi-property update to one object still needs game synchronization if it must be
   atomic.
@@ -175,17 +180,20 @@ Implemented in WP3 inside `Bork2d.Common` (all implementation types are internal
 3. `CreateTransform`/`CreateCamera`/`CreateSpriteRender` attach to the supplied parent;
    the camera/sprite creators reject a `null` parent and non-engine parents.
 4. Parent add/remove, self/cycle rejection, world-preserving re-parent, `DetachAll()` on any
-   transform, and root teardown all run under one scene-graph structural `System.Threading.Lock`.
-   The transform stores its local affine matrix, so re-parenting preserves the composed world
-   matrix exactly (including shear) and `LocalPosition` changes only the translation; local
-   rotation/scale are an authored scalar view refreshed after a re-parent. Property access uses a
-   per-object `Lock`; no path takes the structural lock while holding a per-object lock.
-5. Discovery traverses the rooted tree and returns transforms in entity-ID order; entity IDs are
-   monotonic and never reused.
+   transform, and root teardown all run under one engine-owned structural
+   `System.Threading.Lock` owned by `Engine`. The transform stores its local affine matrix, so
+   re-parenting preserves the composed world matrix exactly (including shear) and
+   `LocalPosition` changes only the translation; local rotation/scale are an authored scalar
+   view refreshed after a re-parent. Property access uses a per-object `Lock`; no path takes
+   the structural lock while holding a per-object lock.
+5. The tree is unordered: there is no entity ID, no ordered discovery, and no public child
+   enumeration. Snapshot capture is not implemented in M1; internal value-only snapshot structs
+   and camera `ZIndex` ordering are M7/M8.
 6. `Bork2d.Tests` covers rooted/unparented lifetime with `WeakReference`, remove/re-add, root
    teardown/re-add, read-only root, self/cycle rejection, exact-matrix world-preserving re-parent,
    authored local scalar round-trip (negative scale axes and degrees normalized to `[0, 360)`),
-   entity-ID order, and concurrent creation/mutation from workers.
+   parent relationships in the unordered tree, distinct references under concurrency, and
+   camera `ZIndex` defaults/round-trip.
 7. Scene entities have no `IDisposable`/`Dispose`/`IsAlive` and do not self-register anywhere.
 8. API docs and the threading/lifecycle notes were updated in the same change; the M1 spec's
    final status pass remains WP8.
@@ -197,3 +205,5 @@ Implemented in WP3 inside `Bork2d.Common` (all implementation types are internal
 - [Threading](threading.md#2-tick-scoped-concurrency) — mutation and locking rules.
 - [API reference](../api/reference.md#2-iengine) — exact public members.
 - [Decision D-023](../decisions.md#d-023-root-owned-scene-graph) — decision record.
+- [Decision D-026](../decisions.md#d-026-no-entity-ids-unordered-tree-camera-zindex-internal-snapshots) —
+  no entity IDs, unordered tree, camera `ZIndex`, internal snapshots.

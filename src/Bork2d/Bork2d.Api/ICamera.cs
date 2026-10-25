@@ -37,4 +37,14 @@ public interface ICamera<TLayer> : ITransform where TLayer : struct, Enum
     /// Gets or sets the linear RGBA clear color used by <see cref="ClearKind.Color"/>.
     /// </summary>
     Color ClearColor { get; set; }
+
+    /// <summary>
+    /// Gets or sets the draw order between cameras; higher values apply later and draw on top.
+    /// </summary>
+    /// <value>
+    /// The camera sort key. The default is <c>0</c>. Cameras are applied in ascending
+    /// <see cref="ZIndex"/> order; ties are unspecified, so assign distinct values when the
+    /// overlap matters.
+    /// </value>
+    int ZIndex { get; set; }
 }
