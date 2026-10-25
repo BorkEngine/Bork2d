@@ -1,10 +1,12 @@
 # NativeAOT
 
-> **Status:** `Current` for the M1 baseline. `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`,
-> `Bork2d.Render`, and `Bork2d.Runtime` compile with `IsAotCompatible` plus the trim and AOT
-> analyzers, and `Bork2d.AotSmoke` publishes and runs with zero AOT/trim warnings. The smoke
-> exercises the default logging path and a Nerdbank.MessagePack generated shape. The editor and
-> build tools stay JIT; SDL/Vulkan AOT validation arrives in M2/M6.
+> **Status:** `Current` for the M1 baseline plus the M2 SDL dependency spike.
+> `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`, and `Bork2d.Runtime` compile with
+> `IsAotCompatible` plus the trim and AOT analyzers, and `Bork2d.AotSmoke` publishes and runs with
+> zero AOT/trim warnings. The smoke exercises the default logging path and a Nerdbank.MessagePack
+> generated shape. The editor and build tools stay JIT; the SDL2 native and a throwaway windowed
+> AOT probe are verified (M2 WP1), the windowed runtime and its AOT demo are M2 WP5, and Vulkan AOT
+> validation is M6.
 
 ## 1. Scope
 
@@ -104,8 +106,23 @@ determinism and a possible future AOT editor, not a current AOT requirement.
 ## 6. Native libraries and Silk.NET
 
 - SDL2 and the Vulkan loader are native dependencies, deployed per target RID.
-- Silk.NET bindings replace dynamic P/Invoke discovery. M1 deliberately excludes Silk.NET/SDL;
-  AOT validation of the SDL path is M2 and of the Vulkan path is M6.
+- `Bork2d.Runtime` pins `Silk.NET.SDL` `2.23.0` for the windowed platform (M2, D-M2-06). No other
+  engine project references it, no SDL type appears in `Bork2d.Api`, and Vulkan validation remains
+  M6.
+- The package brings `Ultz.Native.SDL` `2.32.10` transitively, which supplies
+  `runtimes/win-x64/native/SDL2.dll`; the AOT publish output copies it next to the executable. The
+  loaded binary reports `SDL_GetVersion` `2.30.8` (its Windows file version is also `2.30.8`), so
+  the package version label is ahead of the binary it carries. It exposes every call M2 uses,
+  including `SDL_GetWindowSizeInPixels` (2.26+) and the Windows DPI hints (2.24+).
+- The SDL adapter builds its `Silk.NET.SDL.Sdl` instance over an internal `INativeContext` that
+  loads the package native through the assembly's runtime assets. `Sdl.GetApi()` resolves through
+  `Silk.NET.Core.Loader.DefaultPathResolver`, which reports IL3000/IL3002 single-file trim warnings
+  under NativeAOT; the internal context avoids that code path with no suppression, no extra binary,
+  and no copy step.
+- M2 WP1 verified the dependency with an AOT publish/run of a throwaway windowed probe: SDL video
+  init, window create/destroy, and quit succeed on an engine-created (non-main) thread, the publish
+  has zero AOT/trim warnings, and `SDL2.dll` is present in the output. The windowed runtime, the
+  `--windowed` AOT demo, and the windowed local gate are M2 WP5.
 - No runtime shader compilation: SPIR-V is built offline.
 - The headless server must not initialize SDL or Vulkan; `WithHeadless(...)` must not load or
   call the graphics/windowing paths.
