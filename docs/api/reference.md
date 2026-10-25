@@ -335,6 +335,7 @@ public interface ICamera<TLayer> : ITransform
     TLayer CullingMask { get; set; }
     ClearKind Clear { get; set; }
     Color ClearColor { get; set; }
+    int ZIndex { get; set; }
 }
 ```
 
@@ -345,13 +346,15 @@ public interface ICamera<TLayer> : ITransform
 | `CullingMask` | `Current` | Combination of layer flags; `0` sees nothing. |
 | `Clear` | `Current` | `Color` clears viewport, `None` preserves earlier content, `Depth` is a no-op/one-time warning. |
 | `ClearColor` | `Current` | Linear RGBA for `Clear.Color`. |
+| `ZIndex` | `Current` | Camera order; ascending, higher applies later, default `0`. Ties unspecified. |
 | `ScreenToWorld(Vector2)` | `Planned` | Framebuffer pixels → world units using this camera. |
 | `WorldToScreen(Vector2)` | `Planned` | Inverse. |
 
 - Cameras inherit `ITransform`; position/rotation/parent come from the transform. Scale is not
   zoom; use `Size`. Create with `IEngine.CreateCamera(parent)`; use `Root` or a rooted transform.
-- Camera order is creation order (entity ID). Later camera with `Clear.Color` wipes its
-  viewport; `None` overlays.
+- Camera order is ascending `ZIndex` (default `0`; higher draws later). Ties are unspecified;
+  assign distinct values where overlap matters. A camera applied later with `Clear.Color` wipes
+  its viewport; `None` overlays.
 - Defaults above. `Clear.Depth` is accepted for forward compatibility.
 - Works in headless/offscreen, but headless never renders.
 - Cameras are not `IDisposable` and have no `IsAlive` state; detach with `Parent = null` or
@@ -375,14 +378,14 @@ public interface ISpriteRender<TLayer> : ITransform
 | `Sprite` | `Current` | Opaque sprite asset handle. `Empty` = no draw. Not-ready handles skipped. |
 | `Layer` | `Current` | Exactly one non-zero bit. `0`/composite invalid and skipped with a diagnostic. |
 | `Tint` | `Current` | Linear RGBA multiplied with the texture; `White` neutral. |
-| `ZIndex` | `Current` | Sort within layer; higher draws later. Ties use entity ID. |
+| `ZIndex` | `Current` | Sort within layer; higher draws later. Ties are unspecified. |
 | `FlipX`, `FlipY` | `Planned` | Mirrors the sprite without changing the transform. |
 
 - The sprite asset supplies UVs, pivot, topology, optional indices, texture path, and a
   **pixels-per-unit** scale. `LocalScale` multiplies. There is no global PPU and no vertices
   array.
 - Hide with `Sprite = Sprite.Empty` (keep entity) or detach with `Parent = null`.
-- Sorting: layer numeric → `ZIndex` → entity ID. A not-ready asset yields no instance.
+- Sorting: layer numeric → `ZIndex`; ties are unspecified. A not-ready asset yields no instance.
 - Headless: entities can exist but never produce an instance.
 - Create with `IEngine.CreateSpriteRender(parent)`; use `Root` or a rooted transform.
 - Sprite renderables are not `IDisposable` and have no `IsAlive` state; detach with
@@ -645,11 +648,14 @@ for argument/programming errors raised directly by callers.
 | `IAssets` pack/browse/exists | Missing. |
 | `IAssets` unload/readiness | Missing; load-and-keep deferred. |
 | Builder/app | `Current` (WP4): public `Bork2dAppBuilder<TLayer>`, validation, one-tick `Run`, idempotent `Dispose`, and M1 stubs. Real window/GPU loop is M2/M7. |
-| Threading | The one-tick run, builder, and app `Dispose` have no thread affinity; the WP3 scene graph provides the structural/per-object locks. |
+| Threading | The one-tick run, builder, and app `Dispose` have no thread affinity; the WP3 scene tree provides the engine-owned structural and per-object locks. |
 | Headless/offscreen | Mode selection and validation exist (WP4), but both use the same one-tick smoke in M1; real mode startup is M6/M7. |
 | NativeAOT | No analyzers/publish. |
-| Camera defaults | Implemented (WP3): size 10, full viewport, all declared layers, black clear. |
-| Entity ownership | Root-owned strong tree (WP3); no weak registry, no entity `Dispose`/`IsAlive`. |
+| Camera defaults | Implemented (WP3): size 10, full viewport, all declared layers, black clear, `ZIndex` 0. |
+| Camera ordering | `ICamera.ZIndex` implemented (WP3): ascending, higher later, default 0, ties unspecified. |
+| Entity identity/order | None: no entity IDs, no ordered discovery, no public tree enumeration (WP3/D-026). |
+| Frame snapshots | Internal value-only `CameraSnapshot`/`SpriteSnapshot` structs planned for M7; not part of `Bork2d.Api`. Capture is unordered after `Tick`. |
+| Entity ownership | Root-owned strong **unordered** tree (WP3); no weak registry, no entity `Dispose`/`IsAlive`. |
 | Layer semantics | Undefined; target one bit/mask with validation. |
 | Sprite sizing | No assets; target UVs/pivot/topology/optional indices/pixels-per-unit scale. |
 | Assets/PCK | `Bork2d.Assets` empty. |

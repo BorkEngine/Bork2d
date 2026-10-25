@@ -104,11 +104,11 @@
 
 ## D-007 N cameras, N instanced draws
 
-- **Status:** Accepted
+- **Status:** Accepted; camera ordering updated by D-026
 - **Context:** "One draw per camera" needs a precise multi-camera contract.
 - **Decision:** Each non-empty camera produces one instanced draw; cameras render in ascending
-  entity ID (creation order) into normalized viewports. Empty cameras produce no draw. There is
-  no global one-draw-for-all-cameras requirement.
+  `ZIndex` (default `0`, ties unspecified) into normalized viewports. Empty cameras produce no
+  draw. There is no global one-draw-for-all-cameras requirement.
 - **Consequences:** Split-screen/HUD work naturally; draw count scales with non-empty cameras,
   not sprites/textures. The invariant is testable.
 - **Alternatives:** One active camera; one combined draw; offscreen composite.
@@ -143,8 +143,8 @@
   from sprite assets (UVs/scale/pivot/topology) in one pipeline. Texture pages use a descriptor-
   indexed bindless sampler array; instances select the page. Dynamic rendering; no render
   pass/framebuffer for the swapchain. v1: no depth, no MSAA/HDR, no per-sprite materials;
-  ordering layer → `ZIndex` → entity ID; straight alpha. Windowed and offscreen modes share the
-  pipeline; offscreen discards frames.
+  ordering layer → `ZIndex` (ties unspecified); straight alpha. Windowed and offscreen modes
+  share the pipeline; offscreen discards frames.
 - **Consequences:** One draw per camera; no per-sprite descriptors. Device must support
   descriptor indexing/bindless limits. Transparency needs explicit sorting. Variable-topology
   meshes need a future geometry path.
@@ -239,8 +239,8 @@
   to the same entity/property; the game synchronizes that. Main-only APIs stay main-only.
   Workers join before `Tick` returns.
 - **Consequences:** Parallel spawning/per-entity updates are legal and cheap; no per-property
-  locks. Same-entity races are the game's responsibility. Registry must stay thread-safe and
-  IDs unreused.
+  locks. Same-entity races are the game's responsibility. Structural state must stay
+  thread-safe; no entity IDs are allocated.
 - **Alternatives:** Single-writer main-thread mutation; locks on every property; ECS/job system.
 - **Docs:** [Threading](architecture/threading.md#2-tick-scoped-concurrency)
 
@@ -377,7 +377,8 @@
 - **Consequences:** Deterministic lifetime bounded by scene membership; no GC-driven
   disappearance; no destroy lifecycle or stale-reference state. A rooted object whose game
   reference is lost persists until removed—this is deliberate. Removing and re-adding preserves
-  the object and its state. Snapshot discovery traverses the root tree. Parent add/remove is O(1)
+  the object and its state. Snapshot capture (M7, internal value-only structs) traverses the
+  root tree in unspecified order. Parent add/remove is O(1)
   amortized under a structural `System.Threading.Lock`; traversal is O(n), replacing
   weak-dictionary enumeration. Temporary scopes and typed caches are future optimizations.
 - **Alternatives:** Weak registry; finalizer-backed handles; global strong registry; arena/IDs;
@@ -426,6 +427,33 @@
   [API guide](api/guide.md), [Scene ownership](architecture/scene-ownership.md),
   [Rendering](architecture/rendering.md#7-coordinates-camera-and-projection)
 
+## D-026 No entity IDs, unordered tree, camera `ZIndex`, internal snapshots
+
+- **Status:** Accepted
+- **Context:** M1 briefly exposed a `SceneGraph` holder that allocated monotonic entity IDs and
+  ordered discovery by them. That identity leaked into tests, docs, and the future snapshot
+  contract (tie-breaking and camera order) even though no runtime code consumed it.
+- **Decision:** There are **no entity IDs** and no ordered discovery. The scene is an
+  **unordered** root-owned tree of parent/child links. The internal `ISceneNode` contract
+  exposes only parent, local/world matrix, and child-list operations; there is no graph holder.
+  One engine-owned global structural `System.Threading.Lock` serializes parent changes;
+  per-object `Lock`s protect local properties. `ICamera<TLayer>.ZIndex` (int, default `0`)
+  orders cameras: ascending, higher applies/draws later, ties unspecified. Frame snapshots are
+  internal, value-only `CameraSnapshot`/`SpriteSnapshot` structs, not part of `Bork2d.Api`, and
+  are deferred to M7 (frame handoff); camera ordering is applied in M8. Sprites sort by
+  `(Layer, ZIndex)`; ties unspecified.
+- **Consequences:** No identity allocator, graph holder, or ordering contract to maintain.
+  Equal `ZIndex`/`(Layer, ZIndex)` values have unspecified order, so games must assign distinct
+  keys where order matters. Snapshot capture may traverse the tree in any order. Tests assert
+  parent relationships, reference identity, GC behavior, and unique references instead of IDs
+  or order.
+- **Alternatives:** Keep monotonic IDs for tie-breaking; keep a `SceneGraph` context object;
+  use creation/insertion order as an implicit tie-breaker.
+- **Docs:** [Scene ownership](architecture/scene-ownership.md),
+  [Threading](architecture/threading.md#3-frame-snapshot),
+  [Rendering](architecture/rendering.md#81-sort-order), [API reference](api/reference.md),
+  [API guide](api/guide.md), [M1 spec](specs/m1-foundation.md)
+
 ## Proposed defaults awaiting sign-off
 
 These are decisions embedded in the docs that were not explicitly chosen. They are safe to
@@ -450,7 +478,7 @@ change before the milestone that implements them.
 | Project descriptor | `bork2d.project.toml` with asset/type mapping | M4/M5 |
 | Shader compiler | glslangValidator build target; embedded SPIR-V | M8 |
 | Bindless pages | 4096 default, hard failure on overflow | M8 |
-| Camera order | Entity ID (creation order) | M8 |
+| Camera order | `ZIndex` ascending, default `0`, ties unspecified | M8 |
 | v1 residency | Load-and-keep; unload API later | M3 |
 | Editor custom windows | Type/instance registration; no scanning | M5 |
 | Offscreen readback | Internal discard in v1 | M7/M10 |
@@ -493,3 +521,4 @@ document in the same change. Do not rewrite history by deleting an old decision;
 | D-023 | Root-owned scene graph | Accepted |
 | D-024 | Thread-affinity-free API | Accepted |
 | D-025 | Degrees and normalized rotation | Accepted |
+| D-026 | No entity IDs, unordered tree, camera `ZIndex`, internal snapshots | Accepted |

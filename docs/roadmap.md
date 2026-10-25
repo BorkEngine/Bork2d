@@ -136,9 +136,9 @@ Exit criteria:
 - dependency test passes;
 - an AOT-published smoke app builds/starts without reflection or trim warnings (the full
   headless pack/tick smoke lands in M7);
-- unit tests cover layer validation, entity IDs, root ownership (parented persists, unparented
-  collectible, remove/re-add, root clear detach), transform math, builder validation, concurrent
-  any-thread operations, and pack path rules;
+- unit tests cover layer validation, camera `ZIndex` ordering, root ownership (parented persists,
+  unparented collectible, remove/re-add, root clear detach), transform math, builder validation,
+  concurrent any-thread operations, and pack path rules;
 - pretty ZLogger console logging is visible by default and `IEngine.LoggerFactory` is usable;
 - no weak-reference entity registry and no entity `Dispose`/`IsAlive` remain;
 - no implementation type is unintentionally public.
@@ -319,7 +319,9 @@ Scope:
   clamp only;
 - headless tick loop with no snapshot ring, timer-paced by `ticksPerSecond` (default 60,
   `0` = uncapped);
-- tick capture after `Tick` (workers joined), layer flattening, immutable snapshots;
+- tick capture after `Tick` (workers joined): unordered traversal of the scene tree into
+  internal, value-only `CameraSnapshot`/`SpriteSnapshot` structs (no entity IDs, no live node
+  references), layer flattening, immutable snapshots;
 - windowed/offscreen render loop; headless loop without SDL/Vulkan;
 - frames in flight 2; GPU frame slots/fences; instance/command resources;
 - resize/close/error handling across modes; shutdown with in-flight frames;
@@ -526,7 +528,7 @@ carries indices), asset/pack unloading, and public offscreen readback.
 | Allocator | M6 | Minimal suballocator first; VMA if needed. |
 | Shader compiler/build integration | M8 | glslangValidator in a build target; embedded SPIR-V. |
 | Bindless capacity/overflow | M8 | 4096 pages; hard failure on overflow. |
-| Camera order | M8 | Entity ID (creation order). |
+| Camera order | M8 | Ascending `ZIndex`; higher draws later; ties unspecified. |
 | Frustum culling | M8 | Layer mask only in v1. |
 | Headless timer accuracy | M7 | Default 60; `0` uncapped; decide fractional rates later. |
 | ZLogger default format | M1 | Pretty console; exact colors/timestamp options open. |

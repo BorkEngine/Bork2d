@@ -26,7 +26,7 @@ M1 is complete when all of these are demonstrated:
 2. `dotnet format --verify-no-changes` passes.
 3. The dependency test passes and no implementation type is accidentally public.
 4. `Bork2d.Tests` (xUnit) covers builder validation, scene ownership, transform hierarchy,
-   layers, entity IDs, and the concurrency rules.
+   layers, camera `ZIndex` ordering, and the concurrency rules.
 5. An AOT-published smoke app runs without reflection, trim, or AOT warnings.
 6. `IEngine.LoggerFactory` is usable and a default `Bork2dAppBuilder` run produces pretty
    ZLogger console output.
@@ -50,6 +50,10 @@ M1 is complete when all of these are demonstrated:
 | AOT | Runtime/game AOT-safe; editor/baker JIT later. |
 | Logging | `IEngine.LoggerFactory`; `WithLogging(Action<ILoggingBuilder>)`; pretty ZLogger default. |
 | Rotation | Public unit is **degrees**, positive CCW; `LocalRotation` normalized to `[0, 360)` on assignment (D-025). Internal matrix math stays in radians. |
+| Scene tree | Root-owned strong tree of parent/child links. It is **unordered**: no entity IDs, no ordered discovery, and no public child enumeration in M1 (D-026). |
+| Structural locking | One engine-owned global structural `System.Threading.Lock`, shared by `SceneRoot`, `Transform`, `Camera`, and `SpriteRender`. There is no `SceneGraph` holder. |
+| Camera order | `ICamera.ZIndex`; cameras apply in ascending order, higher draws later, default `0`; ties are unspecified (D-026). |
+| Snapshots | Not part of M1. Internal value-only `CameraSnapshot`/`SpriteSnapshot` structs and snapshot capture belong to M7 (D-026). |
 | Style | Warnings-as-errors, style errors, `dotnet format` gate, all projects. |
 | Tests | xUnit. |
 | Pack | Format accepted; actual pack implementation is M3. M1 exposes only builder option validation. |
@@ -130,8 +134,9 @@ Acceptance: API compiles, docs match, dependency test allows only the intended r
 Replace `EntityList<T>` and the weak registry with:
 
 - `Transform` child storage (`List<Transform>`/array) and parent management;
-- an internal `ISceneNode` structural contract shared by `Transform` and `SceneRoot` (graph,
-  entity ID, parent node, local/world matrix, child-list operations); it is not public;
+- an internal `ISceneNode` structural contract shared by `Transform` and `SceneRoot` (parent
+  node, local/world matrix, child-list operations); it is not public and exposes no graph or
+  scene identity, entity ID, child enumeration, or traversal helper;
 - `SceneRoot` implements `ISceneRoot` **directly** (it does **not** inherit `Transform`):
   - read-only: parent/local setters throw `InvalidOperationException`;
   - inherits `DetachAll()` from `ITransform` and implements it over its own child list;
@@ -150,9 +155,12 @@ Replace `EntityList<T>` and the weak registry with:
 - `CreateTransform/CreateCamera/CreateSpriteRender` attach to the supplied parent;
 - `CreateCamera(null)`/`CreateSpriteRender(null)` fail validation;
 - camera/sprite constructors do not self-register in a global list;
-- snapshot discovery uses rooted-tree traversal and preserves entity-ID ordering;
-- no concurrent dictionary; entity IDs are monotonic and non-reused;
-- all parent/child operations use a scene-graph structural lock (`System.Threading.Lock`);
+- snapshot discovery and capture are **not** implemented in M1; the tree is unordered and no
+  entity IDs or ordered discovery exist (internal value-only snapshot structs land in M7);
+- no concurrent dictionary and no entity ID allocator;
+- all parent/child operations use one engine-owned global structural `System.Threading.Lock`
+  (`Lock`), owned by `Engine` and shared by every node it creates; there is no `SceneGraph`
+  context object;
 - property access is per-object locked (`Lock`), with lock-free paths where practical;
   composite updates to one object still need game synchronization where atomicity matters;
 - avoid `lock (object)`; use `Lock`, `Interlocked`, `Volatile`, and immutable snapshots;
@@ -161,7 +169,7 @@ Replace `EntityList<T>` and the weak registry with:
 Acceptance tests:
 
 1. Unparented transform/camera/sprite is collectible after dropping the last reference.
-2. Rooted object persists after dropping the game reference and is visible to root traversal.
+2. Rooted object persists after dropping the game reference and stays retained by the root.
 3. Detached object is collectible after dropping the last reference.
 4. Remove from parent, keep the reference, re-add later: same object, same state.
 5. `Root.DetachAll()` detaches children; refs remain valid and can be re-parented.
@@ -171,7 +179,8 @@ Acceptance tests:
 9. Re-parenting preserves world position/rotation/scale.
 10. Concurrent operations from workers succeed under locks; composite same-object updates are
     documented as game-synchronized.
-11. Snapshot/camera/sprite discovery order is entity-ID order.
+11. There are no entity IDs and no ordered discovery; the tree is unordered, and snapshot
+    capture/order is deferred to M7/M8.
 
 ### WP4 — Builder and host skeleton
 
@@ -229,7 +238,7 @@ xUnit test groups:
 - root read-only setters;
 - transform hierarchy/parenting/cycles;
 - layer validation and camera/sprite defaults;
-- entity IDs non-reuse;
+- camera `ZIndex` default/round-trip and ascending-order semantics;
 - concurrent operations from multiple threads;
 - dependency matrix;
 - AOT publish/start smoke;
@@ -281,7 +290,7 @@ WP1 and WP2 can overlap; WP3 must land before WP4 because the builder creates `R
 - Detaches **direct children**; grandchildren stay attached to their parents.
 - Children become `Parent == null`; the object and state remain valid.
 - Can be called on any transform (root or subtree) from any thread during the tick window.
-- Runs under the scene-graph structural lock.
+- Runs under the engine-owned global structural lock.
 
 ### Parent changes
 
@@ -289,8 +298,8 @@ WP1 and WP2 can overlap; WP3 must land before WP4 because the builder creates `R
 - Setting a parent preserves world transform.
 - Root as child is rejected.
 - Repeated attach/detach does not recreate the object or reset its state.
-- Concurrent structural operations are serialized by the scene-graph structural lock
-  (`System.Threading.Lock`).
+- Concurrent structural operations are serialized by the engine-owned global structural lock
+  (`System.Threading.Lock`, one instance owned by `Engine`).
 - Concurrent property writes use per-object `Lock`; a multi-property update that must be atomic
   still needs game synchronization. Prefer lock-free/`Interlocked` paths where possible.
 
@@ -338,6 +347,7 @@ WP1 and WP2 can overlap; WP3 must land before WP4 because the builder creates `R
 - [ ] No `Dispose`/`IsAlive` on scene entities.
 - [ ] Lost-reference GC tests pass.
 - [ ] Root setter/cycle tests pass.
+- [ ] Camera `ZIndex` default/round-trip test passes; no entity IDs or ordered discovery exist.
 - [ ] Builder validation tests pass.
 - [ ] One-tick `Run` smoke passes.
 - [ ] ZLogger default + `IEngine.LoggerFactory` smoke passes.
@@ -373,3 +383,5 @@ WP1 and WP2 can overlap; WP3 must land before WP4 because the builder creates `R
 - [Roadmap](../roadmap.md#m1-foundation-and-nativeaot-baseline) — milestone context.
 - [Decision D-023](../decisions.md#d-023-root-owned-scene-graph) — ownership decision.
 - [Decision D-024](../decisions.md#d-024-thread-affinity-free-api) — threading decision.
+- [Decision D-026](../decisions.md#d-026-no-entity-ids-unordered-tree-camera-zindex-internal-snapshots) —
+  no entity IDs, unordered tree, camera `ZIndex`, internal snapshots.

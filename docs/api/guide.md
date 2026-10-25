@@ -247,6 +247,7 @@ camera.Viewport = new Vector4(0, 0, 1, 1); // normalized, top-left origin
 camera.CullingMask = GameLayer.World;
 camera.Clear = ClearKind.Color;
 camera.ClearColor = Color.Black;
+camera.ZIndex = 0;                          // camera order; higher applies later
 ```
 
 - `Size` is the **half** visible height in units. Width follows from viewport aspect.
@@ -254,8 +255,9 @@ camera.ClearColor = Color.Black;
 - `Viewport` is normalized `(x, y, w, h)`, top-left origin.
 - Camera rotation/position come from its transform. Camera scale is not a zoom control.
 - Multiple cameras are supported; each non-empty camera issues one instanced draw.
-- Camera order is creation order. A later camera with `Clear.Color` wipes its viewport;
-  `Clear.None` overlays.
+- `ZIndex` orders cameras: ascending, higher applies later, default `0`. Ties are unspecified;
+  use distinct values when viewports overlap. A camera applied later with `Clear.Color` wipes its
+  viewport; `Clear.None` overlays.
 
 Split screen:
 
@@ -263,10 +265,12 @@ Split screen:
 var left = engine.CreateCamera(engine.Root);
 left.Viewport = new Vector4(0f, 0f, 0.5f, 1f);
 left.CullingMask = GameLayer.World;
+left.ZIndex = 0;
 
 var right = engine.CreateCamera(engine.Root);
 right.Viewport = new Vector4(0.5f, 0f, 0.5f, 1f);
 right.CullingMask = GameLayer.World;
+right.ZIndex = 1;
 ```
 
 HUD overlay:
@@ -276,6 +280,7 @@ var hud = engine.CreateCamera(engine.Root);
 hud.Viewport = new Vector4(0, 0, 1, 1);
 hud.Clear = ClearKind.None;      // keep the world behind it
 hud.CullingMask = GameLayer.Ui;
+hud.ZIndex = 10;                 // apply after the world cameras
 ```
 
 Screen/world conversion helpers are `Planned`:
@@ -305,7 +310,8 @@ Semantics:
 - `Sprite` is an opaque handle to a MessagePack sprite asset. The asset may not be ready; the
   renderer skips it until it is. Do not block.
 - `Sprite.Empty` means no sprite.
-- `ZIndex` orders within a layer; higher draws later. Equal z is tie-broken by entity ID.
+- `ZIndex` orders within a layer; higher draws later. Equal z is unspecified; use distinct
+  values when order matters.
 - `Tint` multiplies the texture; `Color.White` is neutral.
 - The sprite asset stores UVs, pivot, topology, optional indices, texture path, and a
   **pixels-per-unit scale**; the renderer divides by that scale. `LocalScale` multiplies it.
@@ -516,7 +522,7 @@ See [NativeAOT](../architecture/nativeaot.md).
 | Persisting `Sprite.Id` | Broken references | Persist asset paths. |
 | Touching entities from the render thread | Corrupt snapshots | Renderer only reads snapshots. |
 | Two workers mutating one entity without sync | Lost updates/data races | One owner per entity or external sync. |
-| Assuming equal `ZIndex` keeps insertion order | Reordering surprises | Use distinct z; entity ID is the stable tie-break. |
+| Assuming equal `ZIndex` keeps a stable order | Reordering surprises | Use distinct z; ties are unspecified. |
 | Creating/detaching outside a tick | Undefined ordering | Use `Setup`/`Tick`/`Teardown`. |
 | Forgetting to parent a created camera/sprite | It is not in the scene and is collectible | Pass `engine.Root` or a rooted parent. |
 | Losing a reference to a rooted object | It persists until removed from the scene | Intentional scene ownership; `Parent = null` or `Root.DetachAll()` to release it. |
