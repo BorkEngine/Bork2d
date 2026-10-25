@@ -184,8 +184,48 @@ internal sealed class SdlWindowPlatform : IDisposable
         _stateChangedSignal.Wait();
     }
 
+    /// <summary>Waits for a confirmed-state publication for at most a bounded interval.</summary>
+    /// <param name="previousVersion">The version returned by <see cref="StateVersion"/> before the change.</param>
+    /// <param name="timeout">The maximum time to wait.</param>
+    /// <returns>
+    /// <see langword="true"/> when the state version changed; <see langword="false"/> when the
+    /// timeout elapsed first.
+    /// </returns>
+    /// <remarks>
+    /// This bounded overload exists for deterministic tests and diagnostics so a missing
+    /// publication fails instead of hanging the caller. Production code uses the no-timeout
+    /// <see cref="WaitForStateChange(int)"/> path, and neither overload sleeps or polls.
+    /// </remarks>
+    internal bool WaitForStateChange(int previousVersion, TimeSpan timeout)
+    {
+        if (Volatile.Read(ref _stateVersion) != previousVersion)
+        {
+            return true;
+        }
+
+        _stateChangedSignal.Reset();
+        if (Volatile.Read(ref _stateVersion) != previousVersion)
+        {
+            return true;
+        }
+
+        return _stateChangedSignal.Wait(timeout);
+    }
+
     /// <summary>Blocks until <see cref="ExitRequested"/> becomes <see langword="true"/>.</summary>
     internal void WaitForExitRequest() => _exitRequestedSignal.Wait();
+
+    /// <summary>Waits for the exit request for at most a bounded interval.</summary>
+    /// <param name="timeout">The maximum time to wait.</param>
+    /// <returns>
+    /// <see langword="true"/> when the exit request was signalled; <see langword="false"/> when the
+    /// timeout elapsed first.
+    /// </returns>
+    /// <remarks>
+    /// This bounded overload exists for deterministic tests so a missing exit request fails instead
+    /// of hanging the caller. It does not change the platform's no-timeout shutdown semantics.
+    /// </remarks>
+    internal bool WaitForExitRequest(TimeSpan timeout) => _exitRequestedSignal.Wait(timeout);
 
     /// <summary>Signals stop, wakes the event wait, and joins the OS thread.</summary>
     /// <remarks>

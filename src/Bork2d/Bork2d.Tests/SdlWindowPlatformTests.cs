@@ -204,6 +204,19 @@ public sealed class SdlWindowPlatformTests
         Assert.Equal(0, window.SetSizeCallCount);
     }
 
+    [Fact]
+    public void BoundedWaitHelpersReturnFalseWhenNothingIsPublished()
+    {
+        var sdl = new FakeSdlApi();
+        using var platform = WindowTestSupport.Start(sdl);
+        var version = platform.StateVersion;
+
+        Assert.False(platform.WaitForStateChange(version, TimeSpan.FromMilliseconds(20)));
+        Assert.False(platform.WaitForExitRequest(TimeSpan.FromMilliseconds(20)));
+        Assert.Equal(version, platform.StateVersion);
+        Assert.False(platform.ExitRequested);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -217,7 +230,7 @@ public sealed class SdlWindowPlatformTests
             ? SdlEvent.Window(SdlEventType.WindowClose)
             : SdlEvent.Quit());
 
-        platform.WaitForExitRequest();
+        WindowTestSupport.WaitForExitRequest(platform);
 
         Assert.True(platform.ExitRequested);
         Assert.Equal(WindowStopReason.Close, platform.StopReason);
@@ -241,7 +254,7 @@ public sealed class SdlWindowPlatformTests
         sdl.ErrorText = "boom";
 
         proxy.Fullscreen = true;
-        platform.WaitForExitRequest();
+        WindowTestSupport.WaitForExitRequest(platform);
         platform.Shutdown();
 
         var fatal = Assert.IsType<Bork2dException>(platform.FatalException);
