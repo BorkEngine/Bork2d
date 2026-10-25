@@ -2,30 +2,103 @@ using Bork2d.Api;
 
 namespace Bork2d.Common;
 
-public class SpriteRender<TLayer> : Transform, IEntity, ISpriteRender<TLayer> where TLayer : struct, Enum
+/// <summary>
+/// An engine-owned sprite renderable: a transform plus a sprite handle and draw state.
+/// </summary>
+/// <remarks>
+/// Sprite renderables are scene entities with no destruction state and no global registration.
+/// They are retained only while rooted; detaching keeps the instance valid for re-attachment.
+/// </remarks>
+internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
+    where TLayer : struct, Enum
 {
-    public uint Id { get; }
-    public Sprite Sprite { get; set; }
-    public TLayer Layer { get; set; }
-    public Color Tint { get; set; }
-    public int ZIndex { get; set; }
+    private Sprite _sprite;
+    private TLayer _layer;
+    private Color _tint;
+    private int _zIndex;
 
-    private readonly EntityList<SpriteRender<TLayer>> _sprites;
-
-    public SpriteRender(EntityList<SpriteRender<TLayer>> list)
+    internal SpriteRender(SceneGraph graph)
+        : base(graph)
     {
-        _sprites = list;
-        Id = _sprites.GetId();
-        _sprites.RegisterEntity(this);
-
-        Sprite = Sprite.Empty;
-        Layer = default;
-        Tint = Color.White;
-        ZIndex = 0;
+        _sprite = Sprite.Empty;
+        _layer = default;
+        _tint = Color.White;
+        _zIndex = 0;
     }
 
-    public void Dispose()
+    public Sprite Sprite
     {
-        _sprites.UnregisterEntity(Id);
+        get
+        {
+            lock (Sync)
+            {
+                return _sprite;
+            }
+        }
+
+        set
+        {
+            lock (Sync)
+            {
+                _sprite = value;
+            }
+        }
+    }
+
+    public TLayer Layer
+    {
+        get
+        {
+            lock (Sync)
+            {
+                return _layer;
+            }
+        }
+
+        set
+        {
+            lock (Sync)
+            {
+                _layer = value;
+            }
+        }
+    }
+
+    public Color Tint
+    {
+        get
+        {
+            lock (Sync)
+            {
+                return _tint;
+            }
+        }
+
+        set
+        {
+            lock (Sync)
+            {
+                _tint = value;
+            }
+        }
+    }
+
+    public int ZIndex
+    {
+        get
+        {
+            lock (Sync)
+            {
+                return _zIndex;
+            }
+        }
+
+        set
+        {
+            lock (Sync)
+            {
+                _zIndex = value;
+            }
+        }
     }
 }
