@@ -1,8 +1,8 @@
-﻿using Bork2d.Api;
+using Bork2d.Api;
 
 namespace Bork2d.Common;
 
-public class SpriteRender<TLayer>: Transform, IEntity, ISpriteRender<TLayer> where TLayer: struct, Enum
+public class SpriteRender<TLayer> : Transform, IEntity, ISpriteRender<TLayer> where TLayer : struct, Enum
 {
     public uint Id { get; }
     public Sprite Sprite { get; set; }
@@ -23,7 +23,7 @@ public class SpriteRender<TLayer>: Transform, IEntity, ISpriteRender<TLayer> whe
         Tint = Color.White;
         ZIndex = 0;
     }
-    
+
     public void Dispose()
     {
         _sprites.UnregisterEntity(Id);

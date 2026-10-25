@@ -1,15 +1,15 @@
-﻿using Bork2d.Api;
+using Bork2d.Api;
 
 namespace Bork2d.Common;
 
-public class Engine<TLayer, TGame>: IEngine<TLayer>
+public class Engine<TLayer, TGame> : IEngine<TLayer>
     where TLayer : struct, Enum
     where TGame : IGame<TLayer>
 {
     public ITime Time { get; }
     public IWindow Window { get; }
     public IAssets Assets { get; }
-    
+
     private readonly TGame _game;
     private readonly EntityList<Camera<TLayer>> _cameras = new();
     private readonly EntityList<SpriteRender<TLayer>> _sprites = new();
@@ -21,7 +21,7 @@ public class Engine<TLayer, TGame>: IEngine<TLayer>
         Window = window;
         Assets = assets;
     }
-    
+
     public ITransform CreateTransform() => new Transform();
 
     public ICamera<TLayer> CreateCamera() => new Camera<TLayer>(_cameras);
