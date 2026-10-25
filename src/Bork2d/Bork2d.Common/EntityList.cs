@@ -1,14 +1,14 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 
 namespace Bork2d.Common;
 
-public class EntityList<T> where T: class, IEntity
+public class EntityList<T> where T : class, IEntity
 {
     private readonly ConcurrentDictionary<uint, WeakReference<T>> _entities = new();
     private uint _id = 0;
 
     public uint GetId() => Interlocked.Increment(ref _id);
-    
+
     public void RegisterEntity(T entity)
     {
         _entities.TryAdd(entity.Id, new WeakReference<T>(entity));

@@ -1,0 +1,28 @@
+# Normalize text files to LF in the repository and the working tree.
+* text=auto eol=lf
+
+# Binary assets: never apply text conversion or EOL normalization.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.bmp binary
+*.tga binary
+*.ttf binary
+*.otf binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
+*.flac binary
+*.zip binary
+*.7z binary
+*.gz binary
+*.pck binary
+*.dll binary
+*.exe binary
+*.pdb binary
+*.so binary
+*.dylib binary
+*.bin binary

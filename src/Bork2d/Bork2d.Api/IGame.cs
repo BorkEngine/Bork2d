@@ -1,4 +1,4 @@
-﻿namespace Bork2d.Api;
+namespace Bork2d.Api;
 
 public interface IGame<TLayer> where TLayer : struct, Enum
 {
