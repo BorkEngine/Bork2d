@@ -308,7 +308,7 @@ What actually exists today (M1):
   concurrency, and the dependency matrix.
 - NativeAOT baseline: `IsAotCompatible` plus trim/AOT analyzers on the runtime libraries;
   `Bork2d.AotSmoke` publishes/runs locally with zero AOT/trim warnings. AOT is a local gate;
-  CI runs build/test/format only on pushes to `develop`.
+  CI runs build/test/format on pull requests targeting `develop` and on `develop` pushes.
 - `Assets` and `Render` contain only anchor types and reference wiring. `Bork2d.Editor` is
   absent (M5). There is no window, input, renderer, pack, asset loading, or real mode loop.
 

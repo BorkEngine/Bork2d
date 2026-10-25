@@ -30,7 +30,7 @@
 | `Bork2d.Editor` | Absent | Not in the solution (M5). |
 | `Bork2d.Tests` | Current | 135 xUnit tests: ownership/GC, remove/re-add, root read-only, cycles/re-parent, rotation, camera `ZIndex`, builder validation, logging, concurrency, dependency matrix. |
 | NativeAOT | M1 baseline | Runtime libraries use `IsAotCompatible` plus trim/AOT analyzers; `Bork2d.AotSmoke` publishes and runs locally with zero AOT/trim warnings. AOT is a local gate, not CI. |
-| CI | Current | GitHub Actions on push to `develop` only: restore, format verify, build, test. No PR/branch CI; no AOT job. |
+| CI | Current | GitHub Actions on pull requests targeting `develop` and on pushes to `develop`: restore, format verify, build, test. No milestone/task branch push CI; no AOT job. |
 | Docs | M1 final pass (WP8) | M1 spec, architecture, assets/pack, editor, NativeAOT, logging, pacing, modes, API, decisions, READMEs. |
 | Runnable engine | No | No window, renderer, pack, or asset system; `Run()` is a one-tick smoke. |
 
@@ -429,7 +429,7 @@ Size: L (ongoing). Risk: medium.
 | --- | --- |
 | Documentation | Update architecture/API docs in the same change as a contract; add a decision entry for public changes. |
 | Tests | Unit tests every milestone; pack/format tests from M3; AOT smoke from M1; handoff stress from M7; GPU/visual tests from M8. |
-| CI | Build + unit tests + format on push to `develop`; AOT publish/run is a local gate; GPU/validation on a Vulkan 1.3 runner from M8; template build from M9. |
+| CI | Build + unit tests + format on pull requests targeting `develop` and on `develop` pushes; AOT publish/run is a local gate; GPU/validation on a Vulkan 1.3 runner from M8; template build from M9. |
 | NativeAOT | Analyzers and publish smoke from M1; no reflection/dynamic code/TOML in runtime; Nerdbank.MessagePack shapes. |
 | Diagnostics | ZLogger/Microsoft.Extensions.Logging, `IEngine.LoggerFactory`, per-frame counters, validation layers, debug labels; no silent failures. |
 | Assets | Pack format is versioned; header compressed/checksummed; additive changes within v1; deterministic builds; debug/release asset compression modes. |
@@ -558,7 +558,7 @@ carries indices), asset/pack unloading, and public offscreen readback.
 | Milestone | Status | Evidence |
 | --- | --- | --- |
 | M0 Documentation | Complete (2026-10-25) | `docs/` set, decision log, accepted ownership/pack/editor/pacing decisions. |
-| M1 Foundation/AOT | Implemented (WP1–WP8); final PR pending | WP1–WP8 are merged on `m-1/common`. 135 tests; Debug/Release 0 warnings; format clean; `Bork2d.AotSmoke` publishes and runs locally with zero AOT/trim warnings. CI is build/test/format on `develop` only. Final PR not merged or reviewed. [M1 spec](specs/m1-foundation.md). |
+| M1 Foundation/AOT | Implemented (WP1–WP8); final PR pending | WP1–WP8 are merged on `m-1/common`. 135 tests; Debug/Release 0 warnings; format clean; `Bork2d.AotSmoke` publishes and runs locally with zero AOT/trim warnings. CI is build/test/format on pull requests targeting `develop` and on `develop` pushes. Final PR not merged or reviewed. [M1 spec](specs/m1-foundation.md). |
 | M2 SDL platform | Not started | — |
 | M3 Assets/pack | Not started | — |
 | M4 Serialization/bake | Not started | — |

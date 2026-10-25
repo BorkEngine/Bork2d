@@ -1,8 +1,11 @@
 name: CI
 
-# Human decision: CI runs only after a merge to develop.
-# No pull-request or milestone/task-branch CI.
+# Human decision: CI runs on pull requests targeting develop and after a merge to develop.
+# No CI on milestone/task branch pushes. AOT publish/run stays a local gate.
 on:
+  pull_request:
+    branches:
+      - develop
   push:
     branches:
       - develop

@@ -111,7 +111,7 @@ These are the rules the rest of the documentation assumes. Details/alternatives 
 | Renderer | Vulkan 1.3, dynamic rendering, bindless texture pages, instanced generated quads, no depth, one pipeline. |
 | Editor | Avalonia, JIT; compile-time builder registrations; source asset slicing/TOML editing; no Vulkan, no scene editing. |
 | Logging | Microsoft.Extensions.Logging + ZLogger; `IEngine.LoggerFactory`; pretty console default. |
-| Quality | From M1: warnings-as-errors, enforced C# style (`error`), `dotnet format --verify-no-changes`, AOT/trim analyzers. AOT publish/run is a local gate; CI runs on pushes to `develop` only. |
+| Quality | From M1: warnings-as-errors, enforced C# style (`error`), `dotnet format --verify-no-changes`, AOT/trim analyzers. AOT publish/run is a local gate; CI runs on pull requests targeting `develop` and on `develop` pushes. |
 | Stability | Pre-1.0: breaking changes allowed until the v1 API review. |
 
 ## Repository map
@@ -157,7 +157,8 @@ is no window, renderer, pack, asset system, or mode loop, and `Bork2dApp.Run()` 
 one `Setup` → `Tick` → `Teardown` smoke before returning. Warnings-as-errors and style-as-errors
 are active for every project; see [Contributing](contributing.md).
 
-Local NativeAOT gate (not CI; CI runs build/test/format on `develop` only):
+Local NativeAOT gate (not CI; CI runs build/test/format on pull requests targeting `develop` and
+on `develop` pushes):
 
 ```powershell
 dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64

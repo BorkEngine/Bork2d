@@ -44,8 +44,8 @@ engine additionally needs a Vulkan 1.3-capable GPU/driver and the SDL2 native ru
 runtime/game is intended to publish with NativeAOT; the editor and build tools stay JIT.
 Warnings and C# style violations are build errors; see [Contributing](docs/contributing.md).
 
-NativeAOT is a **required local gate, not a CI job** (CI runs build/test/format on pushes to
-`develop`):
+NativeAOT is a **required local gate, not a CI job** (CI runs build/test/format on pull requests
+targeting `develop` and on `develop` pushes):
 
 ```powershell
 dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
@@ -92,5 +92,5 @@ Start at the [documentation index](docs/README.md).
 - Abstract world units, Y-up; `Camera.Size` is half the visible height; no global PPU.
 - Editor is an Avalonia JIT tool with compile-time builder registrations; no scene editing.
 - Warnings-as-errors, C# style rules as errors, and `dotnet format` are the M1 quality gate.
-  CI runs build/test/format on `develop` only; the NativeAOT publish/run is a required local
-  gate.
+  CI runs build/test/format on pull requests targeting `develop` and on `develop` pushes; the
+  NativeAOT publish/run is a required local gate.
