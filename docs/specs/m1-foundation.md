@@ -265,7 +265,8 @@ xUnit test groups:
 - logging default smoke;
 - formatting/style gate.
 
-CI order: restore → format verify → build → tests → AOT publish → smoke run.
+CI order: restore → format verify → build → tests. AOT publish/run is a required local gate,
+not CI (human decision 2026-10-25); run it for runtime-affecting changes and before the final PR.
 
 ### WP8 — Documentation
 
