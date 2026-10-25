@@ -24,14 +24,14 @@
 
 | Area | State |
 | --- | --- |
-| Branch | `develop`; `AGENTS.md` is committed separately. Integration branch `m-1/common`; task/fix branches `m-1/wp-1` … `m-1/wp-8`, `m-1/fix-ci`, `m-1/fix-scene`, `m-1/fix-tree`, `m-1/fix-final`. |
-| M1 progress | WP1–WP8 and the CI/scene/tree corrections are merged into `m-1/common`; the final PR is pending. |
+| Branch | `develop`; `AGENTS.md` is committed separately. Integration branch `m-1/common`; task/fix branches `m-1/wp-1` … `m-1/wp-8`, `m-1/fix-ci`, `m-1/fix-scene`, `m-1/fix-tree`, `m-1/fix-final`, `m-1/fix-ci-pr`. |
+| M1 progress | WP1–WP8 and the CI/scene/tree corrections are merged into `m-1/common`; final PR #1 is open. |
 | Solution | `src/Bork2d/Bork2d.slnx`: API/Common/Runtime have M1 code; Assets/Render are wired but empty; tests and AotSmoke projects exist. Builds with 0 warnings. |
 | Tests | 135 tests on `m-1/common` (rotation, non-virtual properties, independent `SceneRoot`, unordered tree, camera `ZIndex`, MessagePack shape). |
 | Build baseline | `Directory.Build.props`, `.editorconfig`, `.gitattributes`, `global.json`, warnings-as-errors/style gates are active. `dotnet format --verify-no-changes` passes on `m-1/common`. |
-| CI | GitHub Actions enabled; workflow triggers **only on push to `develop`**. No PR/branch CI. |
-| Documentation | M0 complete; M1 implemented and documented through WP8; final PR pending. |
-| GitHub | `develop` unprotected; 0 open PRs (final M1 PR next). |
+| CI | GitHub Actions runs on **pull requests targeting `develop`** and on **pushes to `develop`**; no milestone/task branch push CI. |
+| Documentation | M0 complete; M1 implemented and documented through WP8; final PR #1 open for review. |
+| GitHub | `develop` unprotected; 1 open PR (#1, M1), not merged. |
 
 This is a snapshot, not a live status board. Live milestone status is tracked in the milestone
 PR description and [`docs/roadmap.md`](docs/roadmap.md) progress log. Refresh this snapshot at
@@ -374,7 +374,7 @@ and camera ordering is M8.
 | WP4 | `m-1/wp-4` | `Bork2dAppBuilder<TLayer>`, `Bork2dApp`, validation, one-tick `Run`, idempotent `Dispose`, no window/GPU | WP3 | 3 |
 | WP5 | `m-1/wp-5` | `IEngine.LoggerFactory`, `WithLogging`, pretty ZLogger default, startup logs, categories | WP4 | 4 |
 | WP6 | `m-1/wp-6` | NativeAOT/trim settings, AOT smoke app, Nerdbank.MessagePack policy + generated-shape smoke | WP5 | 5 |
-| WP7 | `m-1/wp-7` | Complete xUnit coverage, concurrency/GC/dependency tests, AOT local checks, preserve develop-only CI | WP6 | 6 |
+| WP7 | `m-1/wp-7` | Complete xUnit coverage, concurrency/GC/dependency tests, AOT local checks, preserve PR + develop CI | WP6 | 6 |
 | WP8 | `m-1/wp-8` | Documentation final pass: API/guide, architecture, decisions, roadmap, READMEs, status markers, resolve M1 doc conflicts | WP7 | 7 |
 
 Do not renumber branches; the spec's WP numbers are the contract. One branch per WP, one
@@ -410,12 +410,12 @@ Additional gates:
 - No `EntityList`/weak registry/entity `Dispose`/`IsAlive` in shipped code.
 - M1 spec §9 checklist items that apply are demonstrated.
 
-**CI policy (human decision 2026-10-25):** CI runs **only on push to `develop`** — i.e. after a
-milestone PR is merged. Do not run CI on pull requests, `m-<N>/common`, or task branches. The
-workflow triggers are now exactly `on: push: branches: [develop]` (`m-1/fix-ci`, merged at
-`d38b1dc`). AOT publish/run is **not** in CI; it is a required local gate for WP6+, WP7, and the
-final `m-1/common` verification. Because CI does not catch AOT regressions, run the AOT gate
-locally on every runtime-affecting change.
+**CI policy (human decision 2026-10-25):** CI runs on **pull requests targeting `develop`** and
+on **pushes to `develop`** after the milestone merge. Do not run CI on milestone/task branch
+pushes. The workflow triggers are `on: pull_request: branches: [develop]` and
+`on: push: branches: [develop]`. AOT publish/run is **not** in CI; it is a required local gate
+for WP6+, WP7, and the final `m-1/common` verification. Because CI does not catch AOT
+regressions, run the AOT gate locally on every runtime-affecting change.
 
 Install SDK `11.0.100-rc.1` explicitly in CI; hosted Windows runners do not ship it by default.
 Do not weaken a gate to make CI green; fix the code or record a justified, narrow suppression.
@@ -452,7 +452,8 @@ where a contract changes:
     only. Document AOT as a local/release gate and keep the M1 exit evidence honest.
 12. `AGENTS.md` is global process documentation committed separately to `develop`; docs may
     mention it, but it is not part of the M1 PR.
-13. CI triggers: fixed in `m-1/fix-ci` (develop push only). Keep it that way.
+13. CI triggers: `pull_request` targeting `develop` plus `push` to `develop`; no milestone/task
+    branch push CI. Keep it that way.
 14. Rotation units: **degrees**, normalized to `[0, 360)` on assignment; `LocalRotation` and
     `WorldRotation` return normalized values. Merged in `m-1/fix-scene`.
 15. Scene tree: **unordered**, no entity IDs, no ordered discovery, no `SceneGraph` holder, no
@@ -477,7 +478,7 @@ These are settled; changes require a new human decision.
 | Subagent workspace | Full clone per WP at `D:\Develop\Bork2dEngine.work\m-1-wp-N`. |
 | Merge style | `--no-ff` merge commit per WP. |
 | Tests/AOT paths | `src/Bork2d/Bork2d.Tests`, `src/Bork2d/Bork2d.AotSmoke`, both in `Bork2d.slnx`. |
-| CI | GitHub Actions **only on push to `develop`** (after milestone merge); no PR or branch CI. AOT publish/run is a required local gate. |
+| CI | GitHub Actions on **pull requests targeting `develop`** and **pushes to `develop`**; no milestone/task branch push CI. AOT publish/run is a required local gate. |
 | Human decision gate | Agents/subagents must stop and ask; no autonomous product/API/architecture/semantic decisions. |
 | `AGENTS.md` | Global process document; committed separately to `develop`, not in the M1 PR. |
 | Rotation unit | **Degrees**, normalized to `[0, 360)` on assignment. `LocalRotation` and `WorldRotation` return normalized values. |
@@ -511,7 +512,7 @@ These are settled; changes require a new human decision.
 - [ ] `Bork2dAppBuilder` validation and one-tick `Run` smoke pass.
 - [ ] No weak `EntityList`, no entity `Dispose`/`IsAlive`, no main-thread requirement.
 - [ ] Docs/API/guide/reference/roadmap/decision log/READMEs match the code; §8.4 fixed.
-- [ ] CI is green on `develop` after the milestone merge; no PR/branch CI; local AOT evidence is attached to the PR.
+- [ ] CI is green on the PR and on `develop` after the milestone merge; no milestone/task branch push CI; local AOT evidence is attached to the PR.
 - [ ] Final ready-for-review PR `m-1/common` → `develop` is open; **not merged**; human review pending.
 
 ### 8.7 Resolved architecture decisions
@@ -632,7 +633,7 @@ is applied in M8 (D-026).
 | MSVC / AOT | Visual Studio 18 Community; `dotnet publish -r win-x64` works and runs locally. |
 | Git | 2.53.0.windows.2; remote `https://github.com/BorkEngine/Bork2d.git`; push/admin via GCM. |
 | `gh` CLI | **Not installed.** Use the REST API; GitHub API access verified (`permissions.push=true`). |
-| GitHub Actions | Enabled; workflow triggers **only on push to `develop`** (merged `m-1/fix-ci` at `d38b1dc`). No PR/branch CI. `develop` unprotected; 0 open PRs. |
+| GitHub Actions | Enabled; workflow triggers on **pull requests targeting `develop`** and **pushes to `develop`**. No milestone/task branch push CI. `develop` unprotected; 1 open PR (#1). |
 | NuGet | nuget.org reachable; other configured sources: BeGet, Local, VS Offline. |
 | Test toolchain | xUnit 2.9.3 + `Microsoft.NET.Test.Sdk` 17.14.1 + runner 3.1.5 works. |
 | AOT logging spike | ZLogger 2.5.10 + MEL 11.0.0-rc.1 + `AddZLoggerConsole` publishes/runs AOT clean. |
@@ -646,8 +647,8 @@ Risks to watch:
 - `dotnet format` is sensitive to line endings; normalize before enabling the gate.
 - ZLogger/Nerdbank are verified in isolated spikes, not yet inside the engine projects; re-run
   AOT from WP6 and WP7.
-- CI runs only on push to `develop` (after milestone merge); no PR/branch CI. Local AOT
-  evidence is mandatory.
+- CI runs on pull requests targeting `develop` and on `develop` pushes; no milestone/task branch
+  push CI. Local AOT evidence is mandatory.
 - No `gh` CLI: PR creation is API-only. Never echo the token; never commit credentials.
 
 ## 11. Authoritative documents
