@@ -83,6 +83,9 @@ internal sealed class FakeSdlApi : ISdlApi
     /// <summary>Gets or sets the mouse state returned by <see cref="GetMouseState"/>.</summary>
     internal SdlMouseState MouseState { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether created windows start with input focus.</summary>
+    internal bool StartFocused { get; set; }
+
     /// <summary>Gets or sets the scale applied to window points when a window is created or resized.</summary>
     internal float WindowScale { get; set; } = 1f;
 
@@ -153,12 +156,18 @@ internal sealed class FakeSdlApi : ISdlApi
             throw new Bork2dException(CreateWindowFailure);
         }
 
+        var initialFlags = flags | SdlWindowFlags.Shown;
+        if (StartFocused)
+        {
+            initialFlags |= SdlWindowFlags.InputFocus;
+        }
+
         var window = new FakeSdlWindow(
             (uint)(Windows.Count + 1),
             title,
             new SdlWindowSize(width, height),
             WindowScale,
-            flags | SdlWindowFlags.Shown,
+            initialFlags,
             RecordCall);
         Windows.Add(window);
         return window;

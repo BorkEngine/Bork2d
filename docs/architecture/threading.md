@@ -158,7 +158,9 @@ older `Ready` snapshots are dropped and the newest is shown.
 
 ## 5. Input across threads (windowed only)
 
-`Planned` for M2 WP3; M1 throws `NotSupportedException` from the `IInput` getter.
+`Current (internal, M2 WP3).` The windowed platform owns the input accumulator and the freeze
+snapshot; M2 WP4 attaches the proxy to the engine and calls freeze/dispatch from the tick loop. In
+this tree `IEngine.Input` still throws `NotSupportedException`.
 
 ### 5.1 Window thread, command queue, and confirmed state (M2 WP2, internal)
 
@@ -184,20 +186,43 @@ calls SDL. The tick thread never calls SDL and never waits for a window command.
 - **Shutdown.** `Shutdown` sets the stop flag, pushes a user event to release the event wait, and
   joins the thread. The OS thread destroys the window before quitting and disposing SDL. There is
   no timeout, sleep, or pacing wait.
-- **Locks.** The command-queue lock and the proxy's attach/detach lock are the platform's only
-  locks. Neither is held across an SDL call, a game callback, or the event wait, and they are never
-  held together. Each lock protects a short critical section only.
+- **Locks.** The platform uses the command-queue lock, the input-accumulator lock, and short-lived
+  proxy locks (window attach/detach and input subscription). None is held across an SDL call, a game
+  callback, or the event wait, and the command-queue and input locks are never held together. Each
+  lock protects a short critical section only.
 
-### 5.2 Input freeze and handoff (M2 WP3, planned)
+### 5.2 Input freeze and handoff (M2 WP3)
 
-- SDL events are pumped on the OS/window thread, including while waiting for work; handlers that
-  touch engine/game state are marshaled to the tick thread. At tick start input is frozen: keys,
-  mouse position/delta/wheel, and text describe events since the previous tick. Edge flags are
-  true for exactly one tick; `OnTextTyped` is dispatched on the engine tick thread before `Tick`.
-- Mouse coordinates are framebuffer pixels, top-left origin; wheel delta accumulates per tick.
-  On focus loss, held keys/buttons are synthesized as released and wheel/text state is cleared.
-  `IInput` reads are thread-safe snapshots, not part of the frame snapshot and not readable from
-  the render thread's public API.
+`Status: Current (internal).` The OS/window thread accumulates events into `InputAccumulator`;
+the tick thread freezes it once per tick into one of two preallocated `InputSnapshot` instances and
+publishes it with a volatile reference write. Reads during `Tick` see only that instance and are
+stable; events applied after the freeze belong to the next one.
+
+- **Accumulation.** A non-repeat key down on an up key sets held plus a press edge; an up on a down
+  key sets a release edge and clears held; duplicates, repeats, undefined scancodes, the unknown
+  scancode zero, and buttons other than the five supported ones are ignored. The five mouse buttons
+  map from SDL's one-based index and pressed mask (`Left=1`, `Middle=2`, `Right=3`, `X1=4`, `X2=5`).
+  Motion is stored in window points; the wheel accumulates with natural scrolling normalized so
+  positive is up/away; text is appended character by character (a surrogate pair is two chars).
+- **Focus.** Loss synthesizes a release for every held key/button, clears held state, wheel, and
+  pending text, stops SDL text input, and forces the next delta to zero. Regain reads
+  `SDL_GetKeyboardState`/`SDL_GetMouseState` outside the input lock, overwrites held state and the
+  mouse position without press edges, starts text input, and also forces the next delta to zero.
+  Transitions apply in event order, so loss+regain between freezes leaves the loss's release edges
+  and the re-seeded held state.
+- **Freeze.** The lock copies the down/pressed/released bitsets, mouse masks, position, and wheel,
+  transfers and clears text, and clears pending edges/wheel; the unlock is followed by the delta
+  computation and the snapshot publication. Delta is zero on the first freeze, a focus transition,
+  and while unfocused; otherwise it is the new position minus the previous freeze position. The
+  freeze path is allocation-free in steady state; only arrived text can grow a buffer.
+- **Handoff.** `InputProxy.Freeze` publishes the snapshot and `InputProxy.DispatchText` raises
+  `OnTextTyped` for the frozen characters in order on the tick thread; handler exceptions propagate.
+  Edges are true for exactly one tick. Mouse coordinates are framebuffer pixels (window points times
+  the confirmed scale), top-left origin.
+- **Lifecycle.** Reads before the first freeze are a preallocated empty snapshot; reads during
+  `Teardown` are the most recent snapshot; after detach every member throws
+  `ObjectDisposedException`. Subscription is thread-safe and no lock is held while a handler runs.
+  Input is not part of the frame snapshot and is not exposed to a render thread.
 
 ## 6. Asset and pack coordination
 

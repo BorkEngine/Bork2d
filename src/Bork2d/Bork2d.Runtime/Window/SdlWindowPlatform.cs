@@ -42,12 +42,16 @@ internal sealed class SdlWindowPlatform : IDisposable
     private readonly Func<ISdlApi> _sdlApiFactory;
     private readonly ILogger _logger;
     private readonly WindowCommandQueue _commands;
+    private readonly InputAccumulator _input = new();
     private readonly ManualResetEventSlim _startedSignal = new(initialState: false);
     private readonly ManualResetEventSlim _exitRequestedSignal = new(initialState: false);
     private readonly ManualResetEventSlim _stateChangedSignal = new(initialState: false);
+    private readonly ManualResetEventSlim _inputChangedSignal = new(initialState: false);
 
     private WindowState _state;
     private int _stateVersion;
+    private long _inputVersion;
+    private bool _textInputActive;
     private Thread? _thread;
     private ISdlApi? _sdl;
     private int _userEventType = -1;
@@ -107,6 +111,13 @@ internal sealed class SdlWindowPlatform : IDisposable
     /// timeout; it is not part of the runtime contract.
     /// </remarks>
     internal int StateVersion => Volatile.Read(ref _stateVersion);
+
+    /// <summary>Gets a counter that increments after every applied input event.</summary>
+    /// <remarks>
+    /// <see cref="WaitForInputVersion"/> uses it to observe input application without polling or a
+    /// timeout; like <see cref="StateVersion"/> it is diagnostic and not part of the runtime contract.
+    /// </remarks>
+    internal long InputVersion => Volatile.Read(ref _inputVersion);
 
     /// <summary>Gets a value indicating whether a graceful exit (close, QUIT, or fatal) was requested.</summary>
     internal bool ExitRequested => Volatile.Read(ref _exitRequested);
@@ -212,6 +223,48 @@ internal sealed class SdlWindowPlatform : IDisposable
         return _stateChangedSignal.Wait(timeout);
     }
 
+    /// <summary>Waits for an applied-input publication for at most a bounded interval.</summary>
+    /// <param name="previousVersion">The <see cref="InputVersion"/> observed before the events.</param>
+    /// <param name="timeout">The maximum time to wait.</param>
+    /// <returns>
+    /// <see langword="true"/> when the input version changed; <see langword="false"/> when the
+    /// timeout elapsed first.
+    /// </returns>
+    /// <remarks>
+    /// This bounded overload exists for deterministic tests so a missing input application fails
+    /// instead of hanging; production code never waits on input. It does not sleep or poll.
+    /// </remarks>
+    internal bool WaitForInputVersion(long previousVersion, TimeSpan timeout)
+    {
+        if (Volatile.Read(ref _inputVersion) != previousVersion)
+        {
+            return true;
+        }
+
+        _inputChangedSignal.Reset();
+        if (Volatile.Read(ref _inputVersion) != previousVersion)
+        {
+            return true;
+        }
+
+        return _inputChangedSignal.Wait(timeout);
+    }
+
+    /// <summary>Freezes the platform input into <paramref name="snapshot"/>.</summary>
+    /// <param name="snapshot">The preallocated snapshot instance the input proxy publishes.</param>
+    /// <remarks>
+    /// Called on the tick thread once per tick. It copies the accumulated state under the input lock,
+    /// converts the mouse position from window points to framebuffer pixels with the current confirmed
+    /// scale, and clears pending edges and wheel state. It performs no SDL call and allocates nothing
+    /// when no text is pending.
+    /// </remarks>
+    internal void FreezeInput(InputSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var scale = State.Scale;
+        _input.Freeze(snapshot, scale > 0f ? scale : 1f);
+    }
+
     /// <summary>Blocks until <see cref="ExitRequested"/> becomes <see langword="true"/>.</summary>
     internal void WaitForExitRequest() => _exitRequestedSignal.Wait();
 
@@ -258,6 +311,7 @@ internal sealed class SdlWindowPlatform : IDisposable
         _startedSignal.Dispose();
         _exitRequestedSignal.Dispose();
         _stateChangedSignal.Dispose();
+        _inputChangedSignal.Dispose();
     }
 
     /// <summary>Enqueues a title change and wakes the OS thread.</summary>
@@ -349,11 +403,18 @@ internal sealed class SdlWindowPlatform : IDisposable
 
             ApplyInitialFramebufferSize(window);
             var flags = window.Flags;
+            var focused = (flags & SdlWindowFlags.InputFocus) != 0;
+            _input.SetFocused(focused);
+            if (focused)
+            {
+                StartTextInput(sdl);
+            }
+
             Publish(
                 BuildState(
                     window,
                     minimized: (flags & SdlWindowFlags.Minimized) != 0,
-                    focused: (flags & SdlWindowFlags.InputFocus) != 0,
+                    focused: focused,
                     alive: true));
             LogStarted(sdl, State);
 
@@ -388,7 +449,7 @@ internal sealed class SdlWindowPlatform : IDisposable
             // contain commands from the same interval.
             while (sdl.TryPollEvent(out var polledEvent))
             {
-                HandleEvent(window, polledEvent);
+                HandleEvent(sdl, window, polledEvent);
                 if (_stop)
                 {
                     break;
@@ -411,12 +472,21 @@ internal sealed class SdlWindowPlatform : IDisposable
 
             // The loop re-drains events and commands before blocking again, so a command queued
             // between the drain and the wait is applied after this wake-up instead of being lost.
-            HandleEvent(window, waitedEvent);
+            HandleEvent(sdl, window, waitedEvent);
         }
     }
 
-    private void HandleEvent(ISdlWindow window, in SdlEvent sdlEvent)
+    private void HandleEvent(ISdlApi sdl, ISdlWindow window, in SdlEvent sdlEvent)
     {
+        // Input is applied first, exactly once per event, so focus transitions are recorded in event
+        // order before the window state reflects them. A close/QUIT event has no input effect and is
+        // still consumed by the window-state switch below.
+        if (HandleInputEvent(sdl, sdlEvent))
+        {
+            Interlocked.Increment(ref _inputVersion);
+            _inputChangedSignal.Set();
+        }
+
         switch (sdlEvent.Type)
         {
             case SdlEventType.Quit:
@@ -460,6 +530,92 @@ internal sealed class SdlWindowPlatform : IDisposable
                 // User wake-ups and unconsumed events need no state change.
                 break;
         }
+    }
+
+    /// <summary>Applies one event to the input accumulator.</summary>
+    /// <param name="sdl">The SDL seam, used only for focus text-input and re-seed reads.</param>
+    /// <param name="sdlEvent">The event to apply.</param>
+    /// <returns><see langword="true"/> when the event was an input event.</returns>
+    /// <remarks>
+    /// No input lock is held across an SDL call: the re-seed reads happen before the accumulator is
+    /// updated, and text-input enablement happens after it. A failure propagates to the pump, which
+    /// records it as a fatal platform error.
+    /// </remarks>
+    private bool HandleInputEvent(ISdlApi sdl, in SdlEvent sdlEvent)
+    {
+        switch (sdlEvent.Type)
+        {
+            case SdlEventType.KeyDown:
+                _input.KeyDown(sdlEvent.Scancode, sdlEvent.IsRepeat);
+                return true;
+
+            case SdlEventType.KeyUp:
+                _input.KeyUp(sdlEvent.Scancode);
+                return true;
+
+            case SdlEventType.MouseMotion:
+                _input.MouseMotion(sdlEvent.MouseX, sdlEvent.MouseY);
+                return true;
+
+            case SdlEventType.MouseButtonDown:
+                _input.MouseButtonDown(sdlEvent.ButtonIndex);
+                return true;
+
+            case SdlEventType.MouseButtonUp:
+                _input.MouseButtonUp(sdlEvent.ButtonIndex);
+                return true;
+
+            case SdlEventType.MouseWheel:
+                _input.MouseWheel(sdlEvent.WheelY, sdlEvent.IsWheelFlipped);
+                return true;
+
+            case SdlEventType.TextInput:
+                _input.Text(sdlEvent.Text);
+                return true;
+
+            case SdlEventType.WindowFocusLost:
+                _input.FocusLost();
+                StopTextInput(sdl);
+                return true;
+
+            case SdlEventType.WindowFocusGained:
+                // Read the SDL state before taking the input lock; both calls are thread-affine to
+                // the OS thread that owns SDL.
+                var keyboardState = sdl.GetKeyboardState();
+                var mouseState = sdl.GetMouseState();
+                _input.FocusGained(keyboardState, mouseState);
+                StartTextInput(sdl);
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>Enables SDL text input once, while focused.</summary>
+    /// <param name="sdl">The SDL seam.</param>
+    private void StartTextInput(ISdlApi sdl)
+    {
+        if (_textInputActive)
+        {
+            return;
+        }
+
+        sdl.StartTextInput();
+        _textInputActive = true;
+    }
+
+    /// <summary>Disables SDL text input when it is active.</summary>
+    /// <param name="sdl">The SDL seam.</param>
+    private void StopTextInput(ISdlApi sdl)
+    {
+        if (!_textInputActive)
+        {
+            return;
+        }
+
+        sdl.StopTextInput();
+        _textInputActive = false;
     }
 
     private void HandleSizeChanged(ISdlWindow window, in SdlEvent sdlEvent)
@@ -799,6 +955,25 @@ internal sealed class SdlWindowPlatform : IDisposable
 
     private void Cleanup(ISdlWindow? window, ISdlApi? sdl)
     {
+        if (_textInputActive && sdl is not null)
+        {
+            try
+            {
+                sdl.StopTextInput();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "SDL failure while stopping text input: {SdlError}",
+                    TryGetSdlError());
+            }
+            finally
+            {
+                _textInputActive = false;
+            }
+        }
+
         var finalState = State;
         try
         {

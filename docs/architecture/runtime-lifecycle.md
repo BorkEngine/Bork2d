@@ -175,8 +175,9 @@ are not guaranteed to complete. Headless skips render/asset shutdown steps (all 
 
 M1 has no window or input: `IWindow` members and the `IInput` getter throw
 `NotSupportedException` in every mode. M2 WP2 adds the internal windowed platform described in
-§7.1; M2 WP4 attaches it to the engine and runs the tick loop, and M2 WP3 implements input. Until
-WP4, `IEngine.Window` still returns the throwing stub.
+§7.1 and M2 WP3 adds the internal input accumulator/freeze described in §7.2. M2 WP4 attaches both
+proxies to the engine and runs the tick loop; until then `IEngine.Window` returns the throwing stub
+and `IEngine.Input` throws.
 
 ### 7.1 Windowed window platform (M2 WP2, internal)
 
@@ -211,23 +212,28 @@ internal to `Bork2d.Runtime` and has no public surface; the runtime host starts 
 - The platform never holds a lock across an SDL call, a game callback, or the event wait. The only
   blocking waits are SDL's event wait, the startup/exit signals, and the thread join.
 
-### 7.2 Modes, input, and time target behavior
+### 7.2 Input and time
 
-Target behavior (`Planned`, M2 WP3/WP4):
+`Status: Current (internal, M2 WP3) for input; M2 WP4 for the loop and clock.`
 
+- `IInput` is pumped on the OS/window thread and frozen at tick start; edge flags are true for
+  exactly one tick, text is dispatched on the tick thread before `Tick`, and mouse coordinates are
+  framebuffer pixels. On focus loss, held keys/buttons are synthesized as released and wheel/text
+  state is cleared; on regain the held state and position are re-seeded without press edges and the
+  delta is zero.
+- Input reads are thread-safe snapshots and are not part of the frame snapshot; a render thread
+  cannot read them. Reads before the first freeze are empty (keys held during `Setup` therefore
+  produce first-tick press edges), reads during `Teardown` return the most recent snapshot, and after
+  detach every member throws `ObjectDisposedException`. The steady-state freeze path allocates
+  nothing; text buffering may allocate only when text arrives.
 - `IWindow` calls may originate on any thread and are marshaled to the OS/window thread. Title
   applies immediately; size and fullscreen change the window; cursor visibility toggles; close
   requests a graceful exit after the current tick.
-- `IInput` is pumped on the OS/window thread and frozen at tick start; edge flags are true for
-  exactly one tick; text is dispatched on the tick thread before `Tick`; mouse coordinates are
-  framebuffer pixels. On focus loss, held keys/buttons are synthesized as released and
-  wheel/text state is cleared.
-- `IInput` reads are thread-safe snapshots and are not part of the frame snapshot. The render
-  thread cannot read them.
-- While minimized, presentation is skipped; on restore the newest snapshot is drawn. The tick
-  loop continues while minimized, and `Size` keeps the last non-minimized framebuffer size.
-- `ITime` wiring (first-tick zero, raw monotonic `Time`, clamped `DeltaTime`) and the windowed
-  loop are M2 WP4; see [Threading](threading.md#5-input-across-threads-windowed-only).
+- While minimized, ticks continue and `Size` keeps the last non-minimized framebuffer size;
+  presentation is irrelevant until M6.
+- `ITime` wiring (first-tick zero, raw monotonic `Time`, clamped `DeltaTime`), the windowed loop, and
+  the public proxy attachment are M2 WP4; see
+  [Threading](threading.md#5-input-across-threads-windowed-only).
 
 ## 8. Related documents
 

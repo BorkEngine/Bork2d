@@ -168,25 +168,42 @@ public interface IWindow
 
 ## 6. `IInput`
 
-`Status: Partial.` Input behavior is `Planned` for M2. `IEngine.Input` throws
-`NotSupportedException` from the getter; there is no M1 input implementation. Target surface and
-semantics (M2):
+`Status: Partial (M2).` The semantics below are `Current` for the windowed platform: the
+OS-thread accumulator, one-tick edges, focus handoff, text queue, and tick-freeze snapshot exist in
+`Bork2d.Runtime`. M2 WP4 attaches the internal proxy to the engine and runs the freeze/dispatch
+loop, so in this tree `IEngine.Input` still throws `NotSupportedException` in every mode.
 
 | Member | Semantics |
 | --- | --- |
-| `event Action<char> OnTextTyped` | UTF-16 `char` events from SDL text input, dispatched on the tick thread before `Tick`. |
-| `bool IsKeyPressed(KeyCode)` / `IsKeyReleased(KeyCode)` | True only during the tick of the up→down / down→up transition. |
+| `event Action<char> OnTextTyped` | UTF-16 `char`s from committed operating-system text input, raised on the tick thread in arrival order before `Tick`. A surrogate pair is two events; malformed encoded text is replaced by U+FFFD. Adding/removing a handler is thread-safe. |
+| `bool IsKeyPressed(KeyCode)` / `IsKeyReleased(KeyCode)` | True only during the tick of the up→down / down→up transition. Key repeat creates no press edge. |
 | `bool IsKeyDown(KeyCode)` | Held state at tick time. |
-| `Vector2 MousePosition` | Framebuffer pixels, top-left origin; not world units. |
-| `Vector2 MouseDelta` | Pixel delta since the previous tick; zero when unfocused. |
-| `float MouseWheelDelta` | Accumulated wheel ticks; positive means up/away. |
-| `bool IsMousePressed/Released/Down(MouseButton)` | Edge/held semantics for mouse buttons. |
+| `Vector2 MousePosition` | Framebuffer **physical pixels**, top-left origin; not logical points or world units. Starts at `(0,0)`, keeps its last value while unfocused, and is re-synchronized on focus regain. |
+| `Vector2 MouseDelta` | Difference between the current and the previous freeze position in framebuffer pixels. Zero on the first freeze, the focus-loss freeze, the focus-regain freeze, and while unfocused. |
+| `float MouseWheelDelta` | Accumulated vertical wheel ticks since the previous freeze; positive means up/away, independent of the OS natural-scrolling setting. Reset after each freeze and cleared on focus loss. |
+| `bool IsMousePressed/Released/Down(MouseButton)` | Edge/held semantics for the five buttons `Left`, `Right`, `Middle`, `Back` (X1), and `Forward` (X2). |
 
-- Windowed only; offscreen/headless throw. Input is frozen at tick start and can be read anywhere
-  in `Tick`; edges reset after the tick, and a fast down/up between ticks leaves both pressed and
-  released true with `Down == false`.
-- Focus loss synthesizes releases and clears wheel/text. `KeyCode` maps physical scancodes and
-  numeric values are unstable, so never serialize them; input is not part of snapshots.
+- Windowed only. In headless/offscreen the `IEngine.Input` getter itself throws
+  `NotSupportedException`; after windowed shutdown the returned object's members throw
+  `ObjectDisposedException`.
+- Input is frozen at tick start and reads are stable for the whole `Tick`; events that arrive during
+  `Tick` belong to the next freeze. Reads during `Setup` return a fully empty snapshot (all queries
+  `false`, zero position/delta/wheel), so keys held during `Setup` produce press edges at the first
+  tick. Reads during `Teardown` return the most recently frozen snapshot.
+- A down and up inside one interval report both edges with `Down == false`; multiple cycles in one
+  interval still produce one tick of edges and `Down` reflects the final state.
+- Focus loss synthesizes a release for every held key and button, clears held state, wheel, and
+  pending text, and reports a zero delta. Focus regain re-seeds `Down` and the mouse position from the
+  operating system without press edges and also reports a zero delta. Transitions apply in event
+  order, so a loss and regain between two freezes leave the loss's release edges plus the re-seeded
+  held state.
+- Text input is enabled while the window is focused and stopped on focus loss and before shutdown.
+  The engine never synthesizes text from key presses; IME/composition, clipboard, and drag-and-drop
+  are out of scope.
+- `KeyCode` is the physical scancode set, not a character or layout name; `MouseButton` is the five
+  supported buttons. Numeric values are unstable and must never be serialized. An undefined enum
+  value is a safe query that returns `false` and throws nothing. Input is never part of a render
+  snapshot.
 
 ## 7. `IAssets`
 
@@ -311,10 +328,14 @@ startup failure (see roadmap).
 | `Depth` | Reserved; no depth attachment; a no-op with a one-time warning when rendering lands (M8). |
 | `Color` | Clear the camera viewport to `ClearColor`. |
 
-`KeyCode` maps physical SDL scancodes and the full set is `Planned`; in this tree it declares
-exactly one member, `A` (a sample member, not a stable set). `MouseButton` declares exactly one
-member, `Left`; the target set is left/right/middle/back/forward (`Planned`). Numeric values are
-unstable, so do not serialize them; text uses `OnTextTyped`.
+`KeyCode` maps the physical SDL scancode set: one member per named SDL scancode (247 members,
+including `Unknown = 0`), named after the SDL name without the `SDL_SCANCODE_` prefix and converted
+to PascalCase (`SDL_SCANCODE_LEFT` → `Left`, `SDL_SCANCODE_NONUSBACKSLASH` → `NonUsBackslash`,
+`SDL_SCANCODE_KP_0` → `Keypad0`, top-row digits → `Digit1`…`Digit0`). Values equal the SDL scancode
+integers. `MouseButton` is exactly `Left`, `Right`, `Middle`, `Back` (X1), and `Forward` (X2), with
+values equal to SDL's one-based button index (`Left = 1`, `Middle = 2`, `Right = 3`, `X1 = 4`,
+`X2 = 5`). Numeric values of both enums are unstable, so do not serialize them; an undefined value
+is a safe query that returns `false`. Text uses `OnTextTyped`.
 
 ## 12. Runtime surface
 
@@ -389,6 +410,8 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 | Self/cycle parent; setting the root's own parent or a root local value | `InvalidOperationException`. |
 | Game callback exceptions | `Setup` propagates without `Teardown`; otherwise the original exception is rethrown, or `AggregateException` when `Tick` and `Teardown` both throw. |
 | `IWindow`/`IInput` member after windowed shutdown | `ObjectDisposedException` (D-M2-17); before the windowed host is wired, `IWindow` members are the headless stub and throw `NotSupportedException`. |
+| Undefined `KeyCode`/`MouseButton` query | `false`; never throws. |
+| Input text handler throws | Treated as a `Tick` failure: no further text dispatch, `Teardown` attempted, the original exception rethrown (windowed host, M2 WP4). |
 | `IWindow.Size` non-positive/NaN/infinite, or `IWindow.Title = null` | `ArgumentOutOfRangeException` / `ArgumentNullException` from the setter, before enqueueing. |
 | Missing/corrupt default pack, or missing asset (M3) | Pack: `Bork2dException` at startup; asset: log plus `Sprite.Empty`, not fatal. |
 
