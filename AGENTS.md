@@ -24,14 +24,14 @@
 
 | Area | State |
 | --- | --- |
-| Branch | `develop`; `AGENTS.md` is committed separately. Integration branch `m-1/common`; task/fix branches `m-1/wp-1` … `m-1/wp-5`, `m-1/fix-ci`, `m-1/fix-scene`, `m-1/fix-tree`. |
-| M1 progress | WP1–WP5 and the CI/scene/tree corrections are merged into `m-1/common`. WP6–WP8 are not started. |
-| Solution | `src/Bork2d/Bork2d.slnx`: API/Common/Runtime have M1 code; Assets/Render are wired but empty; tests project exists. Builds with 0 warnings. |
-| Tests | 130 tests on `m-1/common` (rotation normalization, non-virtual properties, independent `SceneRoot`, unordered tree, camera `ZIndex`). |
+| Branch | `develop`; `AGENTS.md` is committed separately. Integration branch `m-1/common`; task/fix branches `m-1/wp-1` … `m-1/wp-8`, `m-1/fix-ci`, `m-1/fix-scene`, `m-1/fix-tree`, `m-1/fix-final`. |
+| M1 progress | WP1–WP8 and the CI/scene/tree corrections are merged into `m-1/common`; the final PR is pending. |
+| Solution | `src/Bork2d/Bork2d.slnx`: API/Common/Runtime have M1 code; Assets/Render are wired but empty; tests and AotSmoke projects exist. Builds with 0 warnings. |
+| Tests | 135 tests on `m-1/common` (rotation, non-virtual properties, independent `SceneRoot`, unordered tree, camera `ZIndex`, MessagePack shape). |
 | Build baseline | `Directory.Build.props`, `.editorconfig`, `.gitattributes`, `global.json`, warnings-as-errors/style gates are active. `dotnet format --verify-no-changes` passes on `m-1/common`. |
-| CI | GitHub Actions enabled; workflow triggers **only on push to `develop`** (`m-1/fix-ci`). No PR/branch CI. |
-| Documentation | M0 complete; M1 in progress. API/architecture docs partially updated; WP8 final pass pending. |
-| GitHub | `develop` unprotected; 0 open PRs. |
+| CI | GitHub Actions enabled; workflow triggers **only on push to `develop`**. No PR/branch CI. |
+| Documentation | M0 complete; M1 implemented and documented through WP8; final PR pending. |
+| GitHub | `develop` unprotected; 0 open PRs (final M1 PR next). |
 
 This is a snapshot, not a live status board. Live milestone status is tracked in the milestone
 PR description and [`docs/roadmap.md`](docs/roadmap.md) progress log. Refresh this snapshot at
@@ -362,8 +362,8 @@ pack, or asset system (M2/M3/M6+).
 
 ### 8.2 Work packages and waves
 
-**Status:** WP1–WP5 and the CI/scene/tree corrections are merged into `m-1/common`. WP6–WP8 are
-not started. There are no open architecture decisions in M1; internal frame snapshots are M7
+**Status:** WP1–WP8 and the CI/scene/tree corrections are merged into `m-1/common`; the final PR
+is pending. There are no open architecture decisions in M1; internal frame snapshots are M7
 and camera ordering is M8.
 
 | WP | Branch | Scope | Depends on | Wave |
@@ -420,9 +420,13 @@ locally on every runtime-affecting change.
 Install SDK `11.0.100-rc.1` explicitly in CI; hosted Windows runners do not ship it by default.
 Do not weaken a gate to make CI green; fix the code or record a justified, narrow suppression.
 
-### 8.4 M1 documentation backlog (WP8)
+### 8.4 M1 documentation backlog (resolved in WP8)
 
-Do not propagate these; fix them in WP8 and in same-change docs where a contract changes:
+WP8 resolved the stale M1 docs. The list below is retained as a checklist for future milestones;
+re-check it rather than assuming it stays fixed.
+
+Do not propagate these; fix them in the milestone's documentation pass and in same-change docs
+where a contract changes:
 
 1. `runtime-lifecycle.md` says `Setup`/`Tick`/`Teardown` are "still main thread callbacks"; the
    accepted contract is **tick thread, no process-main-thread affinity**.
@@ -632,6 +636,7 @@ is applied in M8 (D-026).
 | NuGet | nuget.org reachable; other configured sources: BeGet, Local, VS Offline. |
 | Test toolchain | xUnit 2.9.3 + `Microsoft.NET.Test.Sdk` 17.14.1 + runner 3.1.5 works. |
 | AOT logging spike | ZLogger 2.5.10 + MEL 11.0.0-rc.1 + `AddZLoggerConsole` publishes/runs AOT clean. |
+| AOT smoke app | `Bork2d.AotSmoke` publishes/runs locally with zero AOT/trim warnings; default logging + MessagePack generated shape verified. |
 | AOT MessagePack spike | Nerdbank.MessagePack 1.4.95 + `[GenerateShape]` + `new MessagePackSerializer()` publishes/runs AOT clean. |
 | Disk | ~300 GB free on D:. |
 
