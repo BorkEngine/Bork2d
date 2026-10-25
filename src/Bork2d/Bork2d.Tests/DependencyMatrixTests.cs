@@ -40,6 +40,12 @@ public sealed class DependencyMatrixTests
     }
 
     [Fact]
+    public void CommonExposesNoPublicImplementationTypes()
+    {
+        Assert.Empty(typeof(Bork2d.Common.Transform).Assembly.GetExportedTypes());
+    }
+
+    [Fact]
     public void AssetsReferencesOnlyApiAndCommon()
     {
         AssertReferenceMatrix(
