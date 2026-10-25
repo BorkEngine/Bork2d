@@ -125,4 +125,34 @@ public sealed class SdlWindowTests
         Assert.Throws<ObjectDisposedException>(() => window.Size);
         Assert.Throws<ObjectDisposedException>(() => window.SetTitle("after dispose"));
     }
+
+    [WindowFact]
+    public void SequentialApiLifetimesEachInitializeAndDispose()
+    {
+        int firstWindowId;
+        using (var first = new SilkSdlApi())
+        {
+            first.SetHint(SdlHints.WindowsDpiAwareness, SdlHints.PerMonitorV2);
+            first.InitializeVideo();
+            using var firstWindow = first.CreateWindow(
+                "Bork2d sequential lifetime one",
+                320,
+                200,
+                SdlWindowFlags.None);
+            firstWindowId = (int)firstWindow.Id;
+            _output.WriteLine($"first lifetime window id: {firstWindowId}");
+        }
+
+        using var second = new SilkSdlApi();
+        second.SetHint(SdlHints.WindowsDpiAwareness, SdlHints.PerMonitorV2);
+        second.InitializeVideo();
+        using var secondWindow = second.CreateWindow(
+            "Bork2d sequential lifetime two",
+            320,
+            200,
+            SdlWindowFlags.None);
+
+        _output.WriteLine($"second lifetime window id: {secondWindow.Id}");
+        Assert.False(secondWindow.Size.IsEmpty);
+    }
 }

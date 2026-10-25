@@ -11,9 +11,8 @@ namespace Bork2d.Runtime;
 /// <para>
 /// Create one instance on the OS thread that will own the window, set hints, call
 /// <see cref="InitializeVideo"/>, use the windows, destroy them, and dispose the instance to quit
-/// SDL. The underlying <see cref="Sdl"/> instance is the process-wide singleton returned by
-/// <see cref="Sdl.GetApi"/>; it is not disposed, so a later app in the same process can initialize
-/// SDL again.
+/// SDL and free its native handle. Each instance owns its own <see cref="Sdl"/> instance, so a
+/// later app in the same process creates a new one.
 /// </para>
 /// <para>
 /// The adapter maps native events to <see cref="SdlEvent"/> and converts SDL failures to
@@ -219,10 +218,10 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
         return new SdlMouseState(x, y, buttons);
     }
 
-    /// <summary>Quits SDL and rejects further use.</summary>
+    /// <summary>Quits SDL, frees the native handle, and rejects further use.</summary>
     /// <remarks>
-    /// The process-wide <see cref="Sdl"/> singleton is intentionally not disposed; disposing it
-    /// would break a later app that initializes SDL in the same process.
+    /// Every window created by this api must be destroyed first. The call is idempotent: only the
+    /// first disposal quits SDL and disposes the <see cref="Sdl"/> instance and its native context.
     /// </remarks>
     public void Dispose()
     {
@@ -232,6 +231,7 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
         }
 
         Quit();
+        _sdl.Dispose();
         _disposed = true;
     }
 

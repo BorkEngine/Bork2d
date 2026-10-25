@@ -5,11 +5,11 @@ namespace Bork2d.Runtime;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The production implementation is <see cref="SilkSdlApi"/>; it owns the SDL video subsystem
-/// lifetime over Silk.NET's process-wide <c>Sdl</c> instance. Later work packages depend on this
-/// interface only, so deterministic in-memory fakes can drive window creation, window commands,
-/// event order, focus/minimize/resize transitions, and input state without a desktop session or
-/// the native library.
+/// The production implementation is <see cref="SilkSdlApi"/>; each instance owns its own
+/// <c>Sdl</c> instance and native handle, quits SDL, and then frees them. Later work packages
+/// depend on this interface only, so deterministic in-memory fakes can drive window creation,
+/// window commands, event order, focus/minimize/resize transitions, and input state without a
+/// desktop session or the native library.
 /// </para>
 /// <para>
 /// Failures are reported as <see cref="Bork2d.Api.Bork2dException"/> carrying
