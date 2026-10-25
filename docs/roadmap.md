@@ -266,7 +266,6 @@ unloading, public offscreen readback.
 | Fullscreen mode: exclusive, borderless, or configurable | M2 | Borderless; revisit in M10. |
 | Minimize: pause ticks or presentation only | M2 | Ticks continue; presentation is skipped. |
 | Expose the selected mode on `IEngine` | M2 | Not exposed; branch in host code. |
-| `MaxDeltaTime = 0` disables the clamp? | M2 | Invalid; require a positive value. |
 | DPI policy; what `IWindow.Size` means under scaling | M2 | Physical framebuffer pixels. |
 | Zstd API shape in .NET 11 | M3 | Adapter behind pack reader/writer; format stays. |
 | Asset failure retry policy | M3 | No automatic retry in v1. |
@@ -280,7 +279,6 @@ unloading, public offscreen readback.
 | Bindless page capacity and overflow policy | M8 | 4096 pages; hard failure on overflow. |
 | Shader compiler/build integration | M8 | `glslangValidator` build target; embedded SPIR-V. |
 | Offscreen readback/capture API | M8/M10 | Internal discard in v1; public later. |
-| Renderer culling beyond the layer mask | M8 | Layer mask only in v1. |
 | Validation warning policy | M8 | Errors fail; warnings are reviewed. |
 | TOML library and comment preservation | M4 | Tomlyn; preserve comments if practical. |
 | Project descriptor schema/type mapping | M4/M5 | `bork2d.project.toml`; define schema in M4. |
