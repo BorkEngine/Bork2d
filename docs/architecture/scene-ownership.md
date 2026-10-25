@@ -84,6 +84,9 @@ Rules:
 - Re-parenting preserves the composed world matrix exactly and recomputes local values. The
   internal transform stores the local affine matrix, so shear from a non-uniform scale combined
   with rotation survives a re-parent.
+- Local position/rotation/scale are an authored scalar view over that matrix: they round-trip
+  what was authored (negative scale axes, angles outside `(-π, π]`). A re-parent refreshes them
+  from the exact matrix and keeps the authored mirror axis when possible.
 - Removing a child (`Parent = null`) does not clear its local/world state.
 - Re-adding a removed object to a parent restores it without creating a new object.
 - `ITransform.DetachAll()` detaches direct children; their `Parent` becomes `null`.
@@ -164,13 +167,14 @@ Implemented in WP3 inside `Bork2d.Common` (all implementation types are internal
 4. Parent add/remove, self/cycle rejection, world-preserving re-parent, `DetachAll()` on any
    transform, and root teardown all run under one scene-graph structural `System.Threading.Lock`.
    The transform stores its local affine matrix, so re-parenting preserves the composed world
-   matrix exactly (including shear) and `LocalPosition` changes only the translation. Property
-   access uses a per-object `Lock`; no path takes the structural lock while holding a per-object
-   lock.
+   matrix exactly (including shear) and `LocalPosition` changes only the translation; local
+   rotation/scale are an authored scalar view refreshed after a re-parent. Property access uses a
+   per-object `Lock`; no path takes the structural lock while holding a per-object lock.
 5. Discovery traverses the rooted tree and returns transforms in entity-ID order; entity IDs are
    monotonic and never reused.
 6. `Bork2d.Tests` covers rooted/unparented lifetime with `WeakReference`, remove/re-add, root
-   teardown/re-add, read-only root, self/cycle rejection, world-preserving re-parent, entity-ID
+   teardown/re-add, read-only root, self/cycle rejection, exact-matrix world-preserving re-parent,
+   authored local scalar round-trip (negative scale axes and angles outside `(-π, π]`), entity-ID
    order, and concurrent creation/mutation from workers.
 7. Scene entities have no `IDisposable`/`Dispose`/`IsAlive` and do not self-register anywhere.
 8. API docs and the threading/lifecycle notes were updated in the same change; the M1 spec's

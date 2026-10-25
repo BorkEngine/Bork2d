@@ -14,19 +14,25 @@ namespace Bork2d.Common;
 /// code path acquires the structural lock while holding a per-object lock.
 /// </para>
 /// <para>
-/// The local affine matrix is the source of truth. <see cref="WorldMatrix"/> composes it through
-/// the parent chain, and re-parenting assigns the exact local matrix derived from the old world
-/// matrix and the inverse of the new parent's world matrix. A non-uniform scale combined with
-/// rotation therefore survives a re-parent, even though it introduces shear that a T/R/S triple
-/// cannot represent.
+/// The local affine matrix is the world source of truth: <see cref="WorldMatrix"/> composes it
+/// through the parent chain, and re-parenting assigns the exact local matrix derived from the old
+/// world matrix and the inverse of the new parent's world matrix. A non-uniform scale combined
+/// with rotation therefore survives a re-parent, even though it introduces shear that a T/R/S
+/// triple cannot represent.
 /// </para>
 /// <para>
-/// <see cref="LocalPosition"/> reads the matrix translation; its setter changes only the
-/// translation and keeps the rest of the matrix. <see cref="LocalRotation"/> and
-/// <see cref="LocalScale"/> decompose the local matrix on read, and their setters recompose it
-/// from the decomposed rotation/scale plus the current translation, so writing them discards any
-/// shear. A parent holds its children strongly and there is no destruction state: detaching keeps
-/// the object and its local matrix valid, and the same instance can be attached again later.
+/// <see cref="LocalPosition"/>, <see cref="LocalRotation"/>, and <see cref="LocalScale"/> are the
+/// authored scalar view cached alongside the matrix. Their getters return the authored value
+/// (including negative scale axes and angles outside (-π, π]); their setters update the authored
+/// value and rebuild the local matrix. The position setter changes only the matrix translation
+/// and keeps the rest of the matrix; the rotation and scale setters recompose from the authored
+/// scalars, so writing either discards shear introduced by a re-parent. A re-parent refreshes the
+/// scalar view from the exact local matrix and keeps the authored mirror axis when possible;
+/// that refresh is the only place where an authored angle outside (-π, π] normalizes.
+/// </para>
+/// <para>
+/// A parent holds its children strongly and there is no destruction state: detaching keeps the
+/// object and its local matrix valid, and the same instance can be attached again later.
 /// </para>
 /// </remarks>
 internal class Transform : ITransform
@@ -35,6 +41,9 @@ internal class Transform : ITransform
     private Transform? _parent;
     private List<Transform>? _children;
     private Matrix3x2 _localMatrix = Matrix3x2.Identity;
+    private Vector2 _localPosition = Vector2.Zero;
+    private float _localRotation;
+    private Vector2 _localScale = Vector2.One;
 
     internal Transform(SceneGraph graph)
         : this(graph, graph.NextEntityId())
@@ -74,7 +83,7 @@ internal class Transform : ITransform
         {
             lock (_sync)
             {
-                return _localMatrix.Translation;
+                return _localPosition;
             }
         }
 
@@ -82,6 +91,7 @@ internal class Transform : ITransform
         {
             lock (_sync)
             {
+                _localPosition = value;
                 _localMatrix.M31 = value.X;
                 _localMatrix.M32 = value.Y;
             }
@@ -94,8 +104,7 @@ internal class Transform : ITransform
         {
             lock (_sync)
             {
-                Decompose(_localMatrix, out _, out var rotation);
-                return rotation;
+                return _localRotation;
             }
         }
 
@@ -103,8 +112,8 @@ internal class Transform : ITransform
         {
             lock (_sync)
             {
-                Decompose(_localMatrix, out var scale, out _);
-                _localMatrix = Compose(scale, value, _localMatrix.Translation);
+                _localRotation = value;
+                _localMatrix = Compose(_localScale, value, _localPosition);
             }
         }
     }
@@ -115,8 +124,7 @@ internal class Transform : ITransform
         {
             lock (_sync)
             {
-                Decompose(_localMatrix, out var scale, out _);
-                return scale;
+                return _localScale;
             }
         }
 
@@ -124,8 +132,8 @@ internal class Transform : ITransform
         {
             lock (_sync)
             {
-                Decompose(_localMatrix, out _, out var rotation);
-                _localMatrix = Compose(value, rotation, _localMatrix.Translation);
+                _localScale = value;
+                _localMatrix = Compose(value, _localRotation, _localPosition);
             }
         }
     }
@@ -304,6 +312,7 @@ internal class Transform : ITransform
             lock (_sync)
             {
                 _localMatrix = local;
+                RefreshAuthoredScalars(local);
             }
         }
     }
@@ -361,6 +370,45 @@ internal class Transform : ITransform
         {
             return _localMatrix;
         }
+    }
+
+    /// <summary>
+    /// Refreshes the authored scalar cache from an exact local matrix.
+    /// </summary>
+    /// <remarks>
+    /// The caller must hold <see cref="_sync"/>. The determinant convention puts a reflection on
+    /// the Y scale; if the object was authored with a negative X scale, the reflection is moved
+    /// back to X (with the matching half-turn) so the authored mirror axis survives a re-parent.
+    /// </remarks>
+    private void RefreshAuthoredScalars(in Matrix3x2 local)
+    {
+        Decompose(local, out var scale, out var rotation);
+
+        if (scale.Y < 0f && _localScale.X < 0f)
+        {
+            scale = new Vector2(-scale.X, -scale.Y);
+            rotation = NormalizeRotation(rotation - MathF.PI);
+        }
+
+        _localPosition = local.Translation;
+        _localRotation = rotation;
+        _localScale = scale;
+    }
+
+    private static float NormalizeRotation(float rotation)
+    {
+        const float twoPi = MathF.PI * 2f;
+        var normalized = rotation % twoPi;
+        if (normalized <= -MathF.PI)
+        {
+            normalized += twoPi;
+        }
+        else if (normalized > MathF.PI)
+        {
+            normalized -= twoPi;
+        }
+
+        return normalized;
     }
 
     private static void Decompose(in Matrix3x2 matrix, out Vector2 scale, out float rotation)

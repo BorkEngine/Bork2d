@@ -134,6 +134,81 @@ public sealed class TransformHierarchyTests
     }
 
     [Fact]
+    public void AuthoredLocalScaleAndRotationRoundTrip()
+    {
+        var engine = TestEngineFactory.Create();
+        var transform = engine.CreateTransform(engine.Root);
+
+        transform.LocalScale = new Vector2(-1f, 1f);
+        Assert.Equal(new Vector2(-1f, 1f), transform.LocalScale);
+        Assert.Equal(0f, transform.LocalRotation);
+
+        transform.LocalScale = new Vector2(1f, -1f);
+        Assert.Equal(new Vector2(1f, -1f), transform.LocalScale);
+        Assert.Equal(0f, transform.LocalRotation);
+
+        transform.LocalRotation = 4f;
+        Assert.Equal(4f, transform.LocalRotation);
+        Assert.Equal(new Vector2(1f, -1f), transform.LocalScale);
+
+        transform.LocalRotation = -4f;
+        Assert.Equal(-4f, transform.LocalRotation);
+        Assert.Equal(new Vector2(1f, -1f), transform.LocalScale);
+    }
+
+    [Fact]
+    public void EditingRotationAfterANegativeXScaleKeepsTheMirrorAxis()
+    {
+        var engine = TestEngineFactory.Create();
+        var transform = engine.CreateTransform(engine.Root);
+
+        transform.LocalScale = new Vector2(-1f, 1f);
+        transform.LocalRotation = 0.5f;
+
+        Assert.Equal(new Vector2(-1f, 1f), transform.LocalScale);
+        Assert.Equal(0.5f, transform.LocalRotation);
+
+        transform.LocalRotation = 1.2f;
+
+        Assert.Equal(new Vector2(-1f, 1f), transform.LocalScale);
+        Assert.Equal(1.2f, transform.LocalRotation);
+    }
+
+    [Fact]
+    public void ReparentingKeepsTheAuthoredMirrorAxis()
+    {
+        var engine = TestEngineFactory.Create();
+        var first = engine.CreateTransform(engine.Root);
+        first.LocalPosition = new Vector2(5f, -2f);
+        var second = engine.CreateTransform(engine.Root);
+        second.LocalPosition = new Vector2(-1f, 4f);
+
+        var negativeX = engine.CreateTransform(first);
+        negativeX.LocalPosition = new Vector2(1.5f, 0.5f);
+        negativeX.LocalScale = new Vector2(-1f, 1f);
+        negativeX.LocalRotation = 0.5f;
+        var negativeXWorld = ((Transform)negativeX).WorldMatrix();
+
+        negativeX.Parent = second;
+
+        TestAssertions.Close(negativeXWorld, ((Transform)negativeX).WorldMatrix());
+        TestAssertions.Close(new Vector2(-1f, 1f), negativeX.LocalScale);
+        TestAssertions.Close(0.5f, negativeX.LocalRotation);
+
+        var negativeY = engine.CreateTransform(first);
+        negativeY.LocalPosition = new Vector2(-2f, 1f);
+        negativeY.LocalScale = new Vector2(1f, -1f);
+        negativeY.LocalRotation = 0.25f;
+        var negativeYWorld = ((Transform)negativeY).WorldMatrix();
+
+        negativeY.Parent = second;
+
+        TestAssertions.Close(negativeYWorld, ((Transform)negativeY).WorldMatrix());
+        TestAssertions.Close(new Vector2(1f, -1f), negativeY.LocalScale);
+        TestAssertions.Close(0.25f, negativeY.LocalRotation);
+    }
+
+    [Fact]
     public void AssigningTheSameParentIsANoOp()
     {
         var engine = TestEngineFactory.Create();
