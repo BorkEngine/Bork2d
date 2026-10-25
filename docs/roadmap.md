@@ -1,8 +1,8 @@
 # Implementation Roadmap
 
-> **Status:** M0 complete; M1 specified and not started (2026-10-25). The sequence is
-> dependency-ordered, not a calendar schedule. Each milestone has an exit criterion; a milestone
-> is done when the criterion is demonstrated, not when the code is merged.
+> **Status:** M0 complete; M1 in progress (WP1–WP6 implemented; WP7–WP8 pending, 2026-10-25).
+> The sequence is dependency-ordered, not a calendar schedule. Each milestone has an exit
+> criterion; a milestone is done when the criterion is demonstrated, not when the code is merged.
 
 ## 1. How to read this roadmap
 
@@ -27,7 +27,7 @@
 | `Bork2d.Render` | Empty | No Vulkan/Silk.NET. |
 | `Bork2d.Assets` | Empty | No pack, VFS, descriptors, or sprite assets. |
 | `Bork2d.Editor` | Absent | Not in the solution. |
-| NativeAOT | None | No publish settings/analyzers/CI. |
+| NativeAOT | M1 baseline | Runtime libraries use `IsAotCompatible` plus trim/AOT analyzers; `Bork2d.AotSmoke` publishes and runs locally with zero AOT/trim warnings. AOT is a local gate, not CI. |
 | Tests | None | No test project or CI. |
 | Docs | M0 complete | M1 spec, architecture, assets/pack, editor, NativeAOT, pacing, modes, API, decisions. |
 | Runnable engine | No | No window, renderer, pack, or asset system. |
@@ -551,7 +551,7 @@ carries indices), asset/pack unloading, and public offscreen readback.
 | Milestone | Status | Evidence |
 | --- | --- | --- |
 | M0 Documentation | Complete (2026-10-25) | `docs/` set, decision log, accepted ownership/pack/editor/pacing decisions. |
-| M1 Foundation/AOT | Spec ready; not started | [M1 spec](specs/m1-foundation.md). |
+| M1 Foundation/AOT | In progress (WP1–WP6 implemented; WP7–WP8 pending) | WP1–WP5 and corrections merged on `m-1/common`; WP6 adds AOT/trim analyzers on the runtime libraries, `Bork2d.AotSmoke` (publishes/runs locally with zero AOT/trim warnings), and the Nerdbank.MessagePack `1.4.95` generated-shape policy. [M1 spec](specs/m1-foundation.md). |
 | M2 SDL platform | Not started | — |
 | M3 Assets/pack | Not started | — |
 | M4 Serialization/bake | Not started | — |
