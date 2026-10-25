@@ -25,12 +25,12 @@
 | Area | State |
 | --- | --- |
 | Branch | `develop`; `AGENTS.md` is committed separately. Integration branch `m-1/common`; task/fix branches `m-1/wp-1` … `m-1/wp-5`, `m-1/fix-ci`, `m-1/fix-scene`. |
-| M1 progress | WP1–WP5 are merged into `m-1/common`. The scene correction pass (`m-1/fix-scene`: degrees/normalization, non-virtual properties, independent `SceneRoot`) is in progress. WP6–WP8 are not started. |
+| M1 progress | WP1–WP5 and the CI/scene corrections are merged into `m-1/common`. WP6–WP8 are not started. |
 | Solution | `src/Bork2d/Bork2d.slnx`: API/Common/Runtime have M1 code; Assets/Render are wired but empty; tests project exists. Builds with 0 warnings. |
-| Tests | 114 tests on `m-1/common`; the scene correction branch will add normalization/non-virtual/SceneRoot tests. |
+| Tests | 129 tests on `m-1/common` (including rotation normalization, non-virtual property, and `SceneRoot` separation coverage). |
 | Build baseline | `Directory.Build.props`, `.editorconfig`, `.gitattributes`, `global.json`, warnings-as-errors/style gates are active. `dotnet format --verify-no-changes` passes on `m-1/common`. |
-| CI | GitHub Actions enabled; workflow now triggers **only on push to `develop`** (`m-1/fix-ci`, merged at `d38b1dc`). No PR/branch CI. |
-| Documentation | M0 complete; M1 in progress. API/architecture docs partially updated by WP1–WP5 and the correction pass; WP8 final pass pending. |
+| CI | GitHub Actions enabled; workflow triggers **only on push to `develop`** (`m-1/fix-ci`). No PR/branch CI. |
+| Documentation | M0 complete; M1 in progress. API/architecture docs partially updated; WP8 final pass pending. |
 | GitHub | `develop` unprotected; 0 open PRs. |
 
 This is a snapshot, not a live status board. Live milestone status is tracked in the milestone
@@ -362,9 +362,9 @@ pack, or asset system (M2/M3/M6+).
 
 ### 8.2 Work packages and waves
 
-**Status:** WP1–WP5 are merged into `m-1/common`. The scene correction branch `m-1/fix-scene`
-implements the approved degrees/normalization, non-virtual property, and independent-`SceneRoot`
-changes. WP6–WP8 are not started.
+**Status:** WP1–WP5 and the CI/scene corrections are merged into `m-1/common`. WP6–WP8 are not
+started. The remaining open architecture decisions are the SceneGraph holder and the property/
+structural locking model (§8.7).
 
 | WP | Branch | Scope | Depends on | Wave |
 | --- | --- | --- | --- | --- |
@@ -450,14 +450,14 @@ Do not propagate these; fix them in WP8 and in same-change docs where a contract
     mention it, but it is not part of the M1 PR.
 13. CI triggers: fixed in `m-1/fix-ci` (develop push only). Keep it that way.
 14. Rotation units: **degrees**, normalized to `[0, 360)` on assignment; `LocalRotation` and
-    `WorldRotation` return normalized values. Implemented by the scene correction branch.
+    `WorldRotation` return normalized values. Merged in `m-1/fix-scene`.
 15. SceneGraph design: the separate `SceneGraph` holder and the parent-change structural lock are
     under human review (see §8.7). Do not change until decided.
 16. WP5 logging is approved and merged; its default format/versions/ownership wrapper are now
     the logging contract.
 17. `Transform` hot properties are **non-virtual**; `SceneRoot` does **not** inherit `Transform`.
     Performance is a first-class constraint; no virtual dispatch/unnecessary inheritance on
-    scene hot paths.
+    scene hot paths. Merged in `m-1/fix-scene`.
 
 ### 8.5 Adopted M1 decisions (human, 2026-10-25)
 
@@ -503,15 +503,16 @@ These are settled; changes require a new human decision.
 - [ ] CI is green on `develop` after the milestone merge; no PR/branch CI; local AOT evidence is attached to the PR.
 - [ ] Final ready-for-review PR `m-1/common` → `develop` is open; **not merged**; human review pending.
 
-### 8.7 Open design decision: SceneGraph
+### 8.7 Open design decisions: SceneGraph and locking
 
-M1 is proceeding on the other approved corrections; this is the only remaining architecture
-question. Do not change `SceneGraph`/the structural lock until the human answers.
+M1 is proceeding on the other approved corrections; these are the remaining architecture
+questions. Do not change `SceneGraph` or the per-object locks until the human answers.
 
 | Decision | Current state | Options / question |
 | --- | --- | --- |
 | SceneGraph holder | `SceneGraph` is an internal per-engine holder of the structural `Lock` and monotonic ID allocator; it holds **no** entity list. `SceneRoot` owns children. | (A) keep it, optionally rename to `SceneContext`/`SceneState`; (B) remove it and put the lock/ID allocator on `SceneRoot`/`Scene`; (C) remove the structural lock and require single-threaded scene mutation (would change D-024 and invalidate concurrency tests). Which ownership/concurrency model do you want? |
 | Why lock parent changes | Attach/detach mutates shared parent/child lists and must serialize cycle/single-parent/traversal invariants when workers call the API from any thread. Per-object locks cover local properties only. | Keep the structural lock, narrow it, or drop any-thread mutation? |
+| Per-object property locks | Every `Transform` local property get/set currently takes its own `Lock`; this is likely a larger hot-path cost than `SceneGraph` itself. | Keep the any-thread contract (locks), require single-threaded scene mutation (remove locks), or move to atomics/immutable snapshots. Which threading model do you want? |
 
 ## 9. Engineering rules (global)
 
@@ -556,8 +557,8 @@ question. Do not change `SceneGraph`/the structural lock until the human answers
 - Composite multi-property updates to one object are the game's synchronization responsibility.
 - No `Thread.Sleep`/target-rate pacing in windowed/offscreen; headless timer pacing is the
   documented exception.
-- The `SceneGraph` structural-lock design is under review (§8.7); keep the current behavior
-  until the human decides.
+- The `SceneGraph` structural-lock design and the per-object property locks are under review
+  (§8.7); keep the current behavior until the human decides.
 
 ### AOT and serialization
 
