@@ -11,20 +11,27 @@
 > ([spec](docs/specs/m1-foundation.md)).
 >
 > **Do not merge the final pull request.** The human owner reviews it manually.
+>
+> **Human decision gate (mandatory).** Agents and subagents are **not** allowed to make
+> product, architecture, API, unit, semantic, or workflow decisions. Stop and ask the human
+> whenever the spec/docs are vague or conflicting; a public API/contract, unit, or semantic
+> change is needed; more than one reasonable implementation exists; a tool, access, or
+> dependency is missing; an unexpected error occurs; or scope/branches/CI need to change.
+> Subagents stop and report to the orchestrator; the orchestrator asks the human. Never
+> silently choose, guess, or implement a workaround.
 
 ## 1. Current state (verified 2026-10-25)
 
 | Area | State |
 | --- | --- |
-| Branch | `develop`; `AGENTS.md` is committed separately. `m-1` is created from `develop`; wave 1 (WP1/WP2) is in progress. WP branches use `m-1-wp-N` (Git ref constraint). |
-| Solution | `src/Bork2d/Bork2d.slnx`, five projects, builds with 0 warnings/errors. |
-| `Bork2d.Api` | Partial contract scaffold. |
-| `Bork2d.Common` | Scaffold: weak `EntityList`, stub transforms, placeholder loop. |
-| `Bork2d.Runtime` / `Bork2d.Assets` / `Bork2d.Render` | Empty (`Class1` placeholders). |
-| Tests / CI / `global.json` / `.editorconfig` | None. |
-| `dotnet format --verify-no-changes` | **Fails today** (whitespace and no style baseline). WP1 fixes this. |
-| Documentation | M0 complete; M1 spec ready. Docs describe the target, not the current code. |
-| GitHub | `develop` unprotected; Actions enabled; 0 workflows; 0 open PRs. |
+| Branch | `develop`; `AGENTS.md` is committed separately. Integration branch `m-1/common` exists; task branches are `m-1/wp-1` … `m-1/wp-5`. M1 is **paused** for human decisions. |
+| M1 progress | WP1–WP4 are merged into `m-1/common`. WP5 (logging) is implemented on `m-1/wp-5` but **unmerged** pending human approval. WP6–WP8 are not started. |
+| Solution | `src/Bork2d/Bork2d.slnx`: API/Common/Runtime have M1 code; Assets/Render are wired but empty; tests project exists. Builds with 0 warnings. |
+| Tests | 101 tests on `m-1/common`; 114 on the unmerged `m-1/wp-5` branch. |
+| Build baseline | `Directory.Build.props`, `.editorconfig`, `.gitattributes`, `global.json`, warnings-as-errors/style gates are active. `dotnet format --verify-no-changes` passes on `m-1/common`. |
+| CI | GitHub Actions enabled; one workflow exists. Current triggers are obsolete (old branch/PR triggers); branch CI is dormant after the ref rename. Policy: CI only on push to `develop`; WP7 must update the workflow. |
+| Documentation | M0 complete; M1 in progress/paused. API/architecture docs partially updated by WP1–WP5; WP8 final pass pending. |
+| GitHub | `develop` unprotected; 0 open PRs. |
 
 This is a snapshot, not a live status board. Live milestone status is tracked in the milestone
 PR description and [`docs/roadmap.md`](docs/roadmap.md) progress log. Refresh this snapshot at
@@ -38,11 +45,11 @@ Every milestone follows the same shape:
    linked architecture/API documents.
 2. Update §8 of this file for the new current milestone (scope, work packages, wave plan,
    gates, decisions). Commit that change **separately to `develop`** (§7).
-3. Create the milestone integration branch `m-<N>` from the current `develop`.
-4. Decompose the milestone into work packages, assign each a branch `m-<N>-wp-<K>`, and define
+3. Create the milestone integration branch `m-<N>/common` from the current `develop`.
+4. Decompose the milestone into work packages, assign each a branch `m-<N>/wp-<K>`, and define
    dependency waves (§4).
 5. Run the work-package loop (§4): dispatch a subagent, review, merge, verify.
-6. Run the full local gates for the milestone and open the final PR `m-<N>` → `develop` (§5).
+6. Run the full local gates for the milestone and open the final PR `m-<N>/common` → `develop` (§5).
 7. Wait for **human** review. Apply requested changes via review-fix branches (§6).
 8. After the PR is approved/merged, update the roadmap progress log and docs status, then start
    the next milestone.
@@ -54,25 +61,24 @@ asks. Do not pull future-milestone features into the current branch.
 
 ```
 develop                     integration target; implementation never committed directly
-  └── m-<N>                 milestone integration branch (m-1, m-2, ...)
-        ├── m-<N>-wp-1      one work package per branch
-        ├── m-<N>-wp-2
+  └── m-<N>/common          milestone integration branch (e.g. m-1/common)
+        ├── m-<N>/wp-1      one work package per branch
+        ├── m-<N>/wp-2
         └── ...
 ```
 
-> **Git ref constraint.** A branch cannot be both `m-<N>` and have child refs under
-> `m-<N>/...` (directory/file ref conflict). Work-package branches are therefore
-> `m-<N>-wp-<K>`, not `m-<N>/wp-<K>`. The same applies to review-fix branches.
+> `m-<N>/common` and `m-<N>/wp-<K>` are siblings under the `m-<N>/` namespace. There is **no**
+> bare `m-<N>` branch (that was the old directory/file ref conflict). Do not create one.
 
 Rules:
 
 - `develop` is the only long-lived integration branch. Implementation work reaches it only
   through the milestone PR.
-- `m-<N>` is created once from `develop` at the start of milestone `<N>`. It is the only branch
+- `m-<N>/common` is created once from `develop` at the start of milestone `<N>`. It is the only branch
   the orchestrator merges into.
-- Each work package gets **exactly one** branch named `m-<N>-wp-<K>` (for M1: `m-1-wp-1` …
-  `m-1-wp-8`). One subagent owns one branch.
-- WP branches are created from the latest `origin/m-<N>` and are merged back only after review.
+- Each work package gets **exactly one** branch named `m-<N>/wp-<K>` (for M1: `m-1/wp-1` …
+  `m-1/wp-8`). One subagent owns one branch.
+- WP branches are created from the latest `origin/m-<N>/common` and are merged back only after review.
 - Never force-push, rewrite published history, or delete a branch before the final PR is
   reviewed. Keep WP branches until the human approves the PR; delete only with human approval.
 - Implementation never goes directly to `develop`. The **only** exception is the global process
@@ -85,10 +91,10 @@ Parallelism is allowed only after a dependency and file-overlap check:
 
 - Two work packages may run in the same **wave** only if neither depends on the other and they
   do not edit the same files/areas.
-- All branches in a wave start from the same `origin/m-<N>` base. Each wave has a fixed merge
+- All branches in a wave start from the same `origin/m-<N>/common` base. Each wave has a fixed merge
   order.
-- A branch that is merged later in the wave must first absorb the updated `origin/m-<N>` with a
-  **merge commit** (`git merge origin/m-<N>`), resolve conflicts, and re-run all gates. Do not
+- A branch that is merged later in the wave must first absorb the updated `origin/m-<N>/common` with a
+  **merge commit** (`git merge origin/m-<N>/common`), resolve conflicts, and re-run all gates. Do not
   rebase or force-push a WP branch.
 - If absorbing the integration branch causes semantic churn or the diff stops being reviewable,
   downgrade the wave to sequential and record why in the PR description.
@@ -99,7 +105,7 @@ Parallelism is allowed only after a dependency and file-overlap check:
 
 | Wave | WP(s) | Notes |
 | --- | --- | --- |
-| 1 | WP1 + WP2 | Parallel. WP1 owns build/quality/solution/test skeleton; WP2 owns API contracts. Merge WP1 first. WP2 absorbs `origin/m-1`, resolves formatting conflicts, re-runs gates, then merges. |
+| 1 | WP1 + WP2 | Parallel. WP1 owns build/quality/solution/test skeleton; WP2 owns API contracts. Merge WP1 first. WP2 absorbs `origin/m-1/common`, resolves formatting conflicts, re-runs gates, then merges. |
 | 2 | WP3 | Depends on WP2. |
 | 3 | WP4 | Depends on WP3. |
 | 4 | WP5 | Depends on WP4. |
@@ -119,18 +125,18 @@ The orchestrator does this once per milestone:
 
 ```powershell
 git fetch origin
-git switch -c m-<N> origin/develop
-git push -u origin m-<N>
+git switch -c m-<N>/common origin/develop
+git push -u origin m-<N>/common
 ```
 
-`AGENTS.md` is already on `develop`; do not commit it to `m-<N>`.
+`AGENTS.md` is already on `develop`; do not commit it to `m-<N>/common`.
 
 Before each wave:
 
 ```powershell
 git fetch origin
-git switch m-<N>
-git pull --ff-only origin m-<N>
+git switch m-<N>/common
+git pull --ff-only origin m-<N>/common
 git status --short          # must be clean
 ```
 
@@ -139,13 +145,13 @@ git status --short          # must be clean
 For every WP in the wave, from the same base:
 
 ```powershell
-git switch -c m-<N>-wp-<K> origin/m-<N>
-git push -u origin m-<N>-wp-<K>
-git switch m-<N>
+git switch -c m-<N>/wp-<K> origin/m-<N>/common
+git push -u origin m-<N>/wp-<K>
+git switch m-<N>/common
 ```
 
-Record the base SHA (`git rev-parse origin/m-<N>`) in the subagent task packet. For M1, the
-branches are `m-1-wp-1` … `m-1-wp-8`.
+Record the base SHA (`git rev-parse origin/m-<N>/common`) in the subagent task packet. For M1, the
+branches are `m-1/wp-1` … `m-1/wp-8`.
 
 ### 4.3 Create an isolated subagent workspace
 
@@ -155,7 +161,7 @@ Each subagent receives its own **full clone**, so it cannot disturb the integrat
 $workspace = "D:\Develop\Bork2dEngine.work\m-<N>-wp-<K>"
 if (Test-Path $workspace) { Remove-Item $workspace -Recurse -Force }
 git clone https://github.com/BorkEngine/Bork2d.git $workspace
-git -C $workspace switch m-<N>-wp-<K>       # tracks origin/m-<N>-wp-<K>
+git -C $workspace switch m-<N>/wp-<K>       # tracks origin/m-<N>/wp-<K>
 git -C $workspace status --short             # must be clean
 ```
 
@@ -171,8 +177,8 @@ docs first. Template:
 
 ```text
 Workspace: D:\Develop\Bork2dEngine.work\m-<N>-wp-<K>
-Branch: m-<N>-wp-<K>
-Base: <origin/m-<N> SHA>
+Branch: m-<N>/wp-<K>
+Base: <origin/m-<N>/common SHA>
 Milestone: <N> — <name>; read docs/specs/<spec>.md.
 Scope: <WP section> only.
 Read first: AGENTS.md; docs/specs/<spec>.md (WP and semantics); docs/contributing.md;
@@ -186,14 +192,18 @@ Required checks (from the workspace):
   dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
   AOT publish/run when the WP touches runtime/AOT (see §8.3)
 Commit style: m<N>(wp-<K>): <imperative summary>
-Push: git push origin m-<N>-wp-<K>. Never push develop, never merge, never force-push.
+Push: git push origin m-<N>/wp-<K>. Never push develop, never merge, never force-push.
 Report: branch, base/head SHAs, commits, files, commands + results, deviations, risks,
 unresolved questions, docs updated.
+If the spec/docs are vague or conflicting, a public API/unit/semantic change is needed,
+multiple implementations are plausible, a tool/access/dependency is missing, or an
+unexpected error occurs: STOP and report to the orchestrator. Do not choose, guess, or
+implement a workaround.
 If blocked: stop and report; do not widen scope.
 ```
 
 The subagent must not touch the main checkout, `AGENTS.md`, other work packages, global tools,
-`develop`, or `m-<N>`.
+`develop`, or `m-<N>/common`, and must not make product/API/architecture decisions.
 
 ### 4.5 Review the subagent work
 
@@ -203,15 +213,15 @@ The orchestrator reviews; do not merge on trust.
 git fetch origin
 $review = "D:\Develop\Bork2dEngine.review\m-<N>-wp-<K>"
 if (Test-Path $review) { Remove-Item $review -Recurse -Force }
-git worktree add --detach $review origin/m-<N>-wp-<K>
+git worktree add --detach $review origin/m-<N>/wp-<K>
 ```
 
-For a parallel wave, confirm the branch absorbed the latest `origin/m-<N>` after the earlier
+For a parallel wave, confirm the branch absorbed the latest `origin/m-<N>/common` after the earlier
 wave merge, and review the **final tree**, not only the first-parent diff.
 
 Review checklist:
 
-- [ ] Branch is based on the recorded `origin/m-<N>` SHA (plus an absorption merge if parallel).
+- [ ] Branch is based on the recorded `origin/m-<N>/common` SHA (plus an absorption merge if parallel).
 - [ ] Commit messages follow `m<N>(wp-<K>): ...`; commits are scoped and readable.
 - [ ] `git diff --check` passes; no whitespace errors.
 - [ ] Diff contains only WP scope; no unrelated refactors/version bumps/formatting churn.
@@ -225,6 +235,7 @@ Review checklist:
 - [ ] AOT/trim analyzers clean; no runtime reflection/TOML/dynamic code/assembly scanning.
 - [ ] Tests cover the WP acceptance criteria and are deterministic (GC/concurrency included).
 - [ ] Docs touched in the same change as any contract change; status markers honest.
+- [ ] No unapproved product/API/unit/architecture decision was made; ambiguities were escalated.
 - [ ] Required checks in §8.3 ran in the review worktree and passed.
 
 If review fails: send exact findings to the subagent, ask it to fix and push the **same**
@@ -243,10 +254,10 @@ git worktree remove $review --force
 Only after review and green gates, in the fixed wave order:
 
 ```powershell
-git switch m-<N>
-git pull --ff-only origin m-<N>
-git merge --no-ff origin/m-<N>-wp-<K> -m "Merge m-<N>-wp-<K>: <WP title>"
-git push origin m-<N>
+git switch m-<N>/common
+git pull --ff-only origin m-<N>/common
+git merge --no-ff origin/m-<N>/wp-<K> -m "Merge m-<N>/wp-<K>: <WP title>"
+git push origin m-<N>/common
 ```
 
 For a parallel wave, merge the earlier branch first, then update the later branch:
@@ -254,12 +265,12 @@ For a parallel wave, merge the earlier branch first, then update the later branc
 ```powershell
 # in the later subagent workspace / review worktree
 git fetch origin
-git merge origin/m-<N>          # merge commit, no rebase/force-push
+git merge origin/m-<N>/common          # merge commit, no rebase/force-push
 # resolve, run gates, commit if needed, push the WP branch
-# then re-review and merge m-<N>-wp-<K>
+# then re-review and merge m-<N>/wp-<K>
 ```
 
-Then run the §8.3 gates on `m-<N>` again (at minimum build, tests, format).
+Then run the §8.3 gates on `m-<N>/common` again (at minimum build, tests, format).
 
 Do **not** update `AGENTS.md` per WP. Live status belongs in the milestone PR description and
 `docs/roadmap.md`; `AGENTS.md` is process documentation only.
@@ -268,17 +279,17 @@ Do **not** update `AGENTS.md` per WP. Live status belongs in the milestone PR de
 
 Keep the subagent clone and remote WP branch until the final PR is reviewed, so the human can
 inspect history. After the PR is approved, remove clones and delete WP branches only with human
-approval. Never delete `m-<N>` before the PR is merged.
+approval. Never delete `m-<N>/common` before the PR is merged.
 
 ## 5. Final pull request
 
-After the last WP is merged and `m-<N>` is green:
+After the last WP is merged and `m-<N>/common` is green:
 
-1. Run the full §8.3 local gates on `m-<N>`, including AOT publish/run.
-2. Confirm `git status` is clean and `git log --oneline origin/develop..m-<N>` shows the
+1. Run the full §8.3 local gates on `m-<N>/common`, including AOT publish/run.
+2. Confirm `git status` is clean and `git log --oneline origin/develop..m-<N>/common` shows the
    integration history.
-3. Push `m-<N>`.
-4. Open a **ready-for-review** PR from `m-<N>` to `develop` (not a draft unless the human asks).
+3. Push `m-<N>/common`.
+4. Open a **ready-for-review** PR from `m-<N>/common` to `develop` (not a draft unless the human asks).
    Title: `M<N> — <milestone name>` (M1: `M1 — Foundation and NativeAOT baseline`).
    Body: goal, WP list with wave/merge order, verification commands and results, CI scope,
    local AOT evidence, risks/deviations, docs updated, and the milestone checklist.
@@ -297,7 +308,7 @@ $headers = @{
 }
 $body = @{
     title = 'M<N> — <milestone name>'
-    head  = 'm-<N>'
+    head  = 'm-<N>/common'
     base  = 'develop'
     body  = '<PR description>'
     draft = $false
@@ -314,11 +325,11 @@ ask the human; do not try alternative credential paths.
 
 The human reviews the PR manually. If changes are requested:
 
-1. Create `m-<N>-review-fix-<K>` from the current `m-<N>`.
+1. Create `m-<N>/fix-<K>` from the current `m-<N>/common`.
 2. Dispatch a subagent, or make the change directly if it is a trivial docs/typo fix.
 3. Review and merge with the same §4.5–§4.6 process.
-4. Push `m-<N>`; the open PR updates automatically.
-5. Never amend or force-push `m-<N>` after the PR is open without explicit human approval.
+4. Push `m-<N>/common`; the open PR updates automatically.
+5. Never amend or force-push `m-<N>/common` after the PR is open without explicit human approval.
 
 ## 7. Process document changes (`AGENTS.md`)
 
@@ -329,9 +340,9 @@ The human reviews the PR manually. If changes are requested:
   docs-only.
 - Commit message: `docs: <summary>`.
 - Update §8 at the start of each milestone to point at the new spec, work packages, wave plan,
-  gates, and decisions. Commit that separately before creating `m-<N>`.
+  gates, and decisions. Commit that separately before creating `m-<N>/common`.
 - Milestone branches must start from a `develop` that contains the latest `AGENTS.md`. If
-  `AGENTS.md` changes while a milestone is open, merge `develop` into `m-<N>` before the next
+  `AGENTS.md` changes while a milestone is open, merge `develop` into `m-<N>/common` before the next
   wave; do not include process-doc changes in the milestone PR.
 - Keep the workflow generic. Milestone-specific details belong only in §8.
 - Never mix implementation with an `AGENTS.md` commit.
@@ -339,7 +350,7 @@ The human reviews the PR manually. If changes are requested:
 ## 8. Current milestone: M1 — Foundation and NativeAOT baseline
 
 **Spec:** [`docs/specs/m1-foundation.md`](docs/specs/m1-foundation.md).
-**Branch:** `m-1`. **Final PR base:** `develop`.
+**Branch:** `m-1/common`. **Final PR base:** `develop`.
 
 ### 8.1 Scope
 
@@ -351,16 +362,19 @@ pack, or asset system (M2/M3/M6+).
 
 ### 8.2 Work packages and waves
 
+**Status (paused):** WP1–WP4 are merged into `m-1/common`; WP5 is implemented on `m-1/wp-5`
+but unmerged; WP6–WP8 are not started. M1 is paused pending the decisions in §8.7.
+
 | WP | Branch | Scope | Depends on | Wave |
 | --- | --- | --- | --- | --- |
-| WP1 | `m-1-wp-1` | Repo/build/quality baseline, project graph, tests project, dependency test, CI skeleton, remove `Class1` | — | 1 |
-| WP2 | `m-1-wp-2` | API contracts: `ISceneRoot`, `ITransform.DetachAll`, parent-required creators, `IEngine` additions, `Bork2dException`, `IGame.Teardown`, remove entity `IDisposable` | WP1 (soft; starts in wave 1, absorbs WP1 before merge) | 1 |
-| WP3 | `m-1-wp-3` | Root-owned scene graph, Transform child storage, read-only root, reparent/cycle/world-preserving, structural + per-object locks, remove weak registry | WP2 | 2 |
-| WP4 | `m-1-wp-4` | `Bork2dAppBuilder<TLayer>`, `Bork2dApp`, validation, one-tick `Run`, idempotent `Dispose`, no window/GPU | WP3 | 3 |
-| WP5 | `m-1-wp-5` | `IEngine.LoggerFactory`, `WithLogging`, pretty ZLogger default, startup logs, categories | WP4 | 4 |
-| WP6 | `m-1-wp-6` | NativeAOT/trim settings, AOT smoke app, Nerdbank.MessagePack policy + generated-shape smoke | WP5 | 5 |
-| WP7 | `m-1-wp-7` | Complete xUnit coverage, concurrency/GC/dependency tests, CI build/test/format order, local AOT checks | WP6 | 6 |
-| WP8 | `m-1-wp-8` | Documentation final pass: API/guide, architecture, decisions, roadmap, READMEs, status markers, resolve M1 doc conflicts | WP7 | 7 |
+| WP1 | `m-1/wp-1` | Repo/build/quality baseline, project graph, tests project, dependency test, CI skeleton, remove `Class1` | — | 1 |
+| WP2 | `m-1/wp-2` | API contracts: `ISceneRoot`, `ITransform.DetachAll`, parent-required creators, `IEngine` additions, `Bork2dException`, `IGame.Teardown`, remove entity `IDisposable` | WP1 (soft; starts in wave 1, absorbs WP1 before merge) | 1 |
+| WP3 | `m-1/wp-3` | Root-owned scene graph, Transform child storage, read-only root, reparent/cycle/world-preserving, structural + per-object locks, remove weak registry | WP2 | 2 |
+| WP4 | `m-1/wp-4` | `Bork2dAppBuilder<TLayer>`, `Bork2dApp`, validation, one-tick `Run`, idempotent `Dispose`, no window/GPU | WP3 | 3 |
+| WP5 | `m-1/wp-5` | `IEngine.LoggerFactory`, `WithLogging`, pretty ZLogger default, startup logs, categories | WP4 | 4 |
+| WP6 | `m-1/wp-6` | NativeAOT/trim settings, AOT smoke app, Nerdbank.MessagePack policy + generated-shape smoke | WP5 | 5 |
+| WP7 | `m-1/wp-7` | Complete xUnit coverage, concurrency/GC/dependency tests, CI trigger policy (push to develop only), local AOT checks | WP6 | 6 |
+| WP8 | `m-1/wp-8` | Documentation final pass: API/guide, architecture, decisions, roadmap, READMEs, status markers, resolve M1 doc conflicts | WP7 | 7 |
 
 Do not renumber branches; the spec's WP numbers are the contract. One branch per WP, one
 subagent per branch.
@@ -395,11 +409,13 @@ Additional gates:
 - No `EntityList`/weak registry/entity `Dispose`/`IsAlive` in shipped code.
 - M1 spec §9 checklist items that apply are demonstrated.
 
-**CI scope (human decision 2026-10-25):** GitHub Actions on Windows runs **restore → format
-verify → build (Debug) → tests**. AOT publish/run is **not** in CI; it is a required local gate
-for WP6+, WP7, and the final `m-1` verification. This intentionally deviates from the M1 spec's
-CI wording; WP8 must document the actual CI scope and keep AOT as a local/release gate. Because
-CI does not catch AOT regressions, run the AOT gate locally on every runtime-affecting change.
+**CI policy (human decision 2026-10-25):** CI runs **only on push to `develop`** — i.e. after a
+milestone PR is merged. Do not run CI on pull requests, `m-<N>/common`, or `m-<N>/wp-<K>`
+branches. The workflow triggers must be exactly `on: push: branches: [develop]`. WP7 owns
+updating `.github/workflows/ci.yml`; the current file still has obsolete branch/PR triggers, so
+branch/PR CI must remain dormant until WP7 changes it. AOT publish/run is **not** in CI; it is a
+required local gate for WP6+, WP7, and the final `m-1/common` verification. Because CI does not
+catch AOT regressions, run the AOT gate locally on every runtime-affecting change.
 
 Install SDK `11.0.100-rc.1` explicitly in CI; hosted Windows runners do not ship it by default.
 Do not weaken a gate to make CI green; fix the code or record a justified, narrow suppression.
@@ -432,6 +448,16 @@ Do not propagate these; fix them in WP8 and in same-change docs where a contract
     only. Document AOT as a local/release gate and keep the M1 exit evidence honest.
 12. `AGENTS.md` is global process documentation committed separately to `develop`; docs may
     mention it, but it is not part of the M1 PR.
+13. CI triggers: update `.github/workflows/ci.yml` to `on: push: branches: [develop]` only (no
+    pull-request or milestone/task branch triggers); document that CI runs after the milestone
+    merge.
+14. Rotation units: the public API will be **degrees**, normalized on assignment. Update all
+    API/architecture docs, tests, and the transform implementation after the normalization range
+    is confirmed.
+15. SceneGraph design: the separate `SceneGraph` holder and the parent-change structural lock are
+    under human review (see §8.7). Do not change until decided.
+16. WP5 logging is unmerged; its default format, versions, ownership wrapper, and startup-log
+    choices need human approval before merge.
 
 ### 8.5 Adopted M1 decisions (human, 2026-10-25)
 
@@ -439,18 +465,20 @@ These are settled; changes require a new human decision.
 
 | Topic | Decision |
 | --- | --- |
+| Branch structure | Integration `m-<N>/common`; task branches `m-<N>/wp-<K>`; no bare `m-<N>`. For M1: `m-1/common`, `m-1/wp-N`. |
 | Branch granularity | One branch per WP; parallel where independent. M1 wave plan in §3.2. |
 | Subagent workspace | Full clone per WP at `D:\Develop\Bork2dEngine.work\m-1-wp-N`. |
 | Merge style | `--no-ff` merge commit per WP. |
 | Tests/AOT paths | `src/Bork2d/Bork2d.Tests`, `src/Bork2d/Bork2d.AotSmoke`, both in `Bork2d.slnx`. |
-| CI | GitHub Actions build/test/format only; AOT publish/run is a required local gate. |
+| CI | GitHub Actions **only on push to `develop`** (after milestone merge); no PR or branch CI. AOT publish/run is a required local gate. |
+| Human decision gate | Agents/subagents must stop and ask; no autonomous product/API/architecture/semantic decisions. |
 | `AGENTS.md` | Global process document; committed separately to `develop`, not in the M1 PR. |
+| Rotation unit | **Degrees** (human decision); normalize on assignment. Exact normalization range is pending (§8.7); code is still radians until approved. |
 | `DetachAll` scope | Direct children. |
 | `CreateTransform` parent | Optional (`null` allowed). |
 | Pack path validation | Non-empty/path shape only; pack implementation is M3. |
 | Lifetime scopes | Deferred. |
 | Per-object locking | One `Lock` per entity; lock-free paths where practical. |
-| ZLogger/MEL | ZLogger 2.5.10; MEL/Abstractions 11.0.0-rc.1. |
 | xUnit | 2.9.3 + `Microsoft.NET.Test.Sdk` 17.14.1 + runner 3.1.5. |
 | Nerdbank.MessagePack | 1.4.95. |
 | `InvariantGlobalization` | `true` for the AOT smoke app. |
@@ -459,7 +487,7 @@ These are settled; changes require a new human decision.
 
 ### 8.6 M1 definition of done
 
-- [ ] `m-1` contains WP1–WP8, each reviewable as its own merge commit (WP1/WP2 in wave order).
+- [ ] `m-1/common` contains WP1–WP8, each reviewable as its own merge commit (WP1/WP2 in wave order).
 - [ ] Build (Debug + Release) is warning-free; style violations are errors.
 - [ ] `dotnet test` passes; dependency test passes; no unintentional public types.
 - [ ] `dotnet format --verify-no-changes` passes.
@@ -470,8 +498,24 @@ These are settled; changes require a new human decision.
 - [ ] `Bork2dAppBuilder` validation and one-tick `Run` smoke pass.
 - [ ] No weak `EntityList`, no entity `Dispose`/`IsAlive`, no main-thread requirement.
 - [ ] Docs/API/guide/reference/roadmap/decision log/READMEs match the code; §8.4 fixed.
-- [ ] CI (format/build/tests) is green; local AOT evidence is attached to the PR.
-- [ ] Final ready-for-review PR `m-1` → `develop` is open; **not merged**; human review pending.
+- [ ] CI is green on `develop` after the milestone merge; no PR/branch CI; local AOT evidence is attached to the PR.
+- [ ] Final ready-for-review PR `m-1/common` → `develop` is open; **not merged**; human review pending.
+
+### 8.7 Pending human decisions (M1 paused)
+
+Do not implement these until the human answers. Each is a product/API/architecture decision,
+not an implementation detail.
+
+| Decision | Current state | Options / question |
+| --- | --- | --- |
+| Rotation normalization range | Human decided **degrees**, normalized on assignment; code still uses radians. | Which range: `[0, 360)`, `(-180, 180]`, or `[-180, 180)`? Should `WorldRotation` be normalized too? Should `LocalRotation` preserve the authored value or always return normalized? |
+| SceneGraph holder | `SceneGraph` is an internal per-engine holder of the structural `Lock` and monotonic ID allocator; it holds **no** entity list. `SceneRoot` owns children. | (A) keep it, optionally rename to `SceneContext`/`SceneState`; (B) remove it and put the lock/ID allocator on `SceneRoot`/`Scene`; (C) remove the structural lock and require single-threaded scene mutation (would change D-024 and invalidate concurrency tests). Which ownership/concurrency model do you want? |
+| Why lock parent changes | Attach/detach mutates shared parent/child lists and must serialize cycle/single-parent/traversal invariants when workers call the API from any thread. Per-object locks cover local properties only. | Keep the structural lock, narrow it, or drop any-thread mutation? |
+| WP5 logging | Branch `m-1/wp-5` is unmerged; 114 tests green. | Approve or change: ZLogger 2.5.10 + MEL 11.0.0-rc.1; default local-time prefix (`yyyy-MM-dd HH:mm:ss.fff [Level] Category:`), no colors; custom `WithLogging` suppresses default provider; `OwnedLoggerFactory` wrapper disposes `AddProvider(instance)` providers because MEL 11 does not. |
+| CI workflow task | Current workflow still has obsolete PR/branch triggers; branch CI is dormant. | WP7 owns the trigger rewrite to `on: push: branches: [develop]`. Do you want a separate `m-1/wp-ci` task now instead? |
+
+Please answer these before any further M1 implementation. The AGENTS decision gate applies to
+every subsequent task.
 
 ## 9. Engineering rules (global)
 
@@ -499,6 +543,10 @@ These are settled; changes require a new human decision.
 - Re-parenting preserves world transform; reject self/cycles/root parent; root cannot be
   parented.
 - Entity IDs are monotonic and non-reused; discovery order is entity-ID order.
+- Rotation public unit is **degrees** (human decision); normalize on assignment. The exact
+  normalization range is pending (§8.7); code is still radians until the human approves.
+- The `SceneGraph` holder and parent-change structural lock are under human review (§8.7); do
+  not change until decided.
 - No thread-affinity assertions.
 
 ### Threading
@@ -512,6 +560,8 @@ These are settled; changes require a new human decision.
 - Composite multi-property updates to one object are the game's synchronization responsibility.
 - No `Thread.Sleep`/target-rate pacing in windowed/offscreen; headless timer pacing is the
   documented exception.
+- The `SceneGraph` structural-lock design is under review (§8.7); keep the current behavior
+  until the human decides.
 
 ### AOT and serialization
 
@@ -553,7 +603,7 @@ These are settled; changes require a new human decision.
 - Pin package versions exactly; no floating versions. `global.json` pins the SDK.
 - Do not change `.editorconfig`/`Directory.Build.props` per project without a decision entry.
 - WP commits: `m<N>(wp-<K>): <imperative summary>`. Merge commits:
-  `Merge m-<N>-wp-<K>: <WP title>`. Process docs: `docs: ...`. Bookkeeping: `chore(m<N>): ...`.
+  `Merge m-<N>/wp-<K>: <WP title>`. Process docs: `docs: ...`. Bookkeeping: `chore(m<N>): ...`.
 - Keep the working tree clean before switching/merging.
 - The only direct-to-`develop` commit is the separate `AGENTS.md` process-doc commit (§7).
 
@@ -567,7 +617,7 @@ These are settled; changes require a new human decision.
 | MSVC / AOT | Visual Studio 18 Community; `dotnet publish -r win-x64` works and runs locally. |
 | Git | 2.53.0.windows.2; remote `https://github.com/BorkEngine/Bork2d.git`; push/admin via GCM. |
 | `gh` CLI | **Not installed.** Use the REST API; GitHub API access verified (`permissions.push=true`). |
-| GitHub Actions | Enabled; 0 workflows; `develop` unprotected; 0 open PRs. |
+| GitHub Actions | Enabled; one workflow exists. It still has obsolete branch/PR triggers; branch CI is dormant. Policy: run only on push to `develop`; WP7 must rewrite the triggers. `develop` unprotected; 0 open PRs. |
 | NuGet | nuget.org reachable; other configured sources: BeGet, Local, VS Offline. |
 | Test toolchain | xUnit 2.9.3 + `Microsoft.NET.Test.Sdk` 17.14.1 + runner 3.1.5 works. |
 | AOT logging spike | ZLogger 2.5.10 + MEL 11.0.0-rc.1 + `AddZLoggerConsole` publishes/runs AOT clean. |
@@ -580,7 +630,8 @@ Risks to watch:
 - `dotnet format` is sensitive to line endings; normalize before enabling the gate.
 - ZLogger/Nerdbank are verified in isolated spikes, not yet inside the engine projects; re-run
   AOT from WP6 and WP7.
-- CI does not run AOT; local AOT evidence is mandatory.
+- CI runs only on push to `develop` (after milestone merge); no PR/branch CI. Local AOT
+  evidence is mandatory.
 - No `gh` CLI: PR creation is API-only. Never echo the token; never commit credentials.
 
 ## 11. Authoritative documents
