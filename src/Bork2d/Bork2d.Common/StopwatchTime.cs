@@ -1,9 +1,9 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Bork2d.Api;
 
 namespace Bork2d.Common;
 
-public class StopwatchTime: ITime
+public class StopwatchTime : ITime
 {
     public double DeltaTime { get; private set; }
     public double Time { get; private set; }
@@ -18,7 +18,7 @@ public class StopwatchTime: ITime
         DeltaTime = 0;
         Time = 0;
     }
-    
+
     public void NewFrame()
     {
         var tick = Stopwatch.GetTimestamp();

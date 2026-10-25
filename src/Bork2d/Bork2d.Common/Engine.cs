@@ -1,10 +1,10 @@
-﻿using Bork2d.Api;
+using Bork2d.Api;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bork2d.Common;
 
-public class Engine<TLayer, TGame>: IEngine<TLayer>
+public class Engine<TLayer, TGame> : IEngine<TLayer>
     where TLayer : struct, Enum
     where TGame : IGame<TLayer>
 {

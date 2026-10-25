@@ -1,4 +1,4 @@
-﻿namespace Bork2d.Api;
+namespace Bork2d.Api;
 
 /// <summary>
 /// The exception thrown for engine-originated startup, configuration, and validation failures.

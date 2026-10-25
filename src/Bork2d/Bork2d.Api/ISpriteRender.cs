@@ -1,4 +1,4 @@
-﻿namespace Bork2d.Api;
+namespace Bork2d.Api;
 
 /// <summary>
 /// A sprite renderable in the scene graph: a transform plus a sprite handle and draw state.

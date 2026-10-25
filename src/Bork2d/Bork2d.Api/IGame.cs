@@ -1,4 +1,4 @@
-﻿namespace Bork2d.Api;
+namespace Bork2d.Api;
 
 /// <summary>
 /// The game entry point injected by the host as a caller-constructed instance.

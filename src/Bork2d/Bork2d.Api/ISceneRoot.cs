@@ -1,4 +1,4 @@
-﻿namespace Bork2d.Api;
+namespace Bork2d.Api;
 
 /// <summary>
 /// The read-only root of the strong scene graph.
