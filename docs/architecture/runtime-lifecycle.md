@@ -2,8 +2,8 @@
 
 > **Status:** the builder, its validation, the one-tick `Bork2dApp.Run()` sequence, and app
 > `Dispose()` are `Current` (M1). Window, input, assets, renderer, tick loop, and paced modes are
-> `Partial` or `Planned`: every mode runs the same one-tick smoke, `IWindow`/`IInput`/`IAssets`
-> are throwing stubs, and `ITime` is never advanced.
+> `Partial` or `Planned`: every mode runs the same one-tick smoke, `IWindow`/`IAssets` return
+> throwing stubs, `IInput` throws on access, and `ITime` is never advanced.
 
 ## 1. Public startup contract
 

@@ -48,7 +48,7 @@ obvious; braces for control flow; one type per file; `_camelCase` private fields
 constants; `I`-prefixed interfaces; `Async` suffix and no `async void` outside handlers; guard
 clauses; no regions except generated code; no commented-out code; XML docs on public API.
 
-Known gap: `IAssets`, `IWindow`, `IInput`, `ITime`, and most `Data.cs` members predate the XML-doc
+Known gap: `IAssets`, `IWindow`, `IInput`, `ITime`, and the `Data.cs` types predate the XML-doc
 rule and are undocumented. Add docs when those contracts are implemented (M2/M3); do not remove
 the rule.
 
