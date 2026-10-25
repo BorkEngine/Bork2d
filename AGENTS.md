@@ -24,10 +24,10 @@
 
 | Area | State |
 | --- | --- |
-| Branch | `develop`; `AGENTS.md` is committed separately. Integration branch `m-1/common`; task/fix branches `m-1/wp-1` … `m-1/wp-5`, `m-1/fix-ci`, `m-1/fix-scene`. |
-| M1 progress | WP1–WP5 and the CI/scene corrections are merged into `m-1/common`. WP6–WP8 are not started. |
+| Branch | `develop`; `AGENTS.md` is committed separately. Integration branch `m-1/common`; task/fix branches `m-1/wp-1` … `m-1/wp-5`, `m-1/fix-ci`, `m-1/fix-scene`, `m-1/fix-tree`. |
+| M1 progress | WP1–WP5 and the CI/scene/tree corrections are merged into `m-1/common`. WP6–WP8 are not started. |
 | Solution | `src/Bork2d/Bork2d.slnx`: API/Common/Runtime have M1 code; Assets/Render are wired but empty; tests project exists. Builds with 0 warnings. |
-| Tests | 129 tests on `m-1/common` (including rotation normalization, non-virtual property, and `SceneRoot` separation coverage). |
+| Tests | 130 tests on `m-1/common` (rotation normalization, non-virtual properties, independent `SceneRoot`, unordered tree, camera `ZIndex`). |
 | Build baseline | `Directory.Build.props`, `.editorconfig`, `.gitattributes`, `global.json`, warnings-as-errors/style gates are active. `dotnet format --verify-no-changes` passes on `m-1/common`. |
 | CI | GitHub Actions enabled; workflow triggers **only on push to `develop`** (`m-1/fix-ci`). No PR/branch CI. |
 | Documentation | M0 complete; M1 in progress. API/architecture docs partially updated; WP8 final pass pending. |
@@ -362,9 +362,9 @@ pack, or asset system (M2/M3/M6+).
 
 ### 8.2 Work packages and waves
 
-**Status:** WP1–WP5 and the CI/scene corrections are merged into `m-1/common`. WP6–WP8 are not
-started. The remaining open architecture decisions are the SceneGraph holder and the property/
-structural locking model (§8.7).
+**Status:** WP1–WP5 and the CI/scene/tree corrections are merged into `m-1/common`. WP6–WP8 are
+not started. There are no open architecture decisions in M1; internal frame snapshots are M7
+and camera ordering is M8.
 
 | WP | Branch | Scope | Depends on | Wave |
 | --- | --- | --- | --- | --- |
@@ -451,13 +451,16 @@ Do not propagate these; fix them in WP8 and in same-change docs where a contract
 13. CI triggers: fixed in `m-1/fix-ci` (develop push only). Keep it that way.
 14. Rotation units: **degrees**, normalized to `[0, 360)` on assignment; `LocalRotation` and
     `WorldRotation` return normalized values. Merged in `m-1/fix-scene`.
-15. SceneGraph design: the separate `SceneGraph` holder and the parent-change structural lock are
-    under human review (see §8.7). Do not change until decided.
+15. Scene tree: **unordered**, no entity IDs, no ordered discovery, no `SceneGraph` holder, no
+    `SceneNodeTraversal`/child-enumeration helper. Engine-owned global structural lock for parent
+    changes; per-object locks for properties (D-026).
 16. WP5 logging is approved and merged; its default format/versions/ownership wrapper are now
     the logging contract.
 17. `Transform` hot properties are **non-virtual**; `SceneRoot` does **not** inherit `Transform`.
     Performance is a first-class constraint; no virtual dispatch/unnecessary inheritance on
     scene hot paths. Merged in `m-1/fix-scene`.
+18. `ICamera<TLayer>.ZIndex` exists in M1; camera ordering is applied in M8, ties unspecified.
+    Internal value-only snapshot structs are planned for M7, not implemented in M1.
 
 ### 8.5 Adopted M1 decisions (human, 2026-10-25)
 
@@ -476,6 +479,10 @@ These are settled; changes require a new human decision.
 | Rotation unit | **Degrees**, normalized to `[0, 360)` on assignment. `LocalRotation` and `WorldRotation` return normalized values. |
 | Hot-path performance | `Transform` hot properties are **non-virtual**; no virtual dispatch on scene property access. |
 | `SceneRoot` | Does **not** inherit `Transform`; implements `ISceneRoot` directly via an internal node abstraction. |
+| Scene tree | **Unordered**: no entity IDs, no ordered discovery, no child enumeration/traversal helper. |
+| Structural lock | One engine-owned global `System.Threading.Lock` shared by root/transforms/cameras/sprites; property access uses per-object locks. |
+| Camera order | `ICamera<TLayer>.ZIndex` (default 0); ascending, higher applies later; ties unspecified; ordering applied in M8. |
+| Frame snapshots | Internal value-only `CameraSnapshot`/`SpriteSnapshot` structs, not `Bork2d.Api`; capture after `Tick` in M7, no live node references. |
 | `DetachAll` scope | Direct children. |
 | `CreateTransform` parent | Optional (`null` allowed). |
 | Pack path validation | Non-empty/path shape only; pack implementation is M3. |
@@ -495,24 +502,20 @@ These are settled; changes require a new human decision.
 - [ ] `dotnet format --verify-no-changes` passes.
 - [ ] AOT smoke publishes and runs locally with zero AOT/trim warnings and exercises logging.
 - [ ] Root ownership, read-only root, DetachAll, remove/re-add, GC lifetime, cycle rejection,
-      world-preserving re-parent, entity IDs, layers, and any-thread concurrency are covered by
-      tests.
+      world-preserving re-parent, unordered tree, camera `ZIndex`, layers, and any-thread
+      concurrency are covered by tests.
 - [ ] `Bork2dAppBuilder` validation and one-tick `Run` smoke pass.
 - [ ] No weak `EntityList`, no entity `Dispose`/`IsAlive`, no main-thread requirement.
 - [ ] Docs/API/guide/reference/roadmap/decision log/READMEs match the code; §8.4 fixed.
 - [ ] CI is green on `develop` after the milestone merge; no PR/branch CI; local AOT evidence is attached to the PR.
 - [ ] Final ready-for-review PR `m-1/common` → `develop` is open; **not merged**; human review pending.
 
-### 8.7 Open design decisions: SceneGraph and locking
+### 8.7 Resolved architecture decisions
 
-M1 is proceeding on the other approved corrections; these are the remaining architecture
-questions. Do not change `SceneGraph` or the per-object locks until the human answers.
-
-| Decision | Current state | Options / question |
-| --- | --- | --- |
-| SceneGraph holder | `SceneGraph` is an internal per-engine holder of the structural `Lock` and monotonic ID allocator; it holds **no** entity list. `SceneRoot` owns children. | (A) keep it, optionally rename to `SceneContext`/`SceneState`; (B) remove it and put the lock/ID allocator on `SceneRoot`/`Scene`; (C) remove the structural lock and require single-threaded scene mutation (would change D-024 and invalidate concurrency tests). Which ownership/concurrency model do you want? |
-| Why lock parent changes | Attach/detach mutates shared parent/child lists and must serialize cycle/single-parent/traversal invariants when workers call the API from any thread. Per-object locks cover local properties only. | Keep the structural lock, narrow it, or drop any-thread mutation? |
-| Per-object property locks | Every `Transform` local property get/set currently takes its own `Lock`; this is likely a larger hot-path cost than `SceneGraph` itself. | Keep the any-thread contract (locks), require single-threaded scene mutation (remove locks), or move to atomics/immutable snapshots. Which threading model do you want? |
+There are no open M1 architecture decisions. The tree is unordered with no entity IDs or
+traversal helper; one engine-owned structural `Lock` serializes parent changes and per-object
+`Lock`s protect properties (D-024, D-026). Internal value-only snapshots are M7; camera ordering
+is applied in M8 (D-026).
 
 ## 9. Engineering rules (global)
 
@@ -539,26 +542,27 @@ questions. Do not change `SceneGraph` or the per-object locks until the human an
 - `ITransform.DetachAll()` detaches **direct children**; any transform can own children.
 - Re-parenting preserves world transform; reject self/cycles/root parent; root cannot be
   parented.
-- Entity IDs are monotonic and non-reused; discovery order is entity-ID order.
+- The tree is **unordered**: no entity IDs, no ordered discovery, no child enumeration/traversal
+  helper in M1.
 - Rotation public unit is **degrees**, normalized to `[0, 360)` on assignment; `LocalRotation`
   and `WorldRotation` return normalized values.
-- The `SceneGraph` holder and parent-change structural lock are under human review (§8.7); do
-  not change until decided.
+- One engine-owned structural `Lock` serializes parent changes; per-object `Lock`s protect local
+  properties. No `SceneGraph` holder.
 - No thread-affinity assertions.
 
 ### Threading
 
 - Any thread may call the public API during `Setup`/`Tick`/`Teardown`; engine callbacks run on
   the tick thread.
-- Structural changes use one scene-graph `System.Threading.Lock`; individual objects use
+- Structural changes use one engine-owned `System.Threading.Lock`; individual objects use
   per-object `Lock`s. Prefer `Interlocked`/`Volatile`/immutable snapshots on hot paths.
 - Avoid `lock (object)`; never hold a lock across an await/blocking wait; keep critical
   sections short. Document lock ordering where multiple locks are unavoidable.
 - Composite multi-property updates to one object are the game's synchronization responsibility.
 - No `Thread.Sleep`/target-rate pacing in windowed/offscreen; headless timer pacing is the
   documented exception.
-- The `SceneGraph` structural-lock design and the per-object property locks are under review
-  (§8.7); keep the current behavior until the human decides.
+- Parent changes are engine-globally serialized; property access uses per-object locks. Snapshot
+  capture is M7 and runs after `Tick`; workers must not write scene state after `Tick` returns.
 
 ### AOT and serialization
 
@@ -585,7 +589,8 @@ questions. Do not change `SceneGraph` or the per-object locks until the human an
 - Scene/transform hot paths must avoid virtual dispatch and unnecessary inheritance. `Transform`
   properties are non-virtual; `SceneRoot` is not a `Transform`.
 - Prefer sealed/internal types, direct fields/accessors, and structs where they do not fight the
-  ownership model. Do not add per-access locks or allocations on hot paths without a measurement.
+  ownership model. M1 uses per-object locks for property access; treat that as a measured
+  baseline, not a mandate to add more locks.
 - Measure before/after performance-sensitive changes; report the method used.
 
 ### Style and tests
@@ -595,7 +600,8 @@ questions. Do not change `SceneGraph` or the per-object locks until the human an
   `_camelCase` private fields; guard clauses; no regions except generated code; no commented-out
   code; XML docs on public API.
 - xUnit. Add tests with behavior changes. GC/lifetime tests must be deterministic; concurrency
-  tests join all workers and assert IDs/order/state. No flaky retries without a tracking entry.
+  tests join all workers and assert relationships/state, not entity IDs or order. No flaky
+  retries without a tracking entry.
 - Suppressions must be narrow, justified, and scoped; `NoWarn` is a review flag.
 - Line endings: normalize to LF via `.gitattributes`/`.editorconfig` in WP1; run
   `git add --renormalize .` once, as part of the format baseline.
@@ -657,7 +663,7 @@ Read these before changing code:
 7. [`docs/api/reference.md`](docs/api/reference.md) and
    [`docs/api/guide.md`](docs/api/guide.md) — public contract and examples.
 8. [`docs/decisions.md`](docs/decisions.md) — D-022 (quality gate), D-023 (root ownership),
-   D-024 (thread affinity).
+   D-024 (thread affinity), D-025 (rotation), D-026 (unordered tree, camera `ZIndex`, snapshots).
 9. [`docs/roadmap.md`](docs/roadmap.md) — milestone sequence and progress log.
 
 When code and docs disagree, the current milestone spec plus the target architecture docs are
@@ -673,5 +679,5 @@ authoritative. Record the disagreement and reconcile it in the milestone's docum
 - [`docs/architecture/projects.md`](docs/architecture/projects.md) — dependency matrix.
 - [`docs/architecture/nativeaot.md`](docs/architecture/nativeaot.md) — AOT.
 - [`docs/architecture/logging.md`](docs/architecture/logging.md) — logging.
-- [`docs/decisions.md`](docs/decisions.md) — D-022/D-023/D-024.
+- [`docs/decisions.md`](docs/decisions.md) — D-022/D-023/D-024/D-025/D-026.
 - [`docs/roadmap.md`](docs/roadmap.md) — milestone context.
