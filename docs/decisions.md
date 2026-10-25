@@ -45,11 +45,12 @@
 - **Decision:** Three snapshot slots with states `Free → Writing → Ready → Rendering → Free`.
   A slot is held until the GPU frame fence. The tick can run ahead while slots are free and
   blocks only when all slots are occupied. The renderer always takes the newest `Ready`
-  snapshot; older undisplayed snapshots are dropped. There is no target tick rate, deadline
-  timer, or `Sleep`.
+  snapshot; older undisplayed snapshots are dropped. Windowed/offscreen have no target tick
+  rate, deadline timer, or `Sleep`.
 - **Consequences:** Tick rate follows the renderer/GPU frame rate and can burst up to the ring
-  depth. Latency and memory are bounded. Headless mode has no ring and is uncapped. The ring
-  is the highest-risk concurrency code and needs fake-fence stress tests.
+  depth. Latency and memory are bounded. Headless mode has no ring and uses a timer at its
+  configured tick rate (default 60, `0` = uncapped). The ring is the highest-risk concurrency
+  code and needs fake-fence stress tests.
 - **Alternatives:** Double buffer with backpressure; strict alternation; unbounded queue;
   uncapped tick with dropped frames.
 - **Docs:** [Threading](architecture/threading.md#4-triple-buffer-handoff)
@@ -60,12 +61,14 @@
 - **Context:** The engine must work on 60, 120, 165 Hz and uncapped displays without a fixed
   simulation rate.
 - **Decision:** `ITime.DeltaTime` is wall-clock time between tick starts, clamped by a
-  configurable max-delta safety value (default 0.25 s). There is no target tick rate, no
-  accumulator, and no render interpolation in v1. Pacing comes from the bounded snapshot ring
-  or, in headless mode, from the CPU.
-- **Consequences:** Simple loop and API; display-rate-independent. Frame pacing is bounded by
-  the ring, not by a timer. Games needing deterministic simulation implement their own
-  accumulator. `MaxDeltaTime` is a safety clamp, not a delay.
+  configurable max-delta safety value (default 0.25 s). Windowed/offscreen have no target tick
+  rate, no accumulator, and no render interpolation in v1. Pacing comes from the bounded
+  snapshot ring. Headless uses `WithHeadless(ticksPerSecond)` (default 60, `0` = uncapped) with
+  a timer.
+- **Consequences:** Simple loop and API; display-rate-independent. Windowed/offscreen frame
+  pacing is bounded by the ring, not by a timer; headless pacing is the one intentional timer.
+  Games needing deterministic simulation implement their own accumulator. `MaxDeltaTime` is a
+  safety clamp, not a delay.
 - **Alternatives:** Fixed step + interpolation; fixed step without interpolation; 60 Hz cap.
 - **Docs:** [Runtime lifecycle](architecture/runtime-lifecycle.md#5-tick-loop-and-pacing)
 
@@ -109,16 +112,20 @@
 
 ## D-008 Units, Y-up, half-height camera, per-sprite scale
 
-- **Status:** Accepted; radians/vertex conventions proposed
+- **Status:** Accepted; pivot/topology conventions proposed
 - **Context:** The engine needs unambiguous coordinates and sprite sizing.
 - **Decision:** World units are abstract; +X right, +Y up; radians CCW. `Camera.Size` is the
   **half** visible height; viewport aspect determines width. Each sprite asset carries a
-  pixels-to-units `scale`; `Transform.LocalScale` multiplies it. No global PPU. Input is
-  framebuffer pixels, top-left, converted through camera helpers. Sprite vertices are source
-  pixels, +Y down, then flipped to world Y-up by the renderer; the editor bakes the origin.
+  **pixels-per-unit** `scale`; world size divides by it, and `Transform.LocalScale` multiplies.
+  No global PPU. Input is framebuffer pixels, top-left, converted through camera helpers.
+  Sprites have no vertices array: a `Quad` is generated from UVs, texture size, scale, and a
+  normalized pivot (default center); `topology` is a `Quad`/`TriangleStrip`/`Triangles` enum,
+  with only `Quad` in v1.
 - **Consequences:** Pixel art and arbitrary unit scales coexist. Camera numbers are Unity-like
-  (half-height). Sprite size depends on asset data; unready sprites are skipped.
-- **Alternatives:** Global PPU; Y-down world; full-height Size; pixel-sized world.
+  (half-height). Sprite size depends on asset data; unready sprites are skipped. Non-Quad
+  topology needs a future mesh asset and renderer path.
+- **Alternatives:** Global PPU; Y-down world; full-height Size; pixel-sized world; explicit
+  vertices array.
 - **Docs:** [Rendering](architecture/rendering.md#7-coordinates-camera-and-projection),
   [Assets](architecture/assets.md#9-sprite-assets)
 
@@ -126,8 +133,8 @@
 
 - **Status:** Accepted; technical details proposed
 - **Context:** Many sprites/texture pages need cheap drawing.
-- **Decision:** Vulkan 1.3 + SDL2/Silk.NET. Sprites are instanced four-vertex quads resolved
-  from sprite assets (vertices/UVs/scale) in one pipeline. Texture pages use a descriptor-
+- **Decision:** Vulkan 1.3 + SDL2/Silk.NET. Sprites are instanced four-corner quads generated
+  from sprite assets (UVs/scale/pivot/topology) in one pipeline. Texture pages use a descriptor-
   indexed bindless sampler array; instances select the page. Dynamic rendering; no render
   pass/framebuffer for the swapchain. v1: no depth, no MSAA/HDR, no per-sprite materials;
   ordering layer → `ZIndex` → entity ID; straight alpha. Windowed and offscreen modes share the
@@ -135,8 +142,8 @@
 - **Consequences:** One draw per camera; no per-sprite descriptors. Device must support
   descriptor indexing/bindless limits. Transparency needs explicit sorting. Variable-topology
   meshes need a future geometry path.
-- **Alternatives:** Traditional passes; per-page draws; depth-based ordering; unit-quad
-  hardcoding (rejected to honor per-sprite vertices).
+- **Alternatives:** Traditional passes; per-page draws; depth-based ordering; explicit
+  per-sprite vertex buffers.
 - **Docs:** [Rendering](architecture/rendering.md)
 
 ## D-010 Packed assets and virtual filesystem
@@ -144,15 +151,18 @@
 - **Status:** Accepted; header entry encoding and missing-pack policy proposed
 - **Context:** Assets must ship compactly, be loadable in the background, support overlays, and
   avoid filesystem/path ambiguity.
-- **Decision:** Runtime assets live in `assets.pck` (magic `BORK2DPK`, version 1, header length,
-  MessagePack array of six-element entries, uint64 offsets/lengths/sizes). `assets.pck` is the
-  base pack; `IAssets.LoadPack` mounts later packs above it (later wins, no unload in v1).
-  Browsing is a merged, shadowed-hidden view. Debug packs are uncompressed; release packs use
-  max Zstd and store compressed bytes only when smaller. Paths are lowercase `/` keys without
+- **Decision:** Runtime assets live in `assets.pck` (magic `BORK2DPK`, version 1, 28-byte
+  prefix: compressed/uncompressed header lengths plus XXH3-64 checksum, then the
+  Zstd-compressed MessagePack header, then data). Entries are six-element arrays with uint64
+  offsets/lengths/sizes. `assets.pck` is the base pack; `IAssets.LoadPack` mounts later packs
+  above it (later wins, no unload in v1). Browsing is a merged, shadowed-hidden view. The header
+  is always compressed and checksummed; asset payloads have no checksum, are uncompressed in
+  debug, and use max Zstd in release only when smaller. Paths are lowercase `/` keys without
   source extensions. TOML never ships.
 - **Consequences:** Deterministic, bounded loading; overlays for DLC/tests. Format becomes a
-  compatibility surface from M3. No unload means memory is load-and-keep in v1. Default pack
-  missing policy remains open.
+  compatibility surface from M3. No unload means memory is load-and-keep in v1. Header
+  corruption is detected; raw asset corruption is not. Default pack missing policy remains
+  open.
 - **Alternatives:** Loose files; ZIP; one uncompressed blob; first-wins overlays; runtime TOML.
 - **Docs:** [Assets and pack files](architecture/assets.md)
 
@@ -173,10 +183,12 @@
 
 - **Status:** Accepted direction; schema details open
 - **Context:** Data should be git-friendly while runtime loading is compact and AOT-safe.
-- **Decision:** TOML is the source of truth for custom data, texture metadata, and sprite
-  definitions. The JIT baker converts TOML to MessagePack and packs it with raw payloads. The
-  NativeAOT runtime reads MessagePack only with source-generated formatters. Data references
-  assets by path, never `Sprite.Id`. Editor/baker may use reflection and TOML; runtime may not.
+- **Decision:** TOML is the source of truth for custom data, sprite definitions, and texture
+  sidecar metadata. The JIT baker converts TOML to MessagePack and packs it with raw payloads.
+  The NativeAOT runtime reads MessagePack only with
+  [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) generated shapes.
+  Data references assets by path, never `Sprite.Id`. Editor/baker may use reflection and TOML;
+  runtime may not.
 - **Consequences:** Readable diffs, compact runtime, one model. Requires a build step,
   validators, source generators, and comment/round-trip decisions. Runtime cannot hot-load TOML.
 - **Alternatives:** JSON; binary-only; TOML at runtime; reflection serialization.
@@ -229,11 +241,11 @@
   build tools have different constraints.
 - **Decision:** Runtime/game projects (`Api`, `Common`, `Assets`, `Render`, `Runtime`,
   `Project.Desktop`) are NativeAOT- and trim-safe from M1. No runtime reflection, assembly
-  scanning, runtime TOML, or dynamic code. MessagePack formatters are source-generated. The
-  editor and baker remain JIT and may use reflection/TOML. `WithGame(instance)` avoids
+  scanning, runtime TOML, or dynamic code. Nerdbank.MessagePack shapes are source-generated.
+  The editor and baker remain JIT and may use reflection/TOML. `WithGame(instance)` avoids
   reflection-based construction.
 - **Consequences:** AOT/trim analyzers and publish smoke are baseline; some libraries may need
-  adapters; game constructors can take dependencies; missing generated formatters fail fast.
+  adapters; game constructors can take dependencies; missing generated shapes fail fast.
   Editor stays rich/JIT.
 - **Alternatives:** AOT everything; AOT only at release; reflection runtime.
 - **Docs:** [NativeAOT](architecture/nativeaot.md)
@@ -243,13 +255,15 @@
 - **Status:** Accepted
 - **Context:** Dedicated servers should not initialize a GPU/window; tests still need to render
   without a window.
-- **Decision:** Two builder modes: `WithHeadless()` (no SDL/Vulkan/render thread; data/assets/
-  tick; uncapped) and `WithOffscreen(w,h)` (Vulkan, no surface/swapchain, internal target,
-  frames discarded, bounded run-ahead). Windowed is the default. Modes are mutually exclusive;
-  `IWindow`/`IInput` throw in headless/offscreen.
-- **Consequences:** Server deployments avoid GPU/window dependencies; CI can exercise Vulkan
-  without a display. Offscreen output is not publicly readable in v1; public readback is future
-  work. Headless is uncapped by design (no artificial delay).
+- **Decision:** Two builder modes: `WithHeadless(int ticksPerSecond = 60)` (no
+  SDL/Vulkan/render thread; data/assets/tick; timer-paced; `0` = uncapped) and
+  `WithOffscreen(w,h)` (Vulkan, no surface/swapchain, internal target, frames discarded, bounded
+  run-ahead). Windowed is the default. Modes are mutually exclusive; `IWindow`/`IInput` throw in
+  headless/offscreen.
+- **Consequences:** Server deployments avoid GPU/window dependencies and get a useful default
+  60 Hz tick rate; `0` preserves uncapped runs. CI can exercise Vulkan without a display.
+  Offscreen output is not publicly readable in v1; public readback is future work. Headless
+  timer pacing is the one intentional artificial delay.
 - **Alternatives:** One offscreen headless mode; no-render only; a renderer on/off flag.
 - **Docs:** [Runtime lifecycle](architecture/runtime-lifecycle.md#10-headless-and-offscreen-modes)
 
@@ -272,12 +286,13 @@
 - **Context:** Raw texture bytes need dimensions/format, and sprites need geometry/UVs/scale.
 - **Decision:** Textures use a separate MessagePack descriptor (`textures/<name>`) plus a raw
   payload (`textures/raw/<name>`): width, height, format (`rgba8` now/KTX2 later), filter,
-  wrap. Sprites are MessagePack assets with texture path, four vertices, four UVs, and a
-  pixels-to-units scale; source is TOML, baked by M4. Vertices are source pixels/+Y down,
-  flipped by the renderer. v1 quads; future meshes add indices/topology.
+  wrap. Sprites are MessagePack assets with texture path, UVs, a **pixels-per-unit** scale, a
+  normalized pivot (default center), and a `topology` enum (`Quad`/`TriangleStrip`/`Triangles`);
+  there is no vertices array. Source is TOML, baked by M4. v1 supports `Quad` only; non-Quad
+  needs a future mesh asset.
 - **Consequences:** Textures can be shared; descriptors carry sampler metadata; KTX2 migration
-  is contained. Sprite vertices produce per-instance quads (not a hard-coded unit quad).
-  Variable-topology meshes need a future renderer path.
+  is contained. The renderer generates per-instance quad corners from UV span, texture size,
+  scale, and pivot. Variable-topology meshes need a future renderer path.
 - **Alternatives:** Metadata in sprite asset; self-describing raw header; KTX2 only.
 - **Docs:** [Assets: texture descriptors](architecture/assets.md#8-texture-descriptors),
   [Assets: sprite assets](architecture/assets.md#9-sprite-assets)
@@ -295,6 +310,36 @@
 - **Alternatives:** Assembly scanning; source-generator-only registrations; deferred.
 - **Docs:** [Editor](architecture/editor.md#3-editor-builder)
 
+## D-021 ZLogger logging surface
+
+- **Status:** Accepted
+- **Context:** Engine and game code need structured, low-overhead logging with a good default
+  experience; the builder should own configuration.
+- **Decision:** Use Microsoft.Extensions.Logging with ZLogger providers. `IEngine` exposes
+  `ILoggerFactory`. The builder has `WithLogging(Action<ILoggingBuilder>)`; if omitted, it
+  configures a pretty ZLogger console provider. `Bork2d.Api` references
+  `Microsoft.Extensions.Logging.Abstractions` only; `Bork2d.Runtime` carries ZLogger. The app
+  owns/disposes the default factory; user-supplied configuration uses the same lifetime.
+- **Consequences:** Game code can create category loggers from the engine factory; a default
+  run is readable without configuration. ZLogger/MEL must be validated for NativeAOT/trimming.
+  Logging is thread-safe and available in windowed/offscreen/headless modes.
+- **Alternatives:** No logging dependency; custom logger interface; file-only logging.
+- **Docs:** [Logging](architecture/logging.md)
+
+## D-022 Warnings-as-errors and C# style gate
+
+- **Status:** Accepted
+- **Context:** The codebase should stay uniform and free of warning debt from the start.
+- **Decision:** All projects (engine, editor, tests, samples) use `TreatWarningsAsErrors`,
+  `EnforceCodeStyleInBuild`, and a Microsoft/.NET-standard `.editorconfig`; relevant IDE style
+  rules are `error`. CI runs `dotnet format --verify-no-changes`. AOT/trim analyzers are also
+  errors for runtime projects.
+- **Consequences:** Style violations fail the build, not just review. Some legacy code will
+  need formatting as it lands. Suppressions require a justified `#pragma`/attribute and a
+  comment. This applies from M1.
+- **Alternatives:** Warnings only; style warnings only in CI; AnalysisMode=All with more noise.
+- **Docs:** [Contributing](contributing.md#3-build-style-and-warnings)
+
 ## Proposed defaults awaiting sign-off
 
 These are decisions embedded in the docs that were not explicitly chosen. They are safe to
@@ -309,11 +354,12 @@ change before the milestone that implements them.
 | DPI | physical pixels, no logical scaling | M2 |
 | Default pack missing | Startup error; explicit empty FS option for tools | M1/M3 |
 | Header entry encoding | Six-element array `[path, isRaw, isCompressed, offset, length, size]` | M3 |
+| Header checksum | XXH3-64 seed 0 over uncompressed header, uint64 LE | M3 |
 | Texture descriptor paths | `textures/<name>` descriptor, `textures/raw/<name>` payload | M3 |
 | Zstd API | .NET 11 built-in; adapter if API differs | M3 |
 | Frames in flight | 2 GPU frames; 3 snapshot slots | M6/M7 |
 | Allocator | Minimal suballocator first; VMA if needed | M6 |
-| Sprite vertex orientation | Source pixels, +Y down, renderer flips | M4/M5 |
+| Sprite geometry | Quad from UVs + texture size / scale; pivot center | M4/M5 |
 | TOML library | Tomlyn; preserve comments if practical | M4 |
 | Project descriptor | `bork2d.project.toml` with asset/type mapping | M4/M5 |
 | Shader compiler | glslangValidator build target; embedded SPIR-V | M8 |
@@ -322,6 +368,7 @@ change before the milestone that implements them.
 | v1 residency | Load-and-keep; unload API later | M3 |
 | Editor custom windows | Type/instance registration; no scanning | M5 |
 | Offscreen readback | Internal discard in v1 | M7/M10 |
+| Logging default | Pretty ZLogger console | M1 |
 | Packaging | Project references in template; NuGet later | M9 |
 | v1 API freeze | At v1.0 release review | M10 |
 
@@ -355,3 +402,5 @@ document in the same change. Do not rewrite history by deleting an old decision;
 | D-018 | Game instance injection | Accepted |
 | D-019 | Texture descriptors + sprite assets | Accepted / schema partly proposed |
 | D-020 | Compile-time editor registrations | Accepted |
+| D-021 | ZLogger logging surface | Accepted |
+| D-022 | Warnings-as-errors + C# style gate | Accepted |

@@ -66,17 +66,18 @@ flowchart BT
 
 Rules behind the matrix:
 
-- `Api` references **nothing** but the BCL (`System.Numerics`, `System.Threading.Tasks`, and
-  similar). No Silk.NET, no SDL, no Vulkan, no file I/O.
+- `Api` references the BCL (`System.Numerics`, `System.Threading.Tasks`, and similar) plus
+  **Microsoft.Extensions.Logging.Abstractions** for `ILoggerFactory`. No Silk.NET, SDL, Vulkan,
+  ZLogger, Avalonia, or file I/O.
 - `Common` is platform-agnostic. It must not reference SDL, Vulkan, or the asset
   implementation. It consumes `IAssets` through the API interface.
-- `Assets` implements `IAssets` and owns loading/serialization. It may use `Common` for
+- `Assets` implements `IAssets` and owns pack loading/serialization. It may use `Common` for
   internal diagnostics and threading helpers; it must not reference `Render`.
 - `Render` consumes the internal snapshot and resource-table contracts. It must not
   reference `Runtime` and must not call SDL. Window/surface lifetime is handed to it; offscreen
   targets are its own.
 - `Runtime` is the composition root: builder, app host, SDL window/input (windowed), Vulkan
-  bootstrap, headless/offscreen mode selection, and service wiring.
+  bootstrap, headless/offscreen mode selection, ZLogger configuration, and service wiring.
 - `Editor` is independent of the renderer. It edits source data, slices textures, and previews
   them with Avalonia imaging, not with the game renderer. It is JIT and not shipped with the
   game.
@@ -93,7 +94,7 @@ decision log.
 
 | Assembly | Public types |
 | --- | --- |
-| `Bork2d.Api` | All contract interfaces and value types: `IEngine<TLayer>`, `IGame<TLayer>`, `ITime`, `IWindow`, `IInput`, `IAssets`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `ITransform`, `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, and future public exceptions/attributes. |
+| `Bork2d.Api` | All contract interfaces and value types: `IEngine<TLayer>`, `IGame<TLayer>`, `ITime`, `IWindow`, `IInput`, `IAssets`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `ITransform`, `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, `ILoggerFactory`, and future public exceptions/attributes. |
 | `Bork2d.Runtime` | `Bork2dAppBuilder<TLayer>`, `Bork2dApp`, and their option types. Nothing else. |
 | `Bork2d.Editor` | `Bork2dEditorBuilder`, `Bork2dEditorApp`, and the public editor service types needed by `Project.Editor`. |
 
@@ -138,8 +139,9 @@ Consequences:
 | Engine state and loop | `Common` | Entity registry, snapshot builder, tick timing, `Engine<TLayer, TGame>`. |
 | Platform and composition | `Runtime` | Builder, app host, windowed SDL, Vulkan bootstrap, headless/offscreen mode selection, lifecycle. |
 | GPU rendering | `Render` | Device, swapchain (windowed) or offscreen targets, dynamic rendering, descriptor sets, bindless textures, instance buffers, pipeline, present. |
-| Assets and data | `Assets` | Pack VFS, overlays, decompression, descriptors, sprite assets, resource table, source-generated MessagePack, bake support. |
+| Assets and data | `Assets` | Pack VFS, overlays, decompression, descriptors, sprite assets, resource table, Nerdbank.MessagePack shapes, bake support. |
 | Editor UI | `Editor` | Avalonia shell, asset browser, slicing view, property grid, validation, bake/pack invocation. |
+| Logging | `Runtime` / `Api` | ZLogger/Microsoft.Extensions.Logging configuration in Runtime; `ILoggerFactory` contract in Api. |
 | Gameplay | `Project.Common` | Game classes, custom data types, assets. |
 
 ## 5. Game solution layout
@@ -195,16 +197,18 @@ Current state:
 
 Target state:
 
-- `Directory.Build.props` for nullable, analyzers, warnings-as-errors in CI, deterministic
-  builds, and language version.
+- `Directory.Build.props` (M1) for nullable, analyzers, **warnings-as-errors**,
+  **`EnforceCodeStyleInBuild`**, deterministic builds, and language version.
+- A root `.editorconfig` (M1; Microsoft/.NET standard) with the enforced C# style rules set to
+  `error`; CI runs `dotnet format --verify-no-changes`. See [Contributing](../contributing.md).
 - A `global.json` pinning the SDK (`rollForward` policy to be chosen). See roadmap M1.
 - Tests project (`Bork2d.Tests`) and a dependency test that asserts the reference matrix by
   inspecting assembly references.
 - NativeAOT settings on runtime/game projects: `PublishAot`, `IsAotCompatible`, AOT/trim
-  analyzers, warnings-as-errors for engine projects. The editor and baker stay JIT. See
-  [NativeAOT](nativeaot.md).
-- Runtime MessagePack serialization is source-generated; no reflection resolver, runtime TOML,
-  or assembly scanning in shipped code.
+  analyzers. Warnings-as-errors and style errors apply to all projects; the editor and baker
+  stay JIT. See [NativeAOT](nativeaot.md).
+- Runtime MessagePack serialization uses Nerdbank.MessagePack generated shapes; no reflection
+  resolver, runtime TOML, or assembly scanning in shipped code.
 - Distribution as source/project references in the template first; NuGet packaging later.
   The packaging model is `Open`.
 - Versioning: pre-1.0 assemblies may break. Public API changes must update the API guide,

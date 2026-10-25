@@ -26,19 +26,19 @@ The binary pack format and runtime filesystem are specified in
 ```
 Project.Common/Assets/
   data/**.toml          custom data
-  sprites/**.toml       sprite definitions (texture, vertices, UVs, scale)
-  textures/**.toml      texture metadata (filter/wrap/source)
+  sprites/**.toml       sprite definitions (texture, UVs, scale, pivot, topology)
   textures/*            source image or raw RGBA
+  textures/*.toml       Unity-style sidecar import settings
         │
-        │  baker (JIT): TOML → MessagePack, images → raw RGBA8 (KTX2 later)
+        │  baker (JIT): TOML → MessagePack, textures → raw RGBA8 (KTX2 later)
         ▼
   MessagePack data assets + MessagePack sprite/texture descriptors + raw payloads
         │
-        │  pack builder: header, offsets, Zstd in release
+        │  pack builder: compressed header + XXH3-64, Zstd assets in release
         ▼
   assets.pck
         │
-        │  runtime (NativeAOT): source-generated MessagePack readers
+        │  runtime (NativeAOT): Nerdbank.MessagePack generated shapes
         ▼
   IAssets.LoadAsset<T> / LoadSprite / LoadData
 ```
@@ -48,17 +48,19 @@ Rules:
 - TOML is never present in the pack and is never parsed by the shipped runtime.
 - The editor writes TOML and reads it back; it does not edit the binary pack.
 - The baker is a build-time JIT tool; it may use reflection over `Project.Common`.
-- The runtime uses source-generated MessagePack formatters; no reflection resolver.
+- The runtime uses [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack)
+  source-generated shapes; no reflection resolver.
 - One model describes both formats: the same C# type is the TOML authoring model and the
   MessagePack runtime model. Divergent DTOs are avoided unless generated.
 
 ## 3. TOML model
 
-Proposed attributes (names finalised in M4):
+Proposed model (names finalised in M4):
 
 ```csharp
-[Bork2dSerializable]
-public sealed class EnemyDefinition
+[GenerateShape]
+[Bork2dSerializable] // optional editor/baker metadata
+public partial class EnemyDefinition
 {
     public string Id { get; set; } = "";
     public float Health { get; set; }
@@ -66,6 +68,10 @@ public sealed class EnemyDefinition
     public List<AttackDefinition> Attacks { get; set; } = new();
 }
 ```
+
+`[GenerateShape]` is Nerdbank.MessagePack's source-generation anchor. Only the top-level type
+that is serialized needs it; referenced types get shapes generated. The editor/baker may use
+reflection over the same model because they are JIT; the runtime uses the generated shapes.
 
 Constraints:
 
@@ -89,10 +95,11 @@ TOML files may contain comments, but whether round-tripping preserves them is `O
 
 Sprite and texture TOML are first-class asset sources, not custom game classes:
 
-- `textures/<name>.toml` describes the source image and sampler settings; the baker writes a
-  MessagePack descriptor at `textures/<name>` and a raw payload at `textures/raw/<name>`.
-- `sprites/<...>.toml` describes a quad: texture path, vertices, UVs, and units-per-pixel
-  scale; the baker writes a MessagePack sprite asset at `sprites/<...>`.
+- `textures/<file>.toml` is a Unity-style sidecar for the source texture; it carries import
+  settings (filter/wrap), not sprite slices. The baker writes a MessagePack descriptor at
+  `textures/<name>` and a raw payload at `textures/raw/<name>`.
+- `sprites/<...>.toml` describes a quad: texture path, UVs, pixels-per-unit scale, pivot, and
+  topology; the baker writes a MessagePack sprite asset at `sprites/<...>`.
 - Both are generated/edited by `Bork2d.Editor` and validated by the same baker.
 
 Schemas are in [Assets: texture descriptors](assets.md#8-texture-descriptors) and
@@ -115,7 +122,7 @@ Schemas are in [Assets: texture descriptors](assets.md#8-texture-descriptors) an
 - a property grid generated from registered serializable types;
 - a raw TOML view for the same file;
 - validation of required fields, ranges (if attributes exist), asset references, and cycles;
-- texture slicing that writes sprite TOML and texture TOML;
+- texture slicing that writes sprite TOML and texture sidecar import settings;
 - invocation of the baker/pack build.
 
 The editor uses compile-time registrations:
@@ -135,28 +142,29 @@ property metadata because it is JIT. See [Editor](editor.md).
 
 1. **Parse/validate:** the baker parses every TOML file into its model, validates required
    fields, asset references, and sprite geometry.
-2. **Import textures:** decode source images and emit raw RGBA8 payloads (KTX2 later) plus
-   MessagePack texture descriptors.
-3. **Bake data:** serialize custom data and sprite assets to MessagePack with the
-   source-generated formatter set.
+2. **Import textures:** read source images/raw RGBA and emit raw RGBA8 payloads (KTX2 later)
+   plus MessagePack texture descriptors.
+3. **Bake data:** serialize custom data and sprite assets to MessagePack with Nerdbank
+   source-generated shapes.
 4. **Pack:** the pack builder collects MessagePack assets and raw payloads, computes offsets,
-   compresses in release mode, and writes `assets.pck` (see
+   compresses the header and release payloads, and writes `assets.pck` (see
    [Assets: build pipeline](assets.md#11-build-pipeline)).
 5. **Report:** all errors carry file/line context and are surfaced by the editor and CI.
 
 Build modes:
 
-- Debug: no pack compression; faster iteration, larger packs.
-- Release: Zstd maximum, per-asset only if smaller; deterministic output.
+- Debug: header compressed with XXH3-64 checksum; asset payloads uncompressed.
+- Release: header compressed; payloads Zstd-max, per-asset only if smaller; deterministic.
 
 The baker/pack tool and the editor share validation code. The runtime never invokes them.
 
 ## 8. NativeAOT serialization
 
-- Runtime custom data uses source-generated MessagePack formatters (for example a
-  `MessagePackSerializerContext` or generated per-type resolvers; exact shape `Open`).
-- `LoadAsset<T>` requires a generated formatter. Missing registrations fail at build or
-  startup with the type name; there is no reflection fallback.
+- Runtime custom data uses
+  [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) source-generated
+  shapes (`[GenerateShape]` on the top-level type).
+- `LoadAsset<T>` requires a generated shape. Missing shapes fail at build or startup with the
+  type name; there is no reflection fallback.
 - Built-in asset types (pack header, texture descriptor, sprite asset) also use generated or
   hand-written readers.
 - No TOML parser, reflection serializer, assembly scanning, or dynamic code in the runtime.
@@ -180,7 +188,7 @@ See [NativeAOT](nativeaot.md#4-serialization-and-assets).
 | Topic | Question | Proposed default |
 | --- | --- | --- |
 | TOML library | Tomlyn or another parser; comment/trivia preservation. | Tomlyn; preserve comments if practical. |
-| MessagePack setup | Context/resolver layout and source-generator attributes. | Generated context; reflection resolver disabled. |
+| MessagePack setup | Nerdbank.MessagePack shape generation and analyzer policy. | `[GenerateShape]` on serialized roots; reflection resolver disabled. |
 | Attributes | Names, location (`Bork2d.Api` vs separate), required or optional. | Small public attributes in Api. |
 | Polymorphism | Type discriminator or unsupported in v1. | Unsupported unless needed. |
 | Collections | Dictionary key restrictions and deterministic ordering. | String/enum keys; stable sort. |
@@ -207,9 +215,9 @@ See [NativeAOT](nativeaot.md#4-serialization-and-assets).
 | --- | --- | --- |
 | TOML model/attributes | None | M4 |
 | TOML parser/writer | None | M4 |
-| MessagePack source generation | None | M3/M4 |
+| MessagePack source generation | None | Nerdbank.MessagePack shapes (M3/M4) |
 | Baker | None | M4 |
-| Sprite/texture TOML | None | M4/M5 |
+| Sprite/texture sources | None | Sprite TOML + texture sidecars (M4/M5) |
 | Runtime data loading | `LoadAsset<T>` declaration only | M3/M4 |
 | Editor property grid | None | M5 |
 | Pack builder | None | M3/M4 |

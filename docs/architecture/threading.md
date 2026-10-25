@@ -161,7 +161,7 @@ loop:
 ```
 
 - `AcquireFreeSlot` may block when all slots are `Ready`/`Rendering`. That wait is frame
-  backpressure, not an artificial delay; there is no timer or sleep.
+  backpressure, not an artificial delay; windowed/offscreen use no timer or sleep.
 - The publish order is `Ready` before `latest`.
 - A superseded `Ready` slot is freed; a `Rendering` slot is never freed by the producer.
 
@@ -209,10 +209,12 @@ Consequences:
   does not re-present an unchanged snapshot every refresh in v1.
 - **GPU slower than the render thread:** the renderer waits on a frame-slot fence; the tick
   continues until the snapshot ring is full, then waits. This bounds latency and memory.
-- **No artificial delays:** no `Sleep`, no target tick rate, no deadline wait. The only waits
-  are the free-slot wait, the GPU frame-slot fence, and the OS event wait when there is no
-  work.
-- **Headless:** no snapshot ring and no render thread; the tick loop runs uncapped.
+- **No artificial delays in windowed/offscreen:** no `Sleep`, no target tick rate, no deadline
+  wait. The only waits are the free-slot wait, the GPU frame-slot fence, and the OS event wait
+  when there is no work.
+- **Headless is timer-paced:** no snapshot ring and no render thread; the tick loop waits on a
+  timer for the configured `ticksPerSecond` (default 60, `0` = uncapped). This is the one
+  intentional pacing delay, for dedicated servers.
 - **No tearing:** a slot is never overwritten while the renderer is reading it or while a GPU
   frame still references it.
 
@@ -236,24 +238,24 @@ frames in flight, a ready snapshot plus two rendering snapshots use all slots.
 ```mermaid
 sequenceDiagram
     autonumber
-    participant T as Tick / main
+    participant T as Tick and main
     participant S as Snapshot slots
     participant R as Render
     participant G as GPU
 
     T->>T: pump SDL (windowed), acquire free slot
-    T->>T: Tick() mutates entities; join workers
+    T->>T: Tick mutates entities, then joins workers
     T->>S: fill, mark Ready, publish
     alt a GPU frame slot is free
         R->>S: take newest Ready
         S-->>R: slot marked Rendering
         R->>R: resolve assets, sort, copy instances into frame buffer
-        R->>G: submit; GPU reads the instance buffer
-        R->>G: present (windowed; may block on FIFO)
+        R->>G: submit, then GPU reads the instance buffer
+        R->>G: present in windowed mode, may block on FIFO
         G-->>R: frame fence
-        R->>S: Rendering -> Free
+        R->>S: Rendering to Free
     else all frame slots busy
-        R->>R: wait for frame fence/snapshot/control signal
+        R->>R: wait for frame fence, snapshot, or control signal
     end
     T->>T: next tick may wait for a free snapshot slot
 ```
@@ -379,8 +381,9 @@ See [Assets and pack files](assets.md#14-threading).
    once; IDs unique; snapshot matches; disposal from workers is safe.
 4. **Shutdown tests.** Stop during publish, take, or simulated GPU work; all threads exit
    within a timeout; all slots end `Free`.
-5. **Mode tests.** Headless creates no SDL/render thread and ticks uncapped; offscreen creates
-   no surface/swapchain and discards frames; windowed handles resize/minimize.
+5. **Mode tests.** Headless creates no SDL/render thread and paces to its configured tick rate
+   (`0` uncapped); offscreen creates no surface/swapchain and discards frames; windowed handles
+   resize/minimize.
 6. **Allocation tests.** Fixed entity count, no steady-state allocations in snapshot/render
    paths.
 7. **Input tests (windowed).** Fast tap, focus loss, repeated keys, text.
@@ -396,7 +399,7 @@ The threading milestone is not done until tests 1–4 pass reliably under stress
 | Time | `StopwatchTime` unused | Wired with delta clamp; no target rate. |
 | Render thread | None | Windowed/offscreen. |
 | Snapshot slots | None | Three slots held until frame fence. |
-| Headless | None | No SDL/GPU/render thread; uncapped. |
+| Headless | None | No SDL/GPU/render thread; timer-paced (default 60, 0 = uncapped). |
 | Offscreen | None | Windowless Vulkan; internal target. |
 | Entity storage | `ConcurrentDictionary<uint, WeakReference<T>>` | Strong ownership; thread-safe registry. |
 | Input | Interface only | Windowed SDL state + edges. |

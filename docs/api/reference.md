@@ -18,6 +18,7 @@ The public API is **not generally thread-safe**. It is safe under the tick-scope
 | `ITime`, `IWindow`, `IInput`, `IGame` callbacks, builder/`Run` | Main/tick thread only. |
 | `IEngine` scene creation, `ICamera`/`ISpriteRender`/`ITransform` mutation and `Dispose` | Main thread in `Setup`/`Tick`/`Teardown`; game workers inside a tick for **distinct** entities only. |
 | `IEngine.Exit` | Main thread only. |
+| `IEngine.LoggerFactory` | Any thread; Microsoft.Extensions.Logging factories/loggers are thread-safe. |
 | `IAssets.LoadSprite` / `LoadAsset<T>` / `LoadData` / `LoadPack` / `Exists` | Any thread; requests are thread-safe. Completion is asynchronous. `Browse` is for tools, not per-frame. |
 | Value types (`Sprite`, `AssetInfo`, `Color`, `Vector2`, enums) | Any thread; they are copies. |
 | Renderer, swapchain, GPU uploads | Render thread only; no public API. |
@@ -49,8 +50,9 @@ boundaries, not arbitrary data races.
 | Scale | Multiplier; negative values mirror. |
 | `ICamera.Size` | Half visible height in world units. |
 | `ICamera.Viewport` | Normalized `(x, y, width, height)`, top-left origin, `[0,1]`. |
-| Sprite asset vertices | Source pixels, relative to origin, +Y down; renderer flips to world Y-up. |
-| Sprite asset `scale` | Per-sprite units per source pixel. |
+| Sprite asset UVs | Normalized, top-left origin. |
+| Sprite asset `scale` | Pixels per world unit; renderer divides by it. |
+| Sprite asset pivot | Normalized, top-left origin; default center. |
 | Input mouse | Framebuffer pixels, top-left origin. |
 | Time | Seconds; monotonic; `DeltaTime` clamped. |
 | Color | Linear RGBA, components `[0,1]`. |
@@ -74,14 +76,17 @@ boundaries, not arbitrary data races.
 | Assets pack | `assets.pck` next to the executable. |
 | Max delta | 0.25 s safety clamp; not a pacing delay. |
 | VSync | Enabled (`FIFO`) in windowed mode. |
-| Tick rate | **None.** Pacing is bounded run-ahead by the renderer, or uncapped in headless. |
+| Logging | Pretty ZLogger console provider by default; configurable via builder. |
+| Tick rate | **None** for windowed/offscreen. Headless: configurable `ticksPerSecond` (default 60, `0` = uncapped). |
 
 ### 1.4 NativeAOT
 
 The runtime/game is NativeAOT- and trim-safe. There is no runtime reflection, assembly
-scanning, runtime TOML, or dynamic code. `LoadAsset<T>` requires a source-generated MessagePack
-formatter. The game is passed as an instance. See
-[NativeAOT](../architecture/nativeaot.md).
+scanning, runtime TOML, or dynamic code. `LoadAsset<T>` requires a
+[Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) generated shape. The
+game is passed as an instance. `Bork2d.Api` references
+`Microsoft.Extensions.Logging.Abstractions` for `IEngine.LoggerFactory`; no GPU/OS/Silk types
+are allowed. See [NativeAOT](../architecture/nativeaot.md).
 
 ## 2. `IEngine<TLayer>`
 
@@ -92,6 +97,7 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     IWindow Window { get; }
     IInput Input { get; }        // Planned
     IAssets Assets { get; }
+    ILoggerFactory LoggerFactory { get; } // Planned
     ITransform CreateTransform();
     ICamera<TLayer> CreateCamera();
     ISpriteRender<TLayer> CreateSpriteRender();
@@ -105,6 +111,7 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
 | `Window` | `Current` | Window controls. Windowed only; throws in offscreen/headless. |
 | `Input` | `Planned` | Input state. Windowed only; throws in offscreen/headless. |
 | `Assets` | `Current` | Pack/asset requests; thread-safe methods. |
+| `LoggerFactory` | `Planned` | Microsoft.Extensions.Logging factory configured by the builder with ZLogger; create per-category loggers. |
 | `CreateTransform()` | `Current` | Standalone transform for math/hierarchy; not rendered. Inside `Setup`/`Tick`; workers may create during a tick. |
 | `CreateCamera()` | `Current` | Creates/registers a camera; defaults above. Workers may create during a tick. |
 | `CreateSpriteRender()` | `Current` | Creates/registers a sprite renderable; defaults above. Workers may create during a tick. |
@@ -120,6 +127,8 @@ Notes:
   registry is a scaffold detail and will be replaced.
 - The engine has no public `Dispose`; `Bork2dApp` owns shutdown.
 - Headless mode still creates cameras/sprites but never renders; `Window`/`Input` throw.
+- `LoggerFactory` is created/owned by the app; `WithLogging` configures its providers. See
+  [Logging](../architecture/logging.md).
 
 ## 3. `IGame<TLayer>`
 
@@ -159,8 +168,10 @@ public interface ITime
 | `Time` | `Current` | Monotonic gameplay time in seconds, starting at `0` on the first tick. |
 
 - Read-only, main-thread.
-- Variable timestep. **No target tick rate.** Windowed/offscreen pacing is bounded run-ahead
-  against the renderer; headless is uncapped. No `Sleep`/deadline pacing.
+- Variable timestep. Windowed/offscreen have **no target tick rate**; pacing is bounded
+  run-ahead against the renderer. Headless is timer-paced to `ticksPerSecond` (default 60,
+  `0` = uncapped). Windowed/offscreen use no `Sleep`/deadline pacing; headless pacing is the
+  intentional exception.
 - No accumulator, fixed step, or render interpolation.
 - Monotonic `Stopwatch`, not wall-clock time. Not paused on focus loss/minimize.
 - `TickCount` is not in v1.
@@ -258,7 +269,7 @@ public readonly record struct AssetInfo(
 
 | Member | Status | Semantics |
 | --- | --- | --- |
-| `LoadAsset<T>` | `Current` declaration; semantics `Planned` | Loads/decompresses a MessagePack asset with a source-generated formatter. Throws for raw assets/missing paths. |
+| `LoadAsset<T>` | `Current` declaration; semantics `Planned` | Loads/decompresses a MessagePack asset with a Nerdbank generated shape. Throws for raw assets/missing paths. |
 | `LoadSprite` | `Current` declaration; semantics `Planned` | Resolves a sprite asset path and returns a handle immediately; loading is async. Missing returns `Sprite.Empty`. |
 | `LoadData` | `Current` declaration | Returns decompressed bytes for any asset kind. |
 | `LoadPack` | `Planned` | Mounts a pack above the current stack; later wins; no unload in v1. |
@@ -273,7 +284,7 @@ Rules:
 - A sprite is skipped until its sprite asset, texture descriptor, raw payload, and GPU page are
   ready. No blocking, no placeholder.
 - Missing/failed assets log; handles stay non-renderable. Retry policy is `Open`.
-- `LoadAsset<T>` requires a generated formatter. No reflection fallback (NativeAOT).
+- `LoadAsset<T>` requires a Nerdbank generated shape. No reflection fallback (NativeAOT).
 - `LoadPack`/`Browse`/`Exists` are thread-safe; mount packs during `Setup`/before loading.
 - No public pack/asset unload in v1; load-and-keep.
 - Default pack is `assets.pck`; missing/malformed behaviour is `Open` (proposed startup error).
@@ -332,8 +343,8 @@ public interface ISpriteRender<TLayer> : ITransform, IDisposable
 | `FlipX`, `FlipY` | `Planned` | Mirrors the sprite without changing the transform. |
 | `Dispose()` | `Current` | Unregisters; inside `Tick`/`Teardown` (main or owning worker; same entity sync). Disappears from the next snapshot. |
 
-- The sprite asset supplies vertices, UVs, texture path, and units-per-pixel scale.
-  `LocalScale` multiplies. There is no global PPU and no per-renderable pivot.
+- The sprite asset supplies UVs, pivot, topology, texture path, and a **pixels-per-unit**
+  scale. `LocalScale` multiplies. There is no global PPU and no vertices array.
 - Hide with `Sprite = Sprite.Empty` (keep entity) or `Dispose()`.
 - Sorting: layer numeric → `ZIndex` → entity ID. A not-ready asset yields no instance.
 - Headless: entities can exist but never produce an instance.
@@ -434,6 +445,7 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     public Bork2dAppBuilder<TLayer> WithGame(IGame<TLayer> game);
 
     public Bork2dAppBuilder<TLayer> WithAssetsPack(string path);
+    public Bork2dAppBuilder<TLayer> WithLogging(Action<ILoggingBuilder> configure);
 
     public Bork2dAppBuilder<TLayer> WithTitle(string title);
     public Bork2dAppBuilder<TLayer> WithSize(int width, int height);
@@ -441,7 +453,7 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     public Bork2dAppBuilder<TLayer> WithFullscreen(bool fullscreen);
     public Bork2dAppBuilder<TLayer> WithVSync(bool enabled);
 
-    public Bork2dAppBuilder<TLayer> WithHeadless();
+    public Bork2dAppBuilder<TLayer> WithHeadless(int ticksPerSecond = 60);
     public Bork2dAppBuilder<TLayer> WithOffscreen(int width, int height);
 
     public Bork2dAppBuilder<TLayer> WithMaxDeltaTime(double seconds);
@@ -454,12 +466,18 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 - Created/configured on the main thread; `Build()` validates once.
 - `WithGame` takes a **caller-constructed instance**; no `new()`/reflection. The caller keeps
   the instance alive through `Run()`.
-- Mode is windowed by default, or mutually exclusive `WithHeadless()`/`WithOffscreen(w,h)`.
+- Mode is windowed by default, or mutually exclusive `WithHeadless(ticksPerSecond)`/
+  `WithOffscreen(w,h)`.
+- `WithHeadless` defaults to 60 ticks/second; `0` means uncapped. This is the only mode with an
+  intentional pacing timer.
 - Window options apply only to windowed mode and are validated.
 - `WithAssetsPack` default is `assets.pck`.
+- `WithLogging` configures Microsoft.Extensions.Logging with ZLogger. If omitted, the app adds
+  a pretty ZLogger console provider by default. See [Logging](../architecture/logging.md).
 - `WithMaxDeltaTime` is a safety clamp, not a pacing delay.
 - `WithValidation` defaults to on in debug.
-- There is **no** `WithTickRate`; pacing is bounded run-ahead or uncapped headless.
+- There is **no** `WithTickRate`; windowed/offscreen pacing is bounded run-ahead, headless uses
+  the `WithHeadless` tick rate.
 
 ### `Bork2dApp`
 
@@ -483,6 +501,7 @@ public sealed class Bork2dApp : IDisposable
 | --- | :-: | :-: | :-: | :-: |
 | `IEngine` create methods | ✓ | ✓ (distinct entities) | ✗ | ✗ |
 | `IEngine.Exit` | ✓ | ✗ | ✗ | ✗ |
+| `IEngine.LoggerFactory` | ✓ | ✓ | ✓ | ✓ |
 | `ITime` reads | ✓ | ✗ | ✗ | ✗ |
 | `IWindow`/`IInput` | ✓ (windowed) | ✗ | ✗ | ✗ |
 | `IAssets.LoadSprite` / `LoadAsset` / `LoadData` / `LoadPack` / `Exists` | ✓ | ✓ (thread-safe) | ✗ | internal |
@@ -508,7 +527,7 @@ Asset completion callbacks are not on the tick thread; marshal scene changes to 
 | Missing/invalid asset path | Log + `Sprite.Empty` (proposed); not fatal. |
 | Asset not ready | No exception; renderer skips. |
 | Raw asset passed to `LoadAsset<T>` | Throws; use `LoadData`. |
-| Missing MessagePack formatter (AOT) | Build/startup error naming the type; no reflection fallback. |
+| Missing Nerdbank shape (AOT) | Build/startup error naming the type; no reflection fallback. |
 | Cross-thread main-only access | Debug: throw/assert; release: undefined; same-entity races are game responsibility. |
 | Use after `Dispose` | Debug exception where cheap; otherwise undefined. |
 | Invalid layer (`0`/composite) | Debug diagnostic; renderer skips. |
@@ -523,6 +542,7 @@ exceptions remain for argument/programming errors.
 | Contract | Current state |
 | --- | --- |
 | `IEngine.Input` / `Exit` | Missing. |
+| `IEngine.LoggerFactory` | Missing; ZLogger configuration planned. |
 | `IGame.Teardown` | Missing. |
 | `ITransform` world reads | Uncomputed class stubs; not in the interface. |
 | `ICamera` screen/world | Missing. |
@@ -535,7 +555,7 @@ exceptions remain for argument/programming errors.
 | Camera defaults | Scaffold uses cyan/zero mask; target black/all layers. |
 | Entity ownership | Weak references; target strong until `Dispose`. |
 | Layer semantics | Undefined; target one bit/mask with validation. |
-| Sprite sizing | No assets; target vertices/UVs/scale. |
+| Sprite sizing | No assets; target UVs/pivot/topology/pixels-per-unit scale. |
 | Assets/PCK | `Bork2d.Assets` empty. |
 | Threading | Single-threaded placeholder; target bounded ring. |
 
@@ -543,6 +563,7 @@ exceptions remain for argument/programming errors.
 
 - [API guide](guide.md) — usage examples.
 - [Assets and pack files](../architecture/assets.md) — pack, descriptors, sprites.
+- [Logging](../architecture/logging.md) — ZLogger and `IEngine.LoggerFactory`.
 - [Editor](../architecture/editor.md) — editor builder (not game API).
 - [NativeAOT](../architecture/nativeaot.md) — runtime constraints.
 - [Rendering](../architecture/rendering.md) — camera/projection/sorting.

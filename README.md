@@ -35,6 +35,8 @@ dotnet build src/Bork2d/Bork2d.slnx
 Current requirements: .NET SDK `11.0.100-rc.1` (target `net11.0`), Windows. The finished
 engine additionally needs a Vulkan 1.3-capable GPU/driver and the SDL2 native runtime. The
 runtime/game is intended to publish with NativeAOT; the editor and build tools stay JIT.
+The build treats warnings and C# style violations as errors once the M1 rules land; see
+[Contributing](docs/contributing.md).
 
 ## Documentation
 
@@ -44,25 +46,28 @@ Start at the [documentation index](docs/README.md).
 - [Projects and dependencies](docs/architecture/projects.md) — public boundary and game layout.
 - [Runtime lifecycle](docs/architecture/runtime-lifecycle.md) — builder, modes, pacing, shutdown.
 - [Threading and frame handoff](docs/architecture/threading.md) — bounded run-ahead snapshots.
-- [Assets and pack files](docs/architecture/assets.md) — `assets.pck`, overlays, descriptors, sprites.
+- [Assets and pack files](docs/architecture/assets.md) — `assets.pck`, compressed header/checksum, overlays, descriptors, sprites.
+- [Logging](docs/architecture/logging.md) — ZLogger and `IEngine.LoggerFactory`.
 - [Editor](docs/architecture/editor.md) — Avalonia builder and asset/data authoring.
-- [Data and serialization](docs/architecture/data-and-serialization.md) — TOML → MessagePack.
+- [Data and serialization](docs/architecture/data-and-serialization.md) — TOML → Nerdbank.MessagePack.
 - [NativeAOT](docs/architecture/nativeaot.md) — runtime constraints and CI.
 - [Rendering](docs/architecture/rendering.md) — Vulkan 1.3, one instanced draw per camera.
 - [API guide](docs/api/guide.md) and [API reference](docs/api/reference.md).
-- [Implementation roadmap](docs/roadmap.md) and [decision log](docs/decisions.md).
+- [Implementation roadmap](docs/roadmap.md), [decision log](docs/decisions.md), and [contributing](docs/contributing.md).
 
 ## Design at a glance
 
-- Tick and render overlap; no fixed tick rate, no artificial delay. Three snapshot slots bound
-  run-ahead; the tick waits only when the ring is full.
+- Tick and render overlap; no fixed tick rate, no artificial delay in windowed/offscreen.
+  Three snapshot slots bound run-ahead. Headless is timer-paced (default 60, `0` = uncapped).
 - Windowed, offscreen (windowless Vulkan), and headless (no GPU/SDL) modes.
-- NativeAOT runtime; source-generated MessagePack; game passed to the builder as an instance.
-- Assets: `assets.pck` with MessagePack header entries and uint64 offsets; later pack overlays
-  win; debug uncompressed, release Zstd-compressed only when smaller.
-- Textures: MessagePack descriptors + raw RGBA8 payloads. Sprites: MessagePack quads with
-  vertices, UVs, and per-sprite units-per-pixel scale; TOML source, baked.
-- One instanced draw per non-empty camera, bindless texture pages, dynamic rendering.
+- NativeAOT runtime; Nerdbank.MessagePack generated shapes; game passed to the builder as an instance.
+- Logging: Microsoft.Extensions.Logging + ZLogger; `IEngine.LoggerFactory`; pretty console default.
+- Assets: `assets.pck` with a compressed, XXH3-64-checksummed header and uint64 offsets; later
+  pack overlays win; header always compressed, debug assets uncompressed, release Zstd when smaller.
+- Textures: MessagePack descriptors + raw RGBA8 payloads. Sprites: MessagePack quads with UVs,
+  pivot, topology, and pixels-per-unit scale; TOML source, baked. No vertices array.
+- One instanced draw per non-empty camera, generated sprite quads, bindless texture pages, dynamic rendering.
 - Layers are `[Flags]` bits (one per renderable, mask per camera).
 - Abstract world units, Y-up; `Camera.Size` is half the visible height; no global PPU.
 - Editor is an Avalonia JIT tool with compile-time builder registrations; no scene editing.
+- Warnings-as-errors, C# style rules as errors, and `dotnet format` are the M1 CI gate.

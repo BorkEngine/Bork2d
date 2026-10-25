@@ -36,11 +36,16 @@ using var app = new Bork2dAppBuilder<GameLayer>()
 app.Run();
 ```
 
-- `WithGame` takes an **instance**, so constructor injection works: logging, networking,
-  services, test doubles. There is no parameterless-constructor/reflection requirement.
+- `WithGame` takes an **instance**, so constructor injection works for networking, services,
+  test doubles, and logging your host owns. The engine factory itself does not exist until
+  `Build()`; for engine logging, create the logger from `engine.LoggerFactory` in `Setup`.
+  There is no parameterless-constructor/reflection requirement.
 - `Build()` validates on the main thread; `Run()` blocks until shutdown; `Dispose()` cleans up.
 - The game instance must stay alive through `Run()`.
-- There is no target tick rate option. Pacing follows the renderer, with no artificial delay.
+- Windowed/offscreen have no target tick rate; pacing follows the renderer, with no artificial
+  delay. Headless is timer-paced via `WithHeadless(ticksPerSecond)` (default 60, `0` uncapped).
+- Logging is configured with `WithLogging`; if omitted, a pretty ZLogger console provider is
+  installed, and `IEngine.LoggerFactory` is always available.
 - The default pack is `assets.pck`; `WithAssetsPack` can point elsewhere.
 
 ### Modes
@@ -61,7 +66,8 @@ using var offscreen = new Bork2dAppBuilder<GameLayer>()
     .Build();
 offscreen.Run();
 
-// Dedicated server/data tool: no SDL, no Vulkan, no render thread; ticks uncapped.
+// Dedicated server/data tool: no SDL, no Vulkan, no render thread; paced to 60 ticks/s.
+// Use WithHeadless(0) for uncapped.
 using var server = new Bork2dAppBuilder<GameLayer>()
     .WithGame(serverGame)
     .WithHeadless()
@@ -69,16 +75,42 @@ using var server = new Bork2dAppBuilder<GameLayer>()
 server.Run();
 ```
 
-These are separate hosts, not three modes in one process. `WithHeadless()` and
-`WithOffscreen()` are mutually exclusive with window options. `IWindow` and `IInput` throw in
-both windowless modes. See
+These are separate hosts, not three modes in one process. `WithHeadless(ticksPerSecond = 60)`
+and `WithOffscreen()` are mutually exclusive with window options. `0` means uncapped headless.
+`IWindow` and `IInput` throw in both windowless modes. See
 [Runtime lifecycle](../architecture/runtime-lifecycle.md#2-modes).
+
+### Logging
+
+If you do nothing, the builder installs a pretty ZLogger console provider. You can replace or
+extend it:
+
+```csharp
+using var app = new Bork2dAppBuilder<GameLayer>()
+    .WithGame(game)
+    .WithLogging(logging =>
+    {
+        // Configure Microsoft.Extensions.Logging providers, including ZLogger.
+    })
+    .Build();
+```
+
+The engine exposes the resulting factory:
+
+```csharp
+ILogger logger = _engine.LoggerFactory.CreateLogger("MyGame");
+logger.LogInformation("Loaded level {Level}", "start");
+```
+
+See [Logging](../architecture/logging.md) for defaults, categories, and AOT notes.
 
 ## 3. Write a game
 
 ```csharp
 using System.Numerics;
 using Bork2d.Api;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 [Flags]
 public enum GameLayer
@@ -92,16 +124,15 @@ public enum GameLayer
 
 public sealed class MyGame : IGame<GameLayer>
 {
-    private readonly ILogger _logger;
+    private ILogger<MyGame> _logger = NullLogger<MyGame>.Instance;
     private IEngine<GameLayer> _engine = null!;
     private ICamera<GameLayer> _camera = null!;
     private ISpriteRender<GameLayer> _player = null!;
 
-    public MyGame(ILogger logger) => _logger = logger;
-
     public void Setup(IEngine<GameLayer> engine)
     {
         _engine = engine;
+        _logger = engine.LoggerFactory.CreateLogger<MyGame>();
 
         _camera = engine.CreateCamera();
         _camera.LocalPosition = Vector2.Zero;
@@ -242,9 +273,10 @@ Semantics:
 - `Sprite.Empty` means no sprite.
 - `ZIndex` orders within a layer; higher draws later. Equal z is tie-broken by entity ID.
 - `Tint` multiplies the texture; `Color.White` is neutral.
-- The sprite asset stores vertices, UVs, texture path, and a **units-per-pixel scale**.
-  `LocalScale` multiplies it. There is no global PPU and no per-renderable pivot.
-- Pivot/origin is baked into the sprite vertices by the editor/slicer.
+- The sprite asset stores UVs, pivot, topology, texture path, and a **pixels-per-unit scale**;
+  the renderer divides by that scale. `LocalScale` multiplies it. There is no global PPU and
+  no vertices array.
+- Pivot/origin is normalized inside the generated quad; default center.
 - Planned `FlipX`/`FlipY` mirrors the sprite.
 - Dispose a sprite when no longer needed, inside a tick/teardown; a worker may dispose an
   entity it owns.
@@ -312,12 +344,13 @@ var dt = (float)_engine.Time.DeltaTime; // seconds, clamped
 var now = _engine.Time.Time;            // seconds since first tick
 ```
 
-- Variable timestep. There is **no target tick rate** and no artificial pacing delay.
+- Variable timestep. Windowed/offscreen have **no target tick rate** and no artificial pacing
+  delay; headless is timer-paced to its configured tick rate.
 - `DeltaTime` is clamped by `MaxDeltaTime` (default 0.25 s) to survive stalls.
 - The first tick's `DeltaTime` is `0`.
 - Windowed/offscreen pacing is bounded run-ahead: the tick runs until the snapshot ring is full,
   then waits for a GPU frame. The rate follows the renderer/frame rate.
-- Headless pacing is uncapped; the server/game must throttle itself if desired.
+- Headless pacing uses the configured tick rate (`WithHeadless(60)` default, `0` uncapped).
 - No render interpolation. If you need deterministic simulation, run your own fixed-step
   accumulator inside `Tick`.
 
@@ -359,7 +392,7 @@ GameConfig config = await _engine.Assets.LoadAsset<GameConfig>("data/config");
 byte[] raw = await _engine.Assets.LoadData("textures/raw/player");
 ```
 
-- `LoadAsset<T>` reads MessagePack assets and requires a source-generated formatter (NativeAOT).
+- `LoadAsset<T>` reads MessagePack assets and requires a Nerdbank generated shape (NativeAOT).
 - `LoadData` returns decompressed bytes for any asset kind.
 - Both complete on a background thread; do not mutate scene state from the continuation. Marshal
   to a tick.
@@ -410,7 +443,7 @@ public void Tick()
 The game/runtime is NativeAOT- and trim-safe. Practical rules:
 
 - Pass the game as an instance; no reflection construction.
-- Use `LoadAsset<T>` only for types with generated MessagePack formatters.
+- Use `LoadAsset<T>` only for types with Nerdbank generated shapes.
 - Do not scan assemblies, use `Type.GetType`, runtime TOML, or dynamic code in game code.
 - TOML is source/editor format only; the pack contains MessagePack/raw assets.
 - The editor is JIT and not shipped with the game.
@@ -433,7 +466,7 @@ See [NativeAOT](../architecture/nativeaot.md).
 | Choosing a global pixels-per-unit | Inconsistent sprite sizes | Use the sprite asset's scale and transform scale. |
 | Relying on a fixed tick rate | Wrong on 165 Hz displays | Use `DeltaTime`; pacing is frame-based. |
 | Calling `IWindow`/`IInput` in headless/offscreen | Throws | Branch on mode or use separate host code. |
-| Using TOML/reflection at runtime | NativeAOT failure | TOML is baked; use generated MessagePack formatters. |
+| Using TOML/reflection at runtime | NativeAOT failure | TOML is baked; use Nerdbank generated shapes. |
 | Setting `Window.Size` every tick | Swapchain churn | Change on user action. |
 
 ## 14. A complete example
@@ -443,7 +476,7 @@ See [NativeAOT](../architecture/nativeaot.md).
 ```csharp
 using Bork2d.Runtime;
 
-var game = new MyGame(new ConsoleLogger());
+var game = new MyGame();
 
 using var app = new Bork2dAppBuilder<GameLayer>()
     .WithGame(game)
@@ -461,6 +494,8 @@ app.Run();
 ```csharp
 using System.Numerics;
 using Bork2d.Api;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 [Flags]
 public enum GameLayer
@@ -473,18 +508,17 @@ public enum GameLayer
 
 public sealed class MyGame : IGame<GameLayer>
 {
-    private readonly ILogger _logger;
+    private ILogger<MyGame> _logger = NullLogger<MyGame>.Instance;
     private IEngine<GameLayer> _engine = null!;
     private ICamera<GameLayer> _camera = null!;
     private ISpriteRender<GameLayer> _background = null!;
     private ISpriteRender<GameLayer> _player = null!;
     private Vector2 _velocity;
 
-    public MyGame(ILogger logger) => _logger = logger;
-
     public void Setup(IEngine<GameLayer> engine)
     {
         _engine = engine;
+        _logger = engine.LoggerFactory.CreateLogger<MyGame>();
 
         _camera = engine.CreateCamera();
         _camera.Size = 5f;
@@ -552,7 +586,7 @@ app.Run();
 ```
 
 No window, SDL, Vulkan, or render thread is initialized. `IWindow`/`IInput` are unavailable.
-The tick loop is uncapped; server-side throttling is a game concern in v1.
+The tick loop is paced at 60 Hz by default; pass `WithHeadless(0)` for uncapped.
 
 ## 15. Where to go next
 

@@ -10,8 +10,8 @@ The renderer receives one immutable [frame snapshot](threading.md#3-frame-snapsh
 and turns it into pixels:
 
 - one instanced draw call per non-empty camera;
-- sprites are quads resolved from **sprite assets** (vertices, UVs, units-per-pixel scale),
-  not a hard-coded unit quad;
+- sprites are quads resolved from **sprite assets** (UVs, pivot, topology, pixels-per-unit
+  scale), not a hard-coded unit quad;
 - all visible quads in a camera share one pipeline, one instance buffer, and one bindless
   texture set;
 - Vulkan 1.3 dynamic rendering, no `VkRenderPass`/`VkFramebuffer` for the swapchain;
@@ -106,7 +106,8 @@ Same as windowed except:
 
 ### 3.3 Headless
 
-No renderer, no device, no frames. `WithHeadless()` never enters this document's code paths.
+No renderer, no device, no frames. Headless mode (`WithHeadless`) never enters this document's
+code paths.
 
 ### 3.4 Draw-count invariant
 
@@ -127,10 +128,12 @@ The render thread owns all of this; the tick thread only supplies immutable snap
 3. For each camera:
    - filter by `(camera.CullingMask & sprite.Layer) != 0`;
    - skip `Sprite.Empty`;
-   - resolve the `Sprite` handle to a sprite asset (texture descriptor, 4 vertices, 4 UVs,
-     units-per-pixel scale);
+   - resolve the `Sprite` handle to a sprite asset (texture descriptor, UVs, pixels-per-unit
+     scale, pivot, topology);
    - skip if the sprite/texture/payload/GPU page is not ready;
-   - build one instance for this camera.
+   - for `Quad`, generate four corners from the UV span × texture size ÷ scale around the
+     pivot; non-Quad is rejected in v1;
+   - append one instance to the camera's contiguous range.
 
 Multiple cameras may see the same sprite. Resource lookup and local geometry can be cached per
 sprite for the frame; each camera gets its own instance because the view-projection and
@@ -143,26 +146,26 @@ Logical per-instance fields (exact layout implementation detail):
 | Field | Meaning |
 | --- | --- |
 | `Transform` | 2×3 world transform from the snapshot (includes parent hierarchy). |
-| `Vertices[4]` | Quad corners in sprite-local **world-unit** space, after applying the sprite asset's `scale` and converting image Y-down to world Y-up. |
-| `Uvs[4]` | Normalized UVs, top-left origin, in vertex order. |
+| `Vertices[4]` | Generated quad corners in sprite-local **world-unit** space, from UV span × texture size ÷ `scale`, offset by `pivot`, converted to Y-up. |
+| `Uvs[4]` | Normalized UVs, top-left origin, in generated corner order. |
 | `Tint` | Linear RGBA multiplied with the sampled texel. |
 | `TextureIndex` | Index into the bindless texture page array. |
 
-The render thread bakes `vertex * scale` and the Y flip into the local vertices before writing
-the instance. The shader does not need pivot/slice metadata.
+The render thread generates `(uvSpan × textureSize) / scale` local corners and offsets them by
+the sprite pivot before writing the instance. The shader does not need slice metadata.
 
 ### 4.3 Quads now, meshes later
 
-v1 uses exactly four vertices per sprite, triangle-strip order. This is still **instanced**:
-each instance carries its own four corners and UVs, and `gl_VertexIndex` selects one corner.
+v1 supports `topology = Quad` only. It generates four corners per sprite; this is still
+**instanced**, with `gl_VertexIndex` selecting one generated corner.
 
-The sprite asset reserves `indices`/`topology` for future auto-generated meshes. Meshes with
-variable vertex counts do not fit the fixed 4-vertex instanced path; they need a different
-geometry path (a later design). v1 does not silently approximate a mesh as a quad.
+`TriangleStrip` and `Triangles` are reserved enum values for a future mesh asset that carries
+vertices/indices. They do not fit the fixed four-corner instanced path; v1 rejects them. A mesh
+renderer path is a later design and is not silently approximated as a quad.
 
 ### 4.4 Shader
 
-- Four vertices, triangle strip.
+- Four generated corners, drawn as a triangle-strip primitive.
 - `gl_VertexIndex` 0..3 selects corner/UV from the instance.
 - Vertex shader: `gl_Position = viewProj * vec4(instance.Transform * localVertex, 0, 1)`.
 - Fragment shader: sample `textures[TextureIndex]`, multiply by `Tint`, output.
@@ -208,8 +211,8 @@ addresses the same record. There is no index buffer.
 
 ### 5.3 Why this satisfies the requirement
 
-- **Instancing:** every sprite of a camera is one instance of a four-vertex quad; per-sprite
-  vertices/UVs live in the instance.
+- **Instancing:** every sprite of a camera is one instance of a generated four-corner quad;
+  per-sprite corners/UVs live in the instance.
 - **Bundled textures:** texture pages live in a bindless array, so changing texture does not
   break the draw.
 - **Dynamic rendering:** no render pass/framebuffer setup per camera.
@@ -246,8 +249,8 @@ and excluded from the one-draw promise until it is.
 - +X right, +Y up.
 - Rotation in radians, positive counter-clockwise around +Z.
 - Scale is a multiplier; negative scale mirrors.
-- One world unit is abstract. A sprite's source pixels become units through its own `scale`;
-  `Camera.Size` and positions use units.
+- One world unit is abstract. A sprite's source pixels become units by dividing by its
+  pixels-per-unit `scale`; `Camera.Size` and positions use units.
 
 ### 7.2 Camera
 
@@ -296,9 +299,9 @@ yNdc = -yv / s        // Vulkan NDC is Y-down; world/API stay Y-up
 zNdc = 0
 ```
 
-The Y negation is the only place the Y-up API meets Vulkan's Y-down clip space. Sprite asset
-vertices use image-space +Y down; the CPU bakes the scale and Y flip into the instance-local
-vertices before the world transform.
+The Y negation is the only place the Y-up API meets Vulkan's Y-down clip space. Sprite quad
+corners are generated in Y-up world-local space from UVs, texture size, scale, and pivot; the
+renderer does not read a vertices array.
 
 ### 7.4 Screen ↔ world (planned)
 
@@ -424,7 +427,8 @@ presentation/GPU completion; offscreen follows GPU completion. Headless has no f
 
 ### 10.3 Headless
 
-No renderer. `WithHeadless()` does not initialize Vulkan or allocate GPU resources.
+No renderer. Headless mode (`WithHeadless`) does not initialize Vulkan or allocate GPU
+resources.
 
 ## 11. Shaders and pipeline creation
 

@@ -46,7 +46,7 @@ The builder selects exactly one mode:
 | --- | --- | --- | --- | --- | --- |
 | **Windowed** (default) | normal options | SDL window + Vulkan swapchain | yes | yes | bounded run-ahead, presentation/GPU rate |
 | **Offscreen** | `WithOffscreen(w, h)` | no window; Vulkan offscreen target | yes | no | bounded run-ahead, GPU frame rate |
-| **Headless** | `WithHeadless()` | no window, no GPU | no | no | uncapped (no artificial delay) |
+| **Headless** | `WithHeadless(ticksPerSecond = 60)` | no window, no GPU | no | no | configured tick rate; `0` = uncapped |
 
 - **Windowed** is the normal game.
 - **Offscreen** is for tests, benchmarks, and server-side visual validation. It initializes
@@ -54,7 +54,9 @@ The builder selects exactly one mode:
   discarded in v1; a public readback API is future work.
 - **Headless** is for dedicated servers and data-only tools. It does not initialize SDL or
   Vulkan and does not run a render thread. Packs, `LoadData`, `LoadAsset<T>`, `Browse`, and
-  `Exists` still work. Sprites can be created but are never rendered.
+  `Exists` still work. Sprites can be created but are never rendered. It is paced to the
+  configured `ticksPerSecond` (default `60`); `0` means uncapped. This is the one mode where a
+  timer/artificial pacing delay is intentional and useful.
 
 `WithHeadless` and `WithOffscreen` are mutually exclusive. Window-only options
 (`WithTitle`, `WithSize`, `WithResizable`, `WithFullscreen`, `WithVSync`) are invalid or
@@ -70,20 +72,23 @@ depend on them.
 | --- | --- | --- | --- |
 | `WithGame(IGame<TLayer> game)` | required | `Planned` | Caller-owned game instance. Must not be null. |
 | `WithAssetsPack(string path)` | `assets.pck` | `Planned` | Base pack path (see [assets](assets.md)). |
+| `WithLogging(Action<ILoggingBuilder>)` | pretty ZLogger console | `Planned` | Configure Microsoft.Extensions.Logging/ZLogger. If omitted, the pretty default is installed. |
 | `WithTitle(string)` | assembly name | `Planned` | Window title (windowed only). |
 | `WithSize(int width, int height)` | `1280 × 720` | `Planned` | Initial framebuffer size (windowed only). |
 | `WithResizable(bool)` | `true` | `Planned` | Windowed only. |
 | `WithFullscreen(bool)` | `false` | `Planned` | Windowed only; exact mode `Open`. |
 | `WithVSync(bool)` | `true` | `Planned` | Windowed present mode preference. Offscreen has no vsync. |
-| `WithHeadless()` | — | `Planned` | No window/GPU/render thread; uncapped ticks. |
+| `WithHeadless(int ticksPerSecond = 60)` | `60` | `Planned` | No window/GPU/render thread; paced to the tick rate. `0` = uncapped. |
 | `WithOffscreen(int width, int height)` | — | `Planned` | Windowless Vulkan rendering; frames discarded. |
 | `WithMaxDeltaTime(double)` | `0.25` s | `Planned` | Safety clamp for `ITime.DeltaTime`; not a pacing delay. |
 | `WithValidation(bool)` | debug only | `Planned` | Vulkan validation layers (windowed/offscreen). |
 | `Build()` | — | `Planned` | Validate and create the app object. |
 | `Bork2dApp.Run()` | — | `Planned` | Start and run until shutdown. |
 
-There is no target tick rate and no `Sleep`/frame limiter. Tick pacing comes from the bounded
-snapshot ring and the renderer's frame completion, or from the CPU in headless mode.
+Windowed/offscreen have no target tick rate and no `Sleep`/frame limiter; tick pacing comes
+from the bounded snapshot ring and the renderer's frame completion. Headless mode uses the
+configured tick rate (default 60, `0` = uncapped) and intentionally waits between ticks; this
+is the documented exception to "no artificial delays".
 
 Validation performed by `Build()`:
 
@@ -92,7 +97,10 @@ Validation performed by `Build()`:
 3. Exactly one mode is selected (default windowed, or headless, or offscreen).
 4. Window-only options are not combined with headless/offscreen.
 5. `TLayer` is an `int`-backed flags enum with 1–32 named single-bit values.
-6. Sizes are positive; max delta is positive; asset pack path is non-empty.
+6. Sizes are positive; max delta is positive; headless tick rate is `>= 0`; asset pack path is
+   non-empty.
+7. Logging configuration, if supplied, is non-null; otherwise the pretty ZLogger default is
+   used.
 7. The pack file exists and parses, or the selected mode explicitly permits an empty filesystem
    (final missing-pack policy is `Open`).
 
@@ -103,18 +111,19 @@ Validation performed by `Build()`:
 ```mermaid
 sequenceDiagram
     autonumber
-    participant M as Main / tick thread
+    participant M as Main and tick thread
     participant SDL as SDL2
     participant A as Asset service
     participant R as Render thread
     participant G as Game
 
-    M->>M: Build(): validate options
+    M->>M: Build validates options
+    M->>M: configure logging (pretty ZLogger default)
     M->>SDL: SDL_Init(video), create hidden Vulkan-capable window
     M->>M: query SDL Vulkan instance extensions
     M->>M: create VkInstance + VkSurfaceKHR (Runtime owns)
-    M->>A: start asset service; open assets.pck
-    M->>R: start render thread(instance, surface, extent)
+    M->>A: start asset service and open assets.pck
+    M->>R: start render thread with instance, surface, extent
     R->>R: device, queues, swapchain, pipeline, offscreen/swapchain targets
     R-->>M: ready, or fatal error
     M->>G: game.Setup(engine)
@@ -136,7 +145,8 @@ The window is created hidden and shown after the first successful present (plann
 
 - No SDL initialization, no Vulkan instance/device, no render thread.
 - Asset service/pack filesystem and the engine start.
-- `game.Setup(engine)` runs, then the tick loop runs uncapped.
+- `game.Setup(engine)` runs, then the tick loop runs at `ticksPerSecond` (default 60;
+  `0` = uncapped).
 - `IWindow`/`IInput` throw; `ITime`, `IAssets`, scene creation, and `Exit` work.
 - Dedicated server code should not create renderables or request textures unnecessarily; the
   engine has no GPU to upload to.
@@ -164,11 +174,18 @@ while (!_exitRequested)
 }
 ```
 
-Headless uses the same loop without the snapshot ring or SDL pump:
+Headless uses the same loop without the snapshot ring or SDL pump, plus timer-based pacing:
 
 ```csharp
+var interval = ticksPerSecond > 0
+    ? TimeSpan.FromSeconds(1.0 / ticksPerSecond)
+    : TimeSpan.Zero;
+
 while (!_exitRequested)
 {
+    if (interval > TimeSpan.Zero)
+        WaitUntilNextHeadlessTick(interval); // timer, not busy-spin
+
     _time.NewFrame();
     _game.Tick();
 }
@@ -176,18 +193,17 @@ while (!_exitRequested)
 
 Pacing rules:
 
-- **No fixed tick rate.** There is no target FPS, no deadline wait, no `Sleep`, and no
-  artificial frame limiter.
+- **Windowed/offscreen have no fixed tick rate.** There is no target FPS, deadline wait,
+  `Sleep`, or artificial frame limiter; pacing comes from the bounded snapshot ring.
 - **Bounded run-ahead.** There are three snapshot slots. A slot is held until the GPU frame
   that consumed it signals its fence. The tick blocks only when all slots are occupied
   (typically at most two frames in flight plus one ready/being written). In steady state the
   tick runs at the renderer's frame rate; it can burst up to the ring depth.
 - **Newest wins.** The render thread always takes the newest ready snapshot; older undisplayed
   snapshots are dropped. Lag does not grow an unbounded queue.
-- **Headless is uncapped.** No renderer means no frame backpressure; ticks run as fast as the
-  CPU and the game allow. A server that wants to throttle must do so itself (for example by
-  blocking on I/O) or wait for a future server pacing feature. This is the explicit
-  consequence of "no artificial delays".
+- **Headless is timer-paced.** `WithHeadless(ticksPerSecond)` defaults to `60`; `0` means
+  uncapped. This is the one intentional pacing delay in the engine, for dedicated servers and
+  data tools. It is not a busy-spin.
 - **Safety clamp.** `WithMaxDeltaTime` clamps a single `DeltaTime` after a stall; it does not
   delay ticks.
 - **No interpolation.** The renderer draws the newest snapshot as-is.
@@ -239,7 +255,7 @@ next tick boundary and `Run()` throws.
 ```mermaid
 sequenceDiagram
     autonumber
-    participant M as Main / tick thread
+    participant M as Main and tick thread
     participant R as Render thread
     participant A as Asset service
 
@@ -285,12 +301,13 @@ failures are rethrown on the caller's thread, with cleanup in a `finally`.
 
 ## 10. Headless and offscreen modes
 
-### 10.1 `WithHeadless()`
+### 10.1 `WithHeadless(ticksPerSecond = 60)`
 
 - No SDL, no Vulkan, no render thread, no swapchain.
 - `ITime`, `IAssets`, `IEngine` scene creation, `Exit`, and game callbacks work.
 - `IWindow`/`IInput` throw.
-- Pacing is uncapped: the tick loop has no artificial delay and no renderer backpressure.
+- Pacing is timer-based at `ticksPerSecond` (default `60`); `0` means uncapped. This is the only
+  intentional pacing delay in the engine, intended for dedicated servers.
 - Asset data (`LoadData`, `LoadAsset<T>`, `Browse`) works; sprite handles can resolve CPU
   metadata but no texture is uploaded and nothing is drawn.
 - NativeAOT headless startup must not touch SDL/Vulkan; this is a CI smoke test.
@@ -338,7 +355,7 @@ thread callbacks.
 - Minimize: pause ticks or only presentation? Proposed: ticks continue; game pauses itself.
 - Offscreen readback/capture API and its owner (M8/M10).
 - Should `IEngine` expose the selected mode? (Useful for server/game code.)
-- Headless uncapped CPU use; a server-side pacing API is future work.
+- Headless tick-rate timer accuracy and whether fractional rates are needed.
 - `MaxDeltaTime` default and whether `0` disables the clamp.
 - Worker threads at shutdown: the game joins before `Tick` returns; the engine cannot join
   unknown threads.
@@ -348,6 +365,7 @@ thread callbacks.
 - [Threading and frame handoff](threading.md) — snapshot ring and bounded run-ahead in detail.
 - [Rendering](rendering.md) — windowed/offscreen render modes.
 - [Assets and pack files](assets.md) — pack loading and default pack.
+- [Logging](logging.md) — default ZLogger configuration and `IEngine.LoggerFactory`.
 - [NativeAOT](nativeaot.md) — headless/AOT startup constraints.
 - [API reference](../api/reference.md) — proposed `Bork2dAppBuilder` surface.
 - [Roadmap](../roadmap.md) — M1, M2, M6, M7.

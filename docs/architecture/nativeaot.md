@@ -45,8 +45,8 @@ Notes:
 - Native assets (SDL2, Vulkan loader) must be deployed for the target RID. The exact
   `RuntimeIdentifier` and native-copy story are part of M1/M6.
 - AOT publish is a CI job, not only a release step. A JIT-clean build can still fail AOT.
-- Trimming warnings are treated as errors for engine projects; game code should also enable
-  the analyzers.
+- Trimming warnings are treated as errors for all projects; game/template projects enable the
+  same AOT/trim analyzers as the engine.
 
 ## 3. Runtime constraints
 
@@ -58,13 +58,13 @@ The runtime must not depend on:
 - runtime TOML parsing or reflection-based serializers;
 - convention-based discovery of game types, assets, or editor registrations;
 - `MakeGenericType`/`MethodInfo.Invoke` on unknown types;
-- unregistered MessagePack formatters;
+- unregistered Nerdbank.MessagePack shapes;
 - `dynamic` and runtime code generation in hot paths.
 
 It may use:
 
 - static generics and `typeof(T)` metadata that the AOT compiler can see;
-- source-generated MessagePack formatters;
+- source-generated Nerdbank.MessagePack shapes;
 - explicit builder registrations (`WithGame(instance)`, `WithAssetType<T>()`,
   `WithWindow<T>()`);
 - hand-written parsers for the pack header and known asset kinds;
@@ -90,14 +90,17 @@ AOT and also allows arbitrary constructor injection.
 
 ## 4. Serialization and assets
 
-- Runtime data assets are MessagePack, decoded by **source-generated** formatters.
-- `LoadAsset<T>` works only for types with a generated formatter/context registration. A
-  missing formatter is a build/startup error; there is no reflection fallback.
-- Pack header entries, texture descriptors, and sprite assets have hand-written/source-generated
-  readers; they are part of the engine, not user types.
-- Custom game data uses the source-generated MessagePack path; TOML exists only in
+- Runtime data assets are MessagePack, decoded by
+  [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) **source-generated
+  shapes**.
+- `LoadAsset<T>` works only for types with a generated shape (for example `[GenerateShape]` on
+  the root type). A missing shape is a build/startup error; there is no reflection fallback.
+- Pack header entries, texture descriptors, and sprite assets use Nerdbank generated shapes or
+  hand-written readers; they are part of the engine, not user types.
+- Custom game data uses the Nerdbank generated-shape path; TOML exists only in
   `Project.Common` and is consumed by the JIT baker/editor.
-- Zstd uses the .NET 11 built-in implementation, avoiding an extra native codec.
+- Zstd uses the .NET 11 built-in implementation; the pack header checksum uses the
+  `System.IO.Hashing` package's `XxHash3`.
 - Asset paths are data, not type names. Loading never resolves a type from a string.
 
 See [Assets and pack files](assets.md) and [Data and serialization](data-and-serialization.md).
@@ -135,7 +138,7 @@ AOT requirement.
 - Silk.NET bindings are used instead of dynamic P/Invoke discovery. Validate the chosen
   Silk.NET versions under AOT in M1 (SDL) and M6 (Vulkan).
 - No runtime shader compilation: SPIR-V is built offline.
-- The headless server should not initialize SDL or Vulkan; `WithHeadless()` must not load or
+- The headless server should not initialize SDL or Vulkan; `WithHeadless(...)` must not load or
   call into the graphics/windowing paths.
 
 These are validation items, not assumptions. If a Silk.NET path uses reflection/dynamic code
@@ -150,8 +153,11 @@ Required checks:
 3. Run the AOT-published **headless** app in CI (no GPU required): load a pack, tick, browse,
    exit.
 4. Run the AOT-published windowed/offscreen app on a GPU runner before release.
-5. Trim/AOT warning budget: zero warnings for engine projects; game warnings reviewed.
-6. A smoke test that no `LoadAsset<T>` type lacks a generated formatter.
+5. Trim/AOT warning budget: zero warnings for every project; style and compiler warnings are
+   errors. AOT/trim analyzers are errors on runtime/game projects.
+6. A smoke test that no `LoadAsset<T>` type lacks a Nerdbank generated shape.
+7. AOT-published app logs through the default ZLogger/Microsoft.Extensions.Logging path without
+   trim warnings; `IEngine.LoggerFactory` is usable.
 
 A JIT unit-test pass is necessary but not sufficient; AOT failures often appear only at
 publish/runtime.
@@ -161,24 +167,25 @@ publish/runtime.
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
 | Silk.NET or a dependency uses reflection/dynamic code | AOT publish/runtime failure | Validate in M1/M6; isolate adapters; pin versions. |
+| ZLogger/MEL provider not AOT-safe | Trim warnings or startup failure | Validate in M1; isolate provider behind `ILoggerFactory`; AOT-safe fallback. |
 | MessagePack source generation misses a custom type | Runtime load failure | Build-time validation; `LoadAsset<T>` registration checks; tests. |
 | TOML/reflection leaks into runtime | AOT warnings/failure | Project boundary and analyzers; TOML only in baker/editor. |
 | Trimming removes needed code | Subtle runtime failures | `IsAotCompatible`, analyzers, AOT smoke tests. |
 | Native SDL2/Vulkan deployment | Missing DllNotFound at runtime | RID-specific packaging and clean-machine tests. |
-| Server pulls in SDL/Vulkan initialization | Unwanted GPU/window dependency | `WithHeadless()` path that never initializes graphics. |
+| Server pulls in SDL/Vulkan initialization | Unwanted GPU/window dependency | `WithHeadless` path that never initializes graphics. |
 | Editor keeps reflection while runtime forbids it | Boundary confusion | Separate assemblies/projects; editor JIT; runtime analyzers. |
 
 ## 9. Open decisions
 
 | Topic | Question | Proposed direction |
 | --- | --- | --- |
-| MessagePack generation | Exact source-generator setup (`MessagePackSerializerContext` vs per-type resolvers). | Context + generated formatters in Assets; no reflection resolver. |
+| MessagePack generation | Nerdbank shape/analyzer setup and root-type annotations. | `[GenerateShape]` roots; reflection resolver disabled. |
 | Globalization | `InvariantGlobalization` true or false? | Decide in M1 based on text/culture needs. |
 | AOT target RIDs | Windows x64 first; Linux later? | win-x64 first; Linux when platform support is added. |
-| Trimming game code | Are game projects required to be fully trim-clean? | Engine yes; game warnings visible, release-reviewed. |
+| Trimming game code | Are game projects required to be fully trim-clean? | All projects warnings-as-errors; trim warnings are errors unless narrowly suppressed with justification. |
 | Editor AOT | Ever? | Not required; keep registrations AOT-friendly anyway. |
 | Native library packaging | How SDL2/Vulkan loaders are copied/deployed. | MSBuild targets + documented redistributables (M1/M6). |
-| AOT diagnostics | Startup check for missing formatters? | Yes: fail fast with the type name. |
+| AOT diagnostics | Startup check for missing Nerdbank shapes? | Yes: fail fast with the type name. |
 
 ## 10. Current status
 
@@ -197,6 +204,7 @@ publish/runtime.
 - [Projects and dependencies](projects.md#6-build-packaging-and-versioning) — project graph and
   build settings.
 - [Assets and pack files](assets.md#13-nativeaot) — runtime pack constraints.
-- [Data and serialization](data-and-serialization.md) — source-generated MessagePack.
+- [Data and serialization](data-and-serialization.md) — Nerdbank.MessagePack source generation.
+- [Logging](logging.md) — ZLogger/MEL AOT notes.
 - [Editor](editor.md#9-runtime-and-aot-boundary) — JIT editor boundary.
 - [Roadmap](../roadmap.md) — M1 baseline, M9 release gate.

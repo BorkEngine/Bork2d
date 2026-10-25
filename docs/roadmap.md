@@ -99,15 +99,22 @@ Scope:
 - add references per the dependency matrix (`Runtime → Api/Common/Assets/Render`,
   `Assets → Api/Common`, `Render → Api/Common/Assets`, `Editor → Api/Common/Assets`);
 - make `Common`/`Assets`/`Render` types `internal` by default with `InternalsVisibleTo`;
-- add `Directory.Build.props`, analyzers, nullable, warnings policy, `global.json`;
+- add `Directory.Build.props`, analyzers, nullable, **warnings-as-errors**,
+  **EnforceCodeStyleInBuild**, root `.editorconfig`, and `global.json`;
+- add the `dotnet format --verify-no-changes` CI gate and Microsoft/.NET-standard style rules
+  at `error`; apply to all projects (engine, editor, tests, samples);
 - enable AOT/trim analyzers on runtime projects; add a sample AOT publish smoke app;
 - add `Bork2d.Tests` and a dependency test for the reference matrix;
 - add `Bork2dAppBuilder<TLayer>`/`Bork2dApp` skeleton:
   - `WithGame(IGame<TLayer> game)` instance injection (no `new()`/reflection);
-  - `WithHeadless()`, `WithOffscreen(w,h)`, `WithAssetsPack(path)`;
+  - `WithHeadless(int ticksPerSecond = 60)`, `WithOffscreen(w,h)`, `WithAssetsPack(path)`;
+  - `WithLogging(Action<ILoggingBuilder>)` with a pretty ZLogger default;
   - window options, `WithMaxDeltaTime`, `WithValidation`;
-  - no target tick rate/Sleep;
-- add `IEngine.Input`, `IEngine.Exit`, `IGame.Teardown`, `Bork2dException`, `AssetInfo`;
+  - no target tick rate/Sleep for windowed/offscreen;
+- add `IEngine.Input`, `IEngine.Exit`, `IEngine.LoggerFactory`, `IGame.Teardown`,
+  `Bork2dException`, `AssetInfo`;
+- reference Microsoft.Extensions.Logging.Abstractions from `Api`; ZLogger/MEL from `Runtime`;
+- establish Nerdbank.MessagePack shape generation/analyzer policy for AOT;
 - replace weak-ref entity ownership with strong ownership + `Dispose`, non-reused IDs, and a
   thread-safe tick-scoped registry;
 - implement/evaluate transform hierarchy math and world read-only properties;
@@ -116,12 +123,14 @@ Scope:
 
 Exit criteria:
 
-- solution builds with warnings-as-errors and AOT/trim analyzers;
+- solution builds with warnings-as-errors, AOT/trim analyzers, and style violations as errors;
+- `dotnet format --verify-no-changes` passes;
 - dependency test passes;
 - an AOT-published smoke app builds/starts without reflection or trim warnings (the full
   headless pack/tick smoke lands in M7);
 - unit tests cover layer validation, entity IDs/disposal, concurrent distinct-entity
   creation/mutation, transform math, builder validation, and pack path rules;
+- pretty ZLogger console logging is visible by default and `IEngine.LoggerFactory` is usable;
 - no implementation type is unintentionally public.
 
 Size: M. Risk: medium (public API churn, AOT/Silk.NET toolchain).
@@ -160,28 +169,33 @@ Scope:
 
 - implement the `assets.pck` reader/writer from
   [Assets and pack files](architecture/assets.md):
-  - magic `BORK2DPK`, version 1, header length, MessagePack header;
+  - magic `BORK2DPK`, version 1, compressed/uncompressed header lengths, XXH3-64 checksum;
+  - always-Zstd-compressed MessagePack header;
+  - `System.IO.Hashing` package for `XxHash3`;
   - six-element entries `[path, isRaw, isCompressed, offset, length, size]`;
-  - uint64 offsets/lengths/sizes, little-endian binary header fields;
-  - path validation, duplicate/overlap checks, bounds validation;
+  - uint64 offsets/lengths/sizes, little-endian binary fields;
+  - path validation, duplicate/overlap checks, bounds/checksum validation;
 - virtual filesystem: default `assets.pck`, `LoadPack`, later-wins overlays, no unload;
 - `Browse`/`Exists` with merged shadowed view;
-- compression: .NET 11 Zstd; debug uncompressed, release max only if smaller;
+- compression: .NET 11 Zstd; header always compressed; debug assets uncompressed; release
+  assets max only if smaller; asset payloads have no checksum;
 - asset loader threads, immutable resource table, readiness/skipping;
 - texture descriptor assets + raw RGBA8 payloads (`textures/<name>`,
   `textures/raw/<name>`);
-- sprite asset schema (texture, vertices, UVs, scale) and built-in source-generated readers;
+- sprite asset schema (texture, UVs, pixels-per-unit scale, pivot, topology) with Nerdbank
+  generated shapes; v1 `Quad` only; no vertices array;
 - `IAssets.LoadData`/`Exists`/`Browse`; `LoadAsset<T>` for built-in MessagePack types;
 - pack builder that can pack pre-baked MessagePack assets and raw payloads;
 - headless tests: create packs with raw textures, descriptors, sprites, data; overlay and
-  browse; corrupt-pack failures; AOT smoke.
+  browse; corrupt-pack/header-checksum failures; AOT smoke.
 
 Exit criteria:
 
 - a pack with a raw texture, texture descriptor, sprite asset, and data asset loads;
 - later pack overlays shadow earlier paths; browsing hides shadowed entries;
-- debug pack stores uncompressed, release pack compresses only when smaller;
-- corrupted magic/version/offset/length/path cases fail safely;
+- header is compressed and XXH3-64 verified; a corrupt checksum is rejected;
+- debug assets are uncompressed; release assets compress only when smaller;
+- corrupted magic/version/offset/length/path/checksum cases fail safely;
 - loader runs on background threads and the resource table is race-free under stress;
 - AOT headless app can load/browse without reflection or GPU.
 
@@ -193,23 +207,26 @@ Size: L. Risk: high (format correctness, overlays, AOT, compression API).
 
 Scope:
 
-- TOML model/attributes and source-generated MessagePack formatters (NativeAOT);
+- TOML model/attributes and Nerdbank.MessagePack generated shapes (NativeAOT);
 - TOML parser/writer (Tomlyn proposed) for the JIT baker/editor;
 - custom data TOML → MessagePack;
-- texture TOML → MessagePack descriptor + raw RGBA8 payload;
-- sprite TOML → MessagePack sprite asset (vertices/UVs/scale);
-- asset baker: validation, image import, MessagePack serialization, deterministic output;
-- pack builder integration: `assets.pck`, release max Zstd, debug uncompressed;
+- texture sidecar (`<file>.toml`) → MessagePack descriptor + raw RGBA8 payload;
+- sprite TOML → MessagePack sprite asset (UVs/scale/pivot/topology, no vertices);
+- asset baker: validation, image import, Nerdbank serialization, deterministic output;
+- pack builder integration: `assets.pck`, compressed header + XXH3-64, release max Zstd,
+  debug asset payloads uncompressed;
 - project descriptor (`bork2d.project.toml`) for asset root/type mapping;
 - build command / MSBuild target; incremental bake;
-- tests: round-trip, missing fields, bad references, deterministic bake, AOT load.
+- tests: round-trip, missing fields, bad references, deterministic bake, AOT load, header
+  compression/checksum.
 
 Exit criteria:
 
 - a source asset tree bakes to MessagePack and packs into `assets.pck`;
-- debug and release packs differ only in compression as specified;
+- header is compressed and XXH3-64 verified; debug and release differ only in asset payload
+  compression;
 - invalid TOML/missing asset/typo fails with file/line diagnostics;
-- runtime (AOT headless) loads the baked data with generated formatters only;
+- runtime (AOT headless) loads the baked data with Nerdbank generated shapes only;
 - no TOML parser or reflection serializer in runtime projects;
 - a custom data class round-trips through TOML → MessagePack → runtime.
 
@@ -226,9 +243,10 @@ Scope:
   - compile-time registrations; no assembly scanning;
 - `Project.Editor` thin host template referencing `Bork2d.Editor` + `Project.Common`;
 - asset browser over `Project.Common/Assets`;
-- texture viewer: zoom/pan, manual (and optionally grid) slicing, origin/pivot, scale,
-  filter/wrap, validation;
-- writes sprite TOML and texture TOML; previews source slices with Avalonia imaging;
+- texture viewer: zoom/pan, manual (and optionally grid) slicing, pivot, pixels-per-unit
+  scale, topology (Quad), filter/wrap, validation;
+- writes sprite TOML (UVs/scale/pivot/topology) and texture sidecar import settings; previews
+  source slices with Avalonia imaging;
 - custom data editing: property grid + raw TOML, validation, save;
 - bake/pack invocation through M4 code; diagnostics panel;
 - no Vulkan, no scene editing, no play mode;
@@ -275,31 +293,37 @@ Size: M. Risk: high (WSI threading, device features, swapchain/target lifetime).
 
 ### M7 — Frame handoff and pacing
 
-**Goal:** bounded run-ahead snapshot ring with no artificial delays, plus headless/offscreen
-pacing.
+**Goal:** bounded run-ahead snapshot ring for windowed/offscreen, plus timer-paced headless and
+offscreen modes.
 
 Scope:
 
 - three-slot snapshot ring with atomic `Free/Writing/Ready/Rendering`;
 - slots held until the GPU frame fence; tick waits only when the ring is full;
 - render takes newest `Ready`; older snapshots dropped; `latest` cleared on take;
-- no target tick rate, deadline timer, or `Sleep`; `MaxDeltaTime` safety clamp only;
+- no target tick rate, deadline timer, or `Sleep` in windowed/offscreen; `MaxDeltaTime` safety
+  clamp only;
+- headless tick loop with no snapshot ring, timer-paced by `ticksPerSecond` (default 60,
+  `0` = uncapped);
 - tick capture after `Tick` (workers joined), layer flattening, immutable snapshots;
-- windowed/offscreen render loop; headless loop with no ring (uncapped);
+- windowed/offscreen render loop; headless loop without SDL/Vulkan;
 - frames in flight 2; GPU frame slots/fences; instance/command resources;
 - resize/close/error handling across modes; shutdown with in-flight frames;
-- stress tests with fake fences, slot invariants, bounded-run-ahead pacing tests;
+- stress tests with fake fences, slot invariants, bounded-run-ahead pacing tests, headless
+  timer tests;
 - no per-frame allocations in the handoff path.
 
 Exit criteria:
 
 - tick/render overlap; tick runs ahead at most the ring depth, then waits;
-- no `Sleep`/fixed-rate code in the loop;
+- no `Sleep`/fixed-rate code in windowed/offscreen loops;
 - newest snapshot wins; older undisplayed snapshots are dropped;
-- headless mode ticks without SDL/Vulkan and has no render thread;
+- headless mode ticks without SDL/Vulkan, has no render thread, and honors its configured rate
+  (`0` uncapped);
 - offscreen mode renders/discards frames and releases slots on fences;
 - 10k-frame stress run has no deadlock/slot leak; shutdown during publish/take is clean;
-- an AOT-published headless app loads a pack, ticks, and exits without SDL/Vulkan;
+- an AOT-published headless app loads a pack, ticks at its configured rate, and exits without
+  SDL/Vulkan;
 - windowed resize/close remains responsive.
 
 Size: L. Risk: high (state machine, memory ordering, cross-mode lifecycle).
@@ -310,14 +334,17 @@ Size: L. Risk: high (state machine, memory ordering, cross-mode lifecycle).
 
 Scope:
 
-- sprite pipeline using real MessagePack sprite assets (four vertices, UVs, scale);
+- sprite pipeline using real MessagePack sprite assets (UVs, pixels-per-unit scale, pivot,
+  `Quad` topology; no vertices array);
 - texture descriptors + raw RGBA8 payloads → bindless texture pages;
-- instance SSBO with per-sprite quad vertices/UVs, world transform, tint, texture index;
+- generate four quad corners from UV span × texture size ÷ scale and pivot; instance SSBO
+  carries generated corners/UVs, world transform, tint, texture index;
 - camera projection (Size half-height, Y-up), viewport/aspect, screen/world helpers;
-- layers, z-order, tint, transforms, per-sprite quads, no depth buffer;
+- layers, z-order, tint, transforms, generated quads, no depth buffer;
 - one dynamic rendering pass, one draw per non-empty camera; clear/overlap semantics;
 - multi-camera/split-screen; offscreen rendering; windowed present;
 - debug counters, validation, labels, capture; golden/screenshot tests;
+- non-Quad topology rejected with a diagnostic in v1;
 - performance benchmark on the 165 Hz test machine; no artificial cap;
 - AOT publish windowed/offscreen.
 
@@ -342,7 +369,7 @@ Scope:
   `bork2d.project.toml`, assets;
 - `dotnet new bork2d` or documented copy; CI template build;
 - sample game: sprites, layers, camera, input, data, pack overlays, editor slicing;
-- headless server sample (`WithHeadless`) and offscreen smoke sample;
+- headless server sample (`WithHeadless(60)`) and offscreen smoke sample;
 - NativeAOT publish profile for Desktop, native SDL2/Vulkan deployment;
 - docs samples compile; API guide/reference match actual surface;
 - packaging decision (project references vs NuGet) and versioning.
@@ -382,9 +409,10 @@ Size: L (ongoing). Risk: medium.
 | Documentation | Update architecture/API docs in the same change as a contract; add a decision entry for public changes. |
 | Tests | Unit tests every milestone; pack/format tests from M3; AOT smoke from M1; handoff stress from M7; GPU/visual tests from M8. |
 | CI | Build + unit + AOT publish; GPU/validation on a Vulkan 1.3 runner; template build from M9. |
-| NativeAOT | Analyzers and publish smoke from M1; no reflection/dynamic code/TOML in runtime; source-generated MessagePack. |
-| Diagnostics | Structured logs, per-frame counters, validation layers, debug labels; no silent failures. |
-| Assets | Pack format is versioned; additive changes within v1; deterministic builds; debug/release compression modes. |
+| NativeAOT | Analyzers and publish smoke from M1; no reflection/dynamic code/TOML in runtime; Nerdbank.MessagePack shapes. |
+| Diagnostics | ZLogger/Microsoft.Extensions.Logging, `IEngine.LoggerFactory`, per-frame counters, validation layers, debug labels; no silent failures. |
+| Assets | Pack format is versioned; header compressed/checksummed; additive changes within v1; deterministic builds; debug/release asset compression modes. |
+| Quality | Warnings-as-errors, C# style rules as errors, `dotnet format --verify-no-changes`, AOT/trim analyzers; all projects. |
 | Scope | Audio/UI/physics/animation require a decision-log entry and roadmap change. |
 
 ## 7. v1 definition of done
@@ -393,43 +421,51 @@ Size: L (ongoing). Risk: medium.
 
 - Generated game solution builds/runs on Windows 10/11 with a Vulkan 1.3 driver.
 - NativeAOT-published Desktop and headless server start, run, and shut down cleanly.
-- Windowed, offscreen, and headless modes behave as documented.
-- Window/input/window ops, variable timestep with bounded run-ahead, no artificial delays.
+- Windowed, offscreen, and headless modes behave as documented. Headless is timer-paced
+  (`WithHeadless`, default 60, `0` = uncapped).
+- Window/input/window ops, variable timestep with bounded run-ahead; no artificial delays in
+  windowed/offscreen.
 - Tick/render threads with three-slot snapshot ring; no unbounded latency; clean shutdown.
 - Tick-scoped workers for distinct entities; same-entity synchronization documented.
+- ZLogger/Microsoft.Extensions.Logging is configured by the builder, `IEngine.LoggerFactory` is
+  exposed, and the default console output is pretty.
 
 **Assets**
 
-- `assets.pck` version 1 with magic/header/data, uint64 offsets, six-element MessagePack
-  entries.
-- Debug pack uncompressed; release pack Zstd-compressed only when smaller.
+- `assets.pck` version 1 with magic, compressed/uncompressed header lengths, XXH3-64 checksum,
+  compressed MessagePack header, uint64 offsets, six-element entries.
+- Header always compressed/checksummed; debug asset payloads uncompressed; release payloads
+  Zstd-compressed only when smaller.
 - Overlays: later `LoadPack` wins; `Browse`/`Exists` merged view; no unload in v1.
-- Texture descriptors (width/height/format/filter/wrap) + raw RGBA8 payloads.
-- Sprite assets (texture, vertices, UVs, scale) baked from TOML.
+- Texture descriptors (width/height/format/filter/wrap) + raw RGBA8 payloads; source sidecars
+  carry import settings.
+- Sprite assets (texture, UVs, pixels-per-unit scale, pivot, topology) baked from TOML;
+  `Quad` only; no vertices array.
 - TOML source → MessagePack → pack pipeline; runtime reads MessagePack only.
 - Missing/not-ready assets are skipped with diagnostics; no placeholders.
-- NativeAOT serialization uses source-generated formatters only.
+- NativeAOT serialization uses Nerdbank.MessagePack generated shapes only.
 
 **Editor**
 
 - Avalonia `Bork2d.Editor` with builder; `Project.Editor` host.
-- Open source project, browse assets, slice textures, set origin/scale/filter, save TOML.
+- Open source project, browse assets, slice textures, set pivot/scale/topology/filter, save TOML.
 - Property grid + raw TOML for registered custom types; validation.
 - Bake/pack invocation; custom windows/types via compile-time registrations.
 - No Vulkan, scene editing, or assembly scanning; editor stays JIT.
 
 **Rendering**
 
-- Vulkan 1.3 dynamic rendering, bindless texture pages, instanced per-sprite quads.
+- Vulkan 1.3 dynamic rendering, bindless texture pages, instanced generated quads.
 - One draw per non-empty camera; layers/z/tint/transform/cameras/clear semantics.
 - Windowed present and offscreen discard paths; no depth buffer.
 - Validation layers zero errors; performance target measured at 165 Hz without artificial cap.
 
 **Process**
 
-- Architecture, threading, assets, editor, NativeAOT, rendering, API docs and decision log
-  match the implementation.
-- CI builds, unit tests, AOT publish, and template checks pass.
+- Architecture, threading, assets, editor, NativeAOT, logging, rendering, API docs and decision
+  log match the implementation.
+- CI builds, unit tests, AOT publish, style/format gates, and template checks pass.
+- Warnings and C# style violations are errors in every project.
 - Public API reviewed/frozen for v1; breaking changes afterward need a major-version decision.
 
 **Explicit non-goals for v1**
@@ -447,7 +483,9 @@ unloading, and public offscreen readback.
 | Frame pacing races/deadlocks | High | Three-slot state machine, fake-fence stress, slot invariants, no sleeps. |
 | Assets/editor before renderer hides visual issues | Medium | Kinematic asset tests, editor previews, integrate real pack in M8 early. |
 | .NET 11 built-in Zstd API differs | Medium | Isolate codec behind reader/writer; keep flags/format stable. |
-| TOML/source-gen mismatch | Medium | One model, build-time formatter validation, round-trip tests. |
+| Pack header checksum/compression | High | XXH3-64 over uncompressed header; corrupt-pack tests; format versioning. |
+| TOML/source-gen mismatch | Medium | One model, Nerdbank shape validation, round-trip tests. |
+| ZLogger/MEL AOT compatibility | Medium | AOT publish smoke; isolate incompatible providers behind `ILoggerFactory`. |
 | Vulkan WSI/offscreen lifetime | High | Split windowed/offscreen paths; validation; GPU runner. |
 | Bindless limits on target GPUs | Medium | Startup feature validation; configurable page capacity; explicit failure. |
 | Editor scope grows | Medium | No scene editing; slicing/data only; builder registrations. |
@@ -462,10 +500,11 @@ unloading, and public offscreen readback.
 | Builder names/signatures, `Run` return shape | M1 | Use the reference proposal. |
 | SDK pin/roll-forward; globalization | M1 | Pin current SDK; decide globalization in M1. |
 | Default `assets.pck` missing behaviour | M1/M3 | Startup error; explicit empty FS option for tools. |
-| MessagePack source-generator setup | M3/M4 | Generated context; no reflection resolver. |
+| Nerdbank.MessagePack shape setup | M3/M4 | `[GenerateShape]` roots; no reflection resolver. |
 | Zstd built-in API shape | M3 | Adapter behind pack reader/writer; keep format. |
 | Texture descriptor/payload paths | M3 | `textures/<name>` + `textures/raw/<name>`. |
-| Sprite vertex orientation | M4/M5 | Source pixels, +Y down; renderer flips. |
+| Texture sidecar naming/keys | M4 | `<file>.toml` sidecar; strip `.toml` + source extension. |
+| Sprite geometry | M4/M5 | Quad from UVs + texture size / scale; pivot center; `Quad` only. |
 | TOML library/comment preservation | M4 | Tomlyn; preserve comments if practical. |
 | Project descriptor/type mapping | M4/M5 | `bork2d.project.toml`; define schema. |
 | Editor custom-window construction | M5 | Compile-time type/instance registration. |
@@ -475,19 +514,22 @@ unloading, and public offscreen readback.
 | Bindless capacity/overflow | M8 | 4096 pages; hard failure on overflow. |
 | Camera order | M8 | Entity ID (creation order). |
 | Frustum culling | M8 | Layer mask only in v1. |
-| Headless server pacing | M7+ | Uncapped; server throttles itself; future feature. |
+| Headless timer accuracy | M7 | Default 60; `0` uncapped; decide fractional rates later. |
+| ZLogger default format | M1 | Pretty console; exact colors/timestamp options open. |
+| Style rule set | M1 | Microsoft/.NET standard; list enforced IDE rules in `.editorconfig`. |
 | Packaging | M9 | Project references in template; NuGet later. |
 | Public API freeze | M10 | Freeze at v1.0. |
 
 ## 10. Immediate next actions
 
-1. Review the revised documentation and sign off on the pack/editor/pacing decisions.
-2. Start M1: project graph, builder contract (`WithGame(instance)`, modes, pack), API
-   lifecycle, AOT analyzers/smoke, tests.
+1. Review the revised documentation and sign off on the pack/editor/pacing/logging/style
+   decisions.
+2. Start M1: project graph, builder contract (`WithGame(instance)`, modes, pack, logging),
+   API lifecycle, warnings/style rules, AOT analyzers/smoke, tests.
 3. Prototype the pack reader/writer against the exact header layout in M3; validate the
-   .NET 11 Zstd API early.
+   .NET 11 Zstd and `System.IO.Hashing.XxHash3` APIs early.
 4. Keep the editor JIT boundary intact; do not pull Avalonia/TOML into runtime projects.
-5. Add the AOT publish smoke and dependency test in M1, not later.
+5. Add the AOT publish smoke, dependency test, format gate, and no-warnings rule in M1.
 
 ## 11. Progress log
 
@@ -509,9 +551,11 @@ unloading, and public offscreen readback.
 
 - [Architecture overview](architecture/overview.md) — invariants that shape the milestones.
 - [Assets and pack files](architecture/assets.md) — M3/M4 format and VFS.
+- [Logging](architecture/logging.md) — M1 logging surface.
 - [Editor](architecture/editor.md) — M5.
 - [Data and serialization](architecture/data-and-serialization.md) — M4.
 - [NativeAOT](architecture/nativeaot.md) — M1 baseline, M9 gate.
+- [Contributing](contributing.md) — M1 warnings/style gate.
 - [Threading](architecture/threading.md) — M7 design/tests.
 - [Rendering](architecture/rendering.md) — M6/M8 design.
 - [Decision log](decisions.md) — why the sequence looks like this.

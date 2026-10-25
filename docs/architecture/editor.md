@@ -138,30 +138,35 @@ the editor's project services, but must not touch the game renderer or runtime e
 
 The editor works on `Project.Common/Assets`:
 
-- texture source (an image or raw RGBA);
-- texture TOML (`textures/player.toml`) with filter/wrap metadata;
-- sprite TOML (`sprites/player/idle.toml`) with texture path, vertices, UVs, and scale;
+- texture source (an image or raw RGBA) plus its Unity-style sidecar
+  (`textures/player.png.toml`) with filter/wrap metadata;
+- sprite TOML (`sprites/player/idle.toml`) with texture path, UVs, pixels-per-unit scale,
+  pivot, and topology;
 - custom data TOML (`data/enemies/boss.toml`).
 
 Slicing workflow:
 
 1. open a texture;
 2. draw a rectangle (manual) or use a grid (planned);
-3. set the sprite origin/pivot, which offsets the generated vertices;
-4. set units-per-pixel scale (the per-sprite pixels-to-units conversion);
-5. set texture filter/wrap;
-6. name the sprite asset (`sprites/player/idle`);
-7. preview the quad and its origin;
-8. validate bounds/overlap (proposed) and save the TOML.
+3. set the sprite pivot (normalized, default center);
+4. set pixels-per-unit scale; the renderer divides by it;
+5. set topology (`Quad` in v1);
+6. set texture filter/wrap in the sidecar;
+7. name the sprite asset (`sprites/player/idle`);
+8. preview the quad and its pivot;
+9. validate bounds/overlap (proposed) and save the TOML.
 
-The editor generates a quad:
+The editor generates UVs for a `Quad`; it does not write a vertices array:
 
+```toml
+texture  = "textures/player"
+uvs      = [ [u0,v0], [u1,v0], [u1,v1], [u0,v1] ] # top-left origin
+scale    = 16.0                                    # pixels per world unit
+pivot    = [0.5, 0.5]                              # normalized, top-left origin
+topology = "quad"
 ```
-vertices = [ [x0,y0], [x1,y0], [x1,y1], [x0,y1] ]   # source pixels, +Y down
-uvs      = [ [u0,v0], [u1,v0], [u1,v1], [u0,v1] ]   # normalized, top-left origin
-scale    = unitsPerPixel
-```
 
+The renderer generates the four corners from the UV span, texture size, scale, and pivot.
 The TOML schema is described in [Assets and pack files](assets.md#9-sprite-assets). The bake
 step (M4) converts it to a MessagePack sprite asset in `assets.pck`.
 
@@ -176,8 +181,8 @@ For each source texture the editor/baker produces:
   filter, wrap);
 - a raw payload at `textures/raw/<name>` (RGBA8 now, KTX2 later).
 
-The editor edits the source TOML and the source image; it does not write the runtime
-descriptor directly. The baker generates it. See
+The editor edits the source sidecar (`<file>.toml`) and the source image; it does not write the
+runtime descriptor directly. The baker generates it. See
 [Assets: texture descriptors](assets.md#8-texture-descriptors).
 
 ## 8. Bake and pack integration
@@ -187,10 +192,11 @@ The editor can invoke the same baker/pack path as the build:
 - **Validate:** parse TOML, check references, validate sprite geometry and texture metadata.
 - **Bake:** TOML → MessagePack assets.
 - **Pack:** MessagePack + raw payloads → `assets.pck` (release compression optional).
-- **Report:** file/line diagnostics, duplicate paths, missing textures, invalid vertices.
+- **Report:** file/line diagnostics, duplicate paths, missing textures, invalid UVs/geometry.
 
 The exact build command/API is `Open`; it will reuse M3/M4 code, not reimplement the pack
-format. The editor should be able to produce a debug pack (uncompressed) for quick runs.
+format. The editor should be able to produce a debug pack (compressed header, uncompressed asset
+payloads) for quick runs.
 
 ## 9. Runtime and AOT boundary
 

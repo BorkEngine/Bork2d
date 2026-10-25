@@ -15,7 +15,7 @@ Game developers consume exactly two assemblies:
 
 | Assembly | Role |
 | --- | --- |
-| `Bork2d.Api` | Public contracts and value types: engine, game, camera, sprite, input, assets. No GPU, OS, or third-party types. |
+| `Bork2d.Api` | Public contracts and value types: engine, game, camera, sprite, input, assets, logging factory. No GPU, OS, renderer, or third-party types (logging abstractions excepted). |
 | `Bork2d.Runtime` | Public startup surface: builder, host, modes. Composes the internal engine, renderer, platform, and asset implementations. |
 
 `Bork2d.Editor` is the public tool surface used by a game's thin `Project.Editor` host. It is
@@ -51,14 +51,16 @@ When code and docs disagree, code is current truth for `Current` items; the docs
 | [Projects and dependencies](architecture/projects.md) | contributors | Project graph, public/internal boundary, game solution layout, AOT build. |
 | [Runtime lifecycle](architecture/runtime-lifecycle.md) | contributors | Builder, modes, startup, tick loop, pacing, shutdown, errors. |
 | [Threading and frame handoff](architecture/threading.md) | contributors | Thread ownership, bounded run-ahead snapshot ring, input, resize/close, memory ordering. |
-| [Assets and pack files](architecture/assets.md) | contributors, editor | `assets.pck` format, VFS overlays, browsing, texture descriptors, sprite assets, bake pipeline. |
+| [Assets and pack files](architecture/assets.md) | contributors, editor | `assets.pck` format, compressed/checksummed header, VFS overlays, browsing, texture descriptors, sprite assets, bake pipeline. |
+| [Logging](architecture/logging.md) | contributors | ZLogger/Microsoft.Extensions.Logging, `IEngine.LoggerFactory`, builder default. |
 | [Editor](architecture/editor.md) | contributors, editor | Avalonia editor builder, slicing, custom types/windows, JIT boundary. |
-| [Data and serialization](architecture/data-and-serialization.md) | contributors, editor | TOML source, MessagePack bake, source generation, NativeAOT. |
+| [Data and serialization](architecture/data-and-serialization.md) | contributors, editor | TOML source, Nerdbank.MessagePack bake, NativeAOT. |
 | [NativeAOT](architecture/nativeaot.md) | contributors | Runtime AOT constraints, source generation, build/CI, editor exemption. |
-| [Rendering](architecture/rendering.md) | contributors | Vulkan 1.3, one draw per camera, per-sprite quads, bindless, dynamic rendering, windowed/offscreen. |
-| [API guide](api/guide.md) | game developers | Startup, modes, game loop, layers, cameras, sprites, input, assets, AOT. |
+| [Rendering](architecture/rendering.md) | contributors | Vulkan 1.3, one draw per camera, generated sprite quads, bindless, dynamic rendering, windowed/offscreen. |
+| [API guide](api/guide.md) | game developers | Startup, modes, game loop, layers, cameras, sprites, input, assets, logging, AOT. |
 | [API reference](api/reference.md) | game developers | Member contracts, defaults, threading, status. |
 | [Implementation roadmap](roadmap.md) | planner | Milestones M0–M10, exit criteria, risks, open decisions. |
+| [Contributing](contributing.md) | contributors | Build, warnings-as-errors, C# style, format gate, PR checklist. |
 | [Decision log](decisions.md) | everyone | Decisions taken, alternatives, consequences. |
 
 ### Suggested reading paths
@@ -75,6 +77,8 @@ When code and docs disagree, code is current truth for `Current` items; the docs
 - **NativeAOT/server:** [nativeaot](architecture/nativeaot.md) →
   [runtime modes](architecture/runtime-lifecycle.md#2-modes) →
   [API guide](api/guide.md#12-nativeaot).
+- **Contributing:** [contributing](contributing.md) → [logging](architecture/logging.md) →
+  [roadmap](roadmap.md).
 - **Planning the next pass:** [roadmap](roadmap.md) → [decision log](decisions.md) →
   [threading](architecture/threading.md).
 
@@ -88,16 +92,18 @@ These are the rules the rest of the documentation assumes. Details/alternatives 
 | Public surface | Only `Bork2d.Api` and `Bork2d.Runtime` are supported for game code; `Bork2d.Editor` is the tool surface. |
 | Runtime | NativeAOT and trim-safe. Editor/baker stay JIT. No runtime reflection, TOML, or assembly scanning. |
 | Threads | Main thread runs the tick; game workers may create/mutate distinct entities inside a tick and must join; a render thread owns Vulkan in windowed/offscreen; asset loaders are background. |
-| Modes | Windowed, offscreen (windowless Vulkan, frames discarded), headless (no SDL/Vulkan/render thread, ticks uncapped). |
-| Frame pacing | Bounded run-ahead. No target tick rate, deadline timer, or `Sleep`. Tick waits only when the three-slot snapshot ring is full. |
-| Assets | `assets.pck` (magic/version/header/data, uint64 offsets); later `LoadPack` overlays win; browse merged; no unload in v1. |
-| Compression | Zstd via .NET 11 built-in. Debug uncompressed; release maximum, stored only when smaller. |
-| Textures/sprites | Separate MessagePack texture descriptor + raw RGBA8 payload; sprite MessagePack assets with vertices, UVs, units-per-pixel scale. TOML source, baked. |
+| Modes | Windowed, offscreen (windowless Vulkan, frames discarded), headless (no SDL/Vulkan/render thread; timer-paced, default 60, 0 = uncapped). |
+| Frame pacing | Bounded run-ahead in windowed/offscreen. No target tick rate, deadline timer, or `Sleep` there. Headless uses its configured tick rate. |
+| Assets | `assets.pck` (magic/version/compressed header with XXH3-64 checksum, uint64 offsets); later `LoadPack` overlays win; browse merged; no unload in v1. |
+| Compression | Header always Zstd-compressed. Debug assets uncompressed; release assets maximum Zstd, stored only when smaller. |
+| Textures/sprites | Separate MessagePack texture descriptor + raw RGBA8 payload; sprite MessagePack assets with UVs, pivot, topology, and pixels-per-unit scale. TOML source, baked. |
 | Layers | `[Flags]` enum. One layer bit per renderable; camera culling mask. 32 flags maximum. |
 | Cameras | N cameras → N instanced draws, one per non-empty camera/viewport. |
-| World | Abstract units, Y-up, CCW radians. `Camera.Size` = half visible height. Per-sprite pixels-to-units scale; no global PPU. |
-| Renderer | Vulkan 1.3, dynamic rendering, bindless texture pages, instanced per-sprite quads, no depth, one pipeline. |
+| World | Abstract units, Y-up, CCW radians. `Camera.Size` = half visible height. Per-sprite pixels-per-unit scale; no global PPU. |
+| Renderer | Vulkan 1.3, dynamic rendering, bindless texture pages, instanced generated quads, no depth, one pipeline. |
 | Editor | Avalonia, JIT; compile-time builder registrations; source asset slicing/TOML editing; no Vulkan, no scene editing. |
+| Logging | Microsoft.Extensions.Logging + ZLogger; `IEngine.LoggerFactory`; pretty console default. |
+| Quality | From M1: warnings-as-errors, enforced C# style (`error`), `dotnet format --verify-no-changes`, AOT/trim analyzers. |
 | Stability | Pre-1.0: breaking changes allowed until the v1 API review. |
 
 ## Repository map
@@ -126,8 +132,10 @@ dotnet build src/Bork2d/Bork2d.slnx
 ```
 
 Today this builds with .NET SDK `11.0.100-rc.1` and target framework `net11.0`, with zero
-warnings/errors. The solution is **not runnable**: no window, renderer, pack, or asset system,
-and `Engine.Run()` is a placeholder loop.
+warnings/errors. The solution is **not runnable**: no window, renderer, pack, asset system, or
+logging stack, and `Engine.Run()` is a placeholder loop. From M1, `Directory.Build.props` and a
+root `.editorconfig` add warnings-as-errors and style-as-errors; see
+[Contributing](contributing.md).
 
 Finished-engine requirements: a Vulkan 1.3 GPU/driver, SDL2 native binaries, Windows x64 for
 the first NativeAOT target.
@@ -143,13 +151,14 @@ the first NativeAOT target.
 | **Snapshot slot** | One of three reusable CPU/GPU-lifetime snapshot buffers; held until its frame fence. |
 | **Frame slot** | One of two GPU frame resources (command buffer, instance buffer, semaphores, fence). |
 | **Bounded run-ahead** | The tick runs until the snapshot ring is full, then waits for a GPU fence; no fixed rate or artificial delay. |
-| **Windowed / offscreen / headless** | Normal SDL+Vulkan+present; windowless Vulkan with discarded frames; no SDL/Vulkan/render thread. |
+| **Windowed / offscreen / headless** | Normal SDL+Vulkan+present; windowless Vulkan with discarded frames; no SDL/Vulkan/render thread, timer-paced. |
 | **Game worker** | Game-owned thread spawned inside a tick; distinct entities; must join before `Tick` returns. |
-| **Pack** | `assets.pck` file containing a MessagePack header and payloads. |
+| **Pack** | `assets.pck` file containing a compressed/checksummed MessagePack header and payloads. |
 | **Overlay** | A pack mounted above the base pack; later packs win; browsing hides shadowed paths. |
 | **Texture descriptor** | MessagePack texture metadata (payload, width, height, format, filter, wrap). |
-| **Sprite asset** | MessagePack quad definition: texture path, vertices, UVs, units-per-pixel scale. |
+| **Sprite asset** | MessagePack quad definition: texture path, UVs, pivot, topology, pixels-per-unit scale. |
 | **Bindless** | Indexing a descriptor array from the shader, so all texture pages are available in one draw. |
+| **ZLogger** | Structured logging provider; the builder's default console configuration. |
 | **NativeAOT** | Ahead-of-time publish mode for the runtime/game; no runtime reflection/dynamic code. |
 | **Draw call** | Here: one `vkCmdDraw` executing all visible sprites of one camera as instances. |
 | **Unit** | Abstract world-space distance. Not a pixel. |
@@ -160,7 +169,8 @@ the first NativeAOT target.
 - Code samples are C# against the target API. Members that do not exist yet are `Planned`; some
   samples therefore do not compile against the current scaffold.
 - Coordinates: +X right, +Y up, radians CCW. Screen/input coordinates are top-left pixels.
-  Sprite vertex source space is pixels with +Y down; the renderer flips.
+  Sprite UVs and pivot are top-left origin; the renderer generates a Y-up quad from the UV span,
+  texture size, pivot, and pixels-per-unit scale.
 - "Main thread" means the thread that created the builder and calls `IGame.Tick`.
 - Asset paths are canonical lowercase `/` keys without source extensions; they are not
   filesystem paths.

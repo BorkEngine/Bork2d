@@ -31,13 +31,15 @@ of custom serializable classes.
   all workers must be joined before the tick ends and before the snapshot is taken. Concurrent
   access to the same entity is the game's responsibility.
 - **NativeAOT runtime.** The game/runtime is published with NativeAOT and is trim-safe; the
-  editor and build tools stay JIT. Runtime serialization is source-generated, and game code is
-  passed to the builder as an instance.
+  editor and build tools stay JIT. Runtime serialization uses Nerdbank.MessagePack generated
+  shapes, and game code is passed to the builder as an instance.
 - **Packed, ID-based assets.** Game code and snapshots carry `Sprite` handles; the runtime reads
   `assets.pck` (plus overlays), loads/decompresses in the background, and skips handles whose
   sprite/texture is not ready. TOML is source/editor format only.
 - **Headless and offscreen modes.** Dedicated servers can run with no window, GPU, or render
-  thread; tests can render windowless to an internal offscreen target.
+  thread and a configured tick rate; tests can render windowless to an internal offscreen target.
+- **Diagnostics and code quality.** ZLogger/Microsoft.Extensions.Logging with a pretty default
+  and `IEngine.LoggerFactory`; warnings and C# style violations are build errors.
 - **A short, composable startup API** through a builder in `Bork2d.Runtime`.
 - **Windows first**, with portable boundaries so Linux/macOS do not require an architectural
   rewrite.
@@ -125,7 +127,7 @@ inside a tick.
 | --- | :-: | :-: | :-: | :-: | --- |
 | Windowed | yes | yes | yes | swapchain | bounded run-ahead; presentation/GPU rate |
 | Offscreen | yes | yes | no | offscreen target | bounded run-ahead; GPU rate |
-| Headless | yes | no | no | no | uncapped (no artificial delay) |
+| Headless | yes | no | no | no | configured tick rate (default 60; 0 = uncapped) |
 
 | Thread | Owner | Responsibilities | Never does |
 | --- | --- | --- | --- |
@@ -191,9 +193,9 @@ One tick (windowed/offscreen):
 
 A render frame may show a snapshot one or more ticks old if the tick is faster; a snapshot may
 never be presented if a newer one supersedes it. The tick can run ahead only as far as the
-three-slot ring allows, then it blocks on a free slot. Headless mode has no ring or renderer and
-ticks uncapped, with no artificial delay. The state machine is in
-[Threading and frame handoff](threading.md).
+three-slot ring allows, then it blocks on a free slot. Headless mode has no ring or renderer;
+it uses a timer for its configured tick rate (default 60, `0` = uncapped). The state machine is
+in [Threading and frame handoff](threading.md).
 
 ## 7. Invariants
 
@@ -202,8 +204,10 @@ is an architecture bug, not a code-style preference.
 
 1. **Only `Bork2d.Api` and `Bork2d.Runtime` are public surfaces.** Internal projects may
    change or disappear between releases.
-2. **`Bork2d.Api` contains no GPU, OS, or third-party types.** No Vulkan handles, no SDL
-   types, no Silk.NET namespaces, no `IntPtr` window handles. It uses BCL types only.
+2. **`Bork2d.Api` contains no GPU, OS, or renderer types.** No Vulkan handles, no SDL types,
+   no Silk.NET namespaces, no `IntPtr` window handles. It uses BCL types plus
+   `Microsoft.Extensions.Logging.Abstractions` for `ILoggerFactory`; no other third-party
+   dependency.
 3. **All scene mutation happens inside the tick window, and the tick is quiescent at
    capture.** Cameras, sprites, transforms, parenting, and disposal are mutated only during
    `Setup`, `Tick`, or `Teardown`. During a tick, game workers may create or mutate distinct
@@ -217,22 +221,30 @@ is an architecture bug, not a code-style preference.
    against the pack-backed resource table at draw time and skips anything not ready.
 6. **A camera draws its visible sprites with at most one instanced draw call.** Empty cameras
    draw zero calls. The total is one per non-empty camera, not one per sprite or texture. Each
-   instance carries the sprite asset's four quad vertices and UVs.
+   instance carries four corners generated from the sprite's UV span, texture size, scale, and
+   pivot, plus its UVs.
 7. **Layers are single bits; culling masks are combinations.** A renderable with layer `0` or
    more than one bit set is invalid and is skipped with a debug diagnostic.
 8. **World units are abstract, Y-up, with CCW radians.** `Camera.Size` is the half visible
-   height. Sprite assets carry vertices, UVs, and a per-sprite pixels-to-units scale; there is
-   no global setting.
+   height. Sprite assets carry UVs, a normalized pivot, a topology enum, and a per-sprite
+   pixels-per-unit scale; there is no vertices array and no global setting.
 9. **There is no depth buffer in v1.** Draw order is layer, then z-index, then stable entity
    order. `ClearKind.Depth` is reserved and does nothing.
 10. **At most one window and one app process in v1.** Modes are windowed, offscreen, or
-    headless; headless has no window or GPU.
+    headless; headless has no window or GPU and uses its configured tick rate (default 60,
+    `0` = uncapped).
 11. **No steady-state per-frame allocations** in the tick snapshot builder or renderer hot path.
 12. **The runtime is NativeAOT- and trim-safe.** No runtime reflection, assembly scanning,
-    runtime TOML, or dynamic code; serializers are source-generated. The editor/baker are JIT.
+    runtime TOML, or dynamic code; Nerdbank.MessagePack shapes are source-generated. The
+    editor/baker are JIT.
 13. **`assets.pck` is the runtime asset source.** TOML and source images live in
-    `Project.Common`; only baked MessagePack/raw assets ship. Overlays are packs, later wins.
-14. **Pre-1.0 means breaking changes are allowed**, but every public change must update the API
+    `Project.Common`; only baked MessagePack/raw assets ship. The header is always compressed
+    and XXH3-64 checksummed; asset payloads have no checksum. Overlays are packs, later wins.
+14. **Logging is available everywhere through `IEngine.LoggerFactory`**, configured with
+    ZLogger by the builder; the default is a pretty console provider.
+15. **Warnings and C# style violations are build errors** in every project, with a format gate
+    in CI.
+16. **Pre-1.0 means breaking changes are allowed**, but every public change must update the API
     guide, API reference, and decision log in the same change.
 
 ## 8. Project responsibilities
@@ -243,8 +255,9 @@ is an architecture bug, not a code-style preference.
 | `Bork2d.Common` | Engine implementation, entity state, transform math, snapshot building, time. Platform-agnostic. | `Partial` |
 | `Bork2d.Runtime` | Public builder/host: SDL platform (windowed), Vulkan bootstrap, headless/offscreen composition root. | `Empty` |
 | `Bork2d.Render` | Vulkan device, swapchain (windowed) or offscreen targets, pipelines, bindless textures, instance buffers, draws, present. | `Empty` |
-| `Bork2d.Assets` | Pack VFS, overlays, decompression, texture descriptors, sprite assets, resource table, baking support. | `Empty` |
+| `Bork2d.Assets` | Pack VFS, overlays, decompression, texture descriptors, sprite assets, resource table, Nerdbank shapes, bake support. | `Empty` |
 | `Bork2d.Editor` | Avalonia editor library/app: asset browser, slicing, TOML data editing, bake/pack invocation; **JIT**. | `Planned` |
+| Logging | `Runtime` configures ZLogger/Microsoft.Extensions.Logging; `Api` exposes `ILoggerFactory`. | `Planned` |
 | Tests | Unit tests for math, pack/format, state machines, input, layers; AOT/GPU smoke/stress tests. | `Planned` |
 
 The current solution contains only the five existing projects; `Bork2d.Editor` and tests are
@@ -265,12 +278,15 @@ What actually exists today:
   placeholder values (`ClearColor = Cyan`, culling mask `0`).
 - `StopwatchTime`, not wired into `Engine`.
 - `Runtime`, `Render`, and `Assets` contain only an empty `Class1`.
+- No logging stack, pack format, headless/offscreen mode, AOT analyze/publish, or enforced style
+  settings yet.
 
 What that means for the documents:
 
 - API reference members are marked `Current` only when the declaration exists today.
-- Builders, `IEngine.Input`, `IEngine.Exit`, `IGame.Teardown`, flip flags, pack/asset loading,
-  headless/offscreen modes, NativeAOT settings, and the renderer are `Planned`.
+- Builders, `IEngine.Input`, `IEngine.Exit`, `IEngine.LoggerFactory`, `IGame.Teardown`, flip
+  flags, pack/asset loading, headless/offscreen modes, NativeAOT settings, and the renderer are
+  `Planned`.
 - The roadmap starts with foundation/AOT and platform work, then assets and the editor, then
   the renderer.
 
@@ -280,7 +296,9 @@ What that means for the documents:
 - [Runtime lifecycle](runtime-lifecycle.md) — builder, modes, startup, shutdown.
 - [Threading and frame handoff](threading.md) — bounded run-ahead and the snapshot ring.
 - [Assets and pack files](assets.md) — `assets.pck`, overlays, descriptors, sprites.
+- [Logging](logging.md) — ZLogger and `IEngine.LoggerFactory`.
 - [Editor](editor.md) — Avalonia builder and source asset authoring.
 - [NativeAOT](nativeaot.md) — runtime constraints and source generation.
 - [Rendering](rendering.md) — windowed/offscreen Vulkan and the one-draw contract.
+- [Contributing](../contributing.md) — build, warnings, style.
 - [Implementation roadmap](../roadmap.md) — the order in which this gets built.
