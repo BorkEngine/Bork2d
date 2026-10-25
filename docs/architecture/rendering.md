@@ -82,7 +82,7 @@ sparse resources, timeline semaphores (reserved for future async uploads).
    - color attachment = swapchain image view;
    - `loadOp = CLEAR` with opaque black as a deterministic safety clear;
    - no depth attachment; `storeOp = STORE`.
-6. For each camera in ascending `EntityId` order:
+6. For each camera in ascending `ZIndex` order:
    - set viewport/scissor to its normalized viewport in pixels;
    - if `Clear == Color`, clear that viewport to `ClearColor`;
    - if `Clear == Depth`, one-time debug warning and no-op;
@@ -123,8 +123,8 @@ The render thread owns all of this; the tick thread only supplies immutable snap
 ### 4.1 Resolve
 
 1. Take the current immutable sprite resource table.
-2. Sort `SpriteSnapshot`s once by `(Layer, ZIndex, EntityId)` ascending. Shared by all cameras;
-   filtering preserves order.
+2. Sort `SpriteSnapshot`s once by `(Layer, ZIndex)` ascending. Shared by all cameras;
+   filtering preserves order; ties within the same `(Layer, ZIndex)` are unspecified.
 3. For each camera:
    - filter by `(camera.CullingMask & sprite.Layer) != 0`;
    - skip `Sprite.Empty`;
@@ -255,7 +255,8 @@ excluded from the one-draw promise until it is.
 ### 7.1 World space
 
 - +X right, +Y up.
-- Rotation in radians, positive counter-clockwise around +Z.
+- Rotation in degrees, positive counter-clockwise around +Z, normalized to `[0, 360)` on
+  assignment. Internal matrix/projection math converts to radians at the boundary.
 - Scale is a multiplier; negative scale mirrors.
 - One world unit is abstract. A sprite's source pixels become units by dividing by its
   pixels-per-unit `scale`; `Camera.Size` and positions use units.
@@ -323,7 +324,7 @@ never treated as world units.
 
 ### 7.5 Defaults
 
-`CreateCamera(parent)` is planned to apply:
+`CreateCamera(parent)` applies:
 
 | Property | Default |
 | --- | --- |
@@ -332,9 +333,11 @@ never treated as world units.
 | `CullingMask` | all declared layer flags |
 | `Clear` | `ClearKind.Color` |
 | `ClearColor` | `Color.Black` |
+| `ZIndex` | `0` |
 | Transform | identity at origin |
 
-The current implementation uses `Cyan` and a zero mask; both are placeholders.
+These defaults are implemented in the M1 camera (WP3). Renderer behavior (drawing, sprite
+sorting, camera ordering) remains M6/M8 work.
 
 ## 8. Sorting, layers, and clears
 
@@ -345,10 +348,11 @@ The renderer sorts each snapshot's sprites once:
 ```
 Layer (numeric, ascending)
   → ZIndex (ascending)
-    → EntityId (ascending)
 ```
 
-Higher layer/`ZIndex` draw later/on top. Entity ID is the stable tie-breaker.
+Higher layer/`ZIndex` draw later/on top. There is no entity ID and no stable tie-breaker:
+sprites with the same `(Layer, ZIndex)` have **unspecified** relative order, so use distinct
+`ZIndex` values when order matters.
 
 Layers are flags, but a renderable must have exactly one bit:
 
@@ -371,12 +375,14 @@ the GPU. Frustum/AABB culling is a planned optimization; it must not change logi
 - `Clear.Color` clears the camera's viewport to `ClearColor` before drawing.
 - `Clear.None` preserves what earlier cameras drew; if first, the result is safety black.
 - `Clear.Depth` is reserved: no depth attachment, so it logs once and does nothing.
-- Camera order is ascending `EntityId` (creation order). A later camera with `Clear.Color`
-  wipes its viewport; with `Clear.None` it overlays.
-- A full-screen HUD camera with `Clear.None` and a later ID is the overlay pattern.
+- Camera order is ascending `ZIndex` (default `0`). Ties are unspecified, so assign distinct
+  values when the overlap matters. A camera applied later with `Clear.Color` wipes its viewport;
+  with `Clear.None` it overlays.
+- A full-screen HUD camera with `Clear.None` and a higher `ZIndex` is the overlay pattern.
 
-Camera order may become an explicit property later; that is `Open` and does not change
-one-draw-per-camera.
+Camera order is an explicit property (`ICamera<TLayer>.ZIndex`); ties remain unspecified and do
+not change one-draw-per-camera. M1 exposes the property and default; the renderer applies the
+ordering in M8 (D-026).
 
 ## 9. Synchronization and frames in flight
 
@@ -523,7 +529,7 @@ linear instance packing with zero steady-state allocations.
 | Bindless overflow | Hard startup failure, lower capacity, or a documented fallback that adds draws. |
 | Sampler defaults | Per-descriptor point/linear and wrap defaults; editor overrides. |
 | Mipmaps/compression | v1 raw RGBA8 only? Mips/KTX2 timeline. |
-| Camera order | Entity ID vs explicit `Order`. |
+| Camera order | Resolved (D-026): `ZIndex` ascending; ties unspecified; applied in M8. |
 | Frustum culling | v1 layer mask only; AABB later. |
 | Offscreen readback | Internal discard now; public capture later. |
 | MSAA | None in v1; confirm no 2D need. |

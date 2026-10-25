@@ -1,22 +1,24 @@
 # NativeAOT
 
-> **Status:** target constraint from M1. The runtime and game desktop host are
-> NativeAOT-compatible; the editor and build tools stay JIT. This is not implemented or
-> validated yet.
+> **Status:** `Current` for the M1 baseline (WP6). `Bork2d.Api`, `Bork2d.Common`,
+> `Bork2d.Assets`, `Bork2d.Render`, and `Bork2d.Runtime` compile with `IsAotCompatible` plus the
+> trim and AOT analyzers, and `Bork2d.AotSmoke` publishes and runs with zero AOT/trim warnings.
+> The smoke exercises the default logging path and a Nerdbank.MessagePack generated shape. The
+> editor and build tools stay JIT; SDL/Vulkan AOT validation arrives in M2/M6.
 
 ## 1. Scope
 
 | Component | NativeAOT required? | Why |
 | --- | --- | --- |
 | `Bork2d.Api` | Yes | It is referenced by the AOT game and must avoid dynamic/reflection traps. |
-| `Bork2d.Common` | Yes | Runtime scene, snapshots, transforms, time. |
+| `Bork2d.Common` | Yes | Runtime scene, snapshots, transforms, time, generated-shape policy. |
 | `Bork2d.Assets` | Yes | Pack parsing, decompression, MessagePack decoding, resource tables. |
 | `Bork2d.Render` | Yes | Vulkan renderer and uploads. |
-| `Bork2d.Runtime` | Yes | Builder, SDL platform, host. |
-| `Project.Desktop` | Yes | The shipped game/headless server is published with `PublishAot`. |
+| `Bork2d.Runtime` | Yes | Builder, host, and app-owned logging. |
+| `Bork2d.AotSmoke` | Yes | M1 one-tick smoke executable; published with `PublishAot`. The game template's `Project.Desktop` takes over this role in M9. |
 | `Bork2d.Editor` | No (JIT) | Avalonia desktop tool; may reflect over the game model. |
 | Asset baker / pack tool | No (JIT) | Build-time tool; may reflect over game assemblies. |
-| Tests | Mixed | Unit tests JIT; at least one AOT publish smoke test. |
+| Tests | Mixed | Unit tests JIT; one local AOT publish/run smoke (`Bork2d.AotSmoke`). |
 
 The editor being JIT is deliberate: it keeps a rich Avalonia UI and reflection-based property
 grid out of the runtime's AOT/trimming constraints. The compile-time editor builder still
@@ -24,29 +26,38 @@ avoids assembly scanning, so the boundary is explicit.
 
 ## 2. Build settings
 
-Target settings for runtime/game projects:
+Current settings for runtime/game projects:
 
 ```xml
+<!-- Api, Common, Assets, Render, Runtime (libraries) -->
 <PropertyGroup>
-  <PublishAot>true</PublishAot>
   <IsAotCompatible>true</IsAotCompatible>
   <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
   <EnableAotAnalyzer>true</EnableAotAnalyzer>
-  <InvariantGlobalization>false</InvariantGlobalization> <!-- decide at M1 -->
+</PropertyGroup>
+
+<!-- Bork2d.AotSmoke (executable) -->
+<PropertyGroup>
+  <OutputType>Exe</OutputType>
+  <PublishAot>true</PublishAot>
+  <InvariantGlobalization>true</InvariantGlobalization>
 </PropertyGroup>
 ```
 
 Notes:
 
 - `IsAotCompatible`/`EnableAotAnalyzer` on engine libraries catch reflection and dynamic-code
-  warnings during normal builds, not only at publish.
-- `PublishAot` is set on `Project.Desktop` (the executable). Libraries do not publish
-  independently.
+  warnings during normal builds, not only at publish. Warnings-as-errors makes every AOT/trim
+  diagnostic an error; a narrow suppression needs a recorded justification.
+- `PublishAot` is set only on `Bork2d.AotSmoke`. Libraries do not publish independently, and no
+  library sets `PublishAot`.
+- `InvariantGlobalization=true` is set for the M1 AOT smoke (human decision). The hosted game
+  will choose its globalization mode when the template lands (M9).
 - Native assets (SDL2, Vulkan loader) must be deployed for the target RID. The exact
-  `RuntimeIdentifier` and native-copy story are part of M1/M6.
-- AOT publish is a CI job, not only a release step. A JIT-clean build can still fail AOT.
-- Trimming warnings are treated as errors for all projects; game/template projects enable the
-  same AOT/trim analyzers as the engine.
+  `RuntimeIdentifier` and native-copy story are part of M2/M6.
+- AOT publish is a **required local gate**, not a CI job (human decision 2026-10-25): CI runs
+  build/tests/format on pull requests targeting `develop` and on `develop` pushes. See
+  [Testing and CI](#7-testing-and-ci).
 
 ## 3. Runtime constraints
 
@@ -93,6 +104,11 @@ AOT and also allows arbitrary constructor injection.
 - Runtime data assets are MessagePack, decoded by
   [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) **source-generated
   shapes**.
+- The M1 policy (WP6) pins `Nerdbank.MessagePack` `1.4.95` in `Bork2d.Common`. An internal
+  `[GenerateShape]` smoke type and a round-trip helper prove the generated-shape path; they are
+  visible to `Bork2d.AotSmoke` through an intentional `InternalsVisibleTo`. No reflection
+  resolver is configured. Pack and asset shapes are M3/M4; see
+  [Data and serialization](data-and-serialization.md).
 - `LoadAsset<T>` works only for types with a generated shape (for example `[GenerateShape]` on
   the root type). A missing shape is a build/startup error; there is no reflection fallback.
 - Pack header/entry classes, texture descriptors, and sprite assets use Nerdbank generated
@@ -135,8 +151,8 @@ AOT requirement.
 ## 6. Native libraries and Silk.NET
 
 - SDL2 and the Vulkan loader are native dependencies; they are deployed per target RID.
-- Silk.NET bindings are used instead of dynamic P/Invoke discovery. Validate the chosen
-  Silk.NET versions under AOT in M1 (SDL) and M6 (Vulkan).
+- Silk.NET bindings are used instead of dynamic P/Invoke discovery. M1 deliberately excludes
+  Silk.NET/SDL; AOT validation of the SDL path is M2 and of the Vulkan path is M6.
 - No runtime shader compilation: SPIR-V is built offline.
 - The headless server should not initialize SDL or Vulkan; `WithHeadless(...)` must not load or
   call into the graphics/windowing paths.
@@ -148,26 +164,31 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
 
 Required checks:
 
-1. `dotnet build` with AOT/trim analyzers and warnings-as-errors.
-2. `dotnet publish -c Release -r win-x64 -p:PublishAot=true` for a sample Desktop app.
-3. Run the AOT-published **headless** app in CI (no GPU required): load a pack, tick, browse,
-   exit.
-4. Run the AOT-published windowed/offscreen app on a GPU runner before release.
+1. `dotnet build` with AOT/trim analyzers and warnings-as-errors (Debug and Release).
+2. `dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64`
+   with zero AOT/trim warnings.
+3. Run the AOT-published **headless** smoke app locally (no GPU required): default logging,
+   one `Setup`/`Tick`/`Teardown`, clear the root, round-trip the generated shape, exit `0`.
+4. Run a windowed/offscreen AOT-published app on a GPU runner before release (M8+; not M1).
 5. Trim/AOT warning budget: zero warnings for every project; style and compiler warnings are
    errors. AOT/trim analyzers are errors on runtime/game projects.
-6. A smoke test that no `LoadAsset<T>` type lacks a Nerdbank generated shape.
+6. A smoke test that no loaded asset type lacks a Nerdbank generated shape (M3/M4 introduces
+   the asset loader; M1 covers the policy with `MessagePackShapeTests`).
 7. AOT-published app logs through the default ZLogger/Microsoft.Extensions.Logging path without
    trim warnings; `IEngine.LoggerFactory` is usable.
 
-A JIT unit-test pass is necessary but not sufficient; AOT failures often appear only at
+The AOT publish/run commands are a **required local gate** for WP6+, WP7, and the final
+`m-1/common` verification. CI is build/test/format only and runs on pull requests targeting
+`develop` and on `develop` pushes after a merge, so it does not catch AOT regressions itself. A
+JIT unit-test pass is necessary but not sufficient; AOT failures often appear only at
 publish/runtime.
 
 ## 8. Risks
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| Silk.NET or a dependency uses reflection/dynamic code | AOT publish/runtime failure | Validate in M1/M6; isolate adapters; pin versions. |
-| ZLogger/MEL provider not AOT-safe | Trim warnings or startup failure | Validate in M1; isolate provider behind `ILoggerFactory`; AOT-safe fallback. |
+| Silk.NET or a dependency uses reflection/dynamic code | AOT publish/runtime failure | Validate in M2/M6; isolate adapters; pin versions. |
+| ZLogger/MEL provider not AOT-safe | Trim warnings or startup failure | Validated by the M1 AOT smoke; keep providers behind `ILoggerFactory`. |
 | MessagePack source generation misses a custom type | Runtime load failure | Build-time validation; `LoadAsset<T>` registration checks; tests. |
 | TOML/reflection leaks into runtime | AOT warnings/failure | Project boundary and analyzers; TOML only in baker/editor. |
 | Trimming removes needed code | Subtle runtime failures | `IsAotCompatible`, analyzers, AOT smoke tests. |
@@ -175,29 +196,29 @@ publish/runtime.
 | Server pulls in SDL/Vulkan initialization | Unwanted GPU/window dependency | `WithHeadless` path that never initializes graphics. |
 | Editor keeps reflection while runtime forbids it | Boundary confusion | Separate assemblies/projects; editor JIT; runtime analyzers. |
 
-## 9. Open decisions
+## 9. Decisions
 
-| Topic | Question | Proposed direction |
-| --- | --- | --- |
-| MessagePack generation | Nerdbank shape/analyzer setup and root-type annotations. | `[GenerateShape]` roots; reflection resolver disabled. |
-| Globalization | `InvariantGlobalization` true or false? | Decide in M1 based on text/culture needs. |
-| AOT target RIDs | Windows x64 first; Linux later? | win-x64 first; Linux when platform support is added. |
-| Trimming game code | Are game projects required to be fully trim-clean? | All projects warnings-as-errors; trim warnings are errors unless narrowly suppressed with justification. |
-| Editor AOT | Ever? | Not required; keep registrations AOT-friendly anyway. |
-| Native library packaging | How SDL2/Vulkan loaders are copied/deployed. | MSBuild targets + documented redistributables (M1/M6). |
-| AOT diagnostics | Startup check for missing Nerdbank shapes? | Yes: fail fast with the type name. |
+| Topic | Decision |
+| --- | --- |
+| MessagePack generation | `Nerdbank.MessagePack` `1.4.95`; `[GenerateShape]` roots; reflection resolver disabled. M1 proves the policy with an internal smoke type and round trip. |
+| Globalization | `InvariantGlobalization=true` for the M1 AOT smoke (human decision); the game template chooses its mode in M9. |
+| AOT target RIDs | `win-x64` for the M1 local gate; Linux when platform support is added. |
+| Trimming game code | All projects warnings-as-errors; trim/AOT warnings are errors unless narrowly suppressed with recorded justification. |
+| Editor AOT | Not required; keep registrations AOT-friendly anyway. |
+| Native library packaging | MSBuild targets + documented redistributables (M2/M6). |
+| AOT diagnostics | Fail fast with the type name for missing Nerdbank shapes (M3/M4). |
 
 ## 10. Current status
 
 | Area | Current | Target |
 | --- | --- | --- |
-| AOT analyzers/settings | None | M1 |
-| `WithGame(instance)` | Builder absent | M1 |
-| Runtime source-generated assets | No asset pipeline | M3/M4 |
-| AOT headless smoke | None | M1 publish/build; full pack/tick/exit in M7; release gate M9 |
-| Silk.NET AOT validation | Not started | M1 (SDL), M6 (Vulkan) |
-| Editor JIT boundary | Editor absent | M5 |
-| AOT publish CI | None | M1 baseline, M9 release gate |
+| AOT analyzers/settings | Implemented (WP6): `IsAotCompatible`, trim and AOT analyzers on `Api`/`Common`/`Assets`/`Render`/`Runtime`; no `PublishAot` on libraries. | M1 |
+| `WithGame(instance)` | Implemented (WP4/WP5). | M1 |
+| Runtime source-generated assets | Policy + internal generated-shape smoke in `Common`; no pack/asset shapes yet. | M3/M4 |
+| AOT headless smoke | Implemented (WP6): `Bork2d.AotSmoke` publishes/runs one tick with default logging and a generated-shape round trip; zero AOT/trim warnings. | M1; full pack/tick/exit in M7; release gate M9 |
+| Silk.NET AOT validation | Not started; Silk.NET/SDL deliberately excluded from M1. | M2 (SDL), M6 (Vulkan) |
+| Editor JIT boundary | Editor absent. | M5 |
+| AOT publish/run gate | Local gate only (human decision); CI is build/test/format on `develop`. | M1 baseline, M9 release gate |
 
 ## 11. Related documents
 

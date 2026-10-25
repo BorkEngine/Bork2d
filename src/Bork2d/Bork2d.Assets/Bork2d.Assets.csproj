@@ -1,9 +1,21 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net11.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
+        <IsAotCompatible>true</IsAotCompatible>
+        <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+        <EnableAotAnalyzer>true</EnableAotAnalyzer>
     </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Bork2d.Api\Bork2d.Api.csproj" />
+        <ProjectReference Include="..\Bork2d.Common\Bork2d.Common.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="Bork2d.Runtime" />
+        <InternalsVisibleTo Include="Bork2d.Render" />
+        <InternalsVisibleTo Include="Bork2d.Editor" />
+        <InternalsVisibleTo Include="Bork2d.Tests" />
+    </ItemGroup>
 
 </Project>

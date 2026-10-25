@@ -104,11 +104,11 @@
 
 ## D-007 N cameras, N instanced draws
 
-- **Status:** Accepted
+- **Status:** Accepted; camera ordering updated by D-026
 - **Context:** "One draw per camera" needs a precise multi-camera contract.
 - **Decision:** Each non-empty camera produces one instanced draw; cameras render in ascending
-  entity ID (creation order) into normalized viewports. Empty cameras produce no draw. There is
-  no global one-draw-for-all-cameras requirement.
+  `ZIndex` (default `0`, ties unspecified) into normalized viewports. Empty cameras produce no
+  draw. There is no global one-draw-for-all-cameras requirement.
 - **Consequences:** Split-screen/HUD work naturally; draw count scales with non-empty cameras,
   not sprites/textures. The invariant is testable.
 - **Alternatives:** One active camera; one combined draw; offscreen composite.
@@ -116,9 +116,10 @@
 
 ## D-008 Units, Y-up, half-height camera, per-sprite scale
 
-- **Status:** Accepted; pivot/topology conventions proposed
+- **Status:** Accepted; pivot/topology conventions proposed; rotation unit superseded by D-025
 - **Context:** The engine needs unambiguous coordinates and sprite sizing.
-- **Decision:** World units are abstract; +X right, +Y up; radians CCW. `Camera.Size` is the
+- **Decision:** World units are abstract; +X right, +Y up; rotation is in degrees, CCW, normalized
+  to `[0, 360)` on assignment (the unit/range decision is D-025). `Camera.Size` is the
   **half** visible height; viewport aspect determines width. Each sprite asset carries a
   **pixels-per-unit** `scale`; world size divides by it, and `Transform.LocalScale` multiplies.
   No global PPU. Input is framebuffer pixels, top-left, converted through camera helpers.
@@ -142,8 +143,8 @@
   from sprite assets (UVs/scale/pivot/topology) in one pipeline. Texture pages use a descriptor-
   indexed bindless sampler array; instances select the page. Dynamic rendering; no render
   pass/framebuffer for the swapchain. v1: no depth, no MSAA/HDR, no per-sprite materials;
-  ordering layer → `ZIndex` → entity ID; straight alpha. Windowed and offscreen modes share the
-  pipeline; offscreen discards frames.
+  ordering layer → `ZIndex` (ties unspecified); straight alpha. Windowed and offscreen modes
+  share the pipeline; offscreen discards frames.
 - **Consequences:** One draw per camera; no per-sprite descriptors. Device must support
   descriptor indexing/bindless limits. Transparency needs explicit sorting. Variable-topology
   meshes need a future geometry path.
@@ -233,13 +234,13 @@
 - **Context:** Gameplay wants many threads inside a tick, joined before it ends, without the
   renderer reading live state.
 - **Decision:** All scene mutation happens inside the tick window. Game workers may create and
-  mutate **distinct** entities concurrently; the engine serializes structural state and
-  captures the snapshot after `Tick` returns. The engine does not serialize concurrent access
-  to the same entity/property; the game synchronizes that. Main-only APIs stay main-only.
-  Workers join before `Tick` returns.
-- **Consequences:** Parallel spawning/per-entity updates are legal and cheap; no per-property
-  locks. Same-entity races are the game's responsibility. Registry must stay thread-safe and
-  IDs unreused.
+  mutate **distinct** entities concurrently; the engine serializes structural changes and
+  individual property access (D-024) and captures the snapshot after `Tick` returns. A logical
+  multi-property update that must be atomic is the game's responsibility. Workers join before
+  `Tick` returns.
+- **Consequences:** Parallel spawning/per-entity updates are legal. Individual property access
+  uses a per-object `Lock` (D-024), while composite same-object updates remain the game's
+  responsibility. Structural state must stay thread-safe; no entity IDs are allocated.
 - **Alternatives:** Single-writer main-thread mutation; locks on every property; ECS/job system.
 - **Docs:** [Threading](architecture/threading.md#2-tick-scoped-concurrency)
 
@@ -248,11 +249,12 @@
 - **Status:** Accepted
 - **Context:** Game and dedicated-server builds should be AOT-published/trimmed; the editor and
   build tools have different constraints.
-- **Decision:** Runtime/game projects (`Api`, `Common`, `Assets`, `Render`, `Runtime`,
-  `Project.Desktop`) are NativeAOT- and trim-safe from M1. No runtime reflection, assembly
-  scanning, runtime TOML, or dynamic code. Nerdbank.MessagePack shapes are source-generated.
-  The editor and baker remain JIT and may use reflection/TOML. `WithGame(instance)` avoids
-  reflection-based construction.
+- **Decision:** Runtime libraries (`Api`, `Common`, `Assets`, `Render`, `Runtime`) are
+  NativeAOT- and trim-safe from M1, proved by the local `Bork2d.AotSmoke` publish/run gate. No
+  runtime reflection, assembly scanning, runtime TOML, or dynamic code.
+  Nerdbank.MessagePack shapes are source-generated. The editor and baker remain JIT and may use
+  reflection/TOML. `WithGame(instance)` avoids reflection-based construction. The game
+  template's `Project.Desktop` takes over the executable role in M9.
 - **Consequences:** AOT/trim analyzers and publish smoke are baseline; some libraries may need
   adapters; game constructors can take dependencies; missing generated shapes fail fast.
   Editor stays rich/JIT.
@@ -331,6 +333,14 @@
   configures a pretty ZLogger console provider. `Bork2d.Api` references
   `Microsoft.Extensions.Logging.Abstractions` only; `Bork2d.Runtime` carries ZLogger. The app
   owns/disposes the default factory; user-supplied configuration uses the same lifetime.
+- **Settled in WP5 (M1):** pinned `Microsoft.Extensions.Logging` `11.0.0-rc.1.26425.128` and
+  `ZLogger` `2.5.10` in `Bork2d.Runtime`. The default is ZLogger console with the plain-text
+  prefix `yyyy-MM-dd HH:mm:ss.fff [Level] Category: message` (local time, no ANSI colors); the
+  minimum level is `Debug` in debug builds and `Information` in release builds; there is no file
+  sink. `WithLogging` is invoked exactly once at `Build` and suppresses the default provider. The
+  app disposes the factory and the provider instances added with `AddProvider`; the logging
+  container disposes providers it creates. `Build` logs the startup mode, validation result, and
+  layer type once from `Bork2d.Runtime`.
 - **Consequences:** Game code can create category loggers from the engine factory; a default
   run is readable without configuration. ZLogger/MEL must be validated for NativeAOT/trimming.
   Logging is thread-safe and available in windowed/offscreen/headless modes.
@@ -353,7 +363,7 @@
 
 ## D-023 Root-owned scene graph
 
-- **Status:** Accepted
+- **Status:** Accepted; implemented in M1
 - **Context:** A global strong registry would retain every created camera/sprite/transform until
   app shutdown; losing a reference would leak permanently. Weak ownership auto-collects but
   makes camera/renderable lifetime nondeterministic.
@@ -368,7 +378,8 @@
 - **Consequences:** Deterministic lifetime bounded by scene membership; no GC-driven
   disappearance; no destroy lifecycle or stale-reference state. A rooted object whose game
   reference is lost persists until removed—this is deliberate. Removing and re-adding preserves
-  the object and its state. Snapshot discovery traverses the root tree. Parent add/remove is O(1)
+  the object and its state. Snapshot capture (M7, internal value-only structs) traverses the
+  root tree in unspecified order. Parent add/remove is O(1)
   amortized under a structural `System.Threading.Lock`; traversal is O(n), replacing
   weak-dictionary enumeration. Temporary scopes and typed caches are future optimizations.
 - **Alternatives:** Weak registry; finalizer-backed handles; global strong registry; arena/IDs;
@@ -378,7 +389,7 @@
 
 ## D-024 Thread-affinity-free API
 
-- **Status:** Accepted
+- **Status:** Accepted; implemented in M1
 - **Context:** Requiring the process main thread for engine calls makes embedding, tooling, and
   worker-driven game code fragile. The engine already needs synchronization for workers.
 - **Decision:** No public engine API requires the process main thread. Calls may originate on any
@@ -394,6 +405,56 @@
 - **Alternatives:** Main-thread-only API; single writer thread; caller-provided external lock.
 - **Docs:** [Threading](architecture/threading.md#2-tick-scoped-concurrency),
   [M1 spec](specs/m1-foundation.md)
+
+## D-025 Degrees and normalized rotation
+
+- **Status:** Accepted; implemented in M1
+- **Context:** The M1 public `ITransform.LocalRotation` originally used radians, which is awkward
+  for authoring and serialized scene data, and the value could differ between assignment and a
+  re-parent refresh. M1 needs one public unit and one canonical range.
+- **Decision:** Public rotation is in **degrees**, positive counter-clockwise around +Z.
+  `ITransform.LocalRotation` normalizes finite values to `[0, 360)` on assignment (`-90` → `270`,
+  `360` and `720` → `0`, `45.5` stays `45.5`), and the getter always returns the normalized value.
+  Non-finite values (`NaN`/±`Infinity`) throw `ArgumentOutOfRangeException`. Internal matrix math
+  keeps using radians and converts only at the boundary (`degrees * PI / 180`). `WorldRotation`
+  reports normalized degrees decomposed from the composed world matrix, and a re-parent cache
+  refresh normalizes the decomposed local rotation too.
+- **Consequences:** One public unit and one canonical range. Authored values outside the range
+  normalize rather than round-trip, so tests/docs use normalized degrees. Internal matrix code
+  stays in radians and must convert only at the public boundary.
+- **Alternatives:** Radians (original); `(-180, 180]` or `[-180, 180)` normalization; keep the
+  authored value and normalize only when evaluating the world transform.
+- **Docs:** [API reference](api/reference.md#12-units-and-conventions),
+  [API guide](api/guide.md), [Scene ownership](architecture/scene-ownership.md),
+  [Rendering](architecture/rendering.md#7-coordinates-camera-and-projection)
+
+## D-026 No entity IDs, unordered tree, camera `ZIndex`, internal snapshots
+
+- **Status:** Accepted; entity storage and camera `ZIndex` implemented in M1; snapshots and
+  ordering applied in M7/M8
+- **Context:** M1 briefly exposed a `SceneGraph` holder that allocated monotonic entity IDs and
+  ordered discovery by them. That identity leaked into tests, docs, and the future snapshot
+  contract (tie-breaking and camera order) even though no runtime code consumed it.
+- **Decision:** There are **no entity IDs** and no ordered discovery. The scene is an
+  **unordered** root-owned tree of parent/child links. The internal `ISceneNode` contract
+  exposes only parent, local/world matrix, and child-list operations; there is no graph holder.
+  One engine-owned global structural `System.Threading.Lock` serializes parent changes;
+  per-object `Lock`s protect local properties. `ICamera<TLayer>.ZIndex` (int, default `0`)
+  orders cameras: ascending, higher applies/draws later, ties unspecified. Frame snapshots are
+  internal, value-only `CameraSnapshot`/`SpriteSnapshot` structs, not part of `Bork2d.Api`, and
+  are deferred to M7 (frame handoff); camera ordering is applied in M8. Sprites sort by
+  `(Layer, ZIndex)`; ties unspecified.
+- **Consequences:** No identity allocator, graph holder, or ordering contract to maintain.
+  Equal `ZIndex`/`(Layer, ZIndex)` values have unspecified order, so games must assign distinct
+  keys where order matters. Snapshot capture may traverse the tree in any order. Tests assert
+  parent relationships, reference identity, GC behavior, and unique references instead of IDs
+  or order.
+- **Alternatives:** Keep monotonic IDs for tie-breaking; keep a `SceneGraph` context object;
+  use creation/insertion order as an implicit tie-breaker.
+- **Docs:** [Scene ownership](architecture/scene-ownership.md),
+  [Threading](architecture/threading.md#3-frame-snapshot),
+  [Rendering](architecture/rendering.md#81-sort-order), [API reference](api/reference.md),
+  [API guide](api/guide.md), [M1 spec](specs/m1-foundation.md)
 
 ## Proposed defaults awaiting sign-off
 
@@ -419,7 +480,7 @@ change before the milestone that implements them.
 | Project descriptor | `bork2d.project.toml` with asset/type mapping | M4/M5 |
 | Shader compiler | glslangValidator build target; embedded SPIR-V | M8 |
 | Bindless pages | 4096 default, hard failure on overflow | M8 |
-| Camera order | Entity ID (creation order) | M8 |
+| Camera order | `ZIndex` ascending, default `0`, ties unspecified | M8 |
 | v1 residency | Load-and-keep; unload API later | M3 |
 | Editor custom windows | Type/instance registration; no scanning | M5 |
 | Offscreen readback | Internal discard in v1 | M7/M10 |
@@ -461,3 +522,5 @@ document in the same change. Do not rewrite history by deleting an old decision;
 | D-022 | Warnings-as-errors + C# style gate | Accepted |
 | D-023 | Root-owned scene graph | Accepted |
 | D-024 | Thread-affinity-free API | Accepted |
+| D-025 | Degrees and normalized rotation | Accepted |
+| D-026 | No entity IDs, unordered tree, camera `ZIndex`, internal snapshots | Accepted |

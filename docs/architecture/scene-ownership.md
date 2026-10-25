@@ -1,7 +1,7 @@
 # Scene Ownership
 
-> **Status:** accepted for M1; implementation planned. This replaces the scaffold's
-> weak-reference registry. See the [M1 implementation spec](../specs/m1-foundation.md).
+> **Status:** current for M1 (implemented in WP3). This replaces the scaffold's weak-reference
+> registry. See the [M1 implementation spec](../specs/m1-foundation.md).
 
 ## 1. Problem
 
@@ -29,6 +29,9 @@ scene membership, not by the process or the GC.
   without recreating it.
 - `CreateCamera(parent)` and `CreateSpriteRender(parent)` require a parent, so the developer
   makes the membership decision at creation. `engine.Root` is the common parent.
+- A newly created object is attached with its default local values (position zero, rotation
+  zero, scale one), so it starts at the parent's origin. Assigning `Parent` afterwards preserves
+  the world transform instead.
 - `CreateTransform(parent = null)` may be standalone for math or temporary use; it is not
   rendered and is not retained unless parented.
 - Detaching (`Parent = null`) removes the object from its parent. If no game reference remains,
@@ -73,18 +76,31 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
 `ICamera<TLayer>` and `ISpriteRender<TLayer>` remain transforms; they can be parented anywhere
 in the rooted tree, not only directly under `Root`.
 
+The public contract is unchanged (`ISceneRoot : ITransform`), but the engine implements the root
+as a dedicated root node that implements `ISceneRoot` directly and is **not** a transform entity.
+Root and transforms share only the internal `ISceneNode` structural contract (child list, local /
+world matrix, structural lock); neither `ISceneNode` nor the concrete root type is public. Callers
+must treat `Root` through `ISceneRoot`/`ITransform` and must not assume a concrete transform type.
+
 Rules:
 
 - `Root.Parent` is always `null`; assigning a parent throws.
 - Setting any local transform value on `Root` throws `InvalidOperationException`.
 - Setting `Parent` on a normal transform rejects cycles, including self-parenting.
-- Re-parenting preserves the world transform and recomputes local values.
+- Re-parenting preserves the composed world matrix exactly and recomputes local values. The
+  internal transform stores the local affine matrix, so shear from a non-uniform scale combined
+  with rotation survives a re-parent.
+- Local position/rotation/scale are an authored scalar view over that matrix: negative scale axes
+  round-trip, and `LocalRotation` is always in degrees normalized to `[0, 360)` (`-90` → `270`,
+  `360`/`720` → `0`). A re-parent refreshes them from the exact matrix, normalizes the decomposed
+  rotation back to `[0, 360)` degrees, and keeps the authored mirror axis when possible.
 - Removing a child (`Parent = null`) does not clear its local/world state.
 - Re-adding a removed object to a parent restores it without creating a new object.
 - `ITransform.DetachAll()` detaches direct children; their `Parent` becomes `null`.
   Grandchildren stay attached to those children.
 - Any `ITransform` can have children; `DetachAll()` is not root-only.
-- Entity IDs are monotonic and not reused. Snapshot/render order remains entity-ID based.
+- The tree is **unordered**. There are no entity IDs, no ordered discovery, and no public child
+  enumeration in M1. Snapshot capture and render order are deferred to M7/M8 (D-026).
 
 ## 4. Lifetime cases
 
@@ -105,22 +121,26 @@ it from the scene is the explicit release; `Root.DetachAll()` bounds the whole s
 
 ## 5. Renderer and snapshot relationship
 
-- Snapshot capture walks the rooted tree and collects cameras, sprite renderables, and
-  transforms. The renderer never walks the live tree.
-- Cameras and sprites are sorted by entity ID before snapshot output, preserving the existing
-  ordering contract.
+- The renderer never walks the live tree. After `Tick` (workers joined), the engine traverses
+  the rooted tree in no specified order and builds internal **value-only** `CameraSnapshot` /
+  `SpriteSnapshot` structs. No `Transform`/`Camera`/`SpriteRender` reference crosses the
+  boundary.
+- The snapshot structs are internal, are not part of `Bork2d.Api`, and are not implemented in
+  M1: snapshot capture belongs to M7 (frame handoff) and camera ordering to M8.
+- Cameras are applied in ascending `ZIndex`; higher draws later, default `0`, ties unspecified.
+  Sprites are sorted by `(Layer, ZIndex)`; ties unspecified. There are no entity IDs.
 - Renderers copy the values they need. Holding a game reference to a live entity never gives
   the render thread access to it.
 - Scene mutation is logically tick-window scoped: `Setup`, `Tick` (including joined workers), or
   `Teardown`. The API itself has no thread affinity; engine locks make concurrent calls safe.
-- Structural attach/detach uses a scene-graph structural `System.Threading.Lock`. Individual
+- Structural attach/detach uses one engine-owned structural `System.Threading.Lock`. Individual
   property access uses per-object `Lock`s; prefer `Interlocked`/immutable paths where practical.
   A logical multi-property update to one object still needs game synchronization if it must be
   atomic.
 
 ## 6. Performance
 
-The root tree is expected to be cheaper than the current weak dictionary:
+The root tree replaces the previous weak dictionary:
 
 - parent add/remove: amortized O(1) with a child list and swap-back removal, under the
   structural `System.Threading.Lock`;
@@ -147,17 +167,36 @@ scene-scoped ownership and does not change the leak semantics.
 | Arena/generational IDs | Viable, but a large API rewrite; a lost ID still leaves a scene object until removal. |
 | Auto-parent everything to `Root` | Recreates permanent ownership; losing a reference still leaks. |
 
-## 8. M1 implementation tasks
+## 8. M1 implementation status
 
-1. Replace `EntityList<T>` with a rooted transform tree.
-2. Add `ISceneRoot`, `IEngine.Root`, and read-only root setters.
-3. Change `CreateTransform`/`CreateCamera`/`CreateSpriteRender` to the parent-aware signatures.
-4. Implement parent add/remove, cycle rejection, `Root.DetachAll()` detach, and re-attach.
-5. Capture cameras/sprites by traversing the rooted tree; remove weak registries.
-6. Add ownership/lifetime tests, including remove/re-add, root clear/re-add, lost-reference/GC,
-   root read-only setters, cycles, and concurrent distinct-entity operations.
-7. Remove `IDisposable`/`Dispose`/`IsAlive` from scene entities.
-8. Update API docs, threading notes, and the M1 spec.
+Implemented in WP3 inside `Bork2d.Common` (all implementation types are internal):
+
+1. `EntityList<T>` and the weak registry are removed; the scene is a root-owned scene tree with a
+   dedicated root node and transform entities.
+2. `ISceneRoot`/`IEngine.Root` are implemented; parent and local setters throw
+   `InvalidOperationException`, and the root stays a read-only identity transform. The root is a
+   dedicated node implementing `ISceneRoot` directly; it does not inherit the transform entity
+   type. Root and transforms share the internal `ISceneNode` structural contract.
+3. `CreateTransform`/`CreateCamera`/`CreateSpriteRender` attach to the supplied parent;
+   the camera/sprite creators reject a `null` parent and non-engine parents.
+4. Parent add/remove, self/cycle rejection, world-preserving re-parent, `DetachAll()` on any
+   transform, and root teardown all run under one engine-owned structural
+   `System.Threading.Lock` owned by `Engine`. The transform stores its local affine matrix, so
+   re-parenting preserves the composed world matrix exactly (including shear) and
+   `LocalPosition` changes only the translation; local rotation/scale are an authored scalar
+   view refreshed after a re-parent. Property access uses a per-object `Lock`; no path takes
+   the structural lock while holding a per-object lock.
+5. The tree is unordered: there is no entity ID, no ordered discovery, and no public child
+   enumeration. Snapshot capture is not implemented in M1; internal value-only snapshot structs
+   and camera `ZIndex` ordering are M7/M8.
+6. `Bork2d.Tests` covers rooted/unparented lifetime with `WeakReference`, remove/re-add, root
+   teardown/re-add, read-only root, self/cycle rejection, exact-matrix world-preserving re-parent,
+   authored local scalar round-trip (negative scale axes and degrees normalized to `[0, 360)`),
+   parent relationships in the unordered tree, distinct references under concurrency, and
+   camera `ZIndex` defaults/round-trip.
+7. Scene entities have no `IDisposable`/`Dispose`/`IsAlive` and do not self-register anywhere.
+8. API docs and the threading/lifecycle notes were updated in the same change; WP8 completed the
+   M1 documentation final pass.
 
 ## 9. Related documents
 
@@ -166,3 +205,5 @@ scene-scoped ownership and does not change the leak semantics.
 - [Threading](threading.md#2-tick-scoped-concurrency) — mutation and locking rules.
 - [API reference](../api/reference.md#2-iengine) — exact public members.
 - [Decision D-023](../decisions.md#d-023-root-owned-scene-graph) — decision record.
+- [Decision D-026](../decisions.md#d-026-no-entity-ids-unordered-tree-camera-zindex-internal-snapshots) —
+  no entity IDs, unordered tree, camera `ZIndex`, internal snapshots.

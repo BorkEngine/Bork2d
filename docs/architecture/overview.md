@@ -1,7 +1,8 @@
 # Architecture Overview
 
-> **Status:** target design with a partial implementation. The sections marked `Current`
-> describe the scaffold; everything else is `Planned` unless called out.
+> **Status:** M1 foundation implemented (WP1–WP8); final PR pending. Sections marked `Current`
+> describe what exists in the M1 tree; everything else is `Planned` unless called out. The
+> window/platform, assets, editor, and renderer are later milestones (M2–M8).
 
 ## 1. Purpose
 
@@ -26,16 +27,18 @@ of custom serializable classes.
 - **SDL2** for window creation, input, and Vulkan surface integration.
 - **Separate tick and render threads.** While the renderer presents frame N, the game ticks
   frame N+1.
-- **Explicit thread model.** Game code may run worker threads inside a tick. Engine registries
-  are safe for concurrent creation/disposal, and distinct entities can be mutated in parallel;
-  all workers must be joined before the tick ends and before the snapshot is taken. Concurrent
-  access to the same entity is the game's responsibility.
+- **Scene operations are thread-safe.** Game code may run worker threads inside a tick; scene
+  structural changes and individual property access are serialized by engine locks, so distinct
+  entities can be mutated in parallel; all workers must be joined before the tick ends and
+  before the snapshot is taken. Composite concurrent access to the same entity remains the
+  game's responsibility.
 - **NativeAOT runtime.** The game/runtime is published with NativeAOT and is trim-safe; the
   editor and build tools stay JIT. Runtime serialization uses Nerdbank.MessagePack generated
   shapes, and game code is passed to the builder as an instance.
-- **Packed, ID-based assets.** Game code and snapshots carry `Sprite` handles; the runtime reads
-  `assets.pck` (plus overlays), loads/decompresses in the background, and skips handles whose
-  sprite/texture is not ready. TOML is source/editor format only.
+- **Packed, path-addressed assets.** Game code and snapshots carry `Sprite` handles; the runtime
+  reads `assets.pck` (plus overlays), loads/decompresses in the background, and skips handles
+  whose sprite/texture is not ready. TOML is source/editor format only. Scene entities have no
+  IDs; assets are referenced by canonical paths (not persisted handles).
 - **Headless and offscreen modes.** Dedicated servers can run with no window, GPU, or render
   thread and a configured tick rate; tests can render windowless to an internal offscreen target.
 - **Diagnostics and code quality.** ZLogger/Microsoft.Extensions.Logging with a pretty default
@@ -119,9 +122,10 @@ The exact reference rules and the public/internal split are in
 
 ## 5. Runtime topology
 
-The engine owns a main/tick thread and asset loader threads in every mode. It additionally
-owns a render thread in windowed and offscreen modes. The game may add short-lived workers
-inside a tick.
+The engine invokes game callbacks on its tick thread, which may be any host thread; there is no
+process-main-thread affinity. It owns asset loader threads in every mode and additionally a
+render thread in windowed and offscreen modes once those milestones land. The game may add
+short-lived workers inside a tick. M1 runs a single tick and has no mode threads.
 
 | Mode | Tick | Render thread | SDL | Vulkan | Pacing |
 | --- | :-: | :-: | :-: | :-: | --- |
@@ -216,11 +220,12 @@ is an architecture bug, not a code-style preference.
    `Microsoft.Extensions.Logging.Abstractions` for `ILoggerFactory`; no other third-party
    dependency.
 3. **All scene mutation happens inside the tick window, and the tick is quiescent at
-   capture.** Cameras, sprites, transforms, parenting, and disposal are mutated only during
+   capture.** Cameras, sprites, transforms, and parenting are mutated only during
    `Setup`, `Tick`, or `Teardown`. During a tick, game workers may create or mutate distinct
    entities; they must be joined before `Tick` returns. The engine serialises structural
-   state (IDs, registries) but not concurrent writes to the same entity/property; the game
-   must synchronise shared entities.
+   parent/child changes and individual property access with `System.Threading.Lock`; a composite
+   multi-property update to one entity still needs game synchronization where atomicity matters.
+   The tree is unordered: there are no entity IDs, ordered discovery, or child enumeration.
 4. **Snapshots are immutable after publication.** The render thread never reads a live
    entity, never mutates snapshot memory, and never blocks the tick on a specific frame. The
    tick may wait only when the snapshot ring is full or a GPU frame slot is unavailable.
@@ -232,11 +237,13 @@ is an architecture bug, not a code-style preference.
    pivot; the asset stores no vertices.
 7. **Layers are single bits; culling masks are combinations.** A renderable with layer `0` or
    more than one bit set is invalid and is skipped with a debug diagnostic.
-8. **World units are abstract, Y-up, with CCW radians.** `Camera.Size` is the half visible
-   height. Sprite assets carry UVs, a normalized pivot, a topology enum, optional indices, and a
-   per-sprite pixels-per-unit scale; there is no vertices array and no global setting.
-9. **There is no depth buffer in v1.** Draw order is layer, then z-index, then stable entity
-   order. `ClearKind.Depth` is reserved and does nothing.
+8. **World units are abstract, Y-up, with CCW degrees normalized to `[0, 360)`.** `Camera.Size`
+   is the half visible height. Sprite assets carry UVs, a normalized pivot, a topology enum,
+   optional indices, and a per-sprite pixels-per-unit scale; there is no vertices array and no
+   global setting.
+9. **There is no depth buffer in v1.** Draw order is layer, then `ZIndex`; ties are unspecified
+   and there is no entity ID or creation-order tie-breaker (D-026). `ClearKind.Depth` is
+   reserved and does nothing.
 10. **At most one window and one app process in v1.** Modes are windowed, offscreen, or
     headless; headless has no window or GPU and uses its configured tick rate (default 60,
     `0` = uncapped).
@@ -264,44 +271,54 @@ is an architecture bug, not a code-style preference.
 
 | Project | Responsibility | Status |
 | --- | --- | --- |
-| `Bork2d.Api` | Public contracts and value types. The only assembly `Project.Common` needs. | `Partial` |
-| `Bork2d.Common` | Engine implementation, scene root/transform tree, entity state, transform math, snapshot building, time. Platform-agnostic. | `Partial` |
-| `Bork2d.Runtime` | Public builder/host: SDL platform (windowed), Vulkan bootstrap, headless/offscreen composition root. | `Empty` |
-| `Bork2d.Render` | Vulkan device, swapchain (windowed) or offscreen targets, pipelines, bindless textures, instance buffers, draws, present. | `Empty` |
-| `Bork2d.Assets` | Pack VFS, overlays, decompression, texture descriptors, sprite assets, resource table, Nerdbank shapes, bake support. | `Empty` |
+| `Bork2d.Api` | Public contracts and value types. The only assembly `Project.Common` needs. | `Current` |
+| `Bork2d.Common` | Engine implementation: root-owned unordered scene tree, transform math, time, layer validation, Nerdbank shapes. Platform-agnostic. | `Partial` (snapshot capture is M7) |
+| `Bork2d.Runtime` | Public builder/host with validation, one-tick `Run`, app-owned logging, and M1 stubs. | `Partial` |
+| `Bork2d.Render` | Vulkan device, swapchain (windowed) or offscreen targets, pipelines, bindless textures, instance buffers, draws, present. | `Empty` (references wired) |
+| `Bork2d.Assets` | Pack VFS, overlays, decompression, texture descriptors, sprite assets, resource table, Nerdbank shapes, bake support. | `Empty` (references wired) |
+| `Bork2d.AotSmoke` | NativeAOT one-tick smoke executable; local publish/run gate. | `Current` |
 | `Bork2d.Editor` | Avalonia editor library/app: asset browser, slicing, TOML data editing, bake/pack invocation; **JIT**. | `Planned` |
-| Logging | `Runtime` configures ZLogger/Microsoft.Extensions.Logging; `Api` exposes `ILoggerFactory`. | `Planned` |
-| Tests | Unit tests for math, pack/format, state machines, input, layers; AOT/GPU smoke/stress tests. | `Planned` |
+| Logging | `Runtime` configures ZLogger/Microsoft.Extensions.Logging; `Api` exposes `ILoggerFactory`. | `Current` (WP5) |
+| Tests | xUnit suite, dependency matrix, concurrency/GC/AOT coverage. | `Current` (135 tests) |
 
-The current solution contains only the five existing projects; `Bork2d.Editor` and tests are
-planned. `examples/` is empty; `docs/` contains this documentation set.
+The current solution contains seven projects (the five engine projects, `Bork2d.Tests`, and
+`Bork2d.AotSmoke`). `Bork2d.Editor` is planned (M5). `examples/` is empty; `docs/` contains this
+documentation set.
 
 ## 9. Current baseline
 
-What actually exists today:
+What actually exists today (M1):
 
-- Five projects targeting `net11.0`; the only project reference is `Common → Api`.
-- API contracts for engine, game, time, window, input, assets, camera, sprite, transform,
-  plus `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`.
-- A placeholder `Engine` that calls `Setup()` and then loops `Tick()` with no time update,
-  no renderer, no exit path, and no disposal.
-- `EntityList` using `ConcurrentDictionary<uint, WeakReference<T>>`.
-- `Transform` with local properties and stubbed global properties; parenting is not implemented.
-- `Camera` and `SpriteRender` implementations registered in entity lists; defaults are
-  placeholder values (`ClearColor = Cyan`, culling mask `0`).
-- `StopwatchTime`, not wired into `Engine`.
-- `Runtime`, `Render`, and `Assets` contain only an empty `Class1`.
-- No logging stack, root-owned scene graph, pack format, headless/offscreen mode, AOT
-  analyze/publish, or enforced style settings yet.
+- Seven `net11.0` projects: `Api`, `Common`, `Runtime`, `Assets`, `Render`, `Tests`, and
+  `AotSmoke`. References: `Common → Api`; `Assets → Api, Common`; `Render → Api, Common,
+  Assets`; `Runtime → Api, Common, Assets, Render`; `AotSmoke → Api, Common, Runtime`; tests may
+  reference everything.
+- API contracts for engine, game, time, window, input, assets, camera (`ZIndex`), sprite,
+  transform (`DetachAll`), scene root, `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`,
+  and `Bork2dException`.
+- `Common`: an internal engine with a dedicated read-only `SceneRoot` (not a `Transform`), a
+  transform tree with strong parent/child links, non-virtual transform properties, rotation in
+  degrees normalized to `[0, 360)`, one engine-owned structural `System.Threading.Lock` plus
+  per-object locks, and no entity IDs or ordered discovery.
+- `Runtime`: `Bork2dAppBuilder<TLayer>` validation (mode, layer enum, sizes, paths), an
+  app-owned Microsoft.Extensions.Logging/ZLogger factory, and a one-tick
+  `Setup` → `Tick` → `Teardown` `Bork2dApp.Run()`.
+- `Bork2d.Tests`: 135 deterministic xUnit tests covering ownership/lifetime, remove/re-add,
+  root read-only, cycles/re-parenting, rotation, camera `ZIndex`, builder validation, logging,
+  concurrency, and the dependency matrix.
+- NativeAOT baseline: `IsAotCompatible` plus trim/AOT analyzers on the runtime libraries;
+  `Bork2d.AotSmoke` publishes/runs locally with zero AOT/trim warnings. AOT is a local gate;
+  CI runs build/test/format on pull requests targeting `develop` and on `develop` pushes.
+- `Assets` and `Render` contain only anchor types and reference wiring. `Bork2d.Editor` is
+  absent (M5). There is no window, input, renderer, pack, asset loading, or real mode loop.
 
 What that means for the documents:
 
-- API reference members are marked `Current` only when the declaration exists today.
-- Builders, `IEngine.Root`, `IEngine.Input`, `IEngine.Exit`, `IEngine.LoggerFactory`,
-  `IGame.Teardown`, flip flags, pack/asset loading, headless/offscreen modes, NativeAOT
-  settings, and the renderer are `Planned`.
-- The roadmap starts with foundation/AOT and the root-owned scene graph, then platform work,
-  then assets/editor, then the renderer.
+- A member is marked `Current` when it exists and is implemented for the M1 host; members that
+  need the window, assets, renderer, or snapshot ring are `Planned`.
+- Snapshot structs and capture are M7; camera order is applied in M8; window/input is M2;
+  pack/assets is M3/M4; Vulkan is M6; the editor is M5.
+- The one-tick `Run()` is a smoke path, not the final loop.
 
 ## 10. Read next
 

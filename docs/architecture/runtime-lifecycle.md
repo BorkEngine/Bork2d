@@ -1,8 +1,10 @@
 # Runtime Lifecycle
 
-> **Status:** target design. No builder or host exists in the current tree; `Engine.Run()` is
-> a placeholder `while (true)` loop. The API shapes below are `Planned` and will be finalised
-> in roadmap M1.
+> **Status:** M1 skeleton implemented. `Bork2dAppBuilder<TLayer>` validates options, creates the
+> app-owned logging factory, and builds the internal engine/root; `Bork2dApp.Run()` performs
+> exactly one `Setup` → `Tick` → `Teardown` sequence, then returns. There is still no window, GPU
+> work, render thread, pack, or timer-paced loop; the mode startup, pacing, and shutdown
+> sequences below remain the target design for M2/M7.
 
 ## 1. Public startup contract
 
@@ -27,16 +29,24 @@ app.Run();
   NativeAOT.
 - `Bork2dAppBuilder<TLayer>` is configured and built once; no thread affinity.
 - `Build()` validates the configuration and returns an `IDisposable` app object. It does not
-  create the window, GPU, or threads. It creates the logger, engine, and `IEngine.Root`; the
-  root is empty until `Setup`.
-- `Run()` may be called from any thread. It starts the selected mode, calls `Setup`, and enters
-  the tick loop (M1: one smoke `Tick`, then returns). It blocks until shutdown.
-- `Dispose()` is safe whether or not `Run()` was called and is idempotent. The `using`
-  declaration guarantees cleanup if `Run()` throws.
+  create the window, GPU, or threads. After validation it creates the app-owned
+  Microsoft.Extensions.Logging/ZLogger factory, logs the startup mode and validation outcome, then
+  creates the options, engine, and `IEngine.Root`; the root is empty until `Setup`. The factory is
+  passed to both the engine (`IEngine.LoggerFactory`) and the app runtime.
+- `Run()` may be called from any thread. In the full design it starts the selected mode, calls
+  `Setup`, and enters the tick loop until shutdown. **In M1 it is a smoke path:** it calls
+  `Setup`, exactly one `Tick`, then `Teardown`, and returns. It may be called only once.
+- `Dispose()` is safe whether or not `Run()` was called and is idempotent. It detaches the root's
+  direct children, disposes the app-owned logger factory, and flushes/stops its providers, but
+  never calls `IGame.Teardown` again. The `using` declaration guarantees cleanup if `Run()` throws.
+- If `Setup` throws there is nothing to tear down, so `Teardown` is not called. If `Tick` throws,
+  `Teardown` is still attempted and the original exception propagates. A failed run clears the
+  root's direct children; calling `Run()` after a failure throws `InvalidOperationException`.
 - The app owns the platform, renderer, asset service, engine, and snapshot ring. The game
   instance is owned by the caller but its lifetime must cover `Run()`.
 
-The exact method names and signatures are `Open`; the shape is the design intent. See
+The exact method names and signatures are `Current` for M1; the mode startup and loop details
+below are still the design intent. See
 [the API reference](../api/reference.md#12-runtime-surface).
 
 ## 2. Modes
@@ -65,26 +75,31 @@ ignored in the other modes; validation rejects conflicting combinations.
 
 `IWindow` and `IInput` are unavailable in offscreen/headless modes. Accessing them throws a
 `Bork2dException`/`NotSupportedException`; game code that must run in all modes should not
-depend on them.
+depend on them. **In M1 there is no window in any mode**, so `IWindow` members and `IInput`
+throw even for the default windowed configuration.
 
 ## 3. Builder options and validation
 
+> **M1 status:** the builder surface, validation, and storage are `Current`; the parenthetical
+> notes whether the underlying window/GPU/timer effect exists. Headless and offscreen currently
+> share the same one-tick smoke, and logging is wired (`WithLogging` is invoked at `Build`).
+
 | Option | Default | Status | Meaning |
 | --- | --- | --- | --- |
-| `WithGame(IGame<TLayer> game)` | required | `Planned` | Caller-owned game instance. Must not be null. |
-| `WithAssetsPack(string path)` | `assets.pck` | `Planned` | Base pack path (see [assets](assets.md)). |
-| `WithLogging(Action<ILoggingBuilder>)` | pretty ZLogger console | `Planned` | Configure Microsoft.Extensions.Logging/ZLogger. If omitted, the pretty default is installed. |
-| `WithTitle(string)` | assembly name | `Planned` | Window title (windowed only). |
-| `WithSize(int width, int height)` | `1280 × 720` | `Planned` | Initial framebuffer size (windowed only). |
-| `WithResizable(bool)` | `true` | `Planned` | Windowed only. |
-| `WithFullscreen(bool)` | `false` | `Planned` | Windowed only; exact mode `Open`. |
-| `WithVSync(bool)` | `true` | `Planned` | Windowed present mode preference. Offscreen has no vsync. |
-| `WithHeadless(int ticksPerSecond = 60)` | `60` | `Planned` | No window/GPU/render thread; paced to the tick rate. `0` = uncapped. |
-| `WithOffscreen(int width, int height)` | — | `Planned` | Windowless Vulkan rendering; frames discarded. |
-| `WithMaxDeltaTime(double)` | `0.25` s | `Planned` | Safety clamp for `ITime.DeltaTime`; not a pacing delay. |
-| `WithValidation(bool)` | debug only | `Planned` | Vulkan validation layers (windowed/offscreen). |
-| `Build()` | — | `Planned` | Validate and create the app object. |
-| `Bork2dApp.Run()` | — | `Planned` | Start and run until shutdown. |
+| `WithGame(IGame<TLayer> game)` | required | `Current` | Caller-owned game instance. Must not be null. |
+| `WithAssetsPack(string path)` | `assets.pck` | `Current (path only)` | Base pack path (see [assets](assets.md)). M1 validates the path shape only (non-empty); the pack is M3. |
+| `WithLogging(Action<ILoggingBuilder>)` | pretty ZLogger console | `Current` | Configures the app-owned logging factory. Invoked once at `Build`; suppresses the default provider. |
+| `WithTitle(string)` | assembly name | `Current (stored)` | Window title (windowed only). |
+| `WithSize(int width, int height)` | `1280 × 720` | `Current (stored)` | Initial framebuffer size (windowed only). |
+| `WithResizable(bool)` | `true` | `Current (stored)` | Windowed only. |
+| `WithFullscreen(bool)` | `false` | `Current (stored)` | Windowed only; exact mode `Open`. |
+| `WithVSync(bool)` | `true` | `Current (stored)` | Windowed present mode preference. Offscreen has no vsync. |
+| `WithHeadless(int ticksPerSecond = 60)` | `60` | `Current (stored)` | No window/GPU/render thread; paced to the tick rate. `0` = uncapped. |
+| `WithOffscreen(int width, int height)` | — | `Current (stored)` | Windowless Vulkan rendering; frames discarded. |
+| `WithMaxDeltaTime(double)` | `0.25` s | `Current (stored)` | Safety clamp for `ITime.DeltaTime`; not a pacing delay. |
+| `WithValidation(bool)` | debug only | `Current (stored)` | Vulkan validation layers (windowed/offscreen). |
+| `Build()` | — | `Current` | Validate and create the app object. |
+| `Bork2dApp.Run()` | — | `Current (M1 smoke)` | Start and run; M1 runs one tick and returns. |
 
 Windowed/offscreen have no target tick rate and no `Sleep`/frame limiter; tick pacing comes
 from the bounded snapshot ring and the renderer's frame completion. Headless mode uses the
@@ -98,12 +113,15 @@ Validation performed by `Build()`:
 3. Exactly one mode is selected (default windowed, or headless, or offscreen).
 4. Window-only options are not combined with headless/offscreen.
 5. `TLayer` is an `int`-backed flags enum with 1–32 named single-bit values.
-6. Sizes are positive; max delta is positive; headless tick rate is `>= 0`; asset pack path is
+6. Sizes are positive; max delta is positive; headless tick rate is `>= 0`; the window title is
    non-empty.
-7. Logging configuration, if supplied, is non-null; otherwise the pretty ZLogger default is
-   used.
-7. The configured pack path exists; a missing base pack is a startup error that throws
-   `Bork2dException` (no empty-FS fallback). Parsing/checksum failures also throw at startup.
+7. Logging configuration, if supplied, is non-null. Validation runs first; then the factory is
+   created, the `WithLogging` callback is invoked exactly once (or the default pretty ZLogger
+   console provider is installed), and the startup mode/validation message is logged from the
+   `Bork2d.Runtime` category. The app owns and disposes the factory.
+8. The M1 pack path is validated for shape only (non-empty; the default is `assets.pck`). It does
+   not need to exist and `Build()` does not touch the filesystem; existence, parsing, and
+   checksum failures arrive with the M3 pack implementation and throw at startup then.
 
 ## 4. Startup sequences
 
@@ -313,7 +331,8 @@ failures are rethrown on the caller's thread, with cleanup in a `finally`.
   intentional pacing delay in the engine, intended for dedicated servers.
 - Asset data (`LoadData`, `LoadAsset<T>`, `Browse`) works; sprite handles can resolve CPU
   metadata but no texture is uploaded and nothing is drawn.
-- NativeAOT headless startup must not touch SDL/Vulkan; this is a CI smoke test.
+- NativeAOT headless startup must not touch SDL/Vulkan; it is a required local gate, not a CI
+  job (CI runs build/test/format on pull requests targeting `develop` and on `develop` pushes).
 - Intended for dedicated servers, data tools, and CI simulation.
 
 ### 10.2 `WithOffscreen(width, height)`
@@ -327,13 +346,14 @@ failures are rethrown on the caller's thread, with cleanup in a `finally`.
 - A public capture/readback API is future work.
 - Intended for CI rendering checks and headless visual tests.
 
-No mode changes the public `IGame` contract: `Setup`, `Tick`, and `Teardown` are still main
-thread callbacks.
+No mode changes the public `IGame` contract: `Setup`, `Tick`, and `Teardown` still run on the
+engine tick thread, which may be any host thread; the API has no process-main-thread affinity.
 
 ## 11. Entity and scene ownership
 
-`IEngine.Root` is the strong owner of the live scene. This replaces the scaffold's weak
-`EntityList` registry; the full model is in [Scene ownership](scene-ownership.md).
+`IEngine.Root` is the strong owner of the live scene (implemented in WP3; the WP4 host creates
+the engine and clears the root on app `Dispose`). The weak `EntityList` registry is gone; the
+full model is in [Scene ownership](scene-ownership.md).
 
 ```csharp
 public interface ISceneRoot : ITransform
@@ -371,6 +391,8 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
   `System.Threading.Lock`.
 - `ISceneRoot` is read-only: setting parent/local position/rotation/scale throws
   `InvalidOperationException`.
+- The root is a dedicated root node that implements `ISceneRoot` directly (it is not a transform
+  entity); root and transforms share only the internal `ISceneNode` structural contract.
 - A rooted object whose game reference is lost remains until detached. This is deliberate:
   strong ownership cannot distinguish an accidental lost reference from a scene object.
 - Scene mutations are tick-window operations; capture/render never walks the live tree.
@@ -379,23 +401,22 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
 
 | Area | Current | Needed |
 | --- | --- | --- |
-| Builder/host | `Bork2d.Runtime` empty | M1/M2 |
-| Game instance injection | No builder; current `Engine` takes a game object but startup is placeholder | M1 |
-| Window/SDL | None | M2 |
-| Time wiring | `StopwatchTime` unused | M2/M7 |
-| Tick loop | `while (true) Game.Tick()` | M7 |
-| Exit | None | M1/M7 |
+| Builder/host | `Current` (M1 skeleton): public builder, validation, one-tick `Run`, idempotent `Dispose` | Real mode startup M2/M7 |
+| Game instance injection | `Current`: instance-only `WithGame`; no `new()`/reflection/`Activator` | — |
+| Window/SDL | None; `IWindow` members throw | M2 |
+| Time wiring | `StopwatchTime` is created by `Build()`; `NewFrame`/`MaxDeltaTime` are not wired into the smoke | M2/M7 |
+| Tick loop | `Setup` → exactly one `Tick` → `Teardown`, then return | M2/M7 |
+| Exit | `IEngine.Exit` exists; the one-tick smoke finishes its tick regardless | M2/M7 |
 | Snapshot ring | None | M7 |
-| Headless/offscreen | None | M6/M7 |
-| Dispose/teardown | None | M1 (root clear detach) |
+| Headless/offscreen | Mode selection and validation only (WP4); both run the one-tick smoke | M6/M7 |
+| Scene teardown | App `Dispose` calls `Root.DetachAll()` for direct children (WP4) | — |
+| Entity ownership | Root-owned strong transform tree with a read-only root (WP3) | — |
 | Assets | Empty | M3/M4 |
 | Render thread | Empty | M6/M7 |
-| Entity ownership | Weak references; no `Root` | M1: root-owned strong tree |
-| NativeAOT | None | M1 baseline, M9 gate |
+| NativeAOT | `Current` (WP6): `IsAotCompatible` plus trim/AOT analyzers on the runtime libraries; `Bork2d.AotSmoke` publishes/runs locally with zero AOT/trim warnings. A local gate, not CI. | M9 release gate |
 
 ## 13. Open questions
 
-- Exact builder method names/signatures and `Run()` return shape.
 - Window shown before the first frame or only after the first present.
 - Fullscreen: exclusive, borderless, or configurable.
 - DPI policy and what `IWindow.Size` means under scaling.

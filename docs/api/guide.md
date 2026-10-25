@@ -1,9 +1,12 @@
 # API Guide
 
-> **Status: target guide.** This is how the engine is meant to be used, not a description of a
-> finished runtime. Members marked `Planned` in the [API reference](reference.md) do not exist
-> in the current scaffold. The startup builder, modes, `IEngine.Input`, `IGame.Teardown`,
-> pack API, and asset schema are the main planned additions shown here.
+> **Status: implemented for the M1 smoke, target for the full runtime.** The public builder and
+> host now exist in `Bork2d.Runtime`: `Build()` validates the options and `Run()` performs one
+> `Setup` → `Tick` → `Teardown` sequence, then returns. Logging is wired: the app owns a
+> Microsoft.Extensions.Logging/ZLogger factory, `IEngine.LoggerFactory` is usable, and
+> `WithLogging` is invoked at `Build`. Window/input, the asset pack, and the real loop remain
+> later milestones (M2/M3/M5/M7); `IWindow`, `IInput`, and `IAssets` currently throw
+> `NotSupportedException`. See the [API reference](reference.md#12-runtime-surface).
 
 ## 1. What you reference
 
@@ -40,17 +43,25 @@ app.Run();
   test doubles, and logging your host owns. The engine factory itself does not exist until
   `Build()`; for engine logging, create the logger from `engine.LoggerFactory` in `Setup`.
   There is no parameterless-constructor/reflection requirement.
-- `Build()` validates configuration; `Run()` blocks until shutdown in the full design (M1: one smoke tick); app `Dispose()` cleans up.
+- `Build()` validates configuration. `Run()` blocks until shutdown in the full design; **in M1
+  it is a smoke path** that calls `Setup`, exactly one `Tick`, and `Teardown`, then returns. No
+  window, GPU, pack, render thread, or pacing loop starts. App `Dispose()` detaches the root's
+  direct children and disposes the logger factory.
 - The game instance must stay alive through `Run()`.
-- Windowed/offscreen have no target tick rate; pacing follows the renderer, with no artificial
-  delay. Headless is timer-paced via `WithHeadless(ticksPerSecond)` (default 60, `0` uncapped).
-- Logging is configured with `WithLogging`; if omitted, a pretty ZLogger console provider is
-  installed, and `IEngine.LoggerFactory` is always available.
+- In the full design, windowed/offscreen have no target tick rate; pacing follows the renderer
+  with no artificial delay, and headless is timer-paced via `WithHeadless(ticksPerSecond)`
+  (default 60, `0` uncapped). M1 validates and stores these options but runs the same one-tick
+  smoke in every mode.
+- `WithLogging` configures the app-owned logging factory. The callback is invoked exactly once
+  at `Build`; when supplied it owns provider configuration and the default pretty ZLogger console
+  provider is not added. When omitted, the default console provider is installed. See
+  [Logging](../architecture/logging.md).
 - `IEngine.Root` owns the scene. Create cameras/sprites under `Root` or a transform under it;
   parented objects persist, unparented objects are collectible. `Root.DetachAll()` detaches the
   scene's top-level children; `ITransform.DetachAll()` does the same for any transform.
-- The default pack is `assets.pck`; `WithAssetsPack` can point elsewhere. A missing/malformed
-  base pack is a startup error that throws `Bork2dException`; there is no empty-FS fallback.
+- The default pack path is `assets.pck`; `WithAssetsPack` can point elsewhere. M1 validates only
+  that a supplied path is non-empty and never touches the filesystem. Pack existence, parsing,
+  and the `Bork2dException` startup failure arrive with the M3 pack/asset implementation.
 
 ### Modes
 
@@ -80,33 +91,50 @@ server.Run();
 ```
 
 These are separate hosts, not three modes in one process. `WithHeadless(ticksPerSecond = 60)`
-and `WithOffscreen()` are mutually exclusive with window options. `0` means uncapped headless.
-`IWindow` and `IInput` throw in both windowless modes. See
+and `WithOffscreen()` are mutually exclusive with each other and with window options. `0` means
+uncapped headless. In M1 all three modes build and validate, but `Run()` still performs the same
+one `Setup`/`Tick`/`Teardown` smoke; mode startup, SDL, Vulkan, and the render thread are later
+milestones. There is no window in M1, so `IWindow` members and `IInput` throw
+`NotSupportedException`; in the target design they throw only in windowless modes, so code that
+must run in all modes should not depend on them. See
 [Runtime lifecycle](../architecture/runtime-lifecycle.md#2-modes).
 
 ### Logging
 
-If you do nothing, the builder installs a pretty ZLogger console provider. You can replace or
-extend it:
+The host creates an app-owned Microsoft.Extensions.Logging/ZLogger factory at `Build`. Without
+`WithLogging`, the default is a pretty ZLogger console provider with a local
+timestamp-with-milliseconds, level, and category prefix. `WithLogging` replaces provider
+configuration; the callback is invoked exactly once and the default provider is not added:
 
 ```csharp
 using var app = new Bork2dAppBuilder<GameLayer>()
     .WithGame(game)
     .WithLogging(logging =>
     {
-        // Configure Microsoft.Extensions.Logging providers, including ZLogger.
+        // Configure Microsoft.Extensions.Logging/ZLogger providers here.
+        // The app disposes the factory and its providers when it is disposed.
     })
     .Build();
 ```
 
-The engine exposes the resulting factory:
+`Build` also logs one startup message from the `Bork2d.Runtime` category, e.g.:
+
+```text
+2026-10-25 21:45:15.981 [Information] Bork2d.Runtime: Bork2d starting: mode=Headless, validation=passed, layers=Layer
+```
+
+The engine exposes the same factory through `IEngine.LoggerFactory`, so game code can create
+category loggers in `Setup` (the game instance exists before `Build`, so the factory is not
+available in its constructor):
 
 ```csharp
-ILogger logger = _engine.LoggerFactory.CreateLogger("MyGame");
+ILogger logger = engine.LoggerFactory.CreateLogger("MyGame");
 logger.LogInformation("Loaded level {Level}", "start");
 ```
 
-See [Logging](../architecture/logging.md) for defaults, categories, and AOT notes.
+`IEngine.LoggerFactory` is available in windowed, offscreen, and headless modes. See
+[Logging](../architecture/logging.md) for the pinned versions, exact format, categories, and AOT
+notes.
 
 ## 3. Write a game
 
@@ -167,7 +195,7 @@ public sealed class MyGame : IGame<GameLayer>
             _player.LocalPosition += Vector2.Normalize(direction) * 4f * dt;
     }
 
-    // Planned: once on the engine tick thread before shutdown.
+    // Once on the engine tick thread before shutdown.
     public void Teardown()
     {
         // App-owned Root.DetachAll() handles normal scene teardown. Detach/remove objects
@@ -219,15 +247,17 @@ camera.Viewport = new Vector4(0, 0, 1, 1); // normalized, top-left origin
 camera.CullingMask = GameLayer.World;
 camera.Clear = ClearKind.Color;
 camera.ClearColor = Color.Black;
+camera.ZIndex = 0;                          // camera order; higher applies later
 ```
 
 - `Size` is the **half** visible height in units. Width follows from viewport aspect.
-- World is Y-up, +X right. Rotation is radians, CCW.
+- World is Y-up, +X right. Rotation is in degrees, CCW, normalized to `[0, 360)` on assignment.
 - `Viewport` is normalized `(x, y, w, h)`, top-left origin.
 - Camera rotation/position come from its transform. Camera scale is not a zoom control.
 - Multiple cameras are supported; each non-empty camera issues one instanced draw.
-- Camera order is creation order. A later camera with `Clear.Color` wipes its viewport;
-  `Clear.None` overlays.
+- `ZIndex` orders cameras: ascending, higher applies later, default `0`. Ties are unspecified;
+  use distinct values when viewports overlap. A camera applied later with `Clear.Color` wipes its
+  viewport; `Clear.None` overlays.
 
 Split screen:
 
@@ -235,10 +265,12 @@ Split screen:
 var left = engine.CreateCamera(engine.Root);
 left.Viewport = new Vector4(0f, 0f, 0.5f, 1f);
 left.CullingMask = GameLayer.World;
+left.ZIndex = 0;
 
 var right = engine.CreateCamera(engine.Root);
 right.Viewport = new Vector4(0.5f, 0f, 0.5f, 1f);
 right.CullingMask = GameLayer.World;
+right.ZIndex = 1;
 ```
 
 HUD overlay:
@@ -248,6 +280,7 @@ var hud = engine.CreateCamera(engine.Root);
 hud.Viewport = new Vector4(0, 0, 1, 1);
 hud.Clear = ClearKind.None;      // keep the world behind it
 hud.CullingMask = GameLayer.Ui;
+hud.ZIndex = 10;                 // apply after the world cameras
 ```
 
 Screen/world conversion helpers are `Planned`:
@@ -268,7 +301,7 @@ sprite.Layer = GameLayer.World;
 sprite.ZIndex = 10;
 sprite.Tint = Color.White;
 sprite.LocalPosition = new Vector2(3, 1);
-sprite.LocalRotation = MathF.PI / 4f; // radians, CCW
+sprite.LocalRotation = 45f; // degrees, CCW
 sprite.LocalScale = new Vector2(2, 2);
 ```
 
@@ -277,7 +310,8 @@ Semantics:
 - `Sprite` is an opaque handle to a MessagePack sprite asset. The asset may not be ready; the
   renderer skips it until it is. Do not block.
 - `Sprite.Empty` means no sprite.
-- `ZIndex` orders within a layer; higher draws later. Equal z is tie-broken by entity ID.
+- `ZIndex` orders within a layer; higher draws later. Equal z is unspecified; use distinct
+  values when order matters.
 - `Tint` multiplies the texture; `Color.White` is neutral.
 - The sprite asset stores UVs, pivot, topology, optional indices, texture path, and a
   **pixels-per-unit scale**; the renderer divides by that scale. `LocalScale` multiplies it.
@@ -297,15 +331,16 @@ Parenting:
 var rig = engine.CreateTransform(engine.Root);
 var turret = engine.CreateSpriteRender(rig);
 turret.LocalPosition = new Vector2(0.5f, 0);
-rig.LocalRotation = MathF.PI / 2f;
+rig.LocalRotation = 90f;
 ```
 
-Reparenting preserves the child's world transform. Cycles are rejected; `Root.Parent` cannot be
-set, and all root transform setters throw. The hierarchy is evaluated on the tick thread; the
-renderer never walks it. A rooted object whose game reference is lost stays alive until detached
-or cleared; an unparented object is collectible. Detaching does not destroy the object; the same
-instance can be re-attached later. `rig.DetachAll()` detaches the turret; `turret` remains valid
-and can be parented again.
+Creating an object under a parent attaches it with its default local values, so it starts at the
+parent's origin. Assigning `Parent` later preserves the child's world transform; cycles are
+rejected; `Root.Parent` cannot be set, and all root transform setters throw. The hierarchy is
+evaluated on the tick thread; the renderer never walks it. A rooted object whose game reference is
+lost stays alive until detached or cleared; an unparented object is collectible. Detaching does
+not destroy the object; the same instance can be re-attached later. `rig.DetachAll()` detaches the
+turret; `turret` remains valid and can be parented again.
 
 ## 7. Input
 
@@ -433,6 +468,9 @@ for tools and diagnostics, not per-frame gameplay.
   same object later. `Root.DetachAll()` detaches the scene's top-level children;
   `ITransform.DetachAll()` works on any transform. Both are thread-affinity-free; calls are
   allowed during Setup/Tick/Teardown.
+- The scene tree is **unordered** and has no entity IDs, ordered discovery, or public child
+  enumeration. Snapshot capture (M7) walks it in no specified order; use `ZIndex` values, not
+  creation order, when draw order matters.
 - Losing a reference to a **rooted** object does not remove it; remove it from the scene to
   release it. Losing a reference to an **unparented** object lets it be collected.
 - Create cameras/sprites/transforms inside the `Setup`/`Tick`/`Teardown` window. Workers may
@@ -487,8 +525,8 @@ See [NativeAOT](../architecture/nativeaot.md).
 | Persisting `Sprite.Id` | Broken references | Persist asset paths. |
 | Touching entities from the render thread | Corrupt snapshots | Renderer only reads snapshots. |
 | Two workers mutating one entity without sync | Lost updates/data races | One owner per entity or external sync. |
-| Assuming equal `ZIndex` keeps insertion order | Reordering surprises | Use distinct z; entity ID is the stable tie-break. |
-| Creating/disposing outside a tick | Undefined ordering | Use `Setup`/`Tick`/`Teardown`. |
+| Assuming equal `ZIndex` keeps a stable order | Reordering surprises | Use distinct z; ties are unspecified. |
+| Creating/detaching outside a tick | Undefined ordering | Use `Setup`/`Tick`/`Teardown`. |
 | Forgetting to parent a created camera/sprite | It is not in the scene and is collectible | Pass `engine.Root` or a rooted parent. |
 | Losing a reference to a rooted object | It persists until removed from the scene | Intentional scene ownership; `Parent = null` or `Root.DetachAll()` to release it. |
 | Using a removed object | Still valid; not rendered until re-attached | Re-attach with `Parent = ...`; no `IsAlive` check needed. |
@@ -613,8 +651,9 @@ using var app = new Bork2dAppBuilder<GameLayer>()
 app.Run();
 ```
 
-No window, SDL, Vulkan, or render thread is initialized. `IWindow`/`IInput` are unavailable.
-The tick loop is paced at 60 Hz by default; pass `WithHeadless(0)` for uncapped.
+In M1 this runs the same one-tick smoke as every other mode: no window, SDL, Vulkan, render
+thread, or 60 Hz pacing timer exists yet. `IWindow`/`IInput` are unavailable. In the target
+headless mode, the tick loop is paced at 60 Hz by default; pass `WithHeadless(0)` for uncapped.
 
 ## 15. Where to go next
 

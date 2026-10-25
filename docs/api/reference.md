@@ -1,10 +1,10 @@
 # API Reference
 
-> **Status:** target contract. `Current` means the member exists in `Bork2d.Api` today;
-> `Planned` means an agreed addition that is **not** in the scaffold; `Open` means the shape
-> or semantics is undecided. The current code is partial; see
-> [Projects and dependencies](../architecture/projects.md) and the
-> [roadmap](../roadmap.md).
+> **Status:** describes the M1 contract. `Current` means the member exists in `Bork2d.Api` and is
+> implemented for the M1 one-tick host; `Planned` means an agreed addition that is **not
+> implemented yet**; `Open` means the shape or semantics is undecided. The window/input, asset,
+> and rendering implementations are later milestones; see
+> [Projects and dependencies](../architecture/projects.md) and the [roadmap](../roadmap.md).
 
 ## 1. Contract-wide rules
 
@@ -25,7 +25,7 @@ are snapshots.
 | `builder/Build/Run/Dispose` | Any thread; no main-thread requirement. |
 | `IEngine.LoggerFactory` | Any thread; Microsoft.Extensions.Logging factories/loggers are thread-safe. |
 | `IAssets.LoadSprite` / `LoadAsset<T>` / `LoadData` / `LoadPack` / `Exists` | Any thread; requests are thread-safe. Completion is asynchronous. `Browse` is for tools, not per-frame. |
-| Value types (`Sprite`, `AssetInfo`, `Color`, `Vector2`, enums) | Any thread; they are copies. |
+| Value types (`Sprite`, `Color`, `Vector2`, enums; `AssetInfo` is M3) | Any thread; they are copies. |
 | Renderer, swapchain, GPU uploads | Render thread only; no public API. |
 | Asset parsing/decompression/resource table | Asset threads only; no public API. |
 
@@ -50,7 +50,7 @@ atomic. There are no thread-affinity exceptions.
 | Quantity | Convention |
 | --- | --- |
 | Position | World units; +X right, +Y up. |
-| Rotation | Radians, positive counter-clockwise around +Z. |
+| Rotation | Degrees, positive counter-clockwise around +Z, normalized to `[0, 360)` on assignment. |
 | Scale | Multiplier; negative values mirror. |
 | `ICamera.Size` | Half visible height in world units. |
 | `ICamera.Viewport` | Normalized `(x, y, width, height)`, top-left origin, `[0,1]`. |
@@ -100,16 +100,16 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
 {
     ITime Time { get; }
     IWindow Window { get; }
-    IInput Input { get; }        // Planned
+    IInput Input { get; }
     IAssets Assets { get; }
-    ILoggerFactory LoggerFactory { get; } // Planned
+    ILoggerFactory LoggerFactory { get; }
     ISceneRoot Root { get; }
 
     ITransform CreateTransform(ITransform? parent = null);
     ICamera<TLayer> CreateCamera(ITransform parent);
     ISpriteRender<TLayer> CreateSpriteRender(ITransform parent);
 
-    void Exit();                 // Planned
+    void Exit();
 }
 ```
 
@@ -127,18 +127,23 @@ detaches the scene's top-level children; the objects remain valid and can be re-
 root is an identity transform: setting parent, position, rotation, or scale throws
 `InvalidOperationException`. The app calls `Root.DetachAll()` during shutdown.
 
+The root is the owner node of the scene tree, not a scene entity: the engine implements
+`ISceneRoot` directly instead of deriving it from the transform entity type (the shared tree
+contract is internal). Callers must treat it through `ISceneRoot`/`ITransform` only and must not
+assume a concrete transform type.
+
 | Member | Status | Semantics |
 | --- | --- | --- |
 | `Time` | `Current` | Monotonic time/delta; snapshot reads from any thread. |
 | `Window` | `Current` | Window controls. Windowed only; throws in offscreen/headless. |
-| `Input` | `Planned` | Input state. Windowed only; throws in offscreen/headless. |
+| `Input` | `Current` | Input state. Windowed only; throws in offscreen/headless. The M1 host has no window, so `Input` throws `NotSupportedException` until the M2 window/input implementation. |
 | `Assets` | `Current` | Pack/asset requests; thread-safe methods. |
-| `LoggerFactory` | `Planned` | Microsoft.Extensions.Logging factory configured by the builder with ZLogger; create per-category loggers. |
-| `Root` | `Planned` | Read-only root of the strong scene graph; app-owned. `Root.DetachAll()` detaches children. |
-| `CreateTransform(parent)` | `Planned` | Creates a transform under `parent`, or standalone when `parent` is null. Inside `Setup`/`Tick`; workers may create during a tick. |
-| `CreateCamera(parent)` | `Planned` | Creates a camera under `parent`; parent is required. Workers may create during a tick. |
-| `CreateSpriteRender(parent)` | `Planned` | Creates a sprite renderable under `parent`; parent is required. Workers may create during a tick. |
-| `Exit()` | `Planned` | Graceful shutdown after the current tick; any thread. |
+| `LoggerFactory` | `Current` | App-owned Microsoft.Extensions.Logging/ZLogger factory created by the builder; create per-category loggers from it. Non-null for built apps; usable in `Setup`. Disposed by `Bork2dApp.Dispose()`. |
+| `Root` | `Current` | Read-only root of the strong scene graph; app-owned. `Root.DetachAll()` detaches children. Created by `Bork2dAppBuilder.Build()` in the M1 host. |
+| `CreateTransform(parent)` | `Current` | Creates a transform under `parent`, or standalone when `parent` is null. A new node is attached with its default local values, so it starts at the parent's origin. Inside `Setup`/`Tick`; workers may create during a tick. Implemented in WP3. |
+| `CreateCamera(parent)` | `Current` | Creates a camera under `parent`; parent is required. Workers may create during a tick. Implemented in WP3. |
+| `CreateSpriteRender(parent)` | `Current` | Creates a sprite renderable under `parent`; parent is required. Workers may create during a tick. Implemented in WP3. |
+| `Exit()` | `Current` | Graceful shutdown request; any thread. The M1 one-tick smoke finishes its `Setup`/`Tick`/`Teardown` sequence regardless; the mode loop that consumes the request is M2/M7. |
 
 Notes:
 
@@ -165,7 +170,7 @@ public interface IGame<TLayer> where TLayer : struct, Enum
 {
     void Setup(IEngine<TLayer> engine);
     void Tick();
-    // void Teardown(); // Planned
+    void Teardown();
 }
 ```
 
@@ -173,7 +178,7 @@ public interface IGame<TLayer> where TLayer : struct, Enum
 | --- | --- | --- |
 | `Setup(IEngine<TLayer>)` | `Current` | Once on the engine tick thread before the first tick. Create entities, request assets. |
 | `Tick()` | `Current` | Once per tick on the engine tick thread. Must return; no `async void`; join workers before returning. |
-| `Teardown()` | `Planned` | Once on the engine tick thread before shutdown. Release game resources; the app clears `Root`. Asset requests are not guaranteed to complete. |
+| `Teardown()` | `Current` | Once on the engine tick thread before shutdown. Release game resources; the app clears `Root`. Asset requests are not guaranteed to complete. |
 | `Run`/`Update`/`Draw` | — | Not part of the contract. The host owns the loop; the snapshot is built after `Tick`. |
 
 `Setup`, `Tick`, and `Teardown` are not concurrent. Exceptions propagate out of
@@ -251,7 +256,8 @@ public interface IInput
 }
 ```
 
-Access via `IEngine.Input` (`Planned`). **Windowed only**; offscreen/headless throw.
+Access via `IEngine.Input` (declaration `Current`; windowed implementation is M2). **Windowed
+only**; offscreen/headless throw.
 
 | Member | Status | Semantics |
 | --- | --- | --- |
@@ -295,6 +301,9 @@ public readonly record struct AssetInfo(
     string PackPath);
 ```
 
+`LoadPack`, `Browse`, `Exists`, and `AssetInfo` are **`Planned` for M3**. The M1 `IAssets`
+interface contains only `LoadAsset<T>`, `LoadSprite`, and `LoadData`.
+
 | Member | Status | Semantics |
 | --- | --- | --- |
 | `LoadAsset<T>` | `Current` declaration; semantics `Planned` | Loads/decompresses a MessagePack asset with a Nerdbank generated shape. Throws for raw assets/missing paths. |
@@ -329,6 +338,7 @@ public interface ICamera<TLayer> : ITransform
     TLayer CullingMask { get; set; }
     ClearKind Clear { get; set; }
     Color ClearColor { get; set; }
+    int ZIndex { get; set; }
 }
 ```
 
@@ -339,16 +349,19 @@ public interface ICamera<TLayer> : ITransform
 | `CullingMask` | `Current` | Combination of layer flags; `0` sees nothing. |
 | `Clear` | `Current` | `Color` clears viewport, `None` preserves earlier content, `Depth` is a no-op/one-time warning. |
 | `ClearColor` | `Current` | Linear RGBA for `Clear.Color`. |
+| `ZIndex` | `Current` | Camera order; ascending, higher applies later, default `0`. Ties unspecified. |
 | `ScreenToWorld(Vector2)` | `Planned` | Framebuffer pixels → world units using this camera. |
 | `WorldToScreen(Vector2)` | `Planned` | Inverse. |
 
 - Cameras inherit `ITransform`; position/rotation/parent come from the transform. Scale is not
   zoom; use `Size`. Create with `IEngine.CreateCamera(parent)`; use `Root` or a rooted transform.
-- Camera order is creation order (entity ID). Later camera with `Clear.Color` wipes its
-  viewport; `None` overlays.
+- Camera order is ascending `ZIndex` (default `0`; higher draws later). Ties are unspecified;
+  assign distinct values where overlap matters. A camera applied later with `Clear.Color` wipes
+  its viewport; `None` overlays.
 - Defaults above. `Clear.Depth` is accepted for forward compatibility.
 - Works in headless/offscreen, but headless never renders.
-- `Dispose()` is not part of camera lifetime; detach with `Parent = null` or clear the root.
+- Cameras are not `IDisposable` and have no `IsAlive` state; detach with `Parent = null` or
+  clear the root. The engine camera type is internal and has no destruction lifecycle.
 
 ## 9. `ISpriteRender<TLayer>`
 
@@ -368,17 +381,19 @@ public interface ISpriteRender<TLayer> : ITransform
 | `Sprite` | `Current` | Opaque sprite asset handle. `Empty` = no draw. Not-ready handles skipped. |
 | `Layer` | `Current` | Exactly one non-zero bit. `0`/composite invalid and skipped with a diagnostic. |
 | `Tint` | `Current` | Linear RGBA multiplied with the texture; `White` neutral. |
-| `ZIndex` | `Current` | Sort within layer; higher draws later. Ties use entity ID. |
+| `ZIndex` | `Current` | Sort within layer; higher draws later. Ties are unspecified. |
 | `FlipX`, `FlipY` | `Planned` | Mirrors the sprite without changing the transform. |
 
 - The sprite asset supplies UVs, pivot, topology, optional indices, texture path, and a
   **pixels-per-unit** scale. `LocalScale` multiplies. There is no global PPU and no vertices
   array.
 - Hide with `Sprite = Sprite.Empty` (keep entity) or detach with `Parent = null`.
-- Sorting: layer numeric → `ZIndex` → entity ID. A not-ready asset yields no instance.
+- Sorting: layer numeric → `ZIndex`; ties are unspecified. A not-ready asset yields no instance.
 - Headless: entities can exist but never produce an instance.
 - Create with `IEngine.CreateSpriteRender(parent)`; use `Root` or a rooted transform.
-- `Dispose()` is not part of sprite lifetime; detach or clear the root.
+- Sprite renderables are not `IDisposable` and have no `IsAlive` state; detach with
+  `Parent = null` or clear the root. The engine sprite type is internal and has no destruction
+  lifecycle.
 
 ## 10. `ITransform`
 
@@ -396,19 +411,29 @@ public interface ITransform
 
 | Member | Status | Semantics |
 | --- | --- | --- |
-| `Parent` | `Current` | Parent or `null`. Re-parenting preserves world transform; self/cycles rejected; `Root.Parent` cannot be set. |
-| `DetachAll()` | `Planned` | Detaches direct children; grandchildren remain attached. Any transform can call it, not just root. |
+| `Parent` | `Current` | Parent or `null`; accepts only engine-owned scene nodes (the root or another transform). Re-parenting preserves world transform; self/cycles rejected; `Root.Parent` cannot be set. |
+| `DetachAll()` | `Current` | Detaches direct children; grandchildren remain attached. Any transform can call it, not just root. Implemented in WP3 under the structural lock. |
 | `LocalPosition` | `Current` | Position relative to parent, world units. |
-| `LocalRotation` | `Current` | Radians, CCW, relative to parent. |
+| `LocalRotation` | `Current` | Degrees, CCW, relative to parent; normalized to `[0, 360)` on assignment and by the getter. Non-finite values throw `ArgumentOutOfRangeException`. |
 | `LocalScale` | `Current` | Scale relative to parent; negative mirrors. |
 | `WorldPosition` | `Planned` | Read-only evaluated world position. |
-| `WorldRotation` | `Planned` | Read-only evaluated world rotation (radians). |
+| `WorldRotation` | `Planned` | Read-only evaluated world rotation in degrees, normalized to `[0, 360)`. |
 | `WorldScale` | `Planned` | Read-only evaluated world scale. |
 
 - World transforms are evaluated/captured on the tick thread; the renderer never walks the
   hierarchy.
-- The scaffold declares global properties on `Transform` but does not compute them; treat them
-  as stubs.
+- World position/rotation/scale stay planned on the public interface; the internal transform
+  evaluates them for world-preserving re-parenting and tests. The renderer will consume the
+  captured world matrix.
+- The internal local matrix is the world source of truth: re-parenting preserves the composed
+  world matrix exactly (including shear from a non-uniform scale combined with rotation), and
+  `LocalPosition` changes only the translation. `LocalPosition`/`LocalRotation`/`LocalScale` are
+  the authored scalar view: negative scale axes round-trip, `LocalRotation` is stored and returned
+  in degrees normalized to `[0, 360)` (`-90` → `270`, `360`/`720` → `0`), and the rotation/scale
+  setters recompose the local matrix (so writing either discards shear). A re-parent refreshes
+  the scalar view from the exact matrix, normalizes the decomposed rotation to `[0, 360)`
+  degrees, and keeps the authored mirror axis when possible. Rotation is converted to radians
+  only at the internal matrix boundary.
 - `IEngine.CreateTransform(parent = null)` returns a standalone transform when unparented; it
   is not rendered and is collectible when the game drops it.
 - `Parent` attaches to a strong tree. A parented object remains alive even if game code loses
@@ -437,8 +462,9 @@ public readonly record struct Sprite(int Id)
 - Equality by `Id`; no public implicit `int` conversion.
 - Not serializable; data/save files use asset paths.
 
-### `AssetInfo`
+### `AssetInfo` (planned, M3)
 
+Planned for the M3 pack/browse API; it is not in the M1 `Bork2d.Api`. When it lands,
 `AssetInfo(Path, IsRaw, IsCompressed, Length, Size, PackPath)` describes one visible asset in
 the merged pack filesystem. `Length` is stored bytes; `Size` is decompressed bytes;
 `PackPath` is the pack that supplies the visible entry. No payload is loaded.
@@ -466,9 +492,9 @@ CLR default is `None`; `CreateCamera(parent)` explicitly sets `Color`.
 
 ### `KeyCode` / `MouseButton`
 
-- `KeyCode` maps physical SDL scancodes; final set `Planned`. Scaffold contains sample members
-  only (`A`; `Left`).
-- `MouseButton` will cover left/right/middle/back/forward; scaffold contains `Left`.
+- `KeyCode` maps physical SDL scancodes; final set `Planned`. M1 contains sample members only
+  (`A`; `Left`).
+- `MouseButton` will cover left/right/middle/back/forward; M1 contains `Left`.
 - Numeric values are unstable; do not serialize them.
 - Text uses `OnTextTyped`, not `KeyCode`.
 
@@ -478,7 +504,9 @@ Planned flags for `FlipX`/`FlipY`; the planned snapshot reserves the field.
 
 ## 12. Runtime surface
 
-> **Status: `Planned`.** `Bork2d.Runtime` is empty today. Names/signatures may change in M1.
+> **Status: `Current` (M1 skeleton).** `Bork2d.Runtime` now contains the public builder, the
+> one-tick smoke app, validation, app-owned logging, and the M1 stubs. Window/input/assets
+> behavior and real loop modes are later milestones (M2/M3/M5/M7).
 
 ### `Bork2dAppBuilder<TLayer>`
 
@@ -508,19 +536,32 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 
 - Created/configured on any thread; `Build()` validates once.
 - `WithGame` takes a **caller-constructed instance**; no `new()`/reflection. The caller keeps
-  the instance alive through `Run()`.
+  the instance alive through `Run()`. It must be called exactly once.
 - Mode is windowed by default, or mutually exclusive `WithHeadless(ticksPerSecond)`/
-  `WithOffscreen(w,h)`.
+  `WithOffscreen(w,h)`. Selecting both fails `Build()`.
 - `WithHeadless` defaults to 60 ticks/second; `0` means uncapped. This is the only mode with an
-  intentional pacing timer.
-- Window options apply only to windowed mode and are validated.
-- `WithAssetsPack` default is `assets.pck`.
-- `WithLogging` configures Microsoft.Extensions.Logging with ZLogger. If omitted, the app adds
-  a pretty ZLogger console provider by default. See [Logging](../architecture/logging.md).
-- `WithMaxDeltaTime` is a safety clamp, not a pacing delay.
-- `WithValidation` defaults to on in debug.
+  intentional pacing timer. M1 validates/stores the rate; actual pacing is M7.
+- Window options apply only to windowed mode; `WithTitle`, `WithSize`, `WithResizable`,
+  `WithFullscreen`, and `WithVSync` are rejected when combined with headless or offscreen.
+- `WithAssetsPack` defaults to `assets.pck`. M1 validates only that a supplied path is
+  non-empty; it does not require the file to exist, and pack loading is M3.
+- `WithLogging(Action<ILoggingBuilder>)` configures the app-owned logging factory. The callback
+  is invoked exactly once at `Build`, after the default minimum level is applied; when supplied,
+  the builder adds no provider of its own. When omitted, a pretty ZLogger console provider is
+  installed. See [Logging](../architecture/logging.md).
+- `WithMaxDeltaTime` is a safety clamp, not a pacing delay. It must be positive.
+- `WithValidation` defaults to on in debug. It is stored for the windowed/offscreen GPU
+  validation layers (M2+); M1 has no GPU.
 - There is **no** `WithTickRate`; windowed/offscreen pacing is bounded run-ahead, headless uses
   the `WithHeadless` tick rate.
+- `Build()` throws `Bork2dException` for engine configuration errors (missing or duplicate game,
+  conflicting modes, invalid layer enum, non-positive sizes/delta, negative headless rate).
+  Null/blank call arguments throw `ArgumentNullException`/`ArgumentException` at the call.
+- `Build()` creates the app-owned logging factory, logs the startup mode/validation message from
+  the `Bork2d.Runtime` category, then creates the options, internal engine, and `IEngine.Root`;
+  it creates no window, GPU resources, threads, or filesystem state. The same factory is used by
+  the engine and the app runtime.
+- The default windowed configuration builds in M1 even though no window exists yet.
 
 ### `Bork2dApp`
 
@@ -533,13 +574,24 @@ public sealed class Bork2dApp : IDisposable
 ```
 
 - `Run()` starts/blocks in the full design. In **M1** it is a smoke path: `Setup` → one `Tick` →
-  `Teardown`, then returns. M2/M7 replace it with the real loop.
+  `Teardown`, then returns. There is no window, GPU work, pack, render thread, or pacing loop yet;
+  M2/M7 replace this with the real loop.
 - `Run()` may be called from any thread; no main-thread requirement.
-- `Dispose()` is idempotent and safe before/after `Run`; it clears the root and disposes the
-  logger. It is app lifetime, not an entity lifetime API.
-- Stop with `IEngine.Exit()` or the window close button (windowed).
-- Exceptions propagate after cleanup.
+- `Run()` may be called once. A second call throws `InvalidOperationException`; calling it after
+  `Dispose()` throws `ObjectDisposedException`.
+- If `Setup` throws, the exception propagates and `Teardown` is not called. If `Tick` throws,
+  `Teardown` is still attempted and the original exception propagates. If both `Tick` and
+  `Teardown` throw, `Run()` throws an `AggregateException` containing both. A failed run clears
+  the root's direct children before rethrowing; the app still counts as run.
+- `Dispose()` is idempotent and safe before/after `Run`; it calls `Root.DetachAll()` (direct
+  children), disposes the app-owned logging factory and its providers (flushing ZLogger sinks),
+  and never calls `IGame.Teardown` again. It is app lifetime, not an entity lifetime API.
+- Stop with `IEngine.Exit()` or the window close button (windowed); the one-tick M1 smoke
+  completes its tick regardless.
 - `Run` return shape is `Open`; v1 uses `void` + exceptions.
+- `IEngine.Window`, `IEngine.Input`, and `IEngine.Assets` are M1 throwing stubs. `Window` members
+  and `Input` throw `NotSupportedException` (window/input are M2); `Assets` methods throw
+  `NotSupportedException` (pack/assets are M3).
 
 ## 13. Threading matrix
 
@@ -576,29 +628,39 @@ and same-object composite updates still require game synchronization where atomi
 | Game exception | Propagates out of `Run()` after shutdown. |
 | Renderer fatal / device lost | Propagates out of `Run()` after shutdown; no auto recovery. |
 
-A public `Bork2dException` is planned in `Bork2d.Api` for engine-originated failures. BCL
-exceptions remain for argument/programming errors.
+A public `Bork2dException` in `Bork2d.Api` represents engine-originated failures. It exposes the
+standard constructors (parameterless, message, message + inner exception). BCL exceptions remain
+for argument/programming errors raised directly by callers.
 
 ## 15. Status summary: current gaps
 
 | Contract | Current state |
 | --- | --- |
-| `IEngine.Input` / `Exit` | Missing. |
-| `IEngine.Root` | Missing; root-owned scene graph planned (M1). |
-| `IEngine.LoggerFactory` | Missing; ZLogger configuration planned. |
-| `IGame.Teardown` | Missing. |
-| `ITransform` world reads | Uncomputed class stubs; not in the interface. |
+| `ISceneRoot` / `IEngine.Root` | Declarations present. Implemented in the internal M1 engine (WP3): read-only identity root that owns the scene. The WP4 host creates the engine and clears the root on `Dispose`. |
+| Parent-required creators | Implemented (WP3): attached to the supplied parent; a `null` parent throws `ArgumentNullException`. |
+| `ITransform.DetachAll` | Implemented (WP3): detaches direct children under the structural lock on any transform. |
+| `IEngine.Input` | Declaration present. The M1 host has no window, so `Input` throws `NotSupportedException` until the M2 window/input implementation. |
+| `IEngine.Exit` | Declaration present. The one-tick M1 smoke ignores it after the tick; the real loop is M2/M7. |
+| `IEngine.LoggerFactory` | Implemented (WP5): non-null app-owned Microsoft.Extensions.Logging/ZLogger factory, usable in `Setup`; disposed by the app. |
+| Startup logging | Implemented (WP5): `Build` logs mode, validation result, and layer type from `Bork2d.Runtime`. |
+| `IGame.Teardown` | Declaration present. The M1 host invokes it once after the tick (WP4). |
+| `Bork2dException` | Present in `Bork2d.Api` with standard constructors. |
+| Scene entity `IDisposable` | Removed from `ICamera`/`ISpriteRender` and from the internal Common types (WP3). |
+| `ITransform` world reads | Not on the public interface; the internal transform evaluates them for re-parenting and tests. |
 | `ICamera` screen/world | Missing. |
 | `ISpriteRender` flip | Missing; planned snapshot flag. |
 | `IAssets` pack/browse/exists | Missing. |
 | `IAssets` unload/readiness | Missing; load-and-keep deferred. |
-| Builder/app | `Bork2d.Runtime` empty; `WithGame` currently would require a new API. |
-| Threading | Single-threaded placeholder; target any-thread API with locks. |
-| Headless/offscreen | Missing. |
-| NativeAOT | No analyzers/publish. |
-| Camera defaults | Scaffold uses cyan/zero mask; target black/all layers. |
-| Entity ownership | Weak references; target root-owned strong tree (M1). |
-| Layer semantics | Undefined; target one bit/mask with validation. |
+| Builder/app | `Current` (WP4): public `Bork2dAppBuilder<TLayer>`, validation, one-tick `Run`, idempotent `Dispose`, and M1 stubs. Real window/GPU loop is M2/M7. |
+| Threading | The one-tick run, builder, and app `Dispose` have no thread affinity; the WP3 scene tree provides the engine-owned structural and per-object locks. |
+| Headless/offscreen | Mode selection and validation exist (WP4), but both use the same one-tick smoke in M1; real mode startup is M6/M7. |
+| NativeAOT | `Current` (WP6): `IsAotCompatible` plus trim/AOT analyzers on the runtime libraries; `Bork2d.AotSmoke` publishes/runs locally with zero AOT/trim warnings. A local gate, not CI. |
+| Camera defaults | Implemented (WP3): size 10, full viewport, all declared layers, black clear, `ZIndex` 0. |
+| Camera ordering | `ICamera.ZIndex` property implemented (WP3): default 0; ascending/higher-later contract documented, ordering applied in M8; ties unspecified. |
+| Entity identity/order | None: no entity IDs, no ordered discovery, no public tree enumeration (WP3/D-026). |
+| Frame snapshots | Internal value-only `CameraSnapshot`/`SpriteSnapshot` structs planned for M7; not part of `Bork2d.Api`. Capture is unordered after `Tick`. |
+| Entity ownership | Root-owned strong **unordered** tree (WP3); no weak registry, no entity `Dispose`/`IsAlive`. |
+| Layer semantics | Builder validation (WP3): an `int`-backed `[Flags]` enum with 1–32 named single-bit values; `None = 0` allowed, composites rejected. Render-time invalid-layer diagnostics are M8. |
 | Sprite sizing | No assets; target UVs/pivot/topology/optional indices/pixels-per-unit scale. |
 | Assets/PCK | `Bork2d.Assets` empty. |
 

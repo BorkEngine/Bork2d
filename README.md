@@ -1,42 +1,56 @@
 # Bork2d
 
-Bork2d is a focused 2D game engine for .NET. It uses **Vulkan 1.3** for rendering and
+Bork2d is a focused 2D game engine for .NET. It will use **Vulkan 1.3** for rendering and
 **SDL2** for windowing through **Silk.NET**. Gameplay ticks on the engine tick thread while a
 dedicated render thread presents the previous frame; each tick publishes an immutable frame
 snapshot. The runtime is **NativeAOT** and assets are packed into **`assets.pck`**, referenced
-by opaque IDs. Windowed, offscreen, and headless modes are supported.
+by canonical asset paths. Windowed, offscreen, and headless modes are the target design.
 
-> **Status: pre-alpha. M0 complete; M1 specified and not started.** The solution builds, but
-> the engine is not runnable yet: there is no window, renderer, pack, or asset system, and
-> `Engine.Run()` is a placeholder loop. See the [M1 implementation spec](docs/specs/m1-foundation.md)
-> and the [roadmap](docs/roadmap.md).
+> **Status: pre-alpha. M0 complete; M1 foundation implemented (WP1–WP8), final PR pending.**
+> The solution builds and the M1 tests pass, but the engine is not runnable yet: there is no
+> window, renderer, pack, or asset system, and `Bork2dApp.Run()` performs one
+> `Setup` → `Tick` → `Teardown` smoke, then returns. See the
+> [M1 implementation spec](docs/specs/m1-foundation.md) and the [roadmap](docs/roadmap.md).
 
 ## Projects
 
 | Project | Role |
 | --- | --- |
 | [`Bork2d.Api`](src/Bork2d/Bork2d.Api) | Public contracts and value types used by game code. |
-| [`Bork2d.Runtime`](src/Bork2d/Bork2d.Runtime) | Public startup builder/host; modes, platform, composition. |
-| [`Bork2d.Common`](src/Bork2d/Bork2d.Common) | Engine state, entities, transforms, snapshots, time. |
-| [`Bork2d.Render`](src/Bork2d/Bork2d.Render) | Vulkan renderer (windowed/offscreen). |
-| [`Bork2d.Assets`](src/Bork2d/Bork2d.Assets) | Pack VFS, loading, texture descriptors, sprite assets, bake support. |
+| [`Bork2d.Runtime`](src/Bork2d/Bork2d.Runtime) | Public startup builder/host; logging, validation, one-tick `Run`, modes. |
+| [`Bork2d.Common`](src/Bork2d/Bork2d.Common) | Engine, root-owned unordered scene tree, transforms, time (snapshots are M7). |
+| [`Bork2d.Render`](src/Bork2d/Bork2d.Render) | Vulkan renderer; reference-wired and empty until M6/M8. |
+| [`Bork2d.Assets`](src/Bork2d/Bork2d.Assets) | Pack VFS, loading, texture descriptors, sprite assets, bake support; empty until M3/M4. |
+| [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite and dependency-matrix test (135 tests). |
+| [`Bork2d.AotSmoke`](src/Bork2d/Bork2d.AotSmoke) | NativeAOT one-tick smoke executable; local publish/run gate. |
 | `Bork2d.Editor` | Planned Avalonia editor library/app; JIT, not in the solution yet. See [Editor docs](docs/architecture/editor.md). |
 
 Game developers only consume `Bork2d.Api` and `Bork2d.Runtime`; everything else is an
-implementation detail. A game solution is split into `Project.Common` (game + source assets),
-`Project.Desktop` (entry point), and `Project.Editor` (thin editor host).
+implementation detail. A game solution will be split into `Project.Common` (game + source
+assets), `Project.Desktop` (entry point), and `Project.Editor` (thin editor host); those template
+projects are M9 and are not in this repository yet.
 
 ## Build
 
 ```powershell
-dotnet build src/Bork2d/Bork2d.slnx
+dotnet build src/Bork2d/Bork2d.slnx -c Debug
+dotnet build src/Bork2d/Bork2d.slnx -c Release
+dotnet test src/Bork2d/Bork2d.slnx -c Debug
+dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 ```
 
 Current requirements: .NET SDK `11.0.100-rc.1` (target `net11.0`), Windows. The finished
 engine additionally needs a Vulkan 1.3-capable GPU/driver and the SDL2 native runtime. The
 runtime/game is intended to publish with NativeAOT; the editor and build tools stay JIT.
-The build treats warnings and C# style violations as errors once the M1 rules land; see
-[Contributing](docs/contributing.md).
+Warnings and C# style violations are build errors; see [Contributing](docs/contributing.md).
+
+NativeAOT is a **required local gate, not a CI job** (CI runs build/test/format on pull requests
+targeting `develop` and on `develop` pushes):
+
+```powershell
+dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
+& src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe
+```
 
 ## Documentation
 
@@ -51,7 +65,7 @@ Start at the [documentation index](docs/README.md).
 - [Logging](docs/architecture/logging.md) — ZLogger and `IEngine.LoggerFactory`.
 - [Editor](docs/architecture/editor.md) — Avalonia builder and asset/data authoring.
 - [Data and serialization](docs/architecture/data-and-serialization.md) — TOML → Nerdbank.MessagePack.
-- [NativeAOT](docs/architecture/nativeaot.md) — runtime constraints and CI.
+- [NativeAOT](docs/architecture/nativeaot.md) — runtime constraints and the local AOT gate.
 - [Rendering](docs/architecture/rendering.md) — Vulkan 1.3, one instanced draw per camera.
 - [API guide](docs/api/guide.md) and [API reference](docs/api/reference.md).
 - [Implementation roadmap](docs/roadmap.md) and [M1 implementation spec](docs/specs/m1-foundation.md).
@@ -77,4 +91,6 @@ Start at the [documentation index](docs/README.md).
 - Layers are `[Flags]` bits (one per renderable, mask per camera).
 - Abstract world units, Y-up; `Camera.Size` is half the visible height; no global PPU.
 - Editor is an Avalonia JIT tool with compile-time builder registrations; no scene editing.
-- Warnings-as-errors, C# style rules as errors, and `dotnet format` are the M1 CI gate.
+- Warnings-as-errors, C# style rules as errors, and `dotnet format` are the M1 quality gate.
+  CI runs build/test/format on pull requests targeting `develop` and on `develop` pushes; the
+  NativeAOT publish/run is a required local gate.
