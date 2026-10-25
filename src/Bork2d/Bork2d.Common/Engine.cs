@@ -5,18 +5,20 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Bork2d.Common;
 
 /// <summary>
-/// The engine instance that owns the scene graph.
+/// The engine instance that owns the scene tree and its global structural lock.
 /// </summary>
 /// <remarks>
 /// The engine holds exactly one <see cref="SceneRoot"/> and no global camera, sprite, or
-/// transform lists. Parented objects are retained by their parent; unparented objects are
-/// collectible when game code drops its last reference. No member requires a particular thread.
+/// transform lists. It also owns the single <see cref="Lock"/> that serializes structural scene
+/// changes; every node created by this engine shares it. Parented objects are retained by their
+/// parent; unparented objects are collectible when game code drops its last reference. No member
+/// requires a particular thread.
 /// </remarks>
 internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
     where TLayer : struct, Enum
     where TGame : IGame<TLayer>
 {
-    private readonly SceneGraph _graph = new();
+    private readonly Lock _structuralLock = new();
     private readonly SceneRoot _root;
     private readonly TGame _game;
     private readonly ILoggerFactory _loggerFactory;
@@ -32,7 +34,7 @@ internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
         LayerValidation.Validate<TLayer>();
 
         _game = game;
-        _root = new SceneRoot(_graph);
+        _root = new SceneRoot(_structuralLock);
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         Time = time;
         Window = window;
@@ -54,7 +56,7 @@ internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
 
     public ITransform CreateTransform(ITransform? parent = null)
     {
-        var transform = new Transform(_graph);
+        var transform = new Transform(_structuralLock);
         if (parent is not null)
         {
             transform.AttachAsNewChild(RequireEngineNode(parent));
@@ -66,7 +68,7 @@ internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
     public ICamera<TLayer> CreateCamera(ITransform parent)
     {
         var parentNode = RequireEngineNode(parent);
-        var camera = new Camera<TLayer>(_graph);
+        var camera = new Camera<TLayer>(_structuralLock);
         camera.AttachAsNewChild(parentNode);
         return camera;
     }
@@ -74,7 +76,7 @@ internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
     public ISpriteRender<TLayer> CreateSpriteRender(ITransform parent)
     {
         var parentNode = RequireEngineNode(parent);
-        var sprite = new SpriteRender<TLayer>(_graph);
+        var sprite = new SpriteRender<TLayer>(_structuralLock);
         sprite.AttachAsNewChild(parentNode);
         return sprite;
     }

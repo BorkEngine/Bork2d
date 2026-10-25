@@ -17,8 +17,8 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
     private Color _tint;
     private int _zIndex;
 
-    internal SpriteRender(SceneGraph graph)
-        : base(graph)
+    internal SpriteRender(Lock structuralLock)
+        : base(structuralLock)
     {
         _sprite = Sprite.Empty;
         _layer = default;

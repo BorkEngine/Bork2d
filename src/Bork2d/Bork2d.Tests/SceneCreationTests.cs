@@ -19,7 +19,26 @@ public sealed class SceneCreationTests
         Assert.Equal(GameLayer.World | GameLayer.Player | GameLayer.Ui, camera.CullingMask);
         Assert.Equal(ClearKind.Color, camera.Clear);
         Assert.Equal(Color.Black, camera.ClearColor);
+        Assert.Equal(0, camera.ZIndex);
         Assert.Same(engine.Root, camera.Parent);
+    }
+
+    [Fact]
+    public void CameraZIndexDefaultsToZeroAndRoundTrips()
+    {
+        var engine = TestEngineFactory.Create();
+        var camera = engine.CreateCamera(engine.Root);
+
+        Assert.Equal(0, camera.ZIndex);
+
+        camera.ZIndex = 7;
+        Assert.Equal(7, camera.ZIndex);
+
+        camera.ZIndex = -3;
+        Assert.Equal(-3, camera.ZIndex);
+
+        camera.ZIndex = 0;
+        Assert.Equal(0, camera.ZIndex);
     }
 
     [Fact]
@@ -55,7 +74,6 @@ public sealed class SceneCreationTests
 
         Assert.Null(implicitParent.Parent);
         Assert.Null(explicitParent.Parent);
-        Assert.Empty(Assert.IsType<SceneRoot>(engine.Root).GetRootedTransformsInIdOrder());
     }
 
     [Fact]
@@ -94,6 +112,5 @@ public sealed class SceneCreationTests
         Assert.Same(engine.Root, sprite.Parent);
         Assert.Equal(Vector2.Zero, transform.LocalPosition);
         Assert.Equal(Vector2.One, transform.LocalScale);
-        Assert.Equal(3, Assert.IsType<SceneRoot>(engine.Root).GetRootedTransformsInIdOrder().Count);
     }
 }

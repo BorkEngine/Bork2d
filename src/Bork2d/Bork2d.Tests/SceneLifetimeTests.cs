@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using Bork2d.Api;
 using Bork2d.Common;
 using Xunit;
 
@@ -11,9 +10,11 @@ namespace Bork2d.Tests;
 /// </summary>
 /// <remarks>
 /// The collection disables parallelization so a forced collection cannot be perturbed by other
-/// test classes while a weak reference is being observed.
+/// test classes while a weak reference is being observed. The tests assert parent relationships,
+/// <see cref="SceneRoot.DetachAll"/>, reference identity, and GC behavior; no entity IDs or root
+/// enumeration are involved.
 /// </remarks>
-[Collection("Scene graph GC")]
+[Collection(SceneGcCollection.Name)]
 public sealed class SceneLifetimeTests
 {
     [Fact]
@@ -47,53 +48,50 @@ public sealed class SceneLifetimeTests
     }
 
     [Fact]
-    public void RootedCameraPersistsAfterTheGameDropsItsReference()
+    public void RootedCameraPersistsUntilTheRootDetachesIt()
     {
         var engine = TestEngineFactory.Create();
-        var (reference, id) = CreateRootedCamera(engine);
+        var reference = CreateRootedCamera(engine);
 
         ForceCollect();
 
         Assert.True(reference.IsAlive, "A rooted camera must survive losing the game's reference.");
-        var rooted = Root(engine).GetRootedTransformsInIdOrder();
-        var camera = Assert.Single(rooted.OfType<Camera<GameLayer>>());
-        Assert.Equal(id, camera.Id);
+
+        engine.Root.DetachAll();
+        AssertCollected(reference);
     }
 
     [Fact]
-    public void RootedSpritePersistsAfterTheGameDropsItsReference()
+    public void RootedSpritePersistsUntilTheRootDetachesIt()
     {
         var engine = TestEngineFactory.Create();
-        var (reference, id) = CreateRootedSprite(engine);
+        var reference = CreateRootedSprite(engine);
 
         ForceCollect();
 
         Assert.True(reference.IsAlive, "A rooted sprite must survive losing the game's reference.");
-        var rooted = Root(engine).GetRootedTransformsInIdOrder();
-        var sprite = Assert.Single(rooted.OfType<SpriteRender<GameLayer>>());
-        Assert.Equal(id, sprite.Id);
+
+        engine.Root.DetachAll();
+        AssertCollected(reference);
     }
 
     [Fact]
     public void DetachedCameraIsCollectibleAndLeavesTheScene()
     {
         var engine = TestEngineFactory.Create();
-        var (reference, id) = CreateDetachedCamera(engine);
+        var reference = CreateDetachedCamera(engine);
 
+        // The root is still alive. Collectibility proves the root no longer retains the camera.
         AssertCollected(reference);
-
-        Assert.DoesNotContain(Root(engine).GetRootedTransformsInIdOrder(), transform => transform.Id == id);
     }
 
     [Fact]
     public void DetachedSpriteIsCollectibleAndLeavesTheScene()
     {
         var engine = TestEngineFactory.Create();
-        var (reference, id) = CreateDetachedSprite(engine);
+        var reference = CreateDetachedSprite(engine);
 
         AssertCollected(reference);
-
-        Assert.DoesNotContain(Root(engine).GetRootedTransformsInIdOrder(), transform => transform.Id == id);
     }
 
     [Fact]
@@ -118,7 +116,10 @@ public sealed class SceneLifetimeTests
         TestAssertions.Close(new Vector2(3f, -4f), transform.LocalPosition);
         TestAssertions.Close(30f, transform.LocalRotation);
         TestAssertions.Close(new Vector2(2f, 3f), transform.LocalScale);
-        Assert.Contains(Root(engine).GetRootedTransformsInIdOrder(), rooted => ReferenceEquals(rooted, transform));
+
+        engine.Root.DetachAll();
+
+        Assert.Null(transform.Parent);
     }
 
     [Fact]
@@ -129,7 +130,6 @@ public sealed class SceneLifetimeTests
         var camera = engine.CreateCamera(engine.Root);
         var grandchild = engine.CreateTransform(first);
         var sprite = engine.CreateSpriteRender(first);
-        var firstId = ((Transform)first).Id;
 
         engine.Root.DetachAll();
 
@@ -137,21 +137,22 @@ public sealed class SceneLifetimeTests
         Assert.Null(camera.Parent);
         Assert.Same(first, grandchild.Parent);
         Assert.Same(first, sprite.Parent);
-        Assert.Empty(Root(engine).GetRootedTransformsInIdOrder());
 
         first.Parent = engine.Root;
 
         Assert.Same(engine.Root, first.Parent);
-        Assert.Equal(firstId, ((Transform)first).Id);
-        var rooted = Root(engine).GetRootedTransformsInIdOrder();
-        Assert.Equal(3, rooted.Count);
-        Assert.Contains(rooted, transform => ReferenceEquals(transform, first));
-        Assert.Contains(rooted, transform => ReferenceEquals(transform, grandchild));
-        Assert.Contains(rooted, transform => ReferenceEquals(transform, sprite));
+        Assert.Same(first, grandchild.Parent);
+        Assert.Same(first, sprite.Parent);
+
+        // The camera was detached by DetachAll and is still detached; re-attach it explicitly.
+        camera.Parent = engine.Root;
+        Assert.Same(engine.Root, camera.Parent);
 
         engine.Root.DetachAll();
 
-        Assert.Empty(Root(engine).GetRootedTransformsInIdOrder());
+        Assert.Null(first.Parent);
+        Assert.Null(camera.Parent);
+        Assert.Same(first, grandchild.Parent);
     }
 
     [Fact]
@@ -164,22 +165,15 @@ public sealed class SceneLifetimeTests
 
         rig.DetachAll();
 
+        Assert.Same(engine.Root, rig.Parent);
         Assert.Null(turret.Parent);
         Assert.Same(turret, barrel.Parent);
-        var rooted = Root(engine).GetRootedTransformsInIdOrder();
-        Assert.Contains(rooted, transform => ReferenceEquals(transform, rig));
-        Assert.DoesNotContain(rooted, transform => ReferenceEquals(transform, turret));
-        Assert.DoesNotContain(rooted, transform => ReferenceEquals(transform, barrel));
 
         turret.Parent = rig;
 
         Assert.Same(rig, turret.Parent);
         Assert.Same(turret, barrel.Parent);
-        Assert.Contains(Root(engine).GetRootedTransformsInIdOrder(), transform => ReferenceEquals(transform, barrel));
     }
-
-    private static SceneRoot Root(Engine<GameLayer, TestGame<GameLayer>> engine)
-        => Assert.IsType<SceneRoot>(engine.Root);
 
     private static void ForceCollect()
     {
@@ -224,34 +218,32 @@ public sealed class SceneLifetimeTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (WeakReference Reference, uint Id) CreateRootedCamera(Engine<GameLayer, TestGame<GameLayer>> engine)
+    private static WeakReference CreateRootedCamera(Engine<GameLayer, TestGame<GameLayer>> engine)
     {
         var camera = engine.CreateCamera(engine.Root);
-        return (new WeakReference(camera), ((Transform)camera).Id);
+        return new WeakReference(camera);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (WeakReference Reference, uint Id) CreateRootedSprite(Engine<GameLayer, TestGame<GameLayer>> engine)
+    private static WeakReference CreateRootedSprite(Engine<GameLayer, TestGame<GameLayer>> engine)
     {
         var sprite = engine.CreateSpriteRender(engine.Root);
-        return (new WeakReference(sprite), ((Transform)sprite).Id);
+        return new WeakReference(sprite);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (WeakReference Reference, uint Id) CreateDetachedCamera(Engine<GameLayer, TestGame<GameLayer>> engine)
+    private static WeakReference CreateDetachedCamera(Engine<GameLayer, TestGame<GameLayer>> engine)
     {
         var camera = engine.CreateCamera(engine.Root);
-        var id = ((Transform)camera).Id;
         camera.Parent = null;
-        return (new WeakReference(camera), id);
+        return new WeakReference(camera);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (WeakReference Reference, uint Id) CreateDetachedSprite(Engine<GameLayer, TestGame<GameLayer>> engine)
+    private static WeakReference CreateDetachedSprite(Engine<GameLayer, TestGame<GameLayer>> engine)
     {
         var sprite = engine.CreateSpriteRender(engine.Root);
-        var id = ((Transform)sprite).Id;
         sprite.Parent = null;
-        return (new WeakReference(sprite), id);
+        return new WeakReference(sprite);
     }
 }

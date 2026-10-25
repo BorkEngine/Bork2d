@@ -18,15 +18,17 @@ internal sealed class Camera<TLayer> : Transform, ICamera<TLayer>
     private TLayer _cullingMask;
     private ClearKind _clear;
     private Color _clearColor;
+    private int _zIndex;
 
-    internal Camera(SceneGraph graph)
-        : base(graph)
+    internal Camera(Lock structuralLock)
+        : base(structuralLock)
     {
         _viewport = new Vector4(0f, 0f, 1f, 1f);
         _size = 10f;
         _cullingMask = LayerValidation.All<TLayer>();
         _clear = ClearKind.Color;
         _clearColor = Color.Black;
+        _zIndex = 0;
     }
 
     public Vector4 Viewport
@@ -120,6 +122,25 @@ internal sealed class Camera<TLayer> : Transform, ICamera<TLayer>
             lock (Sync)
             {
                 _clearColor = value;
+            }
+        }
+    }
+
+    public int ZIndex
+    {
+        get
+        {
+            lock (Sync)
+            {
+                return _zIndex;
+            }
+        }
+
+        set
+        {
+            lock (Sync)
+            {
+                _zIndex = value;
             }
         }
     }

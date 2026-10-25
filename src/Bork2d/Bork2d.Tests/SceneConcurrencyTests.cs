@@ -39,21 +39,20 @@ public sealed class SceneConcurrencyTests
             Assert.True(thread.Join(TimeSpan.FromSeconds(60)), $"Worker '{thread.Name}' did not finish.");
         }
 
-        var created = transforms.SelectMany(items => items).ToArray();
-        Assert.Equal(WorkerCount * TransformsPerWorker, created.Length);
-
-        var allIds = created
-            .Select(transform => ((Transform)transform).Id)
-            .Concat(cameras.Select(camera => ((Transform)camera).Id))
-            .Concat(sprites.Select(sprite => ((Transform)sprite).Id))
-            .ToArray();
-        Assert.Equal(allIds.Length, allIds.Distinct().Count());
-
+        var created = new HashSet<object>(ReferenceEqualityComparer.Instance);
         for (var worker = 0; worker < WorkerCount; worker++)
         {
             Assert.NotNull(transforms[worker]);
             Assert.Same(engine.Root, cameras[worker].Parent);
             Assert.Same(engine.Root, sprites[worker].Parent);
+
+            foreach (var transform in transforms[worker])
+            {
+                Assert.True(created.Add(transform), "Every created transform must be a distinct instance.");
+            }
+
+            Assert.True(created.Add(cameras[worker]), "Every created camera must be a distinct instance.");
+            Assert.True(created.Add(sprites[worker]), "Every created sprite must be a distinct instance.");
 
             for (var item = 0; item < TransformsPerWorker; item++)
             {
@@ -72,11 +71,9 @@ public sealed class SceneConcurrencyTests
             }
         }
 
-        var rooted = Assert.IsType<SceneRoot>(engine.Root).GetRootedTransformsInIdOrder();
-        var rootedIds = rooted.Select(transform => transform.Id).ToArray();
-        Assert.Equal((WorkerCount * TransformsPerWorker / 2) + (WorkerCount * 2), rootedIds.Length);
-        Assert.Equal(rootedIds.OrderBy(id => id).ToArray(), rootedIds);
-        Assert.All(rootedIds, id => Assert.Contains(id, allIds));
+        // No IDs or ordering exist. Membership is proven exactly by each object's parent state:
+        // odd-indexed transforms, every camera, and every sprite are rooted; even ones are not.
+        Assert.Equal(WorkerCount * (TransformsPerWorker + 2), created.Count);
     }
 
     private static void RunWorker(

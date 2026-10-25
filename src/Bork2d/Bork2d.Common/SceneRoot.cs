@@ -4,39 +4,39 @@ using Bork2d.Api;
 namespace Bork2d.Common;
 
 /// <summary>
-/// The read-only, identity-transform root of one engine scene graph.
+/// The read-only, identity-transform root of one engine scene tree.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The root is the strong owner of the live scene. It has ID 0, no parent, and identity local
-/// values; every parent/local setter throws <see cref="InvalidOperationException"/>. It stays
-/// valid after <see cref="DetachAll"/> and can own children again at any time.
+/// The root is the strong owner of the live scene. It has no parent and identity local values;
+/// every parent/local setter throws <see cref="InvalidOperationException"/>. It stays valid
+/// after <see cref="DetachAll"/> and can own children again at any time.
 /// </para>
 /// <para>
 /// The root implements <see cref="ISceneRoot"/> and the internal <see cref="ISceneNode"/> tree
 /// contract directly; it is deliberately <b>not</b> a <see cref="Transform"/>. Structural
-/// operations are shared through <see cref="ISceneNode"/> and serialized by the same
-/// <see cref="SceneGraph.StructuralLock"/> as transforms.
+/// operations are shared through <see cref="ISceneNode"/> and serialized by the engine-owned
+/// global structural lock, the same lock transforms use.
+/// </para>
+/// <para>
+/// The tree is unordered: the root owns its children strongly but exposes no child enumeration,
+/// traversal, order, or identity. Snapshot discovery is not part of M1.
 /// </para>
 /// </remarks>
 internal sealed class SceneRoot : ISceneRoot, ISceneNode
 {
+    private readonly Lock _structuralLock;
     private List<Transform>? _children;
 
-    internal SceneRoot(SceneGraph graph)
+    internal SceneRoot(Lock structuralLock)
     {
-        Graph = graph;
+        _structuralLock = structuralLock;
     }
 
     /// <summary>
-    /// Gets the entity ID of the scene root. ID 0 is reserved and never allocated to a transform.
+    /// Gets the engine-owned global structural lock shared by every node in the scene.
     /// </summary>
-    internal uint Id => 0;
-
-    /// <summary>
-    /// Gets the scene graph this root belongs to.
-    /// </summary>
-    internal SceneGraph Graph { get; }
+    internal Lock StructuralLock => _structuralLock;
 
     public ITransform? Parent
     {
@@ -65,28 +65,11 @@ internal sealed class SceneRoot : ISceneRoot, ISceneNode
             "The scene root is an identity transform; its local scale cannot be set.");
     }
 
-    SceneGraph ISceneNode.Graph => Graph;
-
-    uint ISceneNode.Id => Id;
-
     ISceneNode? ISceneNode.ParentNode => null;
-
-    /// <summary>
-    /// Snapshots every rooted transform, excluding the root itself, in entity-ID order.
-    /// </summary>
-    /// <returns>The rooted transforms sorted by entity ID.</returns>
-    internal IReadOnlyList<Transform> GetRootedTransformsInIdOrder()
-    {
-        using var scope = Graph.StructuralLock.EnterScope();
-        var transforms = new List<Transform>();
-        SceneNodeTraversal.CollectDescendants(this, transforms);
-        transforms.Sort(static (left, right) => left.Id.CompareTo(right.Id));
-        return transforms;
-    }
 
     public void DetachAll()
     {
-        using var scope = Graph.StructuralLock.EnterScope();
+        using var scope = _structuralLock.EnterScope();
         var children = _children;
         if (children is null || children.Count == 0)
         {
@@ -128,16 +111,5 @@ internal sealed class SceneRoot : ISceneRoot, ISceneNode
         }
 
         children.RemoveAt(last);
-    }
-
-    void ISceneNode.CollectChildrenCore(List<Transform> results)
-    {
-        var children = _children;
-        if (children is null || children.Count == 0)
-        {
-            return;
-        }
-
-        results.AddRange(children);
     }
 }
