@@ -583,7 +583,7 @@ The runtime/game is NativeAOT (editor and baker are JIT; see [NativeAOT](nativea
 
 ## 14. Threading
 
-- Pack files are opened and their headers parsed at startup (main thread / asset service).
+- Pack files are opened and their headers parsed at startup (asset service / any thread).
   The resulting path tables are immutable unless a new pack is mounted.
 - `LoadPack` updates the overlay stack atomically for lookups; it is thread-safe and should be
   called during `Setup` or before loading.

@@ -1,11 +1,12 @@
 # Bork2d Engine Documentation
 
-> **Status:** documentation-first pass (2026-10-25). The repository contains a partial
-> scaffold; these documents describe both what exists today and the target design. Check the
-> status markers before treating any API as implemented.
+> **Status:** **M0 complete** (2026-10-25). The repository still contains a partial scaffold;
+> the documentation describes both what exists and the target design. M1 is specified in
+> [M1 — Foundation and NativeAOT baseline](specs/m1-foundation.md). Check the status markers
+> before treating any API as implemented.
 
 Bork2d is a focused 2D game engine for .NET. It renders with **Vulkan 1.3** and handles
-windowing through **SDL2**, bound through **Silk.NET**. Gameplay ticks on the main thread while
+windowing through **SDL2**, bound through **Silk.NET**. Gameplay ticks on the engine tick thread while
 rendering runs on a separate thread; each tick publishes an immutable **frame snapshot** that
 the renderer consumes. The runtime is **NativeAOT**; assets are packed into **`assets.pck`**
 and referenced by opaque IDs. The engine also supports **windowed**, **offscreen**, and
@@ -50,6 +51,7 @@ When code and docs disagree, code is current truth for `Current` items; the docs
 | [Architecture overview](architecture/overview.md) | everyone | Goals, invariants, modes, and how the pieces fit. |
 | [Projects and dependencies](architecture/projects.md) | contributors | Project graph, public/internal boundary, game solution layout, AOT build. |
 | [Runtime lifecycle](architecture/runtime-lifecycle.md) | contributors | Builder, modes, startup, tick loop, pacing, shutdown, errors. |
+| [Scene ownership](architecture/scene-ownership.md) | contributors | Root-owned scene graph, parent/child membership, remove/re-add, read-only root. |
 | [Threading and frame handoff](architecture/threading.md) | contributors | Thread ownership, bounded run-ahead snapshot ring, input, resize/close, memory ordering. |
 | [Assets and pack files](architecture/assets.md) | contributors, editor | `assets.pck` format, compressed/checksummed header, VFS overlays, browsing, texture descriptors, sprite assets, bake pipeline. |
 | [Logging](architecture/logging.md) | contributors | ZLogger/Microsoft.Extensions.Logging, `IEngine.LoggerFactory`, builder default. |
@@ -60,6 +62,7 @@ When code and docs disagree, code is current truth for `Current` items; the docs
 | [API guide](api/guide.md) | game developers | Startup, modes, game loop, layers, cameras, sprites, input, assets, logging, AOT. |
 | [API reference](api/reference.md) | game developers | Member contracts, defaults, threading, status. |
 | [Implementation roadmap](roadmap.md) | planner | Milestones M0–M10, exit criteria, risks, open decisions. |
+| [M1 implementation spec](specs/m1-foundation.md) | implementers | M1 work packages, API changes, scene ownership, tests, acceptance. |
 | [Contributing](contributing.md) | contributors | Build, warnings-as-errors, C# style, format gate, PR checklist. |
 | [Decision log](decisions.md) | everyone | Decisions taken, alternatives, consequences. |
 
@@ -69,8 +72,10 @@ When code and docs disagree, code is current truth for `Current` items; the docs
   [assets](architecture/assets.md).
 - **Working on the engine:** [overview](architecture/overview.md) →
   [projects](architecture/projects.md) → [lifecycle](architecture/runtime-lifecycle.md) →
-  [threading](architecture/threading.md) → [assets](architecture/assets.md) →
-  [rendering](architecture/rendering.md).
+  [scene ownership](architecture/scene-ownership.md) → [threading](architecture/threading.md)
+  → [assets](architecture/assets.md) → [rendering](architecture/rendering.md).
+- **Starting M1:** [M1 spec](specs/m1-foundation.md) → [scene ownership](architecture/scene-ownership.md)
+  → [contributing](contributing.md).
 - **Assets/editor:** [assets](architecture/assets.md) →
   [data and serialization](architecture/data-and-serialization.md) →
   [editor](architecture/editor.md) → roadmap M3–M5.
@@ -91,7 +96,8 @@ These are the rules the rest of the documentation assumes. Details/alternatives 
 | --- | --- |
 | Public surface | Only `Bork2d.Api` and `Bork2d.Runtime` are supported for game code; `Bork2d.Editor` is the tool surface. |
 | Runtime | NativeAOT and trim-safe. Editor/baker stay JIT. No runtime reflection, TOML, or assembly scanning. |
-| Threads | Main thread runs the tick; game workers may create/mutate distinct entities inside a tick and must join; a render thread owns Vulkan in windowed/offscreen; asset loaders are background. |
+| Threads | The engine tick thread runs ticks; game workers may create/mutate distinct entities inside a tick and must join; a render thread owns Vulkan; asset loaders are background. No public API requires the process main thread. |
+| Ownership | `IEngine.Root` owns a strong scene graph. Parented objects persist; unparented objects are collectible. Detach to remove, re-attach the same object later. No weak entity registry, no entity `Dispose`/`IsAlive`. |
 | Modes | Windowed, offscreen (windowless Vulkan, frames discarded), headless (no SDL/Vulkan/render thread; timer-paced, default 60, 0 = uncapped). |
 | Frame pacing | Bounded run-ahead in windowed/offscreen. No target tick rate, deadline timer, or `Sleep` there. Headless uses its configured tick rate. |
 | Assets | `assets.pck` (magic/28-byte prefix with fixed-prefix version, compressed `PackHeader`/`PackEntry` classes with XXH3-64 checksum, uint64 offsets); later `LoadPack` overlays win; browse merged; no unload in v1; missing base pack throws. |
@@ -111,6 +117,7 @@ These are the rules the rest of the documentation assumes. Details/alternatives 
 ```
 Bork2dEngine/
   docs/                      this documentation
+    specs/                   implementation specs (M1+)
   examples/                  empty; sample projects are a roadmap item
   src/Bork2d/
     Bork2d.slnx
@@ -144,7 +151,7 @@ the first NativeAOT target.
 
 | Term | Meaning |
 | --- | --- |
-| **Tick** | One gameplay update executed on the main thread. |
+| **Tick** | One gameplay update executed by the engine tick thread. |
 | **Tick window** | The interval in which scene mutation is legal: `Setup`, `Tick` (including joined game workers), or `Teardown`. |
 | **Frame** | One rendered image. Ticks and frames are not one-to-one. |
 | **Snapshot** | Immutable copy of the scene (cameras + sprite renderables) produced by a tick and consumed by the renderer. |
@@ -153,6 +160,9 @@ the first NativeAOT target.
 | **Bounded run-ahead** | The tick runs until the snapshot ring is full, then waits for a GPU fence; no fixed rate or artificial delay. |
 | **Windowed / offscreen / headless** | Normal SDL+Vulkan+present; windowless Vulkan with discarded frames; no SDL/Vulkan/render thread, timer-paced. |
 | **Game worker** | Game-owned thread spawned inside a tick; distinct entities; must join before `Tick` returns. |
+| **Scene root** | `IEngine.Root`; read-only strong owner of the live transform/camera/sprite tree. `Root.DetachAll()` detaches children. |
+| **Rooted / unrooted** | Reachable / not reachable from `Root`. Rooted objects persist; unrooted objects are collectible. |
+| **Detach / re-attach** | `Parent = null` removes from the scene without destroying the object; assigning a parent again restores it. |
 | **Pack** | `assets.pck` file containing a compressed/checksummed `PackHeader`/`PackEntry` MessagePack header and payloads. |
 | **Overlay** | A pack mounted above the base pack; later packs win; browsing hides shadowed paths. |
 | **Texture descriptor** | MessagePack texture metadata (payload, width, height, format, filter, wrap). |
@@ -171,7 +181,8 @@ the first NativeAOT target.
 - Coordinates: +X right, +Y up, radians CCW. Screen/input coordinates are top-left pixels.
   Sprite UVs and pivot are top-left origin; the renderer generates a Y-up quad from the UV span,
   texture size, pivot, and pixels-per-unit scale.
-- "Main thread" means the thread that created the builder and calls `IGame.Tick`.
+- "Tick thread" means the thread the engine uses to invoke `IGame.Setup/Tick/Teardown`. The
+  public API itself has no thread affinity.
 - Asset paths are canonical lowercase `/` keys without source extensions; they are not
   filesystem paths.
 - Mermaid diagrams cover dependencies, sequences, and states.

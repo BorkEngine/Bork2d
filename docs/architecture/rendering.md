@@ -323,7 +323,7 @@ never treated as world units.
 
 ### 7.5 Defaults
 
-`CreateCamera()` is planned to apply:
+`CreateCamera(parent)` is planned to apply:
 
 | Property | Default |
 | --- | --- |

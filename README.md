@@ -1,15 +1,15 @@
 # Bork2d
 
 Bork2d is a focused 2D game engine for .NET. It uses **Vulkan 1.3** for rendering and
-**SDL2** for windowing through **Silk.NET**. Gameplay ticks on the main thread while a
+**SDL2** for windowing through **Silk.NET**. Gameplay ticks on the engine tick thread while a
 dedicated render thread presents the previous frame; each tick publishes an immutable frame
 snapshot. The runtime is **NativeAOT** and assets are packed into **`assets.pck`**, referenced
 by opaque IDs. Windowed, offscreen, and headless modes are supported.
 
-> **Status: pre-alpha / documentation-first.** The solution builds, but the engine is not
-> runnable yet: there is no window, renderer, pack, or asset system, and `Engine.Run()` is a
-> placeholder loop. The documentation describes the target design and tags what already
-> exists. See the [roadmap](docs/roadmap.md).
+> **Status: pre-alpha. M0 complete; M1 specified and not started.** The solution builds, but
+> the engine is not runnable yet: there is no window, renderer, pack, or asset system, and
+> `Engine.Run()` is a placeholder loop. See the [M1 implementation spec](docs/specs/m1-foundation.md)
+> and the [roadmap](docs/roadmap.md).
 
 ## Projects
 
@@ -43,6 +43,7 @@ The build treats warnings and C# style violations as errors once the M1 rules la
 Start at the [documentation index](docs/README.md).
 
 - [Architecture overview](docs/architecture/overview.md) — goals, invariants, modes.
+- [Scene ownership](docs/architecture/scene-ownership.md) — root-owned lifetime model.
 - [Projects and dependencies](docs/architecture/projects.md) — public boundary and game layout.
 - [Runtime lifecycle](docs/architecture/runtime-lifecycle.md) — builder, modes, pacing, shutdown.
 - [Threading and frame handoff](docs/architecture/threading.md) — bounded run-ahead snapshots.
@@ -53,7 +54,8 @@ Start at the [documentation index](docs/README.md).
 - [NativeAOT](docs/architecture/nativeaot.md) — runtime constraints and CI.
 - [Rendering](docs/architecture/rendering.md) — Vulkan 1.3, one instanced draw per camera.
 - [API guide](docs/api/guide.md) and [API reference](docs/api/reference.md).
-- [Implementation roadmap](docs/roadmap.md), [decision log](docs/decisions.md), and [contributing](docs/contributing.md).
+- [Implementation roadmap](docs/roadmap.md) and [M1 implementation spec](docs/specs/m1-foundation.md).
+- [Decision log](docs/decisions.md) and [contributing](docs/contributing.md).
 
 ## Design at a glance
 
@@ -69,6 +71,9 @@ Start at the [documentation index](docs/README.md).
   pivot, topology, optional indices, and pixels-per-unit scale; TOML source, baked. No vertices
   array; the shader generates quad corners.
 - One instanced draw per non-empty camera, generated sprite quads, bindless texture pages, dynamic rendering.
+- Scene objects are owned by `IEngine.Root` (read-only). Parented objects persist, unparented
+  objects are collectible. Detach to remove and re-attach the same object later; there is no
+  entity `Dispose`/`IsAlive`.
 - Layers are `[Flags]` bits (one per renderable, mask per camera).
 - Abstract world units, Y-up; `Camera.Size` is half the visible height; no global PPU.
 - Editor is an Avalonia JIT tool with compile-time builder registrations; no scene editing.

@@ -94,7 +94,7 @@ decision log.
 
 | Assembly | Public types |
 | --- | --- |
-| `Bork2d.Api` | All contract interfaces and value types: `IEngine<TLayer>`, `IGame<TLayer>`, `ITime`, `IWindow`, `IInput`, `IAssets`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `ITransform`, `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, `ILoggerFactory`, and future public exceptions/attributes. |
+| `Bork2d.Api` | All contract interfaces and value types: `IEngine<TLayer>`, `IGame<TLayer>`, `ITime`, `IWindow`, `IInput`, `IAssets`, `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, `ILoggerFactory`, and future public exceptions/attributes. |
 | `Bork2d.Runtime` | `Bork2dAppBuilder<TLayer>`, `Bork2dApp`, and their option types. Nothing else. |
 | `Bork2d.Editor` | `Bork2dEditorBuilder`, `Bork2dEditorApp`, and the public editor service types needed by `Project.Editor`. |
 
@@ -136,7 +136,7 @@ Consequences:
 | --- | --- | --- |
 | Public contracts | `Api` | Interfaces, `Sprite`, `Color`, `KeyCode`, serialization attributes, `Bork2dException`. |
 | Value semantics and math | `Common` | Transform hierarchy, matrix helpers, layer validation, frame snapshot DTOs, entity IDs. |
-| Engine state and loop | `Common` | Entity registry, snapshot builder, tick timing, `Engine<TLayer, TGame>`. |
+| Engine state and loop | `Common` | Root-owned scene tree, snapshot builder, tick timing, `Engine<TLayer, TGame>`. |
 | Platform and composition | `Runtime` | Builder, app host, windowed SDL, Vulkan bootstrap, headless/offscreen mode selection, lifecycle. |
 | GPU rendering | `Render` | Device, swapchain (windowed) or offscreen targets, dynamic rendering, descriptor sets, bindless textures, instance buffers, pipeline, present. |
 | Assets and data | `Assets` | Pack VFS, overlays, decompression, descriptors, sprite assets, resource table, Nerdbank.MessagePack shapes, bake support. |

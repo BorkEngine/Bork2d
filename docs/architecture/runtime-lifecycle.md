@@ -25,11 +25,12 @@ app.Run();
 - The game is constructed by the developer and passed as an instance. There is no `new()`
   constraint and no reflection-based construction; this supports constructor injection and
   NativeAOT.
-- `Bork2dAppBuilder<TLayer>` is created on the **main thread**, configured, and built once.
+- `Bork2dAppBuilder<TLayer>` is configured and built once; no thread affinity.
 - `Build()` validates the configuration and returns an `IDisposable` app object. It does not
-  create the window, GPU, or threads.
-- `Run()` must be called on the main thread. It starts the selected mode, calls `Setup`, and
-  enters the tick loop. It blocks until shutdown.
+  create the window, GPU, or threads. It creates the logger, engine, and `IEngine.Root`; the
+  root is empty until `Setup`.
+- `Run()` may be called from any thread. It starts the selected mode, calls `Setup`, and enters
+  the tick loop (M1: one smoke `Tick`, then returns). It blocks until shutdown.
 - `Dispose()` is safe whether or not `Run()` was called and is idempotent. The `using`
   declaration guarantees cleanup if `Run()` throws.
 - The app owns the platform, renderer, asset service, engine, and snapshot ring. The game
@@ -92,7 +93,7 @@ is the documented exception to "no artificial delays".
 
 Validation performed by `Build()`:
 
-1. `Build` runs on the main thread.
+1. `Build` may run on any thread.
 2. `WithGame` was called exactly once with a non-null instance.
 3. Exactly one mode is selected (default windowed, or headless, or offscreen).
 4. Window-only options are not combined with headless/offscreen.
@@ -224,7 +225,8 @@ next tick boundary and `Run()` throws.
 
 - The clock is a monotonic `Stopwatch`, never wall-clock time.
 - It is not paused when the window is unfocused/minimized; gameplay can pause itself.
-- `ITime` is main-thread only; workers receive `dt` as an argument.
+- `ITime` reads are thread-safe snapshots; workers do not need a passed `dt` unless the game
+  wants a consistent logical step.
 - The current `StopwatchTime` starts at construction and has no clamp; wiring it with these
   semantics is part of M2/M7.
 - `DeltaTime` includes time spent waiting for a snapshot slot. After a long stall it can be
@@ -232,7 +234,7 @@ next tick boundary and `Run()` throws.
 
 ## 7. Window and input (windowed only)
 
-`IWindow` operations are main-thread operations and are forwarded to SDL:
+`IWindow` operations may be called from any thread and are marshaled to the OS/window thread:
 
 - **Title** — immediate.
 - **Size** — client/framebuffer pixels; sends a resize message to the render thread. Reading
@@ -241,7 +243,7 @@ next tick boundary and `Run()` throws.
 - **CursorVisible** — toggles the SDL cursor. No capture/relative mode in v1.
 - **Close** — graceful exit after the current tick.
 
-- `IInput` is pumped on the main thread and frozen at tick start; see
+- `IInput` is pumped on the OS/window thread and frozen at tick start; see
   [Threading](threading.md#6-input-across-threads-windowed-only).
 - Offscreen/headless have no SDL window; `IWindow`/`IInput` throw.
 - DPI: v1 treats the SDL framebuffer size as physical pixels; per-monitor scaling is `Open`
@@ -261,7 +263,7 @@ sequenceDiagram
 
     M->>M: stop scheduling ticks
     M->>M: game.Teardown() (planned)
-    M->>M: dispose remaining entities, cancel asset requests
+    M->>M: Root.DetachAll(), cancel asset requests
     M->>R: request stop (if a render thread exists)
     R->>R: wait for current frames / vkDeviceWaitIdle
     R->>R: destroy targets, swapchain, pipelines, device objects
@@ -274,8 +276,9 @@ sequenceDiagram
 
 - Headless skips all render-thread steps.
 - Offscreen skips window/surface/swapchain but destroys the device and offscreen targets.
-- `Teardown` runs on the main thread and is the last chance to dispose entities/release game
-  resources. Asset requests during Teardown are not guaranteed to complete.
+- `Teardown` runs on the engine tick thread and is the last chance to detach game-owned subtrees
+  or release game resources. The app then calls `Root.DetachAll()`; asset requests during Teardown
+  are not guaranteed to complete.
 - The render thread never outlives the Vulkan instance/surface (windowed) or the device
   (offscreen).
 - `Dispose()` after a failed `Run()` still attempts cleanup and suppresses only secondary
@@ -291,7 +294,7 @@ sequenceDiagram
 | No Vulkan 1.3 device / missing feature | Windowed/offscreen init | Fatal; `Run()` throws. |
 | Pack missing/corrupt | Asset service startup / `LoadPack` | Fatal; throws `Bork2dException`. |
 | Shader/pipeline failure | Render init | Fatal. |
-| Game exception in `Setup`/`Tick`/`Teardown` | Main thread | Capture, shut down, rethrow original from `Run()`. |
+| Game exception in `Setup`/`Tick`/`Teardown` | Engine tick thread | Capture, shut down, rethrow original from `Run()`. |
 | Asset load/decode failure | Asset thread | Per-asset diagnostic; handle not renderable; not fatal. |
 | Device lost / GPU reset | Render thread | Fatal; signal main, shut down, throw. |
 | API misuse (outside tick, main-only API off main, use-after-dispose, invalid layer) | API boundary checks | Debug throw/log; release best effort; same-entity races are the game's responsibility. |
@@ -327,7 +330,52 @@ failures are rethrown on the caller's thread, with cleanup in a `finally`.
 No mode changes the public `IGame` contract: `Setup`, `Tick`, and `Teardown` are still main
 thread callbacks.
 
-## 11. Current status and gaps
+## 11. Entity and scene ownership
+
+`IEngine.Root` is the strong owner of the live scene. This replaces the scaffold's weak
+`EntityList` registry; the full model is in [Scene ownership](scene-ownership.md).
+
+```csharp
+public interface ISceneRoot : ITransform
+{
+    // Read-only marker; detach via inherited ITransform.DetachAll().
+}
+
+public interface ITransform
+{
+    ITransform? Parent { get; set; }
+    Vector2 LocalPosition { get; set; }
+    float LocalRotation { get; set; }
+    Vector2 LocalScale { get; set; }
+    void DetachAll(); // detaches direct children
+}
+
+public interface IEngine<TLayer> where TLayer : struct, Enum
+{
+    ISceneRoot Root { get; }
+    ITransform CreateTransform(ITransform? parent = null);
+    ICamera<TLayer> CreateCamera(ITransform parent);
+    ISpriteRender<TLayer> CreateSpriteRender(ITransform parent);
+}
+```
+
+- A parent holds its children strongly. The engine holds only `Root`; there is no global
+  camera/sprite/transform registry.
+- An object is retained only while rooted (or referenced by game code). Unparented objects are
+  collectible; leaving a camera/sprite unparented means it is not part of the scene.
+- `CreateCamera`/`CreateSpriteRender` require a parent so lifetime is explicit. `CreateTransform`
+  may be standalone.
+- `ITransform.DetachAll()` detaches direct children; `Root.DetachAll()` detaches the scene's
+  top-level children. Detached objects remain valid and can be re-attached. Calls are allowed
+  from any thread during `Setup`/`Tick`/`Teardown` and are serialized by the structural
+  `System.Threading.Lock`.
+- `ISceneRoot` is read-only: setting parent/local position/rotation/scale throws
+  `InvalidOperationException`.
+- A rooted object whose game reference is lost remains until detached. This is deliberate:
+  strong ownership cannot distinguish an accidental lost reference from a scene object.
+- Scene mutations are tick-window operations; capture/render never walks the live tree.
+
+## 12. Current status and gaps
 
 | Area | Current | Needed |
 | --- | --- | --- |
@@ -339,13 +387,13 @@ thread callbacks.
 | Exit | None | M1/M7 |
 | Snapshot ring | None | M7 |
 | Headless/offscreen | None | M6/M7 |
-| Dispose/teardown | None | M1 |
+| Dispose/teardown | None | M1 (root clear detach) |
 | Assets | Empty | M3/M4 |
 | Render thread | Empty | M6/M7 |
-| Entity ownership | Weak references | M1 |
+| Entity ownership | Weak references; no `Root` | M1: root-owned strong tree |
 | NativeAOT | None | M1 baseline, M9 gate |
 
-## 12. Open questions
+## 13. Open questions
 
 - Exact builder method names/signatures and `Run()` return shape.
 - Window shown before the first frame or only after the first present.
@@ -359,8 +407,10 @@ thread callbacks.
 - Worker threads at shutdown: the game joins before `Tick` returns; the engine cannot join
   unknown threads.
 
-## 13. Related documents
+## 14. Related documents
 
+- [Scene ownership](scene-ownership.md) — root-owned lifetime model in detail.
+- [M1 implementation spec](../specs/m1-foundation.md) — builder/ownership implementation.
 - [Threading and frame handoff](threading.md) — snapshot ring and bounded run-ahead in detail.
 - [Rendering](rendering.md) — windowed/offscreen render modes.
 - [Assets and pack files](assets.md) — pack loading and default pack.

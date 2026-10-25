@@ -123,7 +123,7 @@ The engine owns a main/tick thread and asset loader threads in every mode. It ad
 owns a render thread in windowed and offscreen modes. The game may add short-lived workers
 inside a tick.
 
-| Mode | Main/tick | Render thread | SDL | Vulkan | Pacing |
+| Mode | Tick | Render thread | SDL | Vulkan | Pacing |
 | --- | :-: | :-: | :-: | :-: | --- |
 | Windowed | yes | yes | yes | swapchain | bounded run-ahead; presentation/GPU rate |
 | Offscreen | yes | yes | no | offscreen target | bounded run-ahead; GPU rate |
@@ -131,14 +131,18 @@ inside a tick.
 
 | Thread | Owner | Responsibilities | Never does |
 | --- | --- | --- | --- |
-| **Main / tick** | `Bork2d.Runtime` | `IGame.Setup/Tick/Teardown`, tick scope, entity/asset requests, time, snapshot publication (windowed/offscreen), SDL events (windowed), shutdown. | Create or submit Vulkan work. |
+| **Tick** (any host thread) | `Bork2d.Runtime` | `IGame.Setup/Tick/Teardown`, tick scope, scene/asset requests, time, snapshot publication (windowed/offscreen), shutdown. | Create or submit Vulkan work. |
+| **OS/window** (windowed) | `Bork2d.Runtime` | SDL video/events, window operations, input snapshot. | Call Vulkan or mutate game objects directly. |
 | **Render** | `Bork2d.Render` | Vulkan instance handoff, device, swapchain (windowed) or offscreen targets, GPU uploads, instance building, draws, present (windowed), fences. | Touch SDL window state or game objects. |
 | **Asset loader(s)** | `Bork2d.Assets` | Pack opening, file/decompression I/O, MessagePack/sprite/texture decoding, immutable resource table, upload requests. | Touch Vulkan or the swapchain. |
 
 ```mermaid
 flowchart LR
-  subgraph main["Main (tick) thread"]
-    SDL["SDL window + events (windowed)"]
+  subgraph os["OS/window thread (windowed)"]
+    SDL["SDL window + events"]
+  end
+
+  subgraph tick["Tick thread (any host thread)"]
     GAME["IGame.Tick"]
     BUILD["Snapshot builder (windowed/offscreen)"]
   end
@@ -156,7 +160,7 @@ flowchart LR
     TABLE["Immutable resource table"]
   end
 
-  SDL --> GAME --> BUILD
+  SDL -- "input snapshot" --> GAME --> BUILD
   BUILD -- "3 snapshot slots" --> CONVERT
   TABLE --> CONVERT
   PACK --> TABLE
@@ -166,22 +170,25 @@ flowchart LR
   PRESENT -. "frame fence frees snapshot + frame slot" .-> BUILD
 ```
 
-All scene mutation happens inside the tick window. The main thread owns the loop, time, and
-snapshot capture; game workers may create or mutate distinct entities during the tick and must
-be joined before it returns. The renderer receives a copy of what to draw, never a reference to
-a live entity. Assets are read from pack overlays by loader threads and published through an
-immutable resource table; GPU upload happens on the render thread.
+All scene mutation happens inside the tick window. The engine tick thread owns the loop, time,
+and snapshot capture; game workers may create or mutate distinct entities during the tick and
+must be joined before it returns. The public API has no thread affinity; calls may originate on
+any thread during the tick window and are serialized by structural/per-object locks. The
+renderer receives a copy of what to draw, never a reference to a live entity. Assets are read
+from pack overlays by loader threads and published through an immutable resource table; GPU
+upload happens on the render thread.
 
 ## 6. Frame model at a glance
 
 One tick (windowed/offscreen):
 
-1. SDL events are pumped on the main thread (windowed only): input edges, resize, close, text.
+1. SDL events are pumped on the OS/window thread (windowed only): input edges, resize, close,
+   text. The tick thread consumes the frozen input snapshot.
 2. The loop acquires a free snapshot slot. It waits only when the ring is full; there is no
    target tick rate, deadline timer, or `Sleep`.
 3. `ITime` advances: `DeltaTime` is wall-clock time since the previous tick start, clamped.
-4. `IGame.Tick()` runs on the main thread and opens the tick window. The game may create and
-   mutate distinct entities, including from joined workers; all workers must finish before
+4. `IGame.Tick()` runs on the engine tick thread and opens the tick window. The game may create
+   and mutate distinct entities, including from joined workers; all workers must finish before
    `Tick` returns.
 5. The engine copies cameras and sprite renderables into the slot, converts generic layer types
    to bits, and publishes it.
@@ -247,13 +254,18 @@ is an architecture bug, not a code-style preference.
     in CI.
 16. **Pre-1.0 means breaking changes are allowed**, but every public change must update the API
     guide, API reference, and decision log in the same change.
+17. **Scene objects are root-owned.** `IEngine.Root` strongly owns its transform tree; parented
+    cameras/sprites/transforms persist, unparented objects are collectible, and `Root.DetachAll()`
+    detaches the tree. `ISceneRoot` is read-only. There is no entity `Dispose`/`IsAlive`: remove
+    with `Parent = null`, re-attach the same object later. No weak entity registry. See
+    [Scene ownership](scene-ownership.md).
 
 ## 8. Project responsibilities
 
 | Project | Responsibility | Status |
 | --- | --- | --- |
 | `Bork2d.Api` | Public contracts and value types. The only assembly `Project.Common` needs. | `Partial` |
-| `Bork2d.Common` | Engine implementation, entity state, transform math, snapshot building, time. Platform-agnostic. | `Partial` |
+| `Bork2d.Common` | Engine implementation, scene root/transform tree, entity state, transform math, snapshot building, time. Platform-agnostic. | `Partial` |
 | `Bork2d.Runtime` | Public builder/host: SDL platform (windowed), Vulkan bootstrap, headless/offscreen composition root. | `Empty` |
 | `Bork2d.Render` | Vulkan device, swapchain (windowed) or offscreen targets, pipelines, bindless textures, instance buffers, draws, present. | `Empty` |
 | `Bork2d.Assets` | Pack VFS, overlays, decompression, texture descriptors, sprite assets, resource table, Nerdbank shapes, bake support. | `Empty` |
@@ -279,23 +291,25 @@ What actually exists today:
   placeholder values (`ClearColor = Cyan`, culling mask `0`).
 - `StopwatchTime`, not wired into `Engine`.
 - `Runtime`, `Render`, and `Assets` contain only an empty `Class1`.
-- No logging stack, pack format, headless/offscreen mode, AOT analyze/publish, or enforced style
-  settings yet.
+- No logging stack, root-owned scene graph, pack format, headless/offscreen mode, AOT
+  analyze/publish, or enforced style settings yet.
 
 What that means for the documents:
 
 - API reference members are marked `Current` only when the declaration exists today.
-- Builders, `IEngine.Input`, `IEngine.Exit`, `IEngine.LoggerFactory`, `IGame.Teardown`, flip
-  flags, pack/asset loading, headless/offscreen modes, NativeAOT settings, and the renderer are
-  `Planned`.
-- The roadmap starts with foundation/AOT and platform work, then assets and the editor, then
-  the renderer.
+- Builders, `IEngine.Root`, `IEngine.Input`, `IEngine.Exit`, `IEngine.LoggerFactory`,
+  `IGame.Teardown`, flip flags, pack/asset loading, headless/offscreen modes, NativeAOT
+  settings, and the renderer are `Planned`.
+- The roadmap starts with foundation/AOT and the root-owned scene graph, then platform work,
+  then assets/editor, then the renderer.
 
 ## 10. Read next
 
 - [Projects and dependencies](projects.md) — the reference graph and game solution layout.
 - [Runtime lifecycle](runtime-lifecycle.md) — builder, modes, startup, shutdown.
+- [Scene ownership](scene-ownership.md) — root-owned lifetime and disposal.
 - [Threading and frame handoff](threading.md) — bounded run-ahead and the snapshot ring.
+- [M1 implementation spec](../specs/m1-foundation.md) — the current implementation plan.
 - [Assets and pack files](assets.md) — `assets.pck`, overlays, descriptors, sprites.
 - [Logging](logging.md) — ZLogger and `IEngine.LoggerFactory`.
 - [Editor](editor.md) — Avalonia builder and source asset authoring.

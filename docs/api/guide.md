@@ -40,12 +40,15 @@ app.Run();
   test doubles, and logging your host owns. The engine factory itself does not exist until
   `Build()`; for engine logging, create the logger from `engine.LoggerFactory` in `Setup`.
   There is no parameterless-constructor/reflection requirement.
-- `Build()` validates on the main thread; `Run()` blocks until shutdown; `Dispose()` cleans up.
+- `Build()` validates configuration; `Run()` blocks until shutdown in the full design (M1: one smoke tick); app `Dispose()` cleans up.
 - The game instance must stay alive through `Run()`.
 - Windowed/offscreen have no target tick rate; pacing follows the renderer, with no artificial
   delay. Headless is timer-paced via `WithHeadless(ticksPerSecond)` (default 60, `0` uncapped).
 - Logging is configured with `WithLogging`; if omitted, a pretty ZLogger console provider is
   installed, and `IEngine.LoggerFactory` is always available.
+- `IEngine.Root` owns the scene. Create cameras/sprites under `Root` or a transform under it;
+  parented objects persist, unparented objects are collectible. `Root.DetachAll()` detaches the
+  scene's top-level children; `ITransform.DetachAll()` does the same for any transform.
 - The default pack is `assets.pck`; `WithAssetsPack` can point elsewhere. A missing/malformed
   base pack is a startup error that throws `Bork2dException`; there is no empty-FS fallback.
 
@@ -135,14 +138,14 @@ public sealed class MyGame : IGame<GameLayer>
         _engine = engine;
         _logger = engine.LoggerFactory.CreateLogger<MyGame>();
 
-        _camera = engine.CreateCamera();
+        _camera = engine.CreateCamera(engine.Root);
         _camera.LocalPosition = Vector2.Zero;
         _camera.Size = 5f;                       // 10 world units tall
         _camera.CullingMask = GameLayer.Background | GameLayer.World | GameLayer.Effects;
         _camera.Clear = ClearKind.Color;
         _camera.ClearColor = Color.Black;
 
-        _player = engine.CreateSpriteRender();
+        _player = engine.CreateSpriteRender(engine.Root);
         _player.Sprite = engine.Assets.LoadSprite("sprites/player/idle");
         _player.Layer = GameLayer.World;
         _player.ZIndex = 0;
@@ -164,16 +167,17 @@ public sealed class MyGame : IGame<GameLayer>
             _player.LocalPosition += Vector2.Normalize(direction) * 4f * dt;
     }
 
-    // Planned: once on the main thread before shutdown.
+    // Planned: once on the engine tick thread before shutdown.
     public void Teardown()
     {
-        _player.Dispose();
-        _camera.Dispose();
+        // App-owned Root.DetachAll() handles normal scene teardown. Detach/remove objects
+        // explicitly when they should leave the scene before shutdown.
     }
 }
 ```
 
-`Setup` runs once on the main thread before the first tick. `Tick` runs on the main thread.
+`Setup` runs once on the engine tick thread before the first tick. `Tick` runs on the engine tick
+thread.
 There is no game-side Draw callback: the engine captures the render snapshot after `Tick`.
 
 ## 4. Layers
@@ -202,12 +206,13 @@ _particles.Layer    = GameLayer.Effects;
 - Up to 32 layer flags. The builder validates the enum; keep it `int`-backed.
 - Declare bits in ascending order. Draw order uses the numeric layer value first.
 - A camera mask may combine bits; `0` sees nothing.
-- `CreateCamera()` defaults to all declared layers; set the mask explicitly in real code.
+- `CreateCamera(parent)` requires a parent; use `engine.Root` for a scene-level camera.
+  It defaults to all declared layers; set the mask explicitly in real code.
 
 ## 5. Cameras
 
 ```csharp
-var camera = engine.CreateCamera();
+var camera = engine.CreateCamera(engine.Root);
 camera.LocalPosition = new Vector2(0, 0);
 camera.Size = 5f;                         // half visible height; 10 units tall
 camera.Viewport = new Vector4(0, 0, 1, 1); // normalized, top-left origin
@@ -227,11 +232,11 @@ camera.ClearColor = Color.Black;
 Split screen:
 
 ```csharp
-var left = engine.CreateCamera();
+var left = engine.CreateCamera(engine.Root);
 left.Viewport = new Vector4(0f, 0f, 0.5f, 1f);
 left.CullingMask = GameLayer.World;
 
-var right = engine.CreateCamera();
+var right = engine.CreateCamera(engine.Root);
 right.Viewport = new Vector4(0.5f, 0f, 0.5f, 1f);
 right.CullingMask = GameLayer.World;
 ```
@@ -239,7 +244,7 @@ right.CullingMask = GameLayer.World;
 HUD overlay:
 
 ```csharp
-var hud = engine.CreateCamera();
+var hud = engine.CreateCamera(engine.Root);
 hud.Viewport = new Vector4(0, 0, 1, 1);
 hud.Clear = ClearKind.None;      // keep the world behind it
 hud.CullingMask = GameLayer.Ui;
@@ -257,7 +262,7 @@ Vector2 pixel = camera.WorldToScreen(player.LocalPosition);
 `ISpriteRender<TLayer>` is a transform plus a sprite asset handle:
 
 ```csharp
-var sprite = engine.CreateSpriteRender();
+var sprite = engine.CreateSpriteRender(engine.Root);
 sprite.Sprite = engine.Assets.LoadSprite("sprites/player/idle");
 sprite.Layer = GameLayer.World;
 sprite.ZIndex = 10;
@@ -281,25 +286,30 @@ Semantics:
   indexed path.
 - Pivot/origin is normalized inside the generated quad; default center.
 - Planned `FlipX`/`FlipY` mirrors the sprite.
-- Dispose a sprite when no longer needed, inside a tick/teardown; a worker may dispose an
+- `Dispose()` is not part of scene ownership. Remove a sprite with `Parent = null` and re-attach
+  it later; `Root.DetachAll()`/parent `DetachAll()` removes children. A worker may detach an
   entity it owns.
+- `CreateSpriteRender(parent)` requires a parent; use `engine.Root` or a transform under it.
 
 Parenting:
 
 ```csharp
-var rig = engine.CreateTransform();
-var turret = engine.CreateSpriteRender();
-turret.Parent = rig;
+var rig = engine.CreateTransform(engine.Root);
+var turret = engine.CreateSpriteRender(rig);
 turret.LocalPosition = new Vector2(0.5f, 0);
 rig.LocalRotation = MathF.PI / 2f;
 ```
 
-Reparenting is planned to preserve the child's world transform. Cycles are rejected. The
-hierarchy is evaluated on the tick thread; the renderer never walks it.
+Reparenting preserves the child's world transform. Cycles are rejected; `Root.Parent` cannot be
+set, and all root transform setters throw. The hierarchy is evaluated on the tick thread; the
+renderer never walks it. A rooted object whose game reference is lost stays alive until detached
+or cleared; an unparented object is collectible. Detaching does not destroy the object; the same
+instance can be re-attached later. `rig.DetachAll()` detaches the turret; `turret` remains valid
+and can be parented again.
 
 ## 7. Input
 
-Input is windowed only. It is read during `Tick`:
+Input is windowed only. It is read during `Tick`; reads are thread-safe snapshots:
 
 ```csharp
 var input = _engine.Input;
@@ -337,8 +347,8 @@ _engine.Input.OnTextTyped += c =>
 };
 ```
 
-`OnTextTyped` fires on the main thread during event pumping, before `Tick`. In offscreen or
-headless mode, `IInput` throws; do not call it from mode-independent code.
+`OnTextTyped` fires on the engine tick thread during event pumping, before `Tick`. In offscreen
+or headless mode, `IInput` throws; do not call it from mode-independent code.
 
 ## 8. Time
 
@@ -366,7 +376,8 @@ _engine.Window.Fullscreen = true;
 _engine.Window.CursorVisible = false;
 ```
 
-Window properties are main-thread, windowed only. In offscreen/headless they throw. `Size` is
+Window properties are available in windowed mode; calls from any thread are marshaled to the
+OS/window thread. In offscreen/headless they throw. `Size` is
 framebuffer pixels; the renderer recreates the swapchain asynchronously. Do not set it every
 tick. High-DPI logical scaling is `Open` in v1; treat sizes as physical pixels.
 
@@ -414,14 +425,25 @@ for tools and diagnostics, not per-frame gameplay.
 
 ## 11. Lifetimes and threading
 
-- Create cameras/sprites/transforms inside the `Setup`/`Tick` window. Workers may create
-  entities during a tick if they are joined before it ends.
-- Dispose inside `Tick`/`Teardown`. Workers may dispose entities they own; do not dispose an
-  entity another thread is using.
-- Engine-owned entities are retained until disposed; dropping your own reference does not
-  remove them. This is a planned change from the current weak-reference registry.
-- Workers may mutate **distinct** entities concurrently. They must join before `Tick` returns.
-  Two workers touching the same entity/hierarchy need game-level synchronization.
+- `IEngine.Root` owns the scene. Parented cameras/sprites/transforms persist; unparented objects
+  are collectible when the game drops the last reference.
+- `CreateCamera(parent)` and `CreateSpriteRender(parent)` require a parent. Use
+  `engine.Root` for scene-level objects, or a transform under it.
+- There is no entity `Dispose()`/`IsAlive`. Remove an object with `Parent = null`; re-attach the
+  same object later. `Root.DetachAll()` detaches the scene's top-level children;
+  `ITransform.DetachAll()` works on any transform. Both are thread-affinity-free; calls are
+  allowed during Setup/Tick/Teardown.
+- Losing a reference to a **rooted** object does not remove it; remove it from the scene to
+  release it. Losing a reference to an **unparented** object lets it be collected.
+- Create cameras/sprites/transforms inside the `Setup`/`Tick`/`Teardown` window. Workers may
+  create distinct entities during a tick; structural attach/detach is serialized by the
+  scene-graph lock.
+- Any thread may call the public API during `Setup`/`Tick`/`Teardown`; there is no
+  process-main-thread requirement. Workers may mutate **distinct** entities' properties
+  concurrently and must join before `Tick` returns. Composite updates to the same
+  entity/hierarchy need game-level synchronization.
+- `IWindow` operations are marshaled to the OS/window thread; `IInput`/`ITime` reads are
+  snapshots.
 
 ```csharp
 public void Tick()
@@ -436,7 +458,8 @@ public void Tick()
 }
 ```
 
-- Workers must not read `ITime`, `IInput`, `IWindow`, or call `IEngine.Exit`; pass values in.
+- Workers may mutate distinct entities concurrently; same-entity property races need external
+  synchronization.
 - Asset requests are thread-safe; readiness is asynchronous.
 - The renderer never exposes live entities or GPU resources.
 - Worker exceptions must be observed and propagated by the game.
@@ -466,6 +489,9 @@ See [NativeAOT](../architecture/nativeaot.md).
 | Two workers mutating one entity without sync | Lost updates/data races | One owner per entity or external sync. |
 | Assuming equal `ZIndex` keeps insertion order | Reordering surprises | Use distinct z; entity ID is the stable tie-break. |
 | Creating/disposing outside a tick | Undefined ordering | Use `Setup`/`Tick`/`Teardown`. |
+| Forgetting to parent a created camera/sprite | It is not in the scene and is collectible | Pass `engine.Root` or a rooted parent. |
+| Losing a reference to a rooted object | It persists until removed from the scene | Intentional scene ownership; `Parent = null` or `Root.DetachAll()` to release it. |
+| Using a removed object | Still valid; not rendered until re-attached | Re-attach with `Parent = ...`; no `IsAlive` check needed. |
 | Choosing a global pixels-per-unit | Inconsistent sprite sizes | Use the sprite asset's scale and transform scale. |
 | Relying on a fixed tick rate | Wrong on 165 Hz displays | Use `DeltaTime`; pacing is frame-based. |
 | Calling `IWindow`/`IInput` in headless/offscreen | Throws | Branch on mode or use separate host code. |
@@ -523,19 +549,19 @@ public sealed class MyGame : IGame<GameLayer>
         _engine = engine;
         _logger = engine.LoggerFactory.CreateLogger<MyGame>();
 
-        _camera = engine.CreateCamera();
+        _camera = engine.CreateCamera(engine.Root);
         _camera.Size = 5f;
         _camera.CullingMask = GameLayer.Background | GameLayer.World;
         _camera.Clear = ClearKind.Color;
         _camera.ClearColor = Color.Black;
 
-        _background = engine.CreateSpriteRender();
+        _background = engine.CreateSpriteRender(engine.Root);
         _background.Sprite = engine.Assets.LoadSprite("sprites/background");
         _background.Layer = GameLayer.Background;
         _background.ZIndex = -100;
         _background.LocalScale = new Vector2(4, 4);
 
-        _player = engine.CreateSpriteRender();
+        _player = engine.CreateSpriteRender(engine.Root);
         _player.Sprite = engine.Assets.LoadSprite("sprites/player/idle");
         _player.Layer = GameLayer.World;
         _player.ZIndex = 0;
@@ -567,9 +593,8 @@ public sealed class MyGame : IGame<GameLayer>
 
     public void Teardown()
     {
-        _player.Dispose();
-        _background.Dispose();
-        _camera.Dispose();
+        // App-owned Root.DetachAll() handles normal scene teardown. Remove objects explicitly
+        // (Parent = null) when they should leave the scene before shutdown.
     }
 }
 ```
@@ -594,6 +619,8 @@ The tick loop is paced at 60 Hz by default; pass `WithHeadless(0)` for uncapped.
 ## 15. Where to go next
 
 - [API reference](reference.md) — exact members, defaults, threading, status.
+- [Scene ownership](../architecture/scene-ownership.md) — root-owned lifetime and cleanup.
+- [M1 spec](../specs/m1-foundation.md) — implementation plan.
 - [Assets and pack files](../architecture/assets.md) — pack format, descriptors, sprites.
 - [Editor](../architecture/editor.md) — source authoring and slicing.
 - [NativeAOT](../architecture/nativeaot.md) — runtime constraints.

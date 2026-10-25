@@ -22,19 +22,23 @@
 - **Alternatives:** Make `Common` public; one assembly; let games reference `Render` directly.
 - **Docs:** [Projects and dependencies](architecture/projects.md#3-public-surface-and-assembly-visibility)
 
-## D-002 Thread model: main/tick + render + loaders
+## D-002 Thread model: tick + render + loaders
 
 - **Status:** Accepted
 - **Context:** Ticking and rendering must overlap. Windowed, offscreen, and headless modes have
-  different platform needs.
-- **Decision:** The main thread owns time, game callbacks, tick scope, and snapshot publication.
-  A render thread owns Vulkan in windowed/offscreen modes. Asset loading uses background
-  threads. Headless mode has no render thread and no SDL/Vulkan. Game workers may run inside a
-  tick and must be joined before it returns.
-- **Consequences:** No lock per property; game code is single-threaded per entity. Renderer and
-  game share only immutable snapshots. Windowed control needs a channel. Headless/offscreen
-  are mode branches, not separate engines.
-- **Alternatives:** Three-thread coordinator; render on main; single-thread headless only.
+  different platform needs. The public API must not require the process main thread.
+- **Decision:** A tick thread (any host thread) owns time, game callbacks, tick scope, and
+  snapshot publication. A render thread owns Vulkan in windowed/offscreen modes. Asset loading
+  uses background threads. Headless mode has no render thread and no SDL/Vulkan. Game workers may
+  run inside a tick and must be joined before it returns. The public API has **no thread
+  affinity**; engine locks/queues serialize concurrent calls. `IWindow` operations are marshaled
+  to the OS/window thread; `IInput` and `ITime` reads are snapshots.
+- **Consequences:** Structural and per-object locks are required; prefer `System.Threading.Lock`,
+  `Interlocked`, and immutable snapshots, and keep lock-free paths lock-free. Renderer and game
+  share only immutable snapshots. Windowed control needs a channel. Headless/offscreen are mode
+  branches, not separate engines. Scene mutation remains logically tick-window scoped.
+- **Alternatives:** Main-thread-only API; one lock-free writer; three-thread coordinator; render
+  on the tick thread.
 - **Docs:** [Threading](architecture/threading.md#1-threads-by-mode)
 
 ## D-003 Bounded run-ahead snapshot ring
@@ -79,8 +83,8 @@
 - **Decision:** v1 targets Windows. SDL/Vulkan boundaries stay portable; no Win32 API leaks into
   `Api`/`Runtime`. Linux/macOS are not supported guarantees in v1. NativeAOT publish is
   Windows x64 first.
-- **Consequences:** Faster path; macOS main-thread constraints are not designed in yet. Native
-  SDL2/Vulkan deployment is a Windows-first concern.
+- **Consequences:** Faster path; OS/window-thread marshaling is platform-internal. Linux/macOS
+  support remains a later portability concern. Native SDL2/Vulkan deployment is Windows-first.
 - **Alternatives:** Windows + Linux; all platforms; Windows-only with no portability effort.
 - **Docs:** [Overview](architecture/overview.md#2-goals), [Roadmap](roadmap.md#7-v1-definition-of-done)
 
@@ -347,6 +351,50 @@
 - **Alternatives:** Warnings only; style warnings only in CI; AnalysisMode=All with more noise.
 - **Docs:** [Contributing](contributing.md#3-build-style-and-warnings)
 
+## D-023 Root-owned scene graph
+
+- **Status:** Accepted
+- **Context:** A global strong registry would retain every created camera/sprite/transform until
+  app shutdown; losing a reference would leak permanently. Weak ownership auto-collects but
+  makes camera/renderable lifetime nondeterministic.
+- **Decision:** `IEngine.Root` (`ISceneRoot`) owns a strong transform tree. A parent holds
+  children strongly; the engine holds only the root. `CreateCamera(parent)` and
+  `CreateSpriteRender(parent)` require a parent; `CreateTransform(parent = null)` may be
+  standalone. Unparented objects are collectible. There is no `Dispose()`/`IsAlive` on scene
+  entities: detach (`Parent = null`) to remove and re-attach the same object later.
+  `ITransform.DetachAll()` detaches direct children; `Root.DetachAll()` detaches the scene's
+  top-level children. `ISceneRoot` is read-only; transform setters throw. There is no global
+  strong camera/sprite list and no weak entity registry.
+- **Consequences:** Deterministic lifetime bounded by scene membership; no GC-driven
+  disappearance; no destroy lifecycle or stale-reference state. A rooted object whose game
+  reference is lost persists until removed—this is deliberate. Removing and re-adding preserves
+  the object and its state. Snapshot discovery traverses the root tree. Parent add/remove is O(1)
+  amortized under a structural `System.Threading.Lock`; traversal is O(n), replacing
+  weak-dictionary enumeration. Temporary scopes and typed caches are future optimizations.
+- **Alternatives:** Weak registry; finalizer-backed handles; global strong registry; arena/IDs;
+  `Dispose`/`IsAlive`; auto-parent everything (recreates the leak).
+- **Docs:** [Scene ownership](architecture/scene-ownership.md),
+  [M1 spec](specs/m1-foundation.md)
+
+## D-024 Thread-affinity-free API
+
+- **Status:** Accepted
+- **Context:** Requiring the process main thread for engine calls makes embedding, tooling, and
+  worker-driven game code fragile. The engine already needs synchronization for workers.
+- **Decision:** No public engine API requires the process main thread. Calls may originate on any
+  thread **during `Setup`/`Tick`/`Teardown`**. Scene structural operations use a structural
+  `System.Threading.Lock`; individual objects use per-object `Lock`s, with lock-free/`Interlocked`
+  paths where practical. `IGame.Setup/Tick/Teardown` are invoked by the engine on its tick
+  thread. `IWindow` operations are marshaled to the OS/window thread; `IInput`/`ITime` reads are
+  snapshots. `IAssets` is already thread-safe.
+- **Consequences:** Concurrent calls are safe at the engine level; composite multi-property
+  updates still require game synchronization where atomicity matters. Windowed implementations
+  need a control queue; headless needs none. Per-property `Lock` use is the M1 baseline; prefer
+  `Interlocked`/immutable snapshots and keep critical sections short.
+- **Alternatives:** Main-thread-only API; single writer thread; caller-provided external lock.
+- **Docs:** [Threading](architecture/threading.md#2-tick-scoped-concurrency),
+  [M1 spec](specs/m1-foundation.md)
+
 ## Proposed defaults awaiting sign-off
 
 These are decisions embedded in the docs that were not explicitly chosen. They are safe to
@@ -390,7 +438,7 @@ document in the same change. Do not rewrite history by deleting an old decision;
 | ID | Decision | Status |
 | --- | --- | --- |
 | D-001 | Public surface Api + Runtime | Accepted |
-| D-002 | Main/tick, render, loader threads across modes | Accepted |
+| D-002 | Tick, render, loader threads across modes | Accepted |
 | D-003 | Bounded run-ahead snapshot ring | Accepted |
 | D-004 | Variable timestep, no fixed rate | Accepted |
 | D-005 | Windows first | Accepted |
@@ -411,3 +459,5 @@ document in the same change. Do not rewrite history by deleting an old decision;
 | D-020 | Compile-time editor registrations | Accepted |
 | D-021 | ZLogger logging surface | Accepted |
 | D-022 | Warnings-as-errors + C# style gate | Accepted |
+| D-023 | Root-owned scene graph | Accepted |
+| D-024 | Thread-affinity-free API | Accepted |

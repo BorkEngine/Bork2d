@@ -1,0 +1,370 @@
+# M1 — Foundation and NativeAOT Baseline: Implementation Spec
+
+> **Status:** ready for implementation. **M0 is complete** (2026-10-25). This spec supersedes
+> the older M1 bullet list in the roadmap; the roadmap links here.
+
+## 1. Goal
+
+Produce the stable foundation the rest of the engine builds on:
+
+- the project graph and public/internal boundary;
+- a public builder/host contract with instance-based game injection;
+- the **root-owned scene graph** with remove/re-add lifetime (no weak registry, no
+  `Dispose`/`IsAlive` on scene entities);
+- a thread-affinity-free public API;
+- logging through Microsoft.Extensions.Logging + ZLogger;
+- warnings/style enforcement and a clean CI baseline;
+- NativeAOT/trim analyzers plus a publish smoke app.
+
+M1 does **not** create a window, renderer, pack, or asset system. Those are M2/M3/M6+.
+
+## 2. Exit criteria
+
+M1 is complete when all of these are demonstrated:
+
+1. Every project builds with warnings-as-errors and style violations as errors.
+2. `dotnet format --verify-no-changes` passes.
+3. The dependency test passes and no implementation type is accidentally public.
+4. `Bork2d.Tests` (xUnit) covers builder validation, scene ownership, transform hierarchy,
+   layers, entity IDs, and the concurrency rules.
+5. An AOT-published smoke app runs without reflection, trim, or AOT warnings.
+6. `IEngine.LoggerFactory` is usable and a default `Bork2dAppBuilder` run produces pretty
+   ZLogger console output.
+7. Root ownership works: parented objects persist, unparented objects are collectible,
+   remove/re-add preserves the object, and `Root.DetachAll()` detaches the tree.
+8. `ISceneRoot` rejects all transform mutations.
+9. No public API requires the process main thread.
+10. No `EntityList<T>`/weak-reference ownership remains in shipped code.
+11. The docs in this spec, the API reference/guide, roadmap, and decision log match the code.
+
+## 3. Locked decisions
+
+| Topic | Decision |
+| --- | --- |
+| Ownership | Root-owned strong scene graph; add/remove membership; no weak ownership. |
+| Object lifetime | No `Dispose`/`IsAlive` on scene entities. Detach to remove; re-attach the same object later. |
+| Root | `IEngine.Root : ISceneRoot`; read-only identity transform; mutations throw. |
+| Creation | `CreateCamera(parent)` and `CreateSpriteRender(parent)` require a parent. |
+| Cleanup | `Root.DetachAll()` detaches children. App shutdown detaches root children. |
+| Threads | No thread affinity. Any thread may call the public API during `Setup`/`Tick`/`Teardown`; locks/queues make it safe. |
+| AOT | Runtime/game AOT-safe; editor/baker JIT later. |
+| Logging | `IEngine.LoggerFactory`; `WithLogging(Action<ILoggingBuilder>)`; pretty ZLogger default. |
+| Style | Warnings-as-errors, style errors, `dotnet format` gate, all projects. |
+| Tests | xUnit. |
+| Pack | Format accepted; actual pack implementation is M3. M1 exposes only builder option validation. |
+| M1 `Run` | `Setup` → one `Tick` → `Teardown`, then return. Smoke only; real loop is M2/M7. |
+
+## 4. Work packages
+
+### WP1 — Repository, build, and quality baseline
+
+Deliver:
+
+- root `Directory.Build.props`:
+  - `TreatWarningsAsErrors=true`;
+  - `EnforceCodeStyleInBuild=true`;
+  - deterministic builds;
+  - consistent nullable/implicit-usings settings.
+- root `.editorconfig` with the Microsoft/.NET-standard baseline; enforced style rules at
+  `error`;
+- `global.json` pinning the installed SDK (`11.0.100-rc.1`) with the chosen roll-forward policy;
+- `Bork2d.Tests` using **xUnit** and a dependency test;
+- CI: build, tests, format verify, AOT publish smoke;
+- remove placeholder `Class1` files.
+
+Acceptance: `dotnet build`, `dotnet test`, and `dotnet format --verify-no-changes` pass locally
+and in CI.
+
+### WP2 — API contract changes
+
+Add/adjust in `Bork2d.Api`:
+
+```csharp
+public interface ISceneRoot : ITransform
+{
+    // Read-only marker: all ITransform setters throw on the root.
+}
+
+public interface ITransform
+{
+    ITransform? Parent { get; set; }
+    Vector2 LocalPosition { get; set; }
+    float LocalRotation { get; set; }
+    Vector2 LocalScale { get; set; }
+
+    void DetachAll(); // detaches all direct children
+    // WorldPosition/WorldRotation/WorldScale stay planned.
+}
+
+public interface IEngine<TLayer> where TLayer : struct, Enum
+{
+    ITime Time { get; }
+    IWindow Window { get; }
+    IInput Input { get; }              // declaration/planned
+    IAssets Assets { get; }
+    ILoggerFactory LoggerFactory { get; }
+    ISceneRoot Root { get; }
+
+    ITransform CreateTransform(ITransform? parent = null);
+    ICamera<TLayer> CreateCamera(ITransform parent);
+    ISpriteRender<TLayer> CreateSpriteRender(ITransform parent);
+
+    void Exit();
+}
+```
+
+Also:
+
+- `Bork2dException` for engine-originated startup/validation failures;
+- `IGame.Teardown()` declaration;
+- remove `IDisposable` from `ITransform`, `ICamera`, and `ISpriteRender`;
+- remove `Dispose()`/`IsAlive` from scene entities;
+- reference `Microsoft.Extensions.Logging.Abstractions` from `Api`;
+- keep GPU/OS/Silk/Vulkan types out of `Api`.
+
+Acceptance: API compiles, docs match, dependency test allows only the intended references.
+
+### WP3 — Root-owned scene graph
+
+Replace `EntityList<T>` and the weak registry with:
+
+- `Transform` child storage (`List<ITransform>`/array) and parent management;
+- `SceneRoot : Transform, ISceneRoot`:
+  - read-only: parent/local setters throw `InvalidOperationException`;
+  - inherits `DetachAll()` from `ITransform`;
+  - root itself remains valid;
+- parent attach/detach:
+  - remove from old parent, add to new parent;
+  - reject self/cycles;
+  - preserve world transform on re-parent;
+  - root cannot be parented;
+  - detach returns the object to normal (possibly unrooted) life, not a destroyed state;
+- `ITransform.DetachAll()` detaches all direct children; any transform can own children;
+- remove `Dispose`/`IsAlive`/disposed checks from scene entities;
+- removing from a parent and re-adding later must preserve the object and its state;
+- `CreateTransform/CreateCamera/CreateSpriteRender` attach to the supplied parent;
+- `CreateCamera(null)`/`CreateSpriteRender(null)` fail validation;
+- camera/sprite constructors do not self-register in a global list;
+- snapshot discovery uses rooted-tree traversal and preserves entity-ID ordering;
+- no concurrent dictionary; entity IDs are monotonic and non-reused;
+- all parent/child operations use a scene-graph structural lock (`System.Threading.Lock`);
+- property access is per-object locked (`Lock`), with lock-free paths where practical;
+  composite updates to one object still need game synchronization where atomicity matters;
+- avoid `lock (object)`; use `Lock`, `Interlocked`, `Volatile`, and immutable snapshots;
+- no thread-affinity assertions.
+
+Acceptance tests:
+
+1. Unparented transform/camera/sprite is collectible after dropping the last reference.
+2. Rooted object persists after dropping the game reference and is visible to root traversal.
+3. Detached object is collectible after dropping the last reference.
+4. Remove from parent, keep the reference, re-add later: same object, same state.
+5. `Root.DetachAll()` detaches children; refs remain valid and can be re-parented.
+6. `ITransform.DetachAll()` detaches any transform's direct children (not only root).
+7. Root setters (parent/position/rotation/scale) throw.
+8. Cycle/self-parent attempts throw; root parent assignment throws.
+9. Re-parenting preserves world position/rotation/scale.
+10. Concurrent operations from workers succeed under locks; composite same-object updates are
+    documented as game-synchronized.
+11. Snapshot/camera/sprite discovery order is entity-ID order.
+
+### WP4 — Builder and host skeleton
+
+Add `Bork2dAppBuilder<TLayer>` and `Bork2dApp`:
+
+- `WithGame(IGame<TLayer> game)`; instance only, non-null;
+- `WithHeadless(int ticksPerSecond = 60)`, `WithOffscreen(width, height)`;
+- `WithAssetsPack(string path)` (path validation only in M1);
+- `WithLogging(Action<ILoggingBuilder>)`;
+- window options (`WithTitle`, `WithSize`, `WithResizable`, `WithFullscreen`, `WithVSync`);
+- `WithMaxDeltaTime`, `WithValidation`;
+- `Build()` validation:
+  - exactly one mode;
+  - game present;
+  - valid layer enum;
+  - positive sizes/deltas;
+  - headless tick rate `>= 0`;
+  - no window options with headless/offscreen;
+  - non-empty pack path when supplied;
+- `Build()` creates the logger, options, engine, and `Root`; no window/GPU/threads;
+- `Run()` **M1 smoke behavior**: calls `IGame.Setup`, runs exactly one `Tick`, calls
+  `IGame.Teardown`, then returns. No window, renderer, or pack. M2/M7 replace this with the real
+  loop.
+- `Dispose()` is idempotent; detaches/clears the root, disposes the logger.
+- No thread-affinity requirement on `Build`/`Run`/`Dispose`; OS-required work is marshaled by
+  the platform host in later milestones.
+
+### WP5 — Logging
+
+- `IEngine.LoggerFactory` wired from the app.
+- `WithLogging(Action<ILoggingBuilder>)`; default pretty ZLogger console.
+- Categories: `Bork2d.Runtime`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`.
+- Startup logs the selected mode and validation outcome.
+- AOT/trim smoke includes the default logging path.
+- Exact provider version/format is settled during WP5.
+
+### WP6 — NativeAOT and serialization policy
+
+- `PublishAot`/`IsAotCompatible` on runtime/game projects.
+- AOT/trim analyzers as errors.
+- AOT smoke app: build a logger, builder, root, create parented objects, run the one-tick smoke,
+  clear root, exit.
+- Add Nerdbank.MessagePack package/policy and a generated-shape smoke type; full pack
+  serialization is M3/M4.
+- No runtime reflection, assembly scanning, TOML, or dynamic code in runtime projects.
+- Editor/baker stay JIT and absent from the solution until M5.
+
+### WP7 — Tests and CI
+
+xUnit test groups:
+
+- builder validation/mode exclusivity;
+- scene ownership/lifetime/GC cases;
+- remove/re-add and root clear/re-add;
+- root read-only setters;
+- transform hierarchy/parenting/cycles;
+- layer validation and camera/sprite defaults;
+- entity IDs non-reuse;
+- concurrent operations from multiple threads;
+- dependency matrix;
+- AOT publish/start smoke;
+- logging default smoke;
+- formatting/style gate.
+
+CI order: restore → format verify → build → tests → AOT publish → smoke run.
+
+### WP8 — Documentation
+
+Update same-change:
+
+- `docs/api/reference.md`, `docs/api/guide.md`;
+- `docs/architecture/overview.md`, `runtime-lifecycle.md`, `threading.md`;
+- `docs/architecture/scene-ownership.md`;
+- `docs/decisions.md` (D-023/D-024);
+- `docs/roadmap.md` (M0 complete, M1 progress);
+- root/docs README status.
+
+## 5. Implementation order
+
+1. WP1 build/quality baseline.
+2. WP2 API contracts compile.
+3. WP3 scene graph + ownership tests.
+4. WP4 builder/host smoke + validation tests.
+5. WP5 logging.
+6. WP6 AOT/serialization policy + smoke.
+7. WP7 CI/tests complete.
+8. WP8 docs final pass.
+
+WP1 and WP2 can overlap; WP3 must land before WP4 because the builder creates `Root`.
+
+## 6. API semantics detail
+
+### `ISceneRoot`
+
+- Read-only marker over `ITransform`; identity transform at the origin (`Parent == null`,
+  position zero, rotation zero, scale one).
+- Setting `Parent`, `LocalPosition`, `LocalRotation`, or `LocalScale` throws
+  `InvalidOperationException`.
+- `ISceneRoot` adds no members. `DetachAll()` is inherited from `ITransform` and can be called
+  on any transform, not just the root.
+- `Root.DetachAll()` detaches the root's direct children; subtrees remain intact and can be
+  re-attached.
+- App-owned; app shutdown calls `Root.DetachAll()`.
+
+### `ITransform.DetachAll()`
+
+- Detaches **direct children**; grandchildren stay attached to their parents.
+- Children become `Parent == null`; the object and state remain valid.
+- Can be called on any transform (root or subtree) from any thread during the tick window.
+- Runs under the scene-graph structural lock.
+
+### Parent changes
+
+- `null` detaches; the object remains valid and can be re-attached.
+- Setting a parent preserves world transform.
+- Root as child is rejected.
+- Repeated attach/detach does not recreate the object or reset its state.
+- Concurrent structural operations are serialized by the scene-graph structural lock
+  (`System.Threading.Lock`).
+- Concurrent property writes use per-object `Lock`; a multi-property update that must be atomic
+  still needs game synchronization. Prefer lock-free/`Interlocked` paths where possible.
+
+### Threading
+
+- No `MainThread`/`TickThread` assertions in the public API.
+- `IGame.Setup/Tick/Teardown` are invoked by the engine on its tick thread; user code may call
+  the public API from any thread.
+- Scene mutation is logically tick-window scoped for game code; the API does not enforce a
+  particular calling thread.
+- `IWindow` operations are marshaled to the OS/window thread; `IInput`/`ITime` reads are
+  snapshots. `IAssets` already permits any thread.
+- The renderer and asset threads remain internal; their internals are not public.
+
+## 7. Out of scope for M1
+
+- SDL window/input; actual Vulkan; render thread; snapshot ring; renderer.
+- `assets.pck` reader/writer; asset loading; TOML baking.
+- `Bork2d.Editor` project.
+- Full game loop/mode startup; M1 `Run` is the one-tick smoke only.
+- Public scene serialization, prefabs, or editor scene editing.
+- Lifetime scopes (future complement to root ownership).
+
+## 8. Risks
+
+| Risk | Impact | Mitigation |
+| --- | --- | --- |
+| API churn from `ITransform`/creator signatures | Medium | Freeze M1 contract; update docs/tests in same change. |
+| Root traversal performance | Medium | Start simple; profile; add typed rooted caches only if needed. |
+| Lost references to rooted objects | Medium | Scene membership is the lifetime; document remove/re-add. |
+| Locking overhead/contention | Medium | Structural + per-object `Lock`s in M1; keep lock-free paths; profile/optimize later. |
+| AOT vs logging/Nerdbank/Silk | High | Smoke from M1; pin versions; isolate adapters. |
+| Style gate breaks existing code | Low | Format/repair before enabling CI gate. |
+| M1 `Run` mistaken for a real loop | Medium | Document one-tick smoke; replace in M2/M7. |
+
+## 9. Acceptance checklist
+
+- [ ] Build rules and `.editorconfig` active in all projects.
+- [ ] `dotnet format --verify-no-changes` passes.
+- [ ] Dependency test passes.
+- [ ] `ISceneRoot`/`IEngine.Root` implemented and read-only.
+- [ ] Parent-required creators implemented.
+- [ ] Remove/re-add preserves object/state.
+- [ ] `Root.DetachAll()` detaches; refs remain usable.
+- [ ] No `Dispose`/`IsAlive` on scene entities.
+- [ ] Lost-reference GC tests pass.
+- [ ] Root setter/cycle tests pass.
+- [ ] Builder validation tests pass.
+- [ ] One-tick `Run` smoke passes.
+- [ ] ZLogger default + `IEngine.LoggerFactory` smoke passes.
+- [ ] AOT publish smoke runs with zero warnings.
+- [ ] No weak `EntityList` in shipped code.
+- [ ] Any-thread API smoke/tests pass.
+- [ ] Docs/API/decision log updated.
+- [ ] M0 marked complete; M1 progress table updated.
+
+## 10. Open questions
+
+1. **`DetachAll()` scope:** direct children (current) vs recursively detaching all descendants.
+   Recommendation: direct children; root-level `DetachAll` removes the whole scene tree intact.
+2. **Per-object locking granularity:** lock per entity vs striped locks. Start per-entity with
+   `System.Threading.Lock`; keep lock-free/`Interlocked` paths where possible.
+3. **`IWindow` any-thread semantics:** queue all operations to the OS/window thread; confirm
+   blocking getters vs snapshots.
+4. **`CreateTransform(parent = null)`:** keep optional for standalone math (current), or require
+   a parent everywhere.
+5. **Lifetime scopes:** defer to M2/M7 or add `ISceneScope` in M1? Defer.
+6. **ZLogger version/format:** pin latest stable; pretty local-time console; file sink opt-in.
+7. **`WithAssetsPack` in M1:** validate path only; existence/parse enforcement lands with M3.
+
+## 11. Related documents
+
+- [Scene ownership](../architecture/scene-ownership.md) — accepted model.
+- [Runtime lifecycle](../architecture/runtime-lifecycle.md#11-entity-and-scene-ownership) —
+  startup/shutdown.
+- [Threading](../architecture/threading.md#2-tick-scoped-concurrency) — mutation window and locks.
+- [API reference](../api/reference.md#2-iengine) — public surface.
+- [Logging](../architecture/logging.md) — ZLogger.
+- [NativeAOT](../architecture/nativeaot.md) — AOT constraints.
+- [Roadmap](../roadmap.md#m1-foundation-and-nativeaot-baseline) — milestone context.
+- [Decision D-023](../decisions.md#d-023-root-owned-scene-graph) — ownership decision.
+- [Decision D-024](../decisions.md#d-024-thread-affinity-free-api) — threading decision.

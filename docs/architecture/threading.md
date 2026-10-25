@@ -8,66 +8,73 @@
 
 | Thread | Windowed | Offscreen | Headless | Responsibilities |
 | --- | :-: | :-: | :-: | --- |
-| **Main / tick** | yes | yes | yes | Time, `IGame.Setup/Tick/Teardown`, tick scope, entity/asset requests, snapshot capture (windowed/offscreen), SDL events (windowed), shutdown. |
+| **Tick** | yes | yes | yes | Time, `IGame.Setup/Tick/Teardown`, tick scope, scene/asset requests, snapshot capture (windowed/offscreen), shutdown. May be any host thread. |
+| **OS/window** | yes | no | no | SDL video/events and window operations; public `IWindow` calls are marshaled here. |
 | **Render** | yes | yes | no | Vulkan device, swapchain (windowed) or offscreen targets, GPU uploads, sprite resolution, sorting, instance building, draws, fences, present (windowed). |
 | **Asset loader(s)** | yes | yes | yes | Pack parsing, decompression, MessagePack/descriptor/sprite decoding, immutable resource table, upload requests. |
-| **Game workers** | yes | yes | yes | Game-spawned threads inside `Tick`; distinct entities; must join before `Tick` returns. |
+| **Game workers** | yes | yes | yes | Game-spawned threads; distinct entities; must join before `Tick` returns. |
 
-The engine owns the asset threads and, in windowed/offscreen modes, the render thread. Game
-workers are owned and joined by the game. Headless mode has no render thread and does not
-initialize SDL or Vulkan.
+The engine owns the asset threads and, in windowed/offscreen modes, the OS/window and render
+threads. Game workers are owned and joined by the game. Headless mode has no render thread and
+does not initialize SDL or Vulkan. **No public API requires the process main thread.**
 
 ## 2. Tick-scoped concurrency
 
-The engine is thread-safe **under one model**, not generally:
+The public API is thread-safe; there is no thread affinity. The engine is **not** free of
+logical ordering rules:
 
-> All scene mutation happens inside the tick window (or the main-thread `Setup`/`Teardown`
-> windows), including work performed by game worker threads. Workers must be joined before
-> `Tick` returns. The engine captures the snapshot at that quiescent point, so the renderer
-> only ever reads immutable snapshots. Assets cross threads through packs, queues, and an
-> immutable table.
+> All scene mutation happens inside the tick window (`Setup`/`Tick`/`Teardown`), including work
+> performed by game worker threads. Calls may originate on any thread. Workers must be joined
+> before `Tick` returns. The engine captures the snapshot at that quiescent point, so the
+> renderer only ever reads immutable snapshots. Assets cross threads through packs, queues, and
+> an immutable table.
 
 "Scene state" includes:
 
-- creating and disposing cameras and sprite renderables;
+- creating, attaching, detaching, and clearing cameras/sprite renderables;
 - changing `Transform` local values or parents;
 - changing camera properties (`Size`, `Viewport`, `CullingMask`, `Clear`, `ClearColor`);
 - changing sprite properties (`Sprite`, `Layer`, `ZIndex`, `Tint`, planned flip flags);
-- changing `IWindow` state (windowed only, main thread).
+- changing `IWindow` state (windowed only, any thread, marshaled).
 
 The guarantee is deliberately precise:
 
-- **Structural state is thread-safe during the tick window.** Entity ID allocation, registry
-  insert/remove, and entity creation from multiple game workers are serialized by the engine.
+- **Structural state is serialized during the tick window.** Entity ID allocation and
+  parent/child attach/detach are protected by the scene graph's structural
+  `System.Threading.Lock`. Entity creation and parenting from multiple game workers are safe.
 - **Distinct entities can be created and mutated concurrently.** Two workers may move
-  different sprites, dispose different cameras, etc.
-- **The engine does not serialize concurrent access to the same entity or transform.** Two
-  workers writing the same `LocalPosition`, parenting the same subtree, or reading a world
-  transform while another writes it is a game-level data race; use external synchronization or
-  one owner per entity.
-- **Main-thread-only state:** `IWindow`, `IInput`, `ITime`, `Exit`, and the `IGame` callbacks.
-  Workers receive values such as `dt` as arguments.
+  different sprites, detach different cameras, etc.
+- **Individual property access is serialized per object.** Each object uses a `Lock` for
+  property get/set, so individual reads/writes do not data-race. Prefer `Interlocked`/
+  immutable paths where practical. A logical multi-property update to one entity still needs
+  game synchronization if it must be atomic. Parent/child attach/detach is serialized, but
+  logical ordering of two workers reparenting the same subtree still needs game synchronization.
+- **Any-thread API:** `IWindow`, `IInput`, `ITime`, `Exit`, scene operations, and the builder do
+  not require the process main thread. Calls are made during `Setup`/`Tick`/`Teardown` (plus
+  `IWindow` while the app is running). `IWindow` operations are marshaled to the OS/window
+  thread; `IInput`/`ITime` reads are snapshots. `IGame` callbacks are invoked by the engine on
+  its tick thread.
 - **Asset requests are always thread-safe and non-blocking.** Asset completion is asynchronous;
-  a worker cannot assume a sprite is ready.
+  a caller cannot assume a sprite is ready.
 - **The tick is the quiescence boundary.** The snapshot is built after `Tick` returns. If a
   worker is still running then, the contract is violated and the snapshot may race.
 
-Workers may create cameras/sprites (distinct entities), request assets, mutate entities they
-own, and compute data handed back through game-owned queues. They must not read
-`IWindow`/`IInput`/`ITime`, call `IEngine.Exit`, outlive the tick, or assume asset readiness.
+Workers may create cameras/sprites, request assets, mutate entities they own, read `ITime`/
+`IInput` snapshots, and compute data handed back through game-owned queues. They must join before
+`Tick` returns and must not assume asset readiness.
 
 Why this model:
 
-- Engine registries do the minimum synchronization needed for parallel spawning; gameplay
-  properties stay lock-free.
+- Locking is limited to structural changes and individual object access; game workers can still
+  mutate distinct entities in parallel.
 - A tick is a natural transaction: the renderer sees either the state before it or after it,
   never a half-updated hierarchy.
-- The game retains control over shared-state synchronization.
+- The game retains control over composite shared-state synchronization.
 - Headless servers can use the same scene API; only rendering is absent.
 
 The engine adds **debug-only** checks at API boundaries: tick-active for scene mutation,
-main-thread for main-thread-only APIs, registry checks, and slot-state assertions. It cannot
-detect two workers racing on the same property; that is the game's responsibility.
+structural checks, and slot-state assertions. It cannot detect a non-atomic composite update
+that spans multiple locked operations; that is the game's responsibility.
 
 ## 3. Frame snapshot
 
@@ -109,10 +116,13 @@ Rules:
   final local-to-world matrix. The renderer never walks parents.
 - **Generic layer erased.** `TLayer` is converted to a `uint` mask/bit at capture. The
   renderer is non-generic.
+- **Rooted tree.** Capture walks `IEngine.Root` and copies cameras/sprites/transforms that are
+  still rooted. There is no weak registry; unparented/unreachable objects are not part of the
+  scene.
 - **Sorted by the renderer.** Cameras are captured in entity-ID order; sprites in entity-ID
   order. The renderer sorts sprites by layer, `ZIndex`, and entity ID, then filters per camera.
-- **Disposed entities are absent.** A renderable disposed during `Tick` is not copied into the
-  snapshot published at the end of that tick.
+- **Detached entities are absent.** A renderable detached during `Tick` is not copied into the
+  snapshot published at the end of that tick. It remains valid and can be re-attached.
 - **No readiness filtering at capture.** A sprite whose asset is not ready is still in the
   snapshot; the renderer skips it. This avoids a race where the asset becomes ready between
   capture and draw.
@@ -143,11 +153,10 @@ A slot in `Ready` is an unread snapshot. A slot in `Rendering` is associated wit
 GPU frame for pacing: the renderer has copied instances from it, and the slot is kept until the
 fence signals. A slot in `Writing` belongs to the tick thread. `Ready` slots are not in flight.
 
-### Producer (main thread)
+### Producer (tick thread)
 
 ```
 loop:
-  PumpSdlEvents()                   // windowed only
   slot = AcquireFreeSlot()          // blocks when all three slots are occupied
   time.NewFrame()
   game.Tick()                       // joins game workers before returning
@@ -238,7 +247,7 @@ frames in flight, a ready snapshot plus two rendering snapshots use all slots.
 ```mermaid
 sequenceDiagram
     autonumber
-    participant T as Tick and main
+    participant T as Tick
     participant S as Snapshot slots
     participant R as Render
     participant G as GPU
@@ -269,49 +278,50 @@ and no snapshot ring.
 
 ## 6. Input across threads (windowed only)
 
-Input is owned by the main thread:
+Input is collected on the OS/window thread and exposed as a snapshot:
 
-- SDL events are pumped on the main thread, including while waiting for work. Handlers that
-  touch engine/game state run on the main thread.
+- SDL events are pumped on the OS/window thread, including while waiting for work. Handlers
+  that touch engine/game state are marshaled to the tick thread.
 - At the start of a tick, input is frozen: keys, mouse position/delta/wheel, and text events
   describe events since the previous tick.
 - Edge flags (`Pressed`, `Released`) are true for exactly one tick. A key pressed and released
   between ticks yields both flags in the same tick and `IsKeyDown == false`.
-- `OnTextTyped` is raised during event pumping on the main thread, before `Tick`.
+- `OnTextTyped` is dispatched on the engine tick thread before `Tick`.
 - Mouse coordinates are framebuffer pixels, top-left origin. Camera helpers convert to world.
 - Wheel delta is accumulated per tick; positive means up/away from the user.
 - On focus loss, held keys/buttons are synthesized as released and wheel/text state is
   cleared.
 - `KeyCode` maps physical SDL scancodes; text is separate.
-- `IInput` is not part of the frame snapshot and is not readable from the render thread.
+- `IInput` reads are thread-safe snapshots. It is not part of the frame snapshot and is not
+  readable from the render thread's public API.
 
 Offscreen/headless modes have no SDL window or input; `IInput` throws.
 
 ## 7. Window and renderer control (windowed)
 
-Window mutation stays on the main thread. The render thread receives a coalescing control
-channel:
+Window mutation may be requested from any thread. Calls are marshaled to the OS/window thread;
+the render thread receives a coalescing control channel:
 
 | Direction | Message | Handling |
 | --- | --- | --- |
-| Main → render | `Resize(width, height)` | Recreate swapchain; coalesce to latest. |
-| Main → render | `FullscreenChanged` | Recreate swapchain if extent changed. |
-| Main → render | `Minimized`/`Restored` | Skip present while minimized; recreate on restore. |
-| Main → render | `Redraw` | Present newest snapshot without a new tick. |
-| Main → render | `Stop` | Exit after the current frame/device idle. |
-| Render → main | `Ready` | Renderer initialized. |
-| Render → main | `Fatal(error)` | Store, wake main, stop after current tick. |
+| Caller → OS/window | `Resize(width, height)` | Recreate swapchain; coalesce to latest. |
+| Caller → OS/window | `FullscreenChanged` | Recreate swapchain if extent changed. |
+| OS/window → render | `Minimized`/`Restored` | Skip present while minimized; recreate on restore. |
+| OS/window → render | `Redraw` | Present newest snapshot without a new tick. |
+| OS/window → render | `Stop` | Exit after the current frame/device idle. |
+| Render → OS/window | `Ready` | Renderer initialized. |
+| Render → OS/window | `Fatal(error)` | Store, wake tick, stop after current tick. |
 
 Rules:
 
 - Single-producer/single-consumer; the channel wakes the render thread even if no snapshot
   exists.
 - Resize messages are coalesced; the latest framebuffer size wins.
-- The main thread never calls Vulkan; the render thread never calls SDL window mutation.
+- The OS/window thread never calls Vulkan; the render thread never calls SDL window mutation.
 - `IWindow.Size` reflects the latest known framebuffer size; the swapchain may lag one frame.
 - Close stops the tick loop first; the renderer is stopped after teardown.
-- `VkInstance`/`VkSurfaceKHR` are created on the main thread (SDL owns the window) and handed
-  to the render thread; the render thread owns device/swapchain/etc. Surface/instance are
+- `VkInstance`/`VkSurfaceKHR` are created on the OS/window thread (SDL owns the window) and
+  handed to the render thread; the render thread owns device/swapchain/etc. Surface/instance are
   destroyed only after the render thread joins.
 
 Offscreen mode has no window messages and no surface; only stop/error. Headless has no render
@@ -337,15 +347,15 @@ See [Assets and pack files](assets.md#14-threading).
 
 ## 9. Shutdown and error propagation
 
-- **Windowed:** stop ticks → `Teardown` → dispose entities → signal render stop → join render
+- **Windowed:** stop ticks → `Teardown` → `Root.DetachAll()` → signal render stop → join render
   → stop assets → join → destroy surface/instance/window → dispose app.
 - **Offscreen:** same without window/surface/swapchain; destroy device and offscreen targets.
-- **Headless:** stop ticks → `Teardown` → dispose entities → stop assets → dispose app. No
+- **Headless:** stop ticks → `Teardown` → `Root.DetachAll()` → stop assets → dispose app. No
   render thread.
-- The render thread never waits on the main thread's tick. It waits on its own event, signalled
-  by snapshot publication, control messages, and stop.
+- The render thread never waits on the tick thread. It waits on its own event, signalled by
+  snapshot publication, control messages, and stop.
 - The asset thread is cancellable and joinable; in-flight loads are abandoned at shutdown.
-- Background errors are stored and rethrown on the main thread from `Run()` after cleanup.
+- Background errors are stored and rethrown on the `Run()` caller after cleanup.
 - The tick is a transaction; it is not aborted mid-way for a render error.
 - No `Thread.Abort`, no finalizer-based shutdown, no blocking join inside a render callback.
 
@@ -353,9 +363,9 @@ See [Assets and pack files](assets.md#14-threading).
 
 - Slot state uses `Interlocked`/`Volatile` release/acquire. Publish/take/fence paths are
   lock-free.
-- Locks are acceptable during startup, swapchain recreation, pack mounting, and shutdown; not
-  in the per-frame snapshot/render path. Entity registry operations may synchronize during
-  creation/disposal, not in property setters.
+- Locks are used for structural attach/detach/creation and per-object property access. Use
+  `System.Threading.Lock`, not `lock (object)`; keep critical sections short. Prefer
+  `Interlocked`/`Volatile`/immutable snapshots. Snapshot publish/take/fence paths stay lock-free.
 - Snapshot arrays are slot-private. The tick writes only the slot it owns; the renderer reads
   only a slot in `Rendering`. No other thread writes snapshot memory.
 - The renderer copies snapshot data into per-frame instance buffers; the GPU reads those
@@ -363,10 +373,10 @@ See [Assets and pack files](assets.md#14-threading).
   GPU dereferences them.
 - Buffer uploads use persistently mapped memory; a frame buffer is rewritten only after its
   fence.
-- Debug checks: tick-active for scene mutation, main-thread for main-thread-only APIs, layer
-  validation, slot-state assertions, "renderer must not see Writing".
-- Release builds do not add a thread check per property setter. Same-entity races are the
-  game's responsibility and may corrupt a snapshot.
+- Debug checks: tick-active for scene mutation, layer validation, slot-state assertions,
+  "renderer must not see Writing". There are no main-thread checks.
+- Release builds keep the per-object locks; composite multi-property updates are the game's
+  responsibility and are not atomic.
 
 ## 11. Test strategy
 
@@ -378,7 +388,7 @@ See [Assets and pack files](assets.md#14-threading).
    faster than the ring allows, waits only when full, never sleeps/delays artificially, and
    drops superseded snapshots.
 3. **Concurrency tests.** N workers create/mutate distinct entities, join; all appear exactly
-   once; IDs unique; snapshot matches; disposal from workers is safe.
+   once; IDs unique; snapshot matches; detach/remove and re-attach from workers are safe.
 4. **Shutdown tests.** Stop during publish, take, or simulated GPU work; all threads exit
    within a timeout; all slots end `Free`.
 5. **Mode tests.** Headless creates no SDL/render thread and paces to its configured tick rate
@@ -401,18 +411,20 @@ The threading milestone is not done until tests 1–4 pass reliably under stress
 | Snapshot slots | None | Three slots held until frame fence. |
 | Headless | None | No SDL/GPU/render thread; timer-paced (default 60, 0 = uncapped). |
 | Offscreen | None | Windowless Vulkan; internal target. |
-| Entity storage | `ConcurrentDictionary<uint, WeakReference<T>>` | Strong ownership; thread-safe registry. |
+| Entity storage | `ConcurrentDictionary<uint, WeakReference<T>>` | Root-owned strong transform tree; structural `System.Threading.Lock`. |
 | Input | Interface only | Windowed SDL state + edges. |
 | Control channel | None | SPSC windowed control queue. |
 | Assets | Empty | Pack VFS + loader threads (M3). |
 
 The weak-reference registry remains a hazard: dropping the game's last reference can silently
-remove a renderable. The target design makes the engine the strong owner until `Dispose`.
-This is tracked in M1.
+remove a renderable. The target M1 design replaces it with the root-owned scene graph: parented
+objects persist, unparented objects are collectible, and `Root.DetachAll()` is scene teardown. See
+[Scene ownership](scene-ownership.md).
 
 ## 13. Related documents
 
 - [Runtime lifecycle](runtime-lifecycle.md) — modes, startup, shutdown.
+- [Scene ownership](scene-ownership.md) — root-owned lifetime model.
 - [Rendering](rendering.md) — windowed/offscreen render paths.
 - [Assets and pack files](assets.md) — pack mounting and loader ownership.
 - [Roadmap](../roadmap.md) — M7 is the frame-handoff milestone.

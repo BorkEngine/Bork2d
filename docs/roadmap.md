@@ -1,8 +1,8 @@
 # Implementation Roadmap
 
-> **Status:** proposed sequence as of 2026-10-25. It is dependency-ordered, not a calendar
-> schedule. Each milestone has an exit criterion; a milestone is done when the criterion is
-> demonstrated, not when the code is merged.
+> **Status:** M0 complete; M1 specified and not started (2026-10-25). The sequence is
+> dependency-ordered, not a calendar schedule. Each milestone has an exit criterion; a milestone
+> is done when the criterion is demonstrated, not when the code is merged.
 
 ## 1. How to read this roadmap
 
@@ -22,14 +22,14 @@
 | --- | --- | --- |
 | Build | Green | SDK `11.0.100-rc.1`, `net11.0`, 0 warnings/errors. |
 | `Bork2d.Api` | Partial | Interfaces/value types; no builder lifecycle, pack API, or input exposure. |
-| `Bork2d.Common` | Partial | Placeholder loop, weak-ref entity list, stub transform globals, camera/sprite impl. |
+| `Bork2d.Common` | Partial | Placeholder loop, weak-ref entity list, stub transform globals, camera/sprite impl. Target: root-owned scene graph (M1). |
 | `Bork2d.Runtime` | Empty | No builder, modes, SDL, or host. |
 | `Bork2d.Render` | Empty | No Vulkan/Silk.NET. |
 | `Bork2d.Assets` | Empty | No pack, VFS, descriptors, or sprite assets. |
 | `Bork2d.Editor` | Absent | Not in the solution. |
 | NativeAOT | None | No publish settings/analyzers/CI. |
 | Tests | None | No test project or CI. |
-| Docs | This pass | Assets/pack, editor, NativeAOT, pacing, modes, API, roadmap, decisions. |
+| Docs | M0 complete | M1 spec, architecture, assets/pack, editor, NativeAOT, pacing, modes, API, decisions. |
 | Runnable engine | No | No window, renderer, pack, or asset system. |
 
 ## 3. Sequencing principles
@@ -88,11 +88,14 @@ Exit criteria:
 - M1-facing open questions have owners/defaults;
 - the roadmap is accepted as the working sequence.
 
-Status: **in review** (this pass).
+Status: **complete** (2026-10-25). Documentation and decisions are accepted; M1 is specified in
+[M1 — Foundation and NativeAOT baseline](specs/m1-foundation.md).
 
 ### M1 — Foundation and NativeAOT baseline
 
-**Goal:** project graph, public surface, builder contract, and AOT tooling.
+**Goal:** project graph, public surface, builder contract, root-owned scene graph, and AOT
+tooling. The full work breakdown and acceptance criteria are in the
+[M1 implementation spec](specs/m1-foundation.md).
 
 Scope:
 
@@ -104,19 +107,24 @@ Scope:
 - add the `dotnet format --verify-no-changes` CI gate and Microsoft/.NET-standard style rules
   at `error`; apply to all projects (engine, editor, tests, samples);
 - enable AOT/trim analyzers on runtime projects; add a sample AOT publish smoke app;
-- add `Bork2d.Tests` and a dependency test for the reference matrix;
+- add `Bork2d.Tests` (xUnit) and a dependency test for the reference matrix;
 - add `Bork2dAppBuilder<TLayer>`/`Bork2dApp` skeleton:
   - `WithGame(IGame<TLayer> game)` instance injection (no `new()`/reflection);
   - `WithHeadless(int ticksPerSecond = 60)`, `WithOffscreen(w,h)`, `WithAssetsPack(path)`;
   - `WithLogging(Action<ILoggingBuilder>)` with a pretty ZLogger default;
   - window options, `WithMaxDeltaTime`, `WithValidation`;
+  - `Run()` M1 smoke: `Setup` → one `Tick` → `Teardown`, then return;
   - no target tick rate/Sleep for windowed/offscreen;
 - add `IEngine.Input`, `IEngine.Exit`, `IEngine.LoggerFactory`, `IGame.Teardown`,
   `Bork2dException`, `AssetInfo`;
 - reference Microsoft.Extensions.Logging.Abstractions from `Api`; ZLogger/MEL from `Runtime`;
 - establish Nerdbank.MessagePack shape generation/analyzer policy for AOT;
-- replace weak-ref entity ownership with strong ownership + `Dispose`, non-reused IDs, and a
-  thread-safe tick-scoped registry;
+- implement root-owned scene graph: `IEngine.Root`, parent-required creators, parent/child
+  strong ownership, no global camera/sprite registry, no weak references;
+- implement remove/re-add scene membership: `IEngine.Root`, read-only root, parent-required
+  creators, `Root.DetachAll()` detach, cycle rejection; no entity `Dispose`/`IsAlive`;
+- make the public API thread-affinity-free (any thread during the tick window;
+  `System.Threading.Lock` structural/per-object locks, lock-free paths where practical);
 - implement/evaluate transform hierarchy math and world read-only properties;
 - define/validate layers (one bit, 32 max), camera defaults (black/all layers), sprite defaults;
 - remove placeholder `Class1` files.
@@ -128,12 +136,14 @@ Exit criteria:
 - dependency test passes;
 - an AOT-published smoke app builds/starts without reflection or trim warnings (the full
   headless pack/tick smoke lands in M7);
-- unit tests cover layer validation, entity IDs/disposal, concurrent distinct-entity
-  creation/mutation, transform math, builder validation, and pack path rules;
+- unit tests cover layer validation, entity IDs, root ownership (parented persists, unparented
+  collectible, remove/re-add, root clear detach), transform math, builder validation, concurrent
+  any-thread operations, and pack path rules;
 - pretty ZLogger console logging is visible by default and `IEngine.LoggerFactory` is usable;
+- no weak-reference entity registry and no entity `Dispose`/`IsAlive` remain;
 - no implementation type is unintentionally public.
 
-Size: M. Risk: medium (public API churn, AOT/Silk.NET toolchain).
+Size: M. Risk: medium (public API churn, ownership semantics, AOT/Silk.NET toolchain).
 
 ### M2 — SDL windowed platform
 
@@ -275,7 +285,7 @@ Scope:
 
 - add `Silk.NET.Vulkan`; choose allocator (VMA vs minimal);
 - validation layers/debug messenger; device/queue/feature logging;
-- windowed: `VkInstance`/`VkSurfaceKHR` on the main thread from SDL, render thread device/
+- windowed: `VkInstance`/`VkSurfaceKHR` on the OS/window thread from SDL, render thread device/
   swapchain/dynamic-rendering clear;
 - offscreen: no surface/swapchain; fixed-extent offscreen color target; same clear path;
 - headless: no Vulkan/SDL initialization;
@@ -526,21 +536,20 @@ carries indices), asset/pack unloading, and public offscreen readback.
 
 ## 10. Immediate next actions
 
-1. Review the revised documentation and sign off on the pack/editor/pacing/logging/style
-   decisions.
-2. Start M1: project graph, builder contract (`WithGame(instance)`, modes, pack, logging),
-   API lifecycle, warnings/style rules, AOT analyzers/smoke, tests.
+1. M0 is complete; the docs and decisions are accepted.
+2. Start M1 from the [implementation spec](specs/m1-foundation.md): build/style gate, API
+   contracts, root-owned scene graph, builder skeleton, logging, AOT smoke, and tests.
 3. Prototype the pack reader/writer against the exact header layout in M3; validate the
    .NET 11 Zstd and `System.IO.Hashing.XxHash3` APIs early.
 4. Keep the editor JIT boundary intact; do not pull Avalonia/TOML into runtime projects.
-5. Add the AOT publish smoke, dependency test, format gate, and no-warnings rule in M1.
+5. Resolve the M1 open questions in the spec before changing public contracts.
 
 ## 11. Progress log
 
 | Milestone | Status | Evidence |
 | --- | --- | --- |
-| M0 Documentation | In review | `docs/` set and decision log. |
-| M1 Foundation/AOT | Not started | — |
+| M0 Documentation | Complete (2026-10-25) | `docs/` set, decision log, accepted ownership/pack/editor/pacing decisions. |
+| M1 Foundation/AOT | Spec ready; not started | [M1 spec](specs/m1-foundation.md). |
 | M2 SDL platform | Not started | — |
 | M3 Assets/pack | Not started | — |
 | M4 Serialization/bake | Not started | — |
@@ -554,6 +563,8 @@ carries indices), asset/pack unloading, and public offscreen readback.
 ## 12. Related documents
 
 - [Architecture overview](architecture/overview.md) — invariants that shape the milestones.
+- [Scene ownership](architecture/scene-ownership.md) — M1 root-owned scene graph.
+- [M1 implementation spec](specs/m1-foundation.md) — M1 work breakdown and acceptance.
 - [Assets and pack files](architecture/assets.md) — M3/M4 format and VFS.
 - [Logging](architecture/logging.md) — M1 logging surface.
 - [Editor](architecture/editor.md) — M5.
