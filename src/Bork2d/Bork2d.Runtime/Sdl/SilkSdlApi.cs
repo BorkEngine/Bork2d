@@ -1,4 +1,5 @@
 using Bork2d.Api;
+using Silk.NET.Core.Loader;
 using Silk.NET.SDL;
 
 namespace Bork2d.Runtime;
@@ -8,9 +9,11 @@ namespace Bork2d.Runtime;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One instance owns one native SDL2 library handle and the SDL video subsystem lifetime. Create it
-/// on the OS thread that will own the window, set hints, call <see cref="InitializeVideo"/>, use
-/// the windows, destroy them, and dispose the instance to quit SDL and free the library.
+/// Create one instance on the OS thread that will own the window, set hints, call
+/// <see cref="InitializeVideo"/>, use the windows, destroy them, and dispose the instance to quit
+/// SDL. The underlying <see cref="Sdl"/> instance is the process-wide singleton returned by
+/// <see cref="Sdl.GetApi"/>; it is not disposed, so a later app in the same process can initialize
+/// SDL again.
 /// </para>
 /// <para>
 /// The adapter maps native events to <see cref="SdlEvent"/> and converts SDL failures to
@@ -23,7 +26,6 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
     /// <summary><c>SDL_INIT_VIDEO</c>; video only, never audio, game controller, or haptics.</summary>
     private const uint SdlInitVideo = 0x0000_0020;
 
-    private readonly SdlNativeContext _nativeContext;
     private readonly Sdl _sdl;
     private bool _videoInitialized;
     private bool _disposed;
@@ -32,8 +34,7 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
     /// <exception cref="Bork2dException">The SDL2 native library could not be loaded.</exception>
     internal SilkSdlApi()
     {
-        _nativeContext = new SdlNativeContext();
-        _sdl = new Sdl(_nativeContext);
+        _sdl = CreateSdl();
 
         var version = default(Silk.NET.SDL.Version);
         _sdl.GetVersion(&version);
@@ -218,7 +219,11 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
         return new SdlMouseState(x, y, buttons);
     }
 
-    /// <summary>Quits SDL, frees the native library, and rejects further use.</summary>
+    /// <summary>Quits SDL and rejects further use.</summary>
+    /// <remarks>
+    /// The process-wide <see cref="Sdl"/> singleton is intentionally not disposed; disposing it
+    /// would break a later app that initializes SDL in the same process.
+    /// </remarks>
     public void Dispose()
     {
         if (_disposed)
@@ -228,8 +233,24 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
 
         Quit();
         _disposed = true;
-        _sdl.Dispose();
-        _nativeContext.Dispose();
+    }
+
+    private static Sdl CreateSdl()
+    {
+        try
+        {
+            return Sdl.GetApi();
+        }
+        catch (Exception exception)
+            when (exception is DllNotFoundException or EntryPointNotFoundException
+                or BadImageFormatException or SymbolLoadingException)
+        {
+            throw new Bork2dException(
+                "The SDL2 native library could not be loaded. Silk.NET.SDL 2.23.0 supplies it as a "
+                + "runtime-specific asset; verify the package restore and the target runtime "
+                + "identifier.",
+                exception);
+        }
     }
 
     private static SdlEvent Map(Event* nativeEvent)

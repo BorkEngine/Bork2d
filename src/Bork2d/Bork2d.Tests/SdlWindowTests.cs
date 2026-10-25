@@ -1,4 +1,3 @@
-using Bork2d.Api;
 using Bork2d.Runtime;
 using Xunit;
 using Xunit.Abstractions;
@@ -125,16 +124,5 @@ public sealed class SdlWindowTests
 
         Assert.Throws<ObjectDisposedException>(() => window.Size);
         Assert.Throws<ObjectDisposedException>(() => window.SetTitle("after dispose"));
-    }
-
-    [WindowFact]
-    public void MissingNativeExportIsReportedAsBork2dException()
-    {
-        using var context = new SdlNativeContext();
-
-        var exception = Assert.Throws<Bork2dException>(
-            () => context.GetProcAddress("SDL_ExportThatM2DoesNotBind"));
-
-        Assert.Contains("SDL_ExportThatM2DoesNotBind", exception.Message, StringComparison.Ordinal);
     }
 }
