@@ -85,7 +85,8 @@ The standard baseline (exact `.editorconfig` values finalised with the tooling i
 
 - Add unit tests with behavior changes; pack/format tests for asset changes; threading tests
   for snapshot changes; GPU/visual tests for renderer changes.
-- The AOT publish smoke and dependency test run in CI from M1.
+- The dependency test runs in CI. The AOT publish smoke is a required local gate, not a CI job:
+  CI runs build/tests/format on `develop` only (human decision 2026-10-25).
 - A GPU/validation runner is required for windowed/offscreen checks; headless/data tests must
   run without a GPU.
 - Do not merge with disabled tests, flaky retries without a tracking entry, or a lowered
