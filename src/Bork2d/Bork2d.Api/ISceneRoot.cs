@@ -15,6 +15,11 @@ namespace Bork2d.Api;
 /// detaches the root's direct children; their subtrees remain intact and can be re-attached.
 /// </para>
 /// <para>
+/// The root is the owner node of the scene tree, not a scene entity: it implements
+/// <see cref="ISceneRoot"/> directly and is not an instance of any concrete transform type. Code
+/// must not cast it or assume entity behavior; use <see cref="ITransform"/> members only.
+/// </para>
+/// <para>
 /// The root is owned by the host application and reached through <c>IEngine.Root</c>. Parented
 /// objects are retained strongly by their parent;
 /// unparented objects are not retained by the engine. There is no <see cref="IDisposable"/> or

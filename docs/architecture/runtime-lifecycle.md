@@ -390,6 +390,8 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
   `System.Threading.Lock`.
 - `ISceneRoot` is read-only: setting parent/local position/rotation/scale throws
   `InvalidOperationException`.
+- The root is a dedicated root node that implements `ISceneRoot` directly (it is not a transform
+  entity); root and transforms share only the internal `ISceneNode` structural contract.
 - A rooted object whose game reference is lost remains until detached. This is deliberate:
   strong ownership cannot distinguish an accidental lost reference from a scene object.
 - Scene mutations are tick-window operations; capture/render never walks the live tree.

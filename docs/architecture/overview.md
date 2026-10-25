@@ -232,9 +232,10 @@ is an architecture bug, not a code-style preference.
    pivot; the asset stores no vertices.
 7. **Layers are single bits; culling masks are combinations.** A renderable with layer `0` or
    more than one bit set is invalid and is skipped with a debug diagnostic.
-8. **World units are abstract, Y-up, with CCW radians.** `Camera.Size` is the half visible
-   height. Sprite assets carry UVs, a normalized pivot, a topology enum, optional indices, and a
-   per-sprite pixels-per-unit scale; there is no vertices array and no global setting.
+8. **World units are abstract, Y-up, with CCW degrees normalized to `[0, 360)`.** `Camera.Size`
+   is the half visible height. Sprite assets carry UVs, a normalized pivot, a topology enum,
+   optional indices, and a per-sprite pixels-per-unit scale; there is no vertices array and no
+   global setting.
 9. **There is no depth buffer in v1.** Draw order is layer, then z-index, then stable entity
    order. `ClearKind.Depth` is reserved and does nothing.
 10. **At most one window and one app process in v1.** Modes are windowed, offscreen, or

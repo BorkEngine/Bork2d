@@ -105,7 +105,7 @@ These are the rules the rest of the documentation assumes. Details/alternatives 
 | Textures/sprites | Separate MessagePack texture descriptor + raw RGBA8 payload; sprite MessagePack assets with UVs, pivot, topology, optional indices, and pixels-per-unit scale. TOML source, baked. |
 | Layers | `[Flags]` enum. One layer bit per renderable; camera culling mask. 32 flags maximum. |
 | Cameras | N cameras → N instanced draws, one per non-empty camera/viewport. |
-| World | Abstract units, Y-up, CCW radians. `Camera.Size` = half visible height. Per-sprite pixels-per-unit scale; no global PPU. |
+| World | Abstract units, Y-up, CCW degrees (normalized to `[0, 360)` on assignment). `Camera.Size` = half visible height. Per-sprite pixels-per-unit scale; no global PPU. |
 | Renderer | Vulkan 1.3, dynamic rendering, bindless texture pages, instanced generated quads, no depth, one pipeline. |
 | Editor | Avalonia, JIT; compile-time builder registrations; source asset slicing/TOML editing; no Vulkan, no scene editing. |
 | Logging | Microsoft.Extensions.Logging + ZLogger; `IEngine.LoggerFactory`; pretty console default. |
@@ -178,7 +178,8 @@ the first NativeAOT target.
 
 - Code samples are C# against the target API. Members that do not exist yet are `Planned`; some
   samples therefore do not compile against the current scaffold.
-- Coordinates: +X right, +Y up, radians CCW. Screen/input coordinates are top-left pixels.
+- Coordinates: +X right, +Y up, CCW degrees normalized to `[0, 360)`. Screen/input coordinates
+  are top-left pixels.
   Sprite UVs and pivot are top-left origin; the renderer generates a Y-up quad from the UV span,
   texture size, pivot, and pixels-per-unit scale.
 - "Tick thread" means the thread the engine uses to invoke `IGame.Setup/Tick/Teardown`. The

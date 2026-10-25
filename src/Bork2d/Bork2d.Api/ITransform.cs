@@ -42,11 +42,19 @@ public interface ITransform
     Vector2 LocalPosition { get; set; }
 
     /// <summary>
-    /// Gets or sets the rotation relative to <see cref="Parent"/>, in radians, positive
+    /// Gets or sets the rotation relative to <see cref="Parent"/>, in degrees, positive
     /// counter-clockwise around +Z.
     /// </summary>
+    /// <value>
+    /// A degree value normalized to <c>[0, 360)</c>. The setter normalizes finite values
+    /// (<c>-90</c> becomes <c>270</c>, <c>360</c> and <c>720</c> become <c>0</c>) and the getter
+    /// always returns the normalized value.
+    /// </value>
     /// <exception cref="InvalidOperationException">
     /// The transform is the scene root (read-only identity transform).
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// The assigned value is <see cref="float.NaN"/> or infinite.
     /// </exception>
     float LocalRotation { get; set; }
 

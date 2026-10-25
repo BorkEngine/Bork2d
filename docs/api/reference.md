@@ -50,7 +50,7 @@ atomic. There are no thread-affinity exceptions.
 | Quantity | Convention |
 | --- | --- |
 | Position | World units; +X right, +Y up. |
-| Rotation | Radians, positive counter-clockwise around +Z. |
+| Rotation | Degrees, positive counter-clockwise around +Z, normalized to `[0, 360)` on assignment. |
 | Scale | Multiplier; negative values mirror. |
 | `ICamera.Size` | Half visible height in world units. |
 | `ICamera.Viewport` | Normalized `(x, y, width, height)`, top-left origin, `[0,1]`. |
@@ -126,6 +126,11 @@ public interface ISceneRoot : ITransform
 detaches the scene's top-level children; the objects remain valid and can be re-attached. The
 root is an identity transform: setting parent, position, rotation, or scale throws
 `InvalidOperationException`. The app calls `Root.DetachAll()` during shutdown.
+
+The root is the owner node of the scene tree, not a scene entity: the engine implements
+`ISceneRoot` directly instead of deriving it from the transform entity type (the shared tree
+contract is internal). Callers must treat it through `ISceneRoot`/`ITransform` only and must not
+assume a concrete transform type.
 
 | Member | Status | Semantics |
 | --- | --- | --- |
@@ -400,13 +405,13 @@ public interface ITransform
 
 | Member | Status | Semantics |
 | --- | --- | --- |
-| `Parent` | `Current` | Parent or `null`. Re-parenting preserves world transform; self/cycles rejected; `Root.Parent` cannot be set. |
+| `Parent` | `Current` | Parent or `null`; accepts only engine-owned scene nodes (the root or another transform). Re-parenting preserves world transform; self/cycles rejected; `Root.Parent` cannot be set. |
 | `DetachAll()` | `Current` | Detaches direct children; grandchildren remain attached. Any transform can call it, not just root. Implemented in WP3 under the structural lock. |
 | `LocalPosition` | `Current` | Position relative to parent, world units. |
-| `LocalRotation` | `Current` | Radians, CCW, relative to parent. |
+| `LocalRotation` | `Current` | Degrees, CCW, relative to parent; normalized to `[0, 360)` on assignment and by the getter. Non-finite values throw `ArgumentOutOfRangeException`. |
 | `LocalScale` | `Current` | Scale relative to parent; negative mirrors. |
 | `WorldPosition` | `Planned` | Read-only evaluated world position. |
-| `WorldRotation` | `Planned` | Read-only evaluated world rotation (radians). |
+| `WorldRotation` | `Planned` | Read-only evaluated world rotation in degrees, normalized to `[0, 360)`. |
 | `WorldScale` | `Planned` | Read-only evaluated world scale. |
 
 - World transforms are evaluated/captured on the tick thread; the renderer never walks the
@@ -417,11 +422,12 @@ public interface ITransform
 - The internal local matrix is the world source of truth: re-parenting preserves the composed
   world matrix exactly (including shear from a non-uniform scale combined with rotation), and
   `LocalPosition` changes only the translation. `LocalPosition`/`LocalRotation`/`LocalScale` are
-  the authored scalar view: getters return the authored value, so negative scale axes and angles
-  outside `(-π, π]` round-trip, and the rotation/scale setters recompose the local matrix (so
-  writing either discards shear). A re-parent refreshes the scalar view from the exact matrix and
-  keeps the authored mirror axis when possible; only then may an authored angle outside
-  `(-π, π]` normalize.
+  the authored scalar view: negative scale axes round-trip, `LocalRotation` is stored and returned
+  in degrees normalized to `[0, 360)` (`-90` → `270`, `360`/`720` → `0`), and the rotation/scale
+  setters recompose the local matrix (so writing either discards shear). A re-parent refreshes
+  the scalar view from the exact matrix, normalizes the decomposed rotation to `[0, 360)`
+  degrees, and keeps the authored mirror axis when possible. Rotation is converted to radians
+  only at the internal matrix boundary.
 - `IEngine.CreateTransform(parent = null)` returns a standalone transform when unparented; it
   is not rendered and is collectible when the game drops it.
 - `Parent` attaches to a strong tree. A parented object remains alive even if game code loses

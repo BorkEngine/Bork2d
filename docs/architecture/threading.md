@@ -33,7 +33,7 @@ logical ordering rules:
 "Scene state" includes:
 
 - creating, attaching, detaching, and clearing cameras/sprite renderables;
-- changing `Transform` local values or parents;
+- changing transform local values or parents (including the root's direct children);
 - changing camera properties (`Size`, `Viewport`, `CullingMask`, `Clear`, `ClearColor`);
 - changing sprite properties (`Sprite`, `Layer`, `ZIndex`, `Tint`, planned flip flags);
 - changing `IWindow` state (windowed only, any thread, marshaled).
@@ -412,15 +412,15 @@ The threading milestone is not done until tests 1–4 pass reliably under stress
 | Snapshot slots | None | Three slots held until frame fence. |
 | Headless | None | No SDL/GPU/render thread; timer-paced (default 60, 0 = uncapped). |
 | Offscreen | None | Windowless Vulkan; internal target. |
-| Entity storage | Root-owned strong transform tree (`Bork2d.Common`, WP3); structural `System.Threading.Lock`. | — |
+| Entity storage | Root-owned strong scene tree (`Bork2d.Common`, WP3): the internal `ISceneNode` structural contract is shared by the dedicated root node and transform entities; structural `System.Threading.Lock`. | — |
 | Input | Interface only | Windowed SDL state + edges. |
 | Control channel | None | SPSC windowed control queue. |
 | Assets | Empty | Pack VFS + loader threads (M3). |
 
-The weak-reference registry is gone: the scene is a root-owned strong transform tree, so
-parented objects persist, unparented objects are collectible, `ITransform.DetachAll()` detaches
-direct children, and `Root.DetachAll()` is scene teardown. Discovery walks the rooted tree in
-entity-ID order. See [Scene ownership](scene-ownership.md).
+The weak-reference registry is gone: the scene is a root-owned strong scene tree (a dedicated root
+node plus transform entities), so parented objects persist, unparented objects are collectible,
+`ITransform.DetachAll()` detaches direct children, and `Root.DetachAll()` is scene teardown.
+Discovery walks the rooted tree in entity-ID order. See [Scene ownership](scene-ownership.md).
 
 ## 13. Related documents
 

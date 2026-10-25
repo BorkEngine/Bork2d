@@ -22,23 +22,26 @@ namespace Bork2d.Common;
 /// </para>
 /// <para>
 /// <see cref="LocalPosition"/>, <see cref="LocalRotation"/>, and <see cref="LocalScale"/> are the
-/// authored scalar view cached alongside the matrix. Their getters return the authored value
-/// (including negative scale axes and angles outside (-π, π]); their setters update the authored
-/// value and rebuild the local matrix. The position setter changes only the matrix translation
-/// and keeps the rest of the matrix; the rotation and scale setters recompose from the authored
-/// scalars, so writing either discards shear introduced by a re-parent. A re-parent refreshes the
-/// scalar view from the exact local matrix and keeps the authored mirror axis when possible;
-/// that refresh is the only place where an authored angle outside (-π, π] normalizes.
+/// authored scalar view cached alongside the matrix. The rotation is authored and returned in
+/// degrees, normalized to <c>[0, 360)</c> on assignment; the internal matrix composes radians
+/// converted at the boundary. The position setter changes only the matrix translation and keeps
+/// the rest of the matrix; the rotation and scale setters recompose from the authored scalars,
+/// so writing either discards shear introduced by a re-parent. A re-parent refreshes the scalar
+/// view from the exact local matrix, normalizing the decomposed rotation to degrees in
+/// <c>[0, 360)</c>, and keeps the authored mirror axis when possible.
 /// </para>
 /// <para>
 /// A parent holds its children strongly and there is no destruction state: detaching keeps the
 /// object and its local matrix valid, and the same instance can be attached again later.
 /// </para>
 /// </remarks>
-internal class Transform : ITransform
+internal class Transform : ITransform, ISceneNode
 {
+    private const float DegreesPerRadian = 180f / MathF.PI;
+    private const float RadiansPerDegree = MathF.PI / 180f;
+
     private readonly Lock _sync = new();
-    private Transform? _parent;
+    private ISceneNode? _parent;
     private List<Transform>? _children;
     private Matrix3x2 _localMatrix = Matrix3x2.Identity;
     private Vector2 _localPosition = Vector2.Zero;
@@ -71,13 +74,13 @@ internal class Transform : ITransform
     /// </summary>
     internal Lock Sync => _sync;
 
-    public virtual ITransform? Parent
+    public ITransform? Parent
     {
-        get => Volatile.Read(ref _parent);
+        get => Volatile.Read(ref _parent) as ITransform;
         set => SetParent(value);
     }
 
-    public virtual Vector2 LocalPosition
+    public Vector2 LocalPosition
     {
         get
         {
@@ -98,7 +101,7 @@ internal class Transform : ITransform
         }
     }
 
-    public virtual float LocalRotation
+    public float LocalRotation
     {
         get
         {
@@ -110,15 +113,24 @@ internal class Transform : ITransform
 
         set
         {
+            if (!float.IsFinite(value))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(value),
+                    value,
+                    "The local rotation must be a finite number of degrees.");
+            }
+
+            var normalized = NormalizeDegrees(value);
             lock (_sync)
             {
-                _localRotation = value;
-                _localMatrix = Compose(_localScale, value, _localPosition);
+                _localRotation = normalized;
+                _localMatrix = Compose(_localScale, normalized * RadiansPerDegree, _localPosition);
             }
         }
     }
 
-    public virtual Vector2 LocalScale
+    public Vector2 LocalScale
     {
         get
         {
@@ -133,10 +145,16 @@ internal class Transform : ITransform
             lock (_sync)
             {
                 _localScale = value;
-                _localMatrix = Compose(value, _localRotation, _localPosition);
+                _localMatrix = Compose(value, _localRotation * RadiansPerDegree, _localPosition);
             }
         }
     }
+
+    SceneGraph ISceneNode.Graph => Graph;
+
+    uint ISceneNode.Id => Id;
+
+    ISceneNode? ISceneNode.ParentNode => Volatile.Read(ref _parent);
 
     /// <summary>
     /// Gets the local-to-world matrix, composed through the parent chain.
@@ -157,13 +175,14 @@ internal class Transform : ITransform
     }
 
     /// <summary>
-    /// Gets the world rotation in radians, decomposed from the composed world matrix.
+    /// Gets the world rotation in degrees, normalized to <c>[0, 360)</c> and decomposed from the
+    /// composed world matrix.
     /// </summary>
     internal float WorldRotation()
     {
         using var scope = Graph.StructuralLock.EnterScope();
         Decompose(WorldMatrixCore(), out _, out var rotation);
-        return rotation;
+        return NormalizeDegrees(rotation * DegreesPerRadian);
     }
 
     /// <summary>
@@ -187,31 +206,10 @@ internal class Transform : ITransform
 
         for (var index = 0; index < children.Count; index++)
         {
-            var child = children[index];
-            Volatile.Write(ref child._parent, null);
+            children[index].ClearParentPointer();
         }
 
         children.Clear();
-    }
-
-    /// <summary>
-    /// Appends every rooted descendant, excluding this node, to <paramref name="results"/>.
-    /// </summary>
-    /// <remarks>The caller must hold the graph's structural lock.</remarks>
-    internal void CollectDescendants(List<Transform> results)
-    {
-        var children = _children;
-        if (children is null)
-        {
-            return;
-        }
-
-        for (var index = 0; index < children.Count; index++)
-        {
-            var child = children[index];
-            results.Add(child);
-            child.CollectDescendants(results);
-        }
     }
 
     /// <summary>
@@ -223,7 +221,7 @@ internal class Transform : ITransform
     /// to preserve. Later parent changes go through <see cref="Parent"/>, which preserves the
     /// world transform.
     /// </remarks>
-    internal void AttachAsNewChild(Transform parent)
+    internal void AttachAsNewChild(ISceneNode parent)
     {
         ArgumentNullException.ThrowIfNull(parent);
 
@@ -249,15 +247,42 @@ internal class Transform : ITransform
         parent.AddChildCore(this);
     }
 
+    /// <summary>
+    /// Clears this node's parent pointer without touching the owner's child list.
+    /// </summary>
+    /// <remarks>
+    /// Used by an owner that clears its own child list in one pass (for example the scene root's
+    /// <see cref="DetachAll"/>). The caller must hold the structural lock.
+    /// </remarks>
+    internal void ClearParentPointer() => Volatile.Write(ref _parent, null);
+
+    Matrix3x2 ISceneNode.LocalMatrixCore() => LocalMatrixCore();
+
+    Matrix3x2 ISceneNode.WorldMatrixCore() => WorldMatrixCore();
+
+    void ISceneNode.AddChildCore(Transform child) => AddChildCore(child);
+
+    void ISceneNode.RemoveChildCore(Transform child) => RemoveChildCore(child);
+
+    void ISceneNode.CollectChildrenCore(List<Transform> results) => CollectChildrenCore(results);
+
     private void SetParent(ITransform? parent)
     {
-        if (parent is not null && parent is not Transform)
+        ISceneNode? newParent;
+        if (parent is null)
+        {
+            newParent = null;
+        }
+        else if (parent is ISceneNode node)
+        {
+            newParent = node;
+        }
+        else
         {
             throw new Bork2dException(
-                $"A parent must be an engine-owned transform; got '{parent.GetType().FullName}'.");
+                $"A parent must be an engine-owned scene node; got '{parent.GetType().FullName}'.");
         }
 
-        var newParent = (Transform?)parent;
         var graph = Graph;
         using var scope = graph.StructuralLock.EnterScope();
 
@@ -279,7 +304,7 @@ internal class Transform : ITransform
                 throw new InvalidOperationException("A transform cannot be its own parent.");
             }
 
-            for (var ancestor = newParent; ancestor is not null; ancestor = ancestor._parent)
+            for (var ancestor = newParent; ancestor is not null; ancestor = ancestor.ParentNode)
             {
                 if (ReferenceEquals(ancestor, this))
                 {
@@ -357,6 +382,17 @@ internal class Transform : ITransform
         children.RemoveAt(last);
     }
 
+    private void CollectChildrenCore(List<Transform> results)
+    {
+        var children = _children;
+        if (children is null || children.Count == 0)
+        {
+            return;
+        }
+
+        results.AddRange(children);
+    }
+
     private Matrix3x2 WorldMatrixCore()
     {
         var local = LocalMatrixCore();
@@ -376,39 +412,37 @@ internal class Transform : ITransform
     /// Refreshes the authored scalar cache from an exact local matrix.
     /// </summary>
     /// <remarks>
-    /// The caller must hold <see cref="_sync"/>. The determinant convention puts a reflection on
-    /// the Y scale; if the object was authored with a negative X scale, the reflection is moved
-    /// back to X (with the matching half-turn) so the authored mirror axis survives a re-parent.
+    /// The caller must hold <see cref="_sync"/>. The decomposed rotation is converted to degrees
+    /// and normalized to <c>[0, 360)</c>. The determinant convention puts a reflection on the Y
+    /// scale; if the object was authored with a negative X scale, the reflection is moved back to
+    /// X (with the matching half-turn) so the authored mirror axis survives a re-parent.
     /// </remarks>
     private void RefreshAuthoredScalars(in Matrix3x2 local)
     {
         Decompose(local, out var scale, out var rotation);
+        var rotationDegrees = NormalizeDegrees(rotation * DegreesPerRadian);
 
         if (scale.Y < 0f && _localScale.X < 0f)
         {
             scale = new Vector2(-scale.X, -scale.Y);
-            rotation = NormalizeRotation(rotation - MathF.PI);
+            rotationDegrees = NormalizeDegrees(rotationDegrees - 180f);
         }
 
         _localPosition = local.Translation;
-        _localRotation = rotation;
+        _localRotation = rotationDegrees;
         _localScale = scale;
     }
 
-    private static float NormalizeRotation(float rotation)
+    private static float NormalizeDegrees(float degrees)
     {
-        const float twoPi = MathF.PI * 2f;
-        var normalized = rotation % twoPi;
-        if (normalized <= -MathF.PI)
+        var normalized = degrees % 360f;
+        if (normalized < 0f)
         {
-            normalized += twoPi;
-        }
-        else if (normalized > MathF.PI)
-        {
-            normalized -= twoPi;
+            normalized += 360f;
         }
 
-        return normalized;
+        // Collapse both signed zeros so getters return canonical 0 for full turns.
+        return normalized == 0f ? 0f : normalized;
     }
 
     private static void Decompose(in Matrix3x2 matrix, out Vector2 scale, out float rotation)
@@ -426,10 +460,10 @@ internal class Transform : ITransform
         rotation = MathF.Atan2(matrix.M12, matrix.M11);
     }
 
-    private static Matrix3x2 Compose(Vector2 scale, float rotation, Vector2 translation)
+    private static Matrix3x2 Compose(Vector2 scale, float rotationRadians, Vector2 translation)
     {
         return Matrix3x2.CreateScale(scale)
-            * Matrix3x2.CreateRotation(rotation)
+            * Matrix3x2.CreateRotation(rotationRadians)
             * Matrix3x2.CreateTranslation(translation);
     }
 }

@@ -116,9 +116,10 @@
 
 ## D-008 Units, Y-up, half-height camera, per-sprite scale
 
-- **Status:** Accepted; pivot/topology conventions proposed
+- **Status:** Accepted; pivot/topology conventions proposed; rotation unit superseded by D-025
 - **Context:** The engine needs unambiguous coordinates and sprite sizing.
-- **Decision:** World units are abstract; +X right, +Y up; radians CCW. `Camera.Size` is the
+- **Decision:** World units are abstract; +X right, +Y up; rotation is in degrees, CCW, normalized
+  to `[0, 360)` on assignment (the unit/range decision is D-025). `Camera.Size` is the
   **half** visible height; viewport aspect determines width. Each sprite asset carries a
   **pixels-per-unit** `scale`; world size divides by it, and `Transform.LocalScale` multiplies.
   No global PPU. Input is framebuffer pixels, top-left, converted through camera helpers.
@@ -403,6 +404,28 @@
 - **Docs:** [Threading](architecture/threading.md#2-tick-scoped-concurrency),
   [M1 spec](specs/m1-foundation.md)
 
+## D-025 Degrees and normalized rotation
+
+- **Status:** Accepted
+- **Context:** The M1 public `ITransform.LocalRotation` originally used radians, which is awkward
+  for authoring and serialized scene data, and the value could differ between assignment and a
+  re-parent refresh. M1 needs one public unit and one canonical range.
+- **Decision:** Public rotation is in **degrees**, positive counter-clockwise around +Z.
+  `ITransform.LocalRotation` normalizes finite values to `[0, 360)` on assignment (`-90` → `270`,
+  `360` and `720` → `0`, `45.5` stays `45.5`), and the getter always returns the normalized value.
+  Non-finite values (`NaN`/±`Infinity`) throw `ArgumentOutOfRangeException`. Internal matrix math
+  keeps using radians and converts only at the boundary (`degrees * PI / 180`). `WorldRotation`
+  reports normalized degrees decomposed from the composed world matrix, and a re-parent cache
+  refresh normalizes the decomposed local rotation too.
+- **Consequences:** One public unit and one canonical range. Authored values outside the range
+  normalize rather than round-trip, so tests/docs use normalized degrees. Internal matrix code
+  stays in radians and must convert only at the public boundary.
+- **Alternatives:** Radians (original); `(-180, 180]` or `[-180, 180)` normalization; keep the
+  authored value and normalize only when evaluating the world transform.
+- **Docs:** [API reference](api/reference.md#12-units-and-conventions),
+  [API guide](api/guide.md), [Scene ownership](architecture/scene-ownership.md),
+  [Rendering](architecture/rendering.md#7-coordinates-camera-and-projection)
+
 ## Proposed defaults awaiting sign-off
 
 These are decisions embedded in the docs that were not explicitly chosen. They are safe to
@@ -469,3 +492,4 @@ document in the same change. Do not rewrite history by deleting an old decision;
 | D-022 | Warnings-as-errors + C# style gate | Accepted |
 | D-023 | Root-owned scene graph | Accepted |
 | D-024 | Thread-affinity-free API | Accepted |
+| D-025 | Degrees and normalized rotation | Accepted |
