@@ -114,15 +114,20 @@ determinism and a possible future AOT editor, not a current AOT requirement.
   loaded binary reports `SDL_GetVersion` `2.30.8` (its Windows file version is also `2.30.8`), so
   the package version label is ahead of the binary it carries. It exposes every call M2 uses,
   including `SDL_GetWindowSizeInPixels` (2.26+) and the Windows DPI hints (2.24+).
-- The SDL adapter builds its `Silk.NET.SDL.Sdl` instance over an internal `INativeContext` that
-  loads the package native through the assembly's runtime assets. `Sdl.GetApi()` resolves through
-  `Silk.NET.Core.Loader.DefaultPathResolver`, which reports IL3000/IL3002 single-file trim warnings
-  under NativeAOT; the internal context avoids that code path with no suppression, no extra binary,
-  and no copy step.
-- M2 WP1 verified the dependency with an AOT publish/run of a throwaway windowed probe: SDL video
-  init, window create/destroy, and quit succeed on an engine-created (non-main) thread, the publish
-  has zero AOT/trim warnings, and `SDL2.dll` is present in the output. The windowed runtime, the
-  `--windowed` AOT demo, and the windowed local gate are M2 WP5.
+- The SDL adapter uses `Sdl.GetApi()`, Silk.NET's default native-library resolver. That resolver
+  probes `Assembly.Location`, `Assembly.CodeBase`, and `DependencyContext` for candidate paths,
+  which ILC reports as `IL3000`/`IL3002` single-file trim warnings under NativeAOT. `Bork2d.AotSmoke`
+  — the AOT publisher, and the host of M2 WP5's `--windowed` demo — suppresses exactly those two
+  codes with a project-level `NoWarn`. No other warning code is suppressed and
+  `SuppressTrimAnalysisWarnings` is not used. The suppression is justified: the SDL2 native ships
+  from the package and is resolved by the runtime's normal native-asset lookup, so the flagged
+  fallback probes are not used. Remove it when Silk.NET stops probing those APIs.
+- M2 WP1 verified the dependency with an AOT publish/run of a throwaway windowed probe that reaches
+  the adapter through the default resolver: with the suppression applied the publish reports no
+  warnings (the same graph reports six `IL3000`/`IL3002` warnings when `NoWarn` is cleared); SDL
+  video init, window create/destroy, and quit succeed on an engine-created (non-main) thread; and
+  `SDL2.dll` is present in the output. The windowed runtime, the `--windowed` AOT demo, and the
+  windowed local gate are M2 WP5.
 - No runtime shader compilation: SPIR-V is built offline.
 - The headless server must not initialize SDL or Vulkan; `WithHeadless(...)` must not load or
   call the graphics/windowing paths.
