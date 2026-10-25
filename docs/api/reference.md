@@ -652,7 +652,7 @@ for argument/programming errors raised directly by callers.
 | Headless/offscreen | Mode selection and validation exist (WP4), but both use the same one-tick smoke in M1; real mode startup is M6/M7. |
 | NativeAOT | No analyzers/publish. |
 | Camera defaults | Implemented (WP3): size 10, full viewport, all declared layers, black clear, `ZIndex` 0. |
-| Camera ordering | `ICamera.ZIndex` implemented (WP3): ascending, higher later, default 0, ties unspecified. |
+| Camera ordering | `ICamera.ZIndex` property implemented (WP3): default 0; ascending/higher-later contract documented, ordering applied in M8; ties unspecified. |
 | Entity identity/order | None: no entity IDs, no ordered discovery, no public tree enumeration (WP3/D-026). |
 | Frame snapshots | Internal value-only `CameraSnapshot`/`SpriteSnapshot` structs planned for M7; not part of `Bork2d.Api`. Capture is unordered after `Tick`. |
 | Entity ownership | Root-owned strong **unordered** tree (WP3); no weak registry, no entity `Dispose`/`IsAlive`. |

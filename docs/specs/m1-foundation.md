@@ -26,7 +26,7 @@ M1 is complete when all of these are demonstrated:
 2. `dotnet format --verify-no-changes` passes.
 3. The dependency test passes and no implementation type is accidentally public.
 4. `Bork2d.Tests` (xUnit) covers builder validation, scene ownership, transform hierarchy,
-   layers, camera `ZIndex` ordering, and the concurrency rules.
+   layers, camera `ZIndex` defaults/round-trip, and the concurrency rules.
 5. An AOT-published smoke app runs without reflection, trim, or AOT warnings.
 6. `IEngine.LoggerFactory` is usable and a default `Bork2dAppBuilder` run produces pretty
    ZLogger console output.
@@ -238,7 +238,8 @@ xUnit test groups:
 - root read-only setters;
 - transform hierarchy/parenting/cycles;
 - layer validation and camera/sprite defaults;
-- camera `ZIndex` default/round-trip and ascending-order semantics;
+- camera `ZIndex` default/round-trip and its documented ordering contract; ordering is applied
+  in M8;
 - concurrent operations from multiple threads;
 - dependency matrix;
 - AOT publish/start smoke;

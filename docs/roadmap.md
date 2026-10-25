@@ -136,7 +136,7 @@ Exit criteria:
 - dependency test passes;
 - an AOT-published smoke app builds/starts without reflection or trim warnings (the full
   headless pack/tick smoke lands in M7);
-- unit tests cover layer validation, camera `ZIndex` ordering, root ownership (parented persists,
+- unit tests cover layer validation, camera `ZIndex` defaults/round-trip, root ownership (parented persists,
   unparented collectible, remove/re-add, root clear detach), transform math, builder validation,
   concurrent any-thread operations, and pack path rules;
 - pretty ZLogger console logging is visible by default and `IEngine.LoggerFactory` is usable;
