@@ -21,24 +21,26 @@ namespace Bork2d.Api;
 public interface IEngine<TLayer> where TLayer : struct, Enum
 {
     /// <summary>
-    /// Gets the monotonic time/delta snapshot. Readable from any thread.
+    /// Gets the monotonic time/delta snapshot. Readable from any thread. In M1 the host does not
+    /// advance the clock, so both values stay <c>0</c>.
     /// </summary>
     ITime Time { get; }
 
     /// <summary>
-    /// Gets the window controls. Available in windowed mode only; access throws in offscreen and
-    /// headless modes.
+    /// Gets the window controls. Windowed-only in the target design; in M1 every mode returns a
+    /// stub whose members throw <see cref="NotSupportedException"/>.
     /// </summary>
     IWindow Window { get; }
 
     /// <summary>
-    /// Gets the input snapshot. Available in windowed mode only; access throws in offscreen and
-    /// headless modes.
+    /// Gets the input snapshot. Windowed-only in the target design; in M1 the getter throws
+    /// <see cref="NotSupportedException"/> in every mode.
     /// </summary>
     IInput Input { get; }
 
     /// <summary>
-    /// Gets the asset service. Thread-safe requests; completion is asynchronous.
+    /// Gets the asset service. Thread-safe requests; completion is asynchronous. In M1 the
+    /// returned stub's methods throw <see cref="NotSupportedException"/>.
     /// </summary>
     IAssets Assets { get; }
 

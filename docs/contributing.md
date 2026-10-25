@@ -1,32 +1,28 @@
 # Contributing
 
-> **Status:** current. The warnings/style/format/AOT gates are active from M1 and run in this
-> repository today. CI runs build, tests, and format verification on pull requests targeting
-> `develop` and on pushes to `develop`; the NativeAOT publish/run smoke is a required local gate.
+> **Status:** current. The warning/style/format/AOT gates and the docs link check are active.
+> CI runs docs link check, build, tests, and format verification on PRs to `develop` and pushes to
+> `develop`; the NativeAOT publish/run smoke is a required local gate.
 
 ## 1. Prerequisites
 
 - .NET SDK pinned by `global.json` (`11.0.100-rc.1`, target `net11.0`).
-- Windows for the windowed/Vulkan targets; headless builds/tests should stay cross-platform
-  where practical.
-- Vulkan 1.3 GPU/driver for windowed/offscreen checks from M6; not required for M1 unit tests.
-- SDL2 native binaries for windowed runs from M2.
-- NativeAOT toolchain (MSVC) for the local runtime publish check.
+- Windows for windowed/Vulkan work; headless builds/tests should stay cross-platform where
+  practical.
+- Vulkan 1.3 GPU/driver for windowed/offscreen checks from M6; SDL2 natives from M2.
+- NativeAOT toolchain (MSVC) for the local publish gate.
 
-## 2. Build and test
+## 2. Build, test, and local gates
 
 ```powershell
 dotnet build src/Bork2d/Bork2d.slnx -c Debug
 dotnet build src/Bork2d/Bork2d.slnx -c Release
 dotnet test src/Bork2d/Bork2d.slnx -c Debug
 dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
+pwsh scripts/check-docs.ps1
 ```
 
-The solution builds with **zero warnings**; CI treats warnings and style violations as errors.
-CI runs on pull requests targeting `develop` and on pushes to `develop`; it does not run on
-milestone/task branch pushes.
-
-NativeAOT publish/run is a **required local gate** for runtime-affecting changes:
+NativeAOT publish/run is required for runtime-affecting changes:
 
 ```powershell
 dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
@@ -35,98 +31,75 @@ dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r w
 
 ## 3. Build, style, and warnings
 
-All projects—engine, editor, tests, samples—use the same baseline:
-
-- `TreatWarningsAsErrors=true`;
-- `EnforceCodeStyleInBuild=true`;
-- Microsoft/.NET-standard `.editorconfig` (file-scoped namespaces, braces, naming, spacing,
-  `var`/expression preferences, using ordering, etc.);
-- IDE style rules set to `error` for rules the team enforces;
-- AOT/trim analyzers as errors for runtime projects (`IsAotCompatible`, `EnableAotAnalyzer`,
-  `EnableTrimAnalyzer`);
-- `dotnet format --verify-no-changes` in CI.
-
-The shared settings live in `Directory.Build.props` and the root `.editorconfig`, so new
-projects inherit them automatically. Do not override them per project without a decision-log
-entry.
-
-### Suppressions
-
-- Prefer fixing the code.
-- If a suppression is unavoidable, use the narrowest `#pragma warning disable` or
-  `[SuppressMessage]`, include the justification, and keep it scoped to the smallest block.
-- `NoWarn` in a project file is a code-review flag; it needs a reason and an expiry/owner.
-- Do not disable style rules wholesale to make a build pass.
+- `TreatWarningsAsErrors=true`, `EnforceCodeStyleInBuild=true`, Microsoft/.NET-standard
+  `.editorconfig`, enforced IDE rules as errors.
+- AOT/trim analyzers as errors on runtime projects (`IsAotCompatible`, `EnableAotAnalyzer`,
+  `EnableTrimAnalyzer`).
+- `dotnet format --verify-no-changes` is a CI gate.
+- Shared settings live in `Directory.Build.props` and the root `.editorconfig`; do not override
+  them per project without a decision-log entry.
+- Suppressions must be the narrowest `#pragma`/`[SuppressMessage]`, justified, and scoped. `NoWarn`
+  is a review flag with an owner/expiry.
 
 ## 4. C# conventions
 
-The standard baseline (exact `.editorconfig` values finalised with the tooling in M1):
+File-scoped namespaces; nullable enabled; explicit accessibility; `var` only when the type is
+obvious; braces for control flow; one type per file; `_camelCase` private fields; `PascalCase`
+constants; `I`-prefixed interfaces; `Async` suffix and no `async void` outside handlers; guard
+clauses; no regions except generated code; no commented-out code; XML docs on public API.
 
-- file-scoped namespaces;
-- nullable reference types enabled; no `!` unless the invariant is documented;
-- explicit accessibility on public API;
-- `var` only when the type is obvious from the right-hand side;
-- braces for all control-flow bodies;
-- one type per file, file name matches the type;
-- private fields `_camelCase`, constants `PascalCase`, interfaces `I`-prefixed;
-- `async` methods end in `Async`; no `async void` outside event handlers;
-- `ArgumentNullException.ThrowIfNull`-style guard clauses;
-- no regions except generated code;
-- no commented-out code;
-- XML docs on public API (the API guide/reference mirror them);
-- `Microsoft.Extensions.Logging` for logging, not `Console.WriteLine`;
-- `System.Text.Json`/Nerdbank.MessagePack only where explicitly designed; no ad-hoc
-  serialization.
+Known gap: `IAssets`, `IWindow`, `IInput`, `ITime`, and most `Data.cs` members predate the XML-doc
+rule and are undocumented. Add docs when those contracts are implemented (M2/M3); do not remove
+the rule.
 
 ## 5. Architecture boundaries
 
-- Game code references `Bork2d.Api`/`Bork2d.Runtime` only; see
-  [Projects and dependencies](architecture/projects.md).
-- Editor/tooling code stays JIT; do not leak Avalonia, TOML, or reflection into runtime
-  projects.
-- Runtime projects stay NativeAOT/trim-safe: no runtime reflection, assembly scanning, runtime
-  TOML, dynamic code, or unregistered Nerdbank shapes.
-- No Vulkan/SDL types in `Bork2d.Api`; logging abstractions are the only allowed external
-  contract dependency.
-- Keep pack format changes versioned and documented in
-  [Assets and pack files](architecture/assets.md).
+- Game code references `Bork2d.Api`/`Bork2d.Runtime` only; implementation projects are internal.
+- Editor/tooling stays JIT; no Avalonia, TOML, or reflection in runtime projects.
+- Runtime stays NativeAOT/trim-safe: no runtime reflection, assembly scanning, runtime TOML,
+  dynamic code, or unregistered Nerdbank shapes.
+- No Vulkan/SDL types in `Bork2d.Api`; logging abstractions are the only external contract
+  dependency.
+- Pack format changes are versioned and documented in
+  [Assets and tooling](architecture/assets-and-tooling.md).
 
 ## 6. Tests and CI
 
-- Add unit tests with behavior changes; pack/format tests for asset changes; threading tests
-  for snapshot changes; GPU/visual tests for renderer changes.
-- The dependency test runs in CI. The AOT publish smoke is a required local gate, not a CI job:
-  CI runs build/tests/format on pull requests targeting `develop` and on `develop` pushes
-  (human decision 2026-10-25).
-- A GPU/validation runner is required for windowed/offscreen checks; headless/data tests must
-  run without a GPU.
-- Do not merge with disabled tests, flaky retries without a tracking entry, or a lowered
-  warning level.
+- Add unit tests with behavior changes; pack/format tests for asset changes; threading tests for
+  handoff changes; GPU/visual tests for renderer changes.
+- The dependency test and docs link check run in CI. The AOT publish smoke is a required local
+  gate, not a CI job.
+- GPU/validation checks need a Vulkan 1.3 runner from M8; headless/data tests must run without a
+  GPU.
+- Do not merge with disabled tests, flaky retries without a tracking entry, or a lowered warning
+  level.
 
 ## 7. Documentation
 
-- Update the architecture docs, API guide/reference, roadmap status, and decision log in the
-  same change as a contract change.
-- Keep status markers accurate (`Current`/`Partial`/`Planned`/`Open`/`Deferred`).
-- Add a decision entry for public-contract or format changes, including alternatives.
-- Update the roadmap progress table when a milestone lands.
+- Update the owning document in the same change as a contract change; see the ownership table in
+  [docs/README.md](README.md#ownership).
+- Keep status markers accurate: `Current` only for implemented behavior; use `Partial`/`Planned`/
+  `Open` honestly.
+- Add a decision entry for public-contract or format changes.
+- Update the roadmap progress log when a milestone lands.
+- Run `pwsh scripts/check-docs.ps1` after moving headings or files.
 
 ## 8. Pull-request checklist
 
-- [ ] `dotnet build` has zero warnings.
+- [ ] `dotnet build` Debug and Release: zero warnings.
 - [ ] `dotnet test` passes.
-- [ ] `dotnet format --verify-no-changes` passes.
-- [ ] Dependency matrix respected.
+- [ ] `dotnet format --verify-no-changes` and `scripts/check-docs.ps1` pass.
+- [ ] Dependency matrix respected; no unintended public types.
 - [ ] No runtime reflection/TOML/dynamic code.
-- [ ] NativeAOT smoke still publishes/runs (when runtime-affecting).
-- [ ] Pack format/paths/version updated if assets changed.
-- [ ] Docs/API/decision log updated.
+- [ ] NativeAOT smoke publishes/runs when runtime-affecting.
+- [ ] Pack format/version updated if assets changed.
+- [ ] Owning docs/API/decision log updated; status markers honest.
 - [ ] No unjustified suppressions.
 
 ## 9. Related documents
 
-- [Projects and dependencies](architecture/projects.md) — boundaries and build.
-- [NativeAOT](architecture/nativeaot.md) — runtime AOT constraints.
+- [Projects and dependencies](architecture/projects.md) — boundaries.
+- [NativeAOT](architecture/nativeaot.md) — AOT constraints.
 - [Logging](architecture/logging.md) — ZLogger/MEL usage.
-- [Assets and pack files](architecture/assets.md) — format changes.
-- [Roadmap](roadmap.md) — M1 establishes the build/style baseline.
+- [Assets and tooling](architecture/assets-and-tooling.md) — formats and bake.
+- [Roadmap](roadmap.md) — milestone sequence.
