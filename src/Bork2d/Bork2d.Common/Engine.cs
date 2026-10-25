@@ -19,14 +19,21 @@ internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
     private readonly SceneGraph _graph = new();
     private readonly SceneRoot _root;
     private readonly TGame _game;
+    private readonly ILoggerFactory _loggerFactory;
     private volatile bool _exitRequested;
 
-    internal Engine(TGame game, ITime time, IWindow window, IAssets assets)
+    internal Engine(
+        TGame game,
+        ITime time,
+        IWindow window,
+        IAssets assets,
+        ILoggerFactory? loggerFactory = null)
     {
         LayerValidation.Validate<TLayer>();
 
         _game = game;
         _root = new SceneRoot(_graph);
+        _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         Time = time;
         Window = window;
         Assets = assets;
@@ -41,7 +48,7 @@ internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
     public IInput Input => throw new NotSupportedException(
         "Input requires a window. Windowed input is implemented in M2; M1 has no window.");
 
-    public ILoggerFactory LoggerFactory => NullLoggerFactory.Instance;
+    public ILoggerFactory LoggerFactory => _loggerFactory;
 
     public ISceneRoot Root => _root;
 

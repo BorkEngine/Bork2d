@@ -1,7 +1,6 @@
 using Bork2d.Api;
 using Bork2d.Common;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bork2d.Runtime;
 
@@ -70,8 +69,10 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <param name="configure">The logging configuration callback.</param>
     /// <returns>This builder, for fluent chaining.</returns>
     /// <remarks>
-    /// The callback is stored for WP5. The M1 host installs a null logger factory and does not
-    /// invoke the callback yet.
+    /// The callback is stored and invoked exactly once by <see cref="Build"/>, after validation
+    /// and minimum-level setup. When supplied, the callback owns provider configuration: the
+    /// builder does not add its default pretty ZLogger console provider. When omitted, the
+    /// default console provider is installed. The app owns and disposes the resulting factory.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="configure"/> is <see langword="null"/>.</exception>
     public Bork2dAppBuilder<TLayer> WithLogging(Action<ILoggingBuilder> configure)
@@ -205,20 +206,44 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// Validates the configuration and creates the app.
     /// </summary>
     /// <returns>The built app. The caller owns it and must dispose it.</returns>
+    /// <remarks>
+    /// Validation runs first, then the app-owned logger factory is created, the startup
+    /// mode/validation message is logged, and the internal engine and runtime are created. The
+    /// factory is disposed if creation fails after it was built.
+    /// </remarks>
     /// <exception cref="Bork2dException">The configuration is invalid.</exception>
     public Bork2dApp Build()
     {
         var game = Validate();
 
-        var engine = new Engine<TLayer, IGame<TLayer>>(
-            game,
-            new StopwatchTime(),
-            new UnsupportedWindow(),
-            new UnsupportedAssets());
+        ILoggerFactory loggerFactory = Bork2dLogging.CreateLoggerFactory(_options.ConfigureLogging);
+        try
+        {
+            var logger = loggerFactory.CreateLogger(Bork2dLogging.RuntimeCategory);
+            logger.LogInformation(
+                "Bork2d starting: mode={Mode}, validation=passed, layers={LayerType}",
+                _options.Mode,
+                typeof(TLayer).FullName);
 
-        ILoggerFactory loggerFactory = NullLoggerFactory.Instance;
-        var runtime = new AppRuntime<TLayer>(engine, game, loggerFactory, _options);
-        return new Bork2dApp(runtime);
+            var engine = new Engine<TLayer, IGame<TLayer>>(
+                game,
+                new StopwatchTime(),
+                new UnsupportedWindow(),
+                new UnsupportedAssets(),
+                loggerFactory);
+
+            var runtime = new AppRuntime<TLayer>(engine, game, loggerFactory, _options);
+            return new Bork2dApp(runtime);
+        }
+        catch
+        {
+            if (loggerFactory is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+
+            throw;
+        }
     }
 
     private IGame<TLayer> Validate()

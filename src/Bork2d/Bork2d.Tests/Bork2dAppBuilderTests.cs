@@ -334,7 +334,7 @@ public sealed class Bork2dAppBuilderTests
     }
 
     [Fact]
-    public void LoggingConfigurationIsStoredForWp5()
+    public void LoggingConfigurationIsStored()
     {
         var configure = new Action<ILoggingBuilder>(_ => { });
 
