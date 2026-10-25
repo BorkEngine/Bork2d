@@ -4,12 +4,38 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bork2d.Common;
 
-public class Engine<TLayer, TGame> : IEngine<TLayer>
+/// <summary>
+/// The engine instance that owns the scene graph.
+/// </summary>
+/// <remarks>
+/// The engine holds exactly one <see cref="SceneRoot"/> and no global camera, sprite, or
+/// transform lists. Parented objects are retained by their parent; unparented objects are
+/// collectible when game code drops its last reference. No member requires a particular thread.
+/// </remarks>
+internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
     where TLayer : struct, Enum
     where TGame : IGame<TLayer>
 {
+    private readonly SceneGraph _graph = new();
+    private readonly SceneRoot _root;
+    private readonly TGame _game;
+    private volatile bool _exitRequested;
+
+    internal Engine(TGame game, ITime time, IWindow window, IAssets assets)
+    {
+        LayerValidation.Validate<TLayer>();
+
+        _game = game;
+        _root = new SceneRoot(_graph);
+        Time = time;
+        Window = window;
+        Assets = assets;
+    }
+
     public ITime Time { get; }
+
     public IWindow Window { get; }
+
     public IAssets Assets { get; }
 
     public IInput Input => throw new NotSupportedException(
@@ -17,41 +43,33 @@ public class Engine<TLayer, TGame> : IEngine<TLayer>
 
     public ILoggerFactory LoggerFactory => NullLoggerFactory.Instance;
 
-    public ISceneRoot Root => throw new NotSupportedException("The scene graph is implemented in WP3.");
-
-    private readonly TGame _game;
-    private readonly EntityList<Camera<TLayer>> _cameras = new();
-    private readonly EntityList<SpriteRender<TLayer>> _sprites = new();
-    private volatile bool _exitRequested;
-
-    public Engine(TGame game, ITime time, IWindow window, IAssets assets)
-    {
-        _game = game;
-        Time = time;
-        Window = window;
-        Assets = assets;
-    }
+    public ISceneRoot Root => _root;
 
     public ITransform CreateTransform(ITransform? parent = null)
     {
-        // Parent attachment is part of the scene graph and is implemented in WP3.
-        return new Transform();
+        var transform = new Transform(_graph);
+        if (parent is not null)
+        {
+            transform.AttachAsNewChild(RequireEngineTransform(parent));
+        }
+
+        return transform;
     }
 
     public ICamera<TLayer> CreateCamera(ITransform parent)
     {
-        ArgumentNullException.ThrowIfNull(parent);
-
-        // Attachment to the parent is implemented in WP3.
-        return new Camera<TLayer>(_cameras);
+        var parentTransform = RequireEngineTransform(parent);
+        var camera = new Camera<TLayer>(_graph);
+        camera.AttachAsNewChild(parentTransform);
+        return camera;
     }
 
     public ISpriteRender<TLayer> CreateSpriteRender(ITransform parent)
     {
-        ArgumentNullException.ThrowIfNull(parent);
-
-        // Attachment to the parent is implemented in WP3.
-        return new SpriteRender<TLayer>(_sprites);
+        var parentTransform = RequireEngineTransform(parent);
+        var sprite = new SpriteRender<TLayer>(_graph);
+        sprite.AttachAsNewChild(parentTransform);
+        return sprite;
     }
 
     public void Exit() => _exitRequested = true;
@@ -64,5 +82,17 @@ public class Engine<TLayer, TGame> : IEngine<TLayer>
             // Advance time
             _game.Tick();
         }
+    }
+
+    private static Transform RequireEngineTransform(ITransform parent)
+    {
+        ArgumentNullException.ThrowIfNull(parent);
+        if (parent is not Transform transform)
+        {
+            throw new Bork2dException(
+                $"A parent must be an engine-owned transform; got '{parent.GetType().FullName}'.");
+        }
+
+        return transform;
     }
 }

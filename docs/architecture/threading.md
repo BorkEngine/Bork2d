@@ -1,8 +1,9 @@
 # Threading and Frame Handoff
 
-> **Status:** target design. The current tree has no render thread, no snapshot ring, and no
-> synchronization. `Engine.Run()` is a single-threaded placeholder. This document defines the
-> thread contract the implementation must satisfy.
+> **Status:** target design for frame handoff. The M1 scene graph (WP3) is implemented with the
+> structural + per-object `System.Threading.Lock` rules in §2; there is still no render thread,
+> no snapshot ring, and `Engine.Run()` is a placeholder. This document defines the thread
+> contract the implementation must satisfy.
 
 ## 1. Threads by mode
 
@@ -411,15 +412,15 @@ The threading milestone is not done until tests 1–4 pass reliably under stress
 | Snapshot slots | None | Three slots held until frame fence. |
 | Headless | None | No SDL/GPU/render thread; timer-paced (default 60, 0 = uncapped). |
 | Offscreen | None | Windowless Vulkan; internal target. |
-| Entity storage | `ConcurrentDictionary<uint, WeakReference<T>>` | Root-owned strong transform tree; structural `System.Threading.Lock`. |
+| Entity storage | Root-owned strong transform tree (`Bork2d.Common`, WP3); structural `System.Threading.Lock`. | — |
 | Input | Interface only | Windowed SDL state + edges. |
 | Control channel | None | SPSC windowed control queue. |
 | Assets | Empty | Pack VFS + loader threads (M3). |
 
-The weak-reference registry remains a hazard: dropping the game's last reference can silently
-remove a renderable. The target M1 design replaces it with the root-owned scene graph: parented
-objects persist, unparented objects are collectible, and `Root.DetachAll()` is scene teardown. See
-[Scene ownership](scene-ownership.md).
+The weak-reference registry is gone: the scene is a root-owned strong transform tree, so
+parented objects persist, unparented objects are collectible, `ITransform.DetachAll()` detaches
+direct children, and `Root.DetachAll()` is scene teardown. Discovery walks the rooted tree in
+entity-ID order. See [Scene ownership](scene-ownership.md).
 
 ## 13. Related documents
 

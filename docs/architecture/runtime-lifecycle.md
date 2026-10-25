@@ -327,13 +327,14 @@ failures are rethrown on the caller's thread, with cleanup in a `finally`.
 - A public capture/readback API is future work.
 - Intended for CI rendering checks and headless visual tests.
 
-No mode changes the public `IGame` contract: `Setup`, `Tick`, and `Teardown` are still main
-thread callbacks.
+No mode changes the public `IGame` contract: `Setup`, `Tick`, and `Teardown` still run on the
+engine tick thread, which may be any host thread; the API has no process-main-thread affinity.
 
 ## 11. Entity and scene ownership
 
-`IEngine.Root` is the strong owner of the live scene. This replaces the scaffold's weak
-`EntityList` registry; the full model is in [Scene ownership](scene-ownership.md).
+`IEngine.Root` is the strong owner of the live scene (implemented in WP3; the public host that
+creates the engine is WP4). The weak `EntityList` registry is gone; the full model is in
+[Scene ownership](scene-ownership.md).
 
 ```csharp
 public interface ISceneRoot : ITransform
@@ -387,10 +388,10 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
 | Exit | None | M1/M7 |
 | Snapshot ring | None | M7 |
 | Headless/offscreen | None | M6/M7 |
-| Dispose/teardown | None | M1 (root clear detach) |
+| Scene teardown | `Root.DetachAll()` detaches the scene's top-level children (WP3) | App `Dispose` wiring: WP4 |
+| Entity ownership | Root-owned strong transform tree with a read-only root (WP3) | — |
 | Assets | Empty | M3/M4 |
 | Render thread | Empty | M6/M7 |
-| Entity ownership | Weak references; no `Root` | M1: root-owned strong tree |
 | NativeAOT | None | M1 baseline, M9 gate |
 
 ## 13. Open questions
