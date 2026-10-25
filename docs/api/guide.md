@@ -2,9 +2,11 @@
 
 > **Status: implemented for the M1 smoke, target for the full runtime.** The public builder and
 > host now exist in `Bork2d.Runtime`: `Build()` validates the options and `Run()` performs one
-> `Setup` → `Tick` → `Teardown` sequence, then returns. Window/input, the asset pack, logging
-> providers, and the real loop remain later milestones (M2/M3/M5/M7); `IWindow`, `IInput`, and
-> `IAssets` currently throw `NotSupportedException`. See the [API reference](reference.md#12-runtime-surface).
+> `Setup` → `Tick` → `Teardown` sequence, then returns. Logging is wired: the app owns a
+> Microsoft.Extensions.Logging/ZLogger factory, `IEngine.LoggerFactory` is usable, and
+> `WithLogging` is invoked at `Build`. Window/input, the asset pack, and the real loop remain
+> later milestones (M2/M3/M5/M7); `IWindow`, `IInput`, and `IAssets` currently throw
+> `NotSupportedException`. See the [API reference](reference.md#12-runtime-surface).
 
 ## 1. What you reference
 
@@ -50,9 +52,10 @@ app.Run();
   with no artificial delay, and headless is timer-paced via `WithHeadless(ticksPerSecond)`
   (default 60, `0` uncapped). M1 validates and stores these options but runs the same one-tick
   smoke in every mode.
-- `WithLogging` is accepted and stored for WP5. Until the logging work lands, the host uses
-  `NullLoggerFactory.Instance` and does not install the pretty ZLogger console default;
-  `IEngine.LoggerFactory` is always available.
+- `WithLogging` configures the app-owned logging factory. The callback is invoked exactly once
+  at `Build`; when supplied it owns provider configuration and the default pretty ZLogger console
+  provider is not added. When omitted, the default console provider is installed. See
+  [Logging](../architecture/logging.md).
 - `IEngine.Root` owns the scene. Create cameras/sprites under `Root` or a transform under it;
   parented objects persist, unparented objects are collectible. `Root.DetachAll()` detaches the
   scene's top-level children; `ITransform.DetachAll()` does the same for any transform.
@@ -98,29 +101,40 @@ must run in all modes should not depend on them. See
 
 ### Logging
 
-In M1 the host uses `NullLoggerFactory.Instance`; WP5 installs the pretty ZLogger console
-provider by default. `WithLogging` is accepted and stored now so startup code is already shaped
-for WP5, but the callback is not invoked yet:
+The host creates an app-owned Microsoft.Extensions.Logging/ZLogger factory at `Build`. Without
+`WithLogging`, the default is a pretty ZLogger console provider with a local
+timestamp-with-milliseconds, level, and category prefix. `WithLogging` replaces provider
+configuration; the callback is invoked exactly once and the default provider is not added:
 
 ```csharp
 using var app = new Bork2dAppBuilder<GameLayer>()
     .WithGame(game)
     .WithLogging(logging =>
     {
-        // Configure Microsoft.Extensions.Logging providers, including ZLogger (WP5).
+        // Configure Microsoft.Extensions.Logging/ZLogger providers here.
+        // The app disposes the factory and its providers when it is disposed.
     })
     .Build();
 ```
 
-The engine exposes the factory through `IEngine.LoggerFactory`:
+`Build` also logs one startup message from the `Bork2d.Runtime` category, e.g.:
+
+```text
+2026-10-25 21:45:15.981 [Information] Bork2d.Runtime: Bork2d starting: mode=Headless, validation=passed, layers=Layer
+```
+
+The engine exposes the same factory through `IEngine.LoggerFactory`, so game code can create
+category loggers in `Setup` (the game instance exists before `Build`, so the factory is not
+available in its constructor):
 
 ```csharp
-ILogger logger = _engine.LoggerFactory.CreateLogger("MyGame");
+ILogger logger = engine.LoggerFactory.CreateLogger("MyGame");
 logger.LogInformation("Loaded level {Level}", "start");
 ```
 
-In M1 that factory is the null factory; WP5 replaces it with the configured one. See
-[Logging](../architecture/logging.md) for defaults, categories, and AOT notes.
+`IEngine.LoggerFactory` is available in windowed, offscreen, and headless modes. See
+[Logging](../architecture/logging.md) for the pinned versions, exact format, categories, and AOT
+notes.
 
 ## 3. Write a game
 

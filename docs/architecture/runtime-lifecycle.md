@@ -1,10 +1,10 @@
 # Runtime Lifecycle
 
-> **Status:** M1 skeleton implemented. `Bork2dAppBuilder<TLayer>` validates options and builds
-> the internal engine/root, and `Bork2dApp.Run()` performs exactly one `Setup` → `Tick` →
-> `Teardown` sequence, then returns. There is still no window, GPU work, render thread, pack, or
-> timer-paced loop; the mode startup, pacing, and shutdown sequences below remain the target
-> design for M2/M7.
+> **Status:** M1 skeleton implemented. `Bork2dAppBuilder<TLayer>` validates options, creates the
+> app-owned logging factory, and builds the internal engine/root; `Bork2dApp.Run()` performs
+> exactly one `Setup` → `Tick` → `Teardown` sequence, then returns. There is still no window, GPU
+> work, render thread, pack, or timer-paced loop; the mode startup, pacing, and shutdown
+> sequences below remain the target design for M2/M7.
 
 ## 1. Public startup contract
 
@@ -29,14 +29,16 @@ app.Run();
   NativeAOT.
 - `Bork2dAppBuilder<TLayer>` is configured and built once; no thread affinity.
 - `Build()` validates the configuration and returns an `IDisposable` app object. It does not
-  create the window, GPU, or threads. It creates the logger (an internal null factory in M1),
-  options, engine, and `IEngine.Root`; the root is empty until `Setup`.
+  create the window, GPU, or threads. After validation it creates the app-owned
+  Microsoft.Extensions.Logging/ZLogger factory, logs the startup mode and validation outcome, then
+  creates the options, engine, and `IEngine.Root`; the root is empty until `Setup`. The factory is
+  passed to both the engine (`IEngine.LoggerFactory`) and the app runtime.
 - `Run()` may be called from any thread. In the full design it starts the selected mode, calls
   `Setup`, and enters the tick loop until shutdown. **In M1 it is a smoke path:** it calls
   `Setup`, exactly one `Tick`, then `Teardown`, and returns. It may be called only once.
 - `Dispose()` is safe whether or not `Run()` was called and is idempotent. It detaches the root's
-  direct children and disposes the logger factory when it is `IDisposable`; it never calls
-  `IGame.Teardown` again. The `using` declaration guarantees cleanup if `Run()` throws.
+  direct children, disposes the app-owned logger factory, and flushes/stops its providers, but
+  never calls `IGame.Teardown` again. The `using` declaration guarantees cleanup if `Run()` throws.
 - If `Setup` throws there is nothing to tear down, so `Teardown` is not called. If `Tick` throws,
   `Teardown` is still attempted and the original exception propagates. A failed run clears the
   root's direct children; calling `Run()` after a failure throws `InvalidOperationException`.
@@ -80,13 +82,13 @@ throw even for the default windowed configuration.
 
 > **M1 status:** the builder surface, validation, and storage are `Current`; the parenthetical
 > notes whether the underlying window/GPU/timer effect exists. Headless and offscreen currently
-> share the same one-tick smoke, and `WithLogging` is stored for WP5.
+> share the same one-tick smoke, and logging is wired (`WithLogging` is invoked at `Build`).
 
 | Option | Default | Status | Meaning |
 | --- | --- | --- | --- |
 | `WithGame(IGame<TLayer> game)` | required | `Current` | Caller-owned game instance. Must not be null. |
 | `WithAssetsPack(string path)` | `assets.pck` | `Current (path only)` | Base pack path (see [assets](assets.md)). M1 checks non-empty only; pack is M3. |
-| `WithLogging(Action<ILoggingBuilder>)` | null factory in M1 | `Current (stored)` | Records the Microsoft.Extensions.Logging/ZLogger configuration; WP5 installs it. |
+| `WithLogging(Action<ILoggingBuilder>)` | pretty ZLogger console | `Current` | Configures the app-owned logging factory. Invoked once at `Build`; suppresses the default provider. |
 | `WithTitle(string)` | assembly name | `Current (stored)` | Window title (windowed only). |
 | `WithSize(int width, int height)` | `1280 × 720` | `Current (stored)` | Initial framebuffer size (windowed only). |
 | `WithResizable(bool)` | `true` | `Current (stored)` | Windowed only. |
@@ -113,8 +115,10 @@ Validation performed by `Build()`:
 5. `TLayer` is an `int`-backed flags enum with 1–32 named single-bit values.
 6. Sizes are positive; max delta is positive; headless tick rate is `>= 0`; asset pack path is
    non-empty.
-7. Logging configuration, if supplied, is non-null. The M1 host stores it and uses
-   `NullLoggerFactory.Instance`; WP5 installs it and the default provider.
+7. Logging configuration, if supplied, is non-null. Validation runs first; then the factory is
+   created, the `WithLogging` callback is invoked exactly once (or the default pretty ZLogger
+   console provider is installed), and the startup mode/validation message is logged from the
+   `Bork2d.Runtime` category. The app owns and disposes the factory.
 8. The M1 pack path is validated as non-empty only. It does not need to exist and `Build()` does
    not touch the filesystem; existence, parsing, and checksum failures arrive with the M3 pack
    implementation and throw at startup then.

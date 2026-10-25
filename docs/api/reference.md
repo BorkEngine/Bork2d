@@ -133,7 +133,7 @@ root is an identity transform: setting parent, position, rotation, or scale thro
 | `Window` | `Current` | Window controls. Windowed only; throws in offscreen/headless. |
 | `Input` | `Current` | Input state. Windowed only; throws in offscreen/headless. M1 scaffold throws `NotSupportedException` (windowed input is M2). |
 | `Assets` | `Current` | Pack/asset requests; thread-safe methods. |
-| `LoggerFactory` | `Current` | Microsoft.Extensions.Logging factory configured by the builder with ZLogger; create per-category loggers. M1 scaffold returns `NullLoggerFactory.Instance` until the logging work wires the real factory. |
+| `LoggerFactory` | `Current` | App-owned Microsoft.Extensions.Logging/ZLogger factory created by the builder; create per-category loggers from it. Non-null for built apps; usable in `Setup`. Disposed by `Bork2dApp.Dispose()`. |
 | `Root` | `Current` | Read-only root of the strong scene graph; app-owned. `Root.DetachAll()` detaches children. Implemented in the M1 engine (WP3); the public host that creates the engine is WP4. |
 | `CreateTransform(parent)` | `Current` | Creates a transform under `parent`, or standalone when `parent` is null. A new node is attached with its default local values, so it starts at the parent's origin. Inside `Setup`/`Tick`; workers may create during a tick. Implemented in WP3. |
 | `CreateCamera(parent)` | `Current` | Creates a camera under `parent`; parent is required. Workers may create during a tick. Implemented in WP3. |
@@ -492,8 +492,8 @@ Planned flags for `FlipX`/`FlipY`; the planned snapshot reserves the field.
 ## 12. Runtime surface
 
 > **Status: `Current` (M1 skeleton).** `Bork2d.Runtime` now contains the public builder, the
-> one-tick smoke app, validation, and the M1 stubs. Window/input/assets behavior, logging
-> providers, and real loop modes are later milestones (M2/M3/M5/M7).
+> one-tick smoke app, validation, app-owned logging, and the M1 stubs. Window/input/assets
+> behavior and real loop modes are later milestones (M2/M3/M5/M7).
 
 ### `Bork2dAppBuilder<TLayer>`
 
@@ -532,9 +532,10 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
   `WithFullscreen`, and `WithVSync` are rejected when combined with headless or offscreen.
 - `WithAssetsPack` defaults to `assets.pck`. M1 validates only that a supplied path is
   non-empty; it does not require the file to exist, and pack loading is M3.
-- `WithLogging(Action<ILoggingBuilder>)` is accepted and stored for WP5. The M1 host uses
-  `NullLoggerFactory.Instance` and does not install a ZLogger/default provider yet; see
-  [Logging](../architecture/logging.md).
+- `WithLogging(Action<ILoggingBuilder>)` configures the app-owned logging factory. The callback
+  is invoked exactly once at `Build`, after the default minimum level is applied; when supplied,
+  the builder adds no provider of its own. When omitted, a pretty ZLogger console provider is
+  installed. See [Logging](../architecture/logging.md).
 - `WithMaxDeltaTime` is a safety clamp, not a pacing delay. It must be positive.
 - `WithValidation` defaults to on in debug. It is stored for the windowed/offscreen GPU
   validation layers (M2+); M1 has no GPU.
@@ -543,8 +544,10 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 - `Build()` throws `Bork2dException` for engine configuration errors (missing or duplicate game,
   conflicting modes, invalid layer enum, non-positive sizes/delta, negative headless rate).
   Null/blank call arguments throw `ArgumentNullException`/`ArgumentException` at the call.
-- `Build()` creates the logger (an internal null factory in M1), options, internal engine, and
-  `IEngine.Root`; it creates no window, GPU resources, threads, or filesystem state.
+- `Build()` creates the app-owned logging factory, logs the startup mode/validation message from
+  the `Bork2d.Runtime` category, then creates the options, internal engine, and `IEngine.Root`;
+  it creates no window, GPU resources, threads, or filesystem state. The same factory is used by
+  the engine and the app runtime.
 - The default windowed configuration builds in M1 even though no window exists yet.
 
 ### `Bork2dApp`
@@ -568,8 +571,8 @@ public sealed class Bork2dApp : IDisposable
   `Teardown` throw, `Run()` throws an `AggregateException` containing both. A failed run clears
   the root's direct children before rethrowing; the app still counts as run.
 - `Dispose()` is idempotent and safe before/after `Run`; it calls `Root.DetachAll()` (direct
-  children), disposes the logger factory when it is `IDisposable`, and never calls
-  `IGame.Teardown` again. It is app lifetime, not an entity lifetime API.
+  children), disposes the app-owned logging factory and its providers (flushing ZLogger sinks),
+  and never calls `IGame.Teardown` again. It is app lifetime, not an entity lifetime API.
 - Stop with `IEngine.Exit()` or the window close button (windowed); the one-tick M1 smoke
   completes its tick regardless.
 - `Run` return shape is `Open`; v1 uses `void` + exceptions.
@@ -625,7 +628,8 @@ for argument/programming errors raised directly by callers.
 | `ITransform.DetachAll` | Implemented (WP3): detaches direct children under the structural lock on any transform. |
 | `IEngine.Input` | Declaration present. Scaffold throws `NotSupportedException`; the M1 host has no window, so input remains a stub until M2. |
 | `IEngine.Exit` | Declaration present. The one-tick M1 smoke ignores it after the tick; the real loop is M2/M7. |
-| `IEngine.LoggerFactory` | Declaration present. The internal engine returns `NullLoggerFactory.Instance`; `WithLogging` is stored but providers are wired in WP5. |
+| `IEngine.LoggerFactory` | Implemented (WP5): non-null app-owned Microsoft.Extensions.Logging/ZLogger factory, usable in `Setup`; disposed by the app. |
+| Startup logging | Implemented (WP5): `Build` logs mode, validation result, and layer type from `Bork2d.Runtime`. |
 | `IGame.Teardown` | Declaration present. The M1 host invokes it once after the tick (WP4). |
 | `Bork2dException` | Present in `Bork2d.Api` with standard constructors. |
 | Scene entity `IDisposable` | Removed from `ICamera`/`ISpriteRender` and from the internal Common types (WP3). |

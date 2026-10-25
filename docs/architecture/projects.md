@@ -2,7 +2,8 @@
 
 > **Status:** the dependency rules below are the target. `Common → Api`, `Runtime → Api, Common,
 > Assets, Render`, and `Tests → all` are wired. `Bork2d.Runtime` now has the M1 builder/host
-> skeleton; `Assets` and `Render` are still empty until their milestones (M3/M6).
+> skeleton and app-owned Microsoft.Extensions.Logging/ZLogger configuration; `Assets` and `Render`
+> are still empty until their milestones (M3/M6).
 
 ## 1. Current projects
 
@@ -10,13 +11,16 @@
 | --- | --- | --- | --- | --- |
 | `Bork2d.Api` | `net11.0` | none | `Partial` | Public contracts and value types. |
 | `Bork2d.Common` | `net11.0` | `Bork2d.Api` | `Partial` | Engine implementation, entity state, transforms, snapshots, time. |
-| `Bork2d.Runtime` | `net11.0` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render` | `Partial` | Public builder/app/host (M1); later SDL platform and full composition. |
+| `Bork2d.Runtime` | `net11.0` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render` | `Partial` | Public builder/app/host and app-owned logging (M1); later SDL platform and full composition. |
 | `Bork2d.Render` | `net11.0` | none | `Empty` | Vulkan renderer. |
 | `Bork2d.Assets` | `net11.0` | none | `Empty` | Pack VFS, loaders, descriptors, sprite assets, baking support. |
 | `Bork2d.Editor` | `net11.0` (planned) | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets` (+ Avalonia) | `Planned` | Avalonia editor library/app; JIT. |
 
 All five existing projects live in `src/Bork2d/` and are listed in
-[`Bork2d.slnx`](../../src/Bork2d/Bork2d.slnx).
+[`Bork2d.slnx`](../../src/Bork2d/Bork2d.slnx). Only `Bork2d.Runtime` has package references:
+`Microsoft.Extensions.Logging` `11.0.0-rc.1.26425.128` and `ZLogger` `2.5.10` (pinned). `Bork2d.Api`
+uses `Microsoft.Extensions.Logging.Abstractions` from the .NET 11 shared framework and has no
+package reference.
 
 ## 2. Target dependency graph
 
@@ -68,8 +72,9 @@ flowchart BT
 Rules behind the matrix:
 
 - `Api` references the BCL (`System.Numerics`, `System.Threading.Tasks`, and similar) plus
-  **Microsoft.Extensions.Logging.Abstractions** for `ILoggerFactory`. No Silk.NET, SDL, Vulkan,
-  ZLogger, Avalonia, or file I/O.
+  **Microsoft.Extensions.Logging.Abstractions** for `ILoggerFactory`, supplied by the .NET 11
+  shared framework (no package reference). No Silk.NET, SDL, Vulkan, ZLogger, Avalonia, or file
+  I/O.
 - `Common` is platform-agnostic. It must not reference SDL, Vulkan, or the asset
   implementation. It consumes `IAssets` through the API interface.
 - `Assets` implements `IAssets` and owns pack loading/serialization. It may use `Common` for
