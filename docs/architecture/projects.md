@@ -2,25 +2,31 @@
 
 > **Status:** the dependency rules below are the target. `Common → Api`, `Runtime → Api, Common,
 > Assets, Render`, and `Tests → all` are wired. `Bork2d.Runtime` now has the M1 builder/host
-> skeleton and app-owned Microsoft.Extensions.Logging/ZLogger configuration; `Assets` and `Render`
-> are still empty until their milestones (M3/M6).
+> skeleton and app-owned Microsoft.Extensions.Logging/ZLogger configuration; `Bork2d.AotSmoke` is
+> the M1 NativeAOT one-tick smoke executable. All runtime/game projects enable `IsAotCompatible`
+> with the trim and AOT analyzers (WP6). `Assets` and `Render` are still empty until their
+> milestones (M3/M6).
 
 ## 1. Current projects
 
 | Project | Target framework | References | State | Responsibility |
 | --- | --- | --- | --- | --- |
 | `Bork2d.Api` | `net11.0` | none | `Partial` | Public contracts and value types. |
-| `Bork2d.Common` | `net11.0` | `Bork2d.Api` | `Partial` | Engine implementation, entity state, transforms, snapshots, time. |
+| `Bork2d.Common` | `net11.0` | `Bork2d.Api` | `Partial` | Engine implementation, entity state, transforms, snapshots, time, Nerdbank.MessagePack generated-shape policy. |
 | `Bork2d.Runtime` | `net11.0` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render` | `Partial` | Public builder/app/host and app-owned logging (M1); later SDL platform and full composition. |
 | `Bork2d.Render` | `net11.0` | none | `Empty` | Vulkan renderer. |
 | `Bork2d.Assets` | `net11.0` | none | `Empty` | Pack VFS, loaders, descriptors, sprite assets, baking support. |
+| `Bork2d.AotSmoke` | `net11.0` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Runtime` | `Smoke` | NativeAOT one-tick smoke executable (WP6); not part of the game template. |
 | `Bork2d.Editor` | `net11.0` (planned) | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets` (+ Avalonia) | `Planned` | Avalonia editor library/app; JIT. |
 
-All five existing projects live in `src/Bork2d/` and are listed in
-[`Bork2d.slnx`](../../src/Bork2d/Bork2d.slnx). Only `Bork2d.Runtime` has package references:
-`Microsoft.Extensions.Logging` `11.0.0-rc.1.26425.128` and `ZLogger` `2.5.10` (pinned). `Bork2d.Api`
-uses `Microsoft.Extensions.Logging.Abstractions` from the .NET 11 shared framework and has no
-package reference.
+All existing projects live in `src/Bork2d/` and are listed in
+[`Bork2d.slnx`](../../src/Bork2d/Bork2d.slnx). `Bork2d.Runtime` references
+`Microsoft.Extensions.Logging` `11.0.0-rc.1.26425.128` and `ZLogger` `2.5.10`; `Bork2d.Common`
+references `Nerdbank.MessagePack` `1.4.95` (generated shapes only, no reflection resolver).
+`Bork2d.AotSmoke` is the only executable and the only project that sets `PublishAot`; the
+libraries do not publish independently. `Bork2d.Api` uses
+`Microsoft.Extensions.Logging.Abstractions` from the .NET 11 shared framework and has no package
+reference.
 
 ## 2. Target dependency graph
 
@@ -34,6 +40,7 @@ flowchart BT
   ASSETS["Bork2d.Assets"]
   RENDER["Bork2d.Render"]
   RUNTIME["Bork2d.Runtime"]
+  AOTSMOKE["Bork2d.AotSmoke"]
   EDITOR["Bork2d.Editor"]
   TESTS["Tests"]
 
@@ -47,6 +54,9 @@ flowchart BT
   RUNTIME --> CORE
   RUNTIME --> ASSETS
   RUNTIME --> RENDER
+  AOTSMOKE --> API
+  AOTSMOKE --> CORE
+  AOTSMOKE --> RUNTIME
   EDITOR --> API
   EDITOR --> CORE
   EDITOR --> ASSETS
@@ -67,6 +77,7 @@ flowchart BT
 | **Assets** | ✓ | ✓ | — | ✗ | ✗ | ✗ |
 | **Render** | ✓ | ✓ | ✓ | — | ✗ | ✗ |
 | **Runtime** | ✓ | ✓ | ✓ | ✓ | — | ✗ |
+| **AotSmoke** | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ |
 | **Editor** | ✓ | ✓ | ✓ | ✗ | ✗ | — |
 
 Rules behind the matrix:
@@ -84,6 +95,9 @@ Rules behind the matrix:
   targets are its own.
 - `Runtime` is the composition root: builder, app host, SDL window/input (windowed), Vulkan
   bootstrap, headless/offscreen mode selection, ZLogger configuration, and service wiring.
+- `AotSmoke` is the M1 NativeAOT smoke executable, not a game template project. It references
+  `Runtime` for the host plus `Api`/`Common` for the scene graph and the internal
+  generated-shape helper; it must not pull `Assets`/`Render` types into the smoke.
 - `Editor` is independent of the renderer. It edits source data, slices textures, and previews
   them with Avalonia imaging, not with the game renderer. It is JIT and not shipped with the
   game.
@@ -116,13 +130,14 @@ them:
 [assembly: InternalsVisibleTo("Bork2d.Assets")]
 [assembly: InternalsVisibleTo("Bork2d.Editor")]
 [assembly: InternalsVisibleTo("Bork2d.Tests")]
+[assembly: InternalsVisibleTo("Bork2d.AotSmoke")]
 ```
 
 The exact `InternalsVisibleTo` list differs per project:
 
 | Project | Internals visible to |
 | --- | --- |
-| `Bork2d.Common` | `Bork2d.Runtime`, `Bork2d.Render`, `Bork2d.Assets`, `Bork2d.Editor`, `Bork2d.Tests` |
+| `Bork2d.Common` | `Bork2d.Runtime`, `Bork2d.Render`, `Bork2d.Assets`, `Bork2d.Editor`, `Bork2d.Tests`, `Bork2d.AotSmoke` |
 | `Bork2d.Assets` | `Bork2d.Runtime`, `Bork2d.Render`, `Bork2d.Editor`, `Bork2d.Tests` |
 | `Bork2d.Render` | `Bork2d.Runtime`, `Bork2d.Tests` |
 | `Bork2d.Runtime` | `Bork2d.Tests` |
@@ -196,27 +211,25 @@ not used. The project descriptor format remains `Open`
 
 Current state:
 
-- Project references only; no NuGet packages, no `Directory.Build.props`, no `global.json`.
-- SDK `11.0.100-rc.1` with `net11.0`. This is the only SDK installed that can build the
-  current target framework; the roadmap tracks pinning it.
-- Build: `dotnet build src/Bork2d/Bork2d.slnx`.
+- `Directory.Build.props`, `.editorconfig`, `.gitattributes`, and `global.json` are active for
+  every project; warnings and style violations are errors.
+- SDK `11.0.100-rc.1` with `net11.0`, pinned by `global.json` with `rollForward: latestPatch`.
+- `Bork2d.Tests` exists and a dependency test asserts the reference matrix by inspecting assembly
+  references.
+- Runtime/game libraries (`Api`, `Common`, `Assets`, `Render`, `Runtime`) set
+  `IsAotCompatible`, `EnableTrimAnalyzer`, and `EnableAotAnalyzer`; they do not set
+  `PublishAot`. `Bork2d.AotSmoke` sets `PublishAot` and `InvariantGlobalization`.
+- `Bork2d.Runtime` references pinned `Microsoft.Extensions.Logging` and `ZLogger`;
+  `Bork2d.Common` references pinned `Nerdbank.MessagePack` and uses generated shapes only.
+- Build: `dotnet build src/Bork2d/Bork2d.slnx`. Local AOT gate:
+  `dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64`.
+  AOT publish/run is a local gate, not a CI job. See [NativeAOT](nativeaot.md#7-testing-and-ci).
 
 Target state:
 
-- `Directory.Build.props` (M1) for nullable, analyzers, **warnings-as-errors**,
-  **`EnforceCodeStyleInBuild`**, deterministic builds, and language version.
-- A root `.editorconfig` (M1; Microsoft/.NET standard) with the enforced C# style rules set to
-  `error`; CI runs `dotnet format --verify-no-changes`. See [Contributing](../contributing.md).
-- A `global.json` pinning the SDK (`rollForward` policy to be chosen). See roadmap M1.
-- Tests project (`Bork2d.Tests`) and a dependency test that asserts the reference matrix by
-  inspecting assembly references.
-- NativeAOT settings on runtime/game projects: `PublishAot`, `IsAotCompatible`, AOT/trim
-  analyzers. Warnings-as-errors and style errors apply to all projects; the editor and baker
-  stay JIT. See [NativeAOT](nativeaot.md).
-- Runtime MessagePack serialization uses Nerdbank.MessagePack generated shapes; no reflection
-  resolver, runtime TOML, or assembly scanning in shipped code.
 - Distribution as source/project references in the template first; NuGet packaging later.
   The packaging model is `Open`.
+- The game template's `Project.Desktop`/`Project.Common` take over the smoke app's role in M9.
 - Versioning: pre-1.0 assemblies may break. Public API changes must update the API guide,
   reference, and decision log in the same commit.
 

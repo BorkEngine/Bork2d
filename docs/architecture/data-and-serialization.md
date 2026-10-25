@@ -1,8 +1,11 @@
 # Data and Serialization
 
-> **Status:** designed direction; implementation is roadmap **M4**, after the pack/FS layer
+> **Status:** designed direction; full implementation is roadmap **M4**, after the pack/FS layer
 > (M3) and before the editor (M5). The TOML schema details are still partly `Open`, but the
-> source → bake → pack split is fixed.
+> source → bake → pack split is fixed. M1 (WP6) landed the NativeAOT serialization **policy**:
+> `Bork2d.Common` pins `Nerdbank.MessagePack` `1.4.95`, carries an internal `[GenerateShape]`
+> smoke type plus a round-trip helper, and the AOT smoke proves the generated-shape path with no
+> reflection resolver. Pack/asset serialization is still M3/M4.
 
 ## 1. Scope
 
@@ -164,6 +167,11 @@ The baker/pack tool and the editor share validation code. The runtime never invo
 - Runtime custom data uses
   [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) source-generated
   shapes (`[GenerateShape]` on the top-level type).
+- M1 policy (WP6): `Nerdbank.MessagePack` `1.4.95` is pinned in `Bork2d.Common`. The internal
+  `MessagePackSmokeData` type carries `[GenerateShape]`, and `MessagePackSmokeSerializer`
+  round-trips it with the default serializer and no reflection resolver. `Bork2d.AotSmoke` calls
+  that helper through an intentional `InternalsVisibleTo`; `Bork2d.Tests` covers the same round
+  trip. These are policy smokes, not the asset model.
 - `LoadAsset<T>` requires a generated shape. Missing shapes fail at build or startup with the
   type name; there is no reflection fallback.
 - Built-in asset types (pack header, texture descriptor, sprite asset) also use generated or
@@ -189,7 +197,7 @@ See [NativeAOT](nativeaot.md#4-serialization-and-assets).
 | Topic | Question | Proposed default |
 | --- | --- | --- |
 | TOML library | Tomlyn or another parser; comment/trivia preservation. | Tomlyn; preserve comments if practical. |
-| MessagePack setup | Nerdbank.MessagePack shape generation and analyzer policy. | `[GenerateShape]` on serialized roots; reflection resolver disabled. |
+| MessagePack setup | Nerdbank.MessagePack shape generation and analyzer policy. | Resolved in M1: Nerdbank.MessagePack `1.4.95`; `[GenerateShape]` roots; reflection resolver disabled; generated-shape round trip in tests and the AOT smoke. |
 | Attributes | Names, location (`Bork2d.Api` vs separate), required or optional. | Small public attributes in Api. |
 | Polymorphism | Type discriminator or unsupported in v1. | Unsupported unless needed. |
 | Collections | Dictionary key restrictions and deterministic ordering. | String/enum keys; stable sort. |
@@ -216,13 +224,13 @@ See [NativeAOT](nativeaot.md#4-serialization-and-assets).
 | --- | --- | --- |
 | TOML model/attributes | None | M4 |
 | TOML parser/writer | None | M4 |
-| MessagePack source generation | None | Nerdbank.MessagePack shapes (M3/M4) |
+| MessagePack source generation | Policy + internal generated-shape smoke (WP6); no pack/asset shapes | Nerdbank.MessagePack shapes (M3/M4) |
 | Baker | None | M4 |
 | Sprite/texture sources | None | Sprite TOML + texture sidecars (M4/M5) |
 | Runtime data loading | `LoadAsset<T>` declaration only | M3/M4 |
 | Editor property grid | None | M5 |
 | Pack builder | None | M3/M4 |
-| NativeAOT runtime | None | M1 baseline, M4 data |
+| NativeAOT runtime | M1 baseline: AOT smoke publishes/runs with zero warnings | M1 baseline, M4 data |
 
 ## 13. Related documents
 

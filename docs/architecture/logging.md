@@ -3,8 +3,8 @@
 > **Status:** `Current` for M1 (WP5). The builder creates an app-owned
 > `Microsoft.Extensions.Logging` factory, installs a pretty ZLogger console provider by default,
 > logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`.
-> Windowed, offscreen, and headless configurations are identical. AOT/trim validation inside the
-> engine projects is WP6; the pinned logging stack was validated in isolated spikes.
+> Windowed, offscreen, and headless configurations are identical. WP6 validated the default
+> logging path inside the AOT smoke app with zero AOT/trim warnings.
 
 ## 1. Surface
 
@@ -171,7 +171,7 @@ where relevant.
   volume messages.
 - If ZLogger or a provider is not AOT-compatible, isolate it behind the logging configuration
   and choose an AOT-safe console provider; the `ILoggerFactory` surface stays.
-- WP6 validates the default logging path inside the AOT smoke app with zero trim/AOT warnings.
+- WP6 validated the default logging path inside the AOT smoke app with zero trim/AOT warnings.
 - `Bork2d.Editor`/baker are JIT and may use the same logging stack without AOT constraints.
 
 ## 7. Errors and diagnostics
@@ -207,7 +207,7 @@ where relevant.
 | Builder `WithLogging` | Implemented (WP5): null-checked, invoked exactly once at `Build`, suppresses the default provider. |
 | ZLogger default | Implemented (WP5): pretty plain-text console provider with timestamp/level/category prefix. |
 | Engine categories/log calls | Categories available; startup mode/validation logging implemented. Feature-level logs arrive with their milestones. |
-| NativeAOT validation | Pinned stack validated in M1 spikes; WP6 runs the AOT smoke. |
+| NativeAOT validation | Validated (WP6): the AOT smoke uses the default ZLogger console path with zero AOT/trim warnings. |
 | File/structured sinks | None by default; opt-in. |
 
 ## 10. Related documents

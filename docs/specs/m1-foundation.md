@@ -219,6 +219,25 @@ Add `Bork2dAppBuilder<TLayer>` and `Bork2dApp`:
 
 ### WP6 — NativeAOT and serialization policy
 
+**Status:** implemented on `m-1/wp-6`.
+
+Acceptance evidence:
+
+- `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`, and `Bork2d.Runtime` set
+  `IsAotCompatible`, `EnableTrimAnalyzer`, and `EnableAotAnalyzer`; no library sets
+  `PublishAot`.
+- `Bork2d.AotSmoke` (`PublishAot`, `InvariantGlobalization`, console) publishes with
+  `dotnet publish ... -c Release -r win-x64` with zero AOT/trim warnings, runs to exit `0`, and
+  exercises the default logging path plus one `Setup`/`Tick`/`Teardown` with a parented
+  transform/camera/sprite and a cleared root.
+- `Bork2d.Common` pins `Nerdbank.MessagePack` `1.4.95`, has an internal `[GenerateShape]` smoke
+  type and a round-trip helper (no reflection resolver), and exposes it to `Bork2d.AotSmoke`
+  via `InternalsVisibleTo`; `Bork2d.Tests` covers the round trip.
+- AOT publish/run remains a required local gate and is not added to CI; full pack serialization
+  is M3/M4.
+
+Deliverables:
+
 - `PublishAot`/`IsAotCompatible` on runtime/game projects.
 - AOT/trim analyzers as errors.
 - AOT smoke app: build a logger, builder, root, create parented objects, run the one-tick smoke,
@@ -352,7 +371,7 @@ WP1 and WP2 can overlap; WP3 must land before WP4 because the builder creates `R
 - [ ] Builder validation tests pass.
 - [ ] One-tick `Run` smoke passes.
 - [ ] ZLogger default + `IEngine.LoggerFactory` smoke passes.
-- [ ] AOT publish smoke runs with zero warnings.
+- [x] AOT publish smoke runs with zero warnings.
 - [ ] No weak `EntityList` in shipped code.
 - [ ] Any-thread API smoke/tests pass.
 - [ ] Docs/API/decision log updated.
