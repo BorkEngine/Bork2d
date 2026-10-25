@@ -8,7 +8,8 @@ public class SpriteRender<TLayer>: Transform, IEntity, ISpriteRender<TLayer> whe
     public Sprite Sprite { get; set; }
     public TLayer Layer { get; set; }
     public Color Tint { get; set; }
-    
+    public int ZIndex { get; set; }
+
     private readonly EntityList<SpriteRender<TLayer>> _sprites;
 
     public SpriteRender(EntityList<SpriteRender<TLayer>> list)
@@ -20,6 +21,7 @@ public class SpriteRender<TLayer>: Transform, IEntity, ISpriteRender<TLayer> whe
         Sprite = Sprite.Empty;
         Layer = default;
         Tint = Color.White;
+        ZIndex = 0;
     }
     
     public void Dispose()

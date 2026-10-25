@@ -5,4 +5,5 @@ public interface ISpriteRender<TLayer>: ITransform, IDisposable where TLayer : s
     Sprite Sprite { get; set; }
     TLayer Layer { get; set; }
     Color Tint { get; set; }
+    int ZIndex { get; set; }
 }
