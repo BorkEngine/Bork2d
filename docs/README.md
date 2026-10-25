@@ -52,6 +52,7 @@ items. The [decision log](decisions.md) records why.
 | [API reference](api/reference.md) | game developers | Members, defaults, threading, status, errors. |
 | [Implementation roadmap](roadmap.md) | planner | M0–M10, exit criteria, risks, open decisions, progress. |
 | [M1 spec](specs/m1-foundation.md) | implementers | Historical M1 goal, decisions, and acceptance evidence. |
+| [M2 spec](specs/m2-sdl-platform.md) | implementers | Approved M2 SDL window/input decisions, semantics, work packages, acceptance. |
 | [Contributing](contributing.md) | contributors | Build, warnings, style, format, docs check, PR checklist. |
 | [Decision log](decisions.md) | everyone | Accepted decisions and consequences. |
 
