@@ -128,20 +128,43 @@ stay `0` for the one-tick run.
 
 ## 5. `IWindow`
 
-`Status: Partial.` Window behavior is `Planned` for M2. In M1 `IEngine.Window` returns an
-`UnsupportedWindow` in every mode: the property access succeeds and every member throws
-`NotSupportedException`.
+`Status: Partial (M2).` The interface and its semantics are `Current`; the windowed implementation
+exists internally as an OS/window-thread platform, and M2 WP4 attaches its proxy to the engine. In
+this tree `IEngine.Window` still returns an `UnsupportedWindow` in every mode, and every member of
+that stub throws `NotSupportedException`.
 
-| Target member (M2) | Semantics |
+```csharp
+public interface IWindow
+{
+    string Title { get; set; }
+    Vector2 Size { get; set; }
+    bool Fullscreen { get; set; }
+    bool CursorVisible { get; set; }
+    bool IsMinimized { get; }     // new in M2
+}
+```
+
+| Member | Semantics |
 | --- | --- |
-| `string Title { get; set; }` | Window title; any thread, marshaled to the OS/window thread. |
-| `Vector2 Size { get; set; }` | Client/framebuffer size in physical pixels; requests a resize. The swapchain may lag one frame. |
-| `bool Fullscreen { get; set; }` | Toggles fullscreen/borderless; exact mode is decided in M2 (see roadmap). |
-| `bool CursorVisible { get; set; }` | OS cursor visibility; no capture or relative mode in v1. |
+| `Title` | Non-null; empty and whitespace-only titles are allowed (unlike `WithTitle`). Initial value is the builder title. The setter queues and returns; the getter returns the last confirmed title and may lag one event pump. |
+| `Size` | Framebuffer **physical pixels**. Getter: last confirmed non-zero size, including while minimized. Setter: finite and `> 0` components, queued and converted to window points with the current display scale; ignored while fullscreen with a debug log; while minimized it becomes the size restored later. Rounding is an implementation detail; the getter reflects the measured reality. |
+| `Fullscreen` | `true` requests borderless desktop fullscreen on the primary monitor; `false` returns to windowed mode at the previous bounds (SDL-managed). Initial value is the builder option. Same-value requests are dropped; the getter returns the last confirmed state. |
+| `CursorVisible` | Default `true`. No capture, no relative mode, no automatic hiding, including in fullscreen. Same-value requests are dropped. |
+| `IsMinimized` | `true` while the window is minimized. Read-only, readable from any thread; ticks continue while minimized. |
 
-- Windowed only; offscreen/headless access throws, so do not use window APIs in code that runs in
-  all modes. Setting size/fullscreen every tick causes swapchain churn. High-DPI logical scaling
-  is not handled in v1 (physical pixels); `IsMinimized` is under consideration.
+- All members may be called from any thread. Setters enqueue a command for the engine-owned
+  OS/window thread and never block on SDL; commands coalesce per property (latest value wins,
+  order between different properties preserved). Getters read an immutable confirmed snapshot and
+  may lag one pump (D-M2-04).
+- In **headless/offscreen** the returned stub's members (including `IsMinimized`) throw
+  `NotSupportedException`. After windowed shutdown, retained `IWindow` references throw
+  `ObjectDisposedException` (D-M2-17).
+- Defaults: builder title, 1280x720 framebuffer pixels, resizable `true`, fullscreen `false`,
+  cursor visible. Window position, monitor selection, icons, minimum/maximum size, and
+  `IsFocused`/`IsVisible`/DPI-scale members are not part of M2.
+- Errors: `Title = null` throws `ArgumentNullException`; a non-positive, NaN, or infinite `Size`
+  component throws `ArgumentOutOfRangeException`; both are thrown by the setter before queueing.
+
 
 ## 6. `IInput`
 
@@ -365,7 +388,8 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 | Non-engine or other-engine parent; singular parent world matrix | `Bork2dException`. |
 | Self/cycle parent; setting the root's own parent or a root local value | `InvalidOperationException`. |
 | Game callback exceptions | `Setup` propagates without `Teardown`; otherwise the original exception is rethrown, or `AggregateException` when `Tick` and `Teardown` both throw. |
-| `IWindow` member, `IInput` getter, or `IAssets` method in M1 | `NotSupportedException` (M2/M3). |
+| `IWindow`/`IInput` member after windowed shutdown | `ObjectDisposedException` (D-M2-17); before the windowed host is wired, `IWindow` members are the headless stub and throw `NotSupportedException`. |
+| `IWindow.Size` non-positive/NaN/infinite, or `IWindow.Title = null` | `ArgumentOutOfRangeException` / `ArgumentNullException` from the setter, before enqueueing. |
 | Missing/corrupt default pack, or missing asset (M3) | Pack: `Bork2dException` at startup; asset: log plus `Sprite.Empty`, not fatal. |
 
 `Bork2dException` lives in `Bork2d.Api` with the standard constructors; BCL exceptions remain for caller argument errors.

@@ -1,9 +1,10 @@
 # Runtime Lifecycle
 
-> **Status:** the builder, its validation, the one-tick `Bork2dApp.Run()` sequence, and app
-> `Dispose()` are `Current` (M1). Window, input, assets, renderer, tick loop, and paced modes are
-> `Partial` or `Planned`: every mode runs the same one-tick smoke, `IWindow`/`IAssets` return
-> throwing stubs, `IInput` throws on access, and `ITime` is never advanced.
+> **Status:** the builder, its validation, the one-tick `Bork2dApp.Run()` sequence, app
+> `Dispose()`, and the internal M2 windowed platform (OS/window thread, window commands, confirmed
+> state) are `Current`. The platform is not yet attached to the engine: every mode still runs the
+> same one-tick smoke, `IWindow`/`IAssets` return throwing stubs, `IInput` throws on access, and
+> `ITime` is never advanced until M2 WP4.
 
 ## 1. Public startup contract
 
@@ -173,21 +174,60 @@ are not guaranteed to complete. Headless skips render/asset shutdown steps (all 
 ## 7. Window and input (windowed only)
 
 M1 has no window or input: `IWindow` members and the `IInput` getter throw
-`NotSupportedException` in every mode. Target behavior (`Planned`, M2):
+`NotSupportedException` in every mode. M2 WP2 adds the internal windowed platform described in
+§7.1; M2 WP4 attaches it to the engine and runs the tick loop, and M2 WP3 implements input. Until
+WP4, `IEngine.Window` still returns the throwing stub.
+
+### 7.1 Windowed window platform (M2 WP2, internal)
+
+`Status: Current (internal).` `SdlWindowPlatform` owns one engine-created OS/window thread. It is
+internal to `Bork2d.Runtime` and has no public surface; the runtime host starts it before
+`IGame.Setup` and shuts it down after `Teardown`.
+
+- **Start** blocks until the window exists or startup failed. On the OS thread it sets
+  `SDL_WINDOWS_DPI_AWARENESS=permonitorv2` and `SDL_WINDOWS_DPI_SCALING=1` before
+  `SDL_Init(SDL_INIT_VIDEO)`, creates one visible `SDL_WINDOW_VULKAN | SDL_WINDOW_ALLOW_HIGHDPI`
+  window centered on display 0 (plus `RESIZABLE` when configured and `FULLSCREEN_DESKTOP` when the
+  builder starts fullscreen), and applies the builder title and initial framebuffer size. SDL
+  accepts window points, so the platform measures the achieved framebuffer size and adjusts the
+  point size once with the measured scale. It then publishes the first confirmed state and logs
+  the startup line. A startup failure throws `Bork2dException` with the SDL error text after the
+  thread has cleaned up and been joined.
+- **Commands and state.** `IWindow` setters validate, drop requests that repeat the last requested
+  value, coalesce pending requests per property, enqueue into one lock-guarded MPSC queue, and wake
+  the OS thread with one registered SDL user event. The OS thread drains the queue before waiting
+  and re-checks after each wait, applies commands in order, and publishes an immutable confirmed
+  snapshot (title, window points, framebuffer pixels, scale, fullscreen, cursor, minimized, focused,
+  visible, alive). Getters read the snapshot without blocking and may lag one pump.
+- **Events.** The pump handles resize/size-changed (0x0 is ignored while minimized), minimize,
+  restore, maximize, focus gained/lost, fullscreen changes, and DPI/scale changes in event order.
+  A close request or `SDL_QUIT` requests a graceful exit but leaves the window alive so
+  `Teardown` can still use it. An unrecoverable SDL error is stored as a fatal
+  `Bork2dException`, requests an error exit, and stops the pump.
+- **Shutdown** sets the stop flag, pushes a user event to release the event wait, and joins the
+  thread. The OS thread destroys the window first, then quits and disposes SDL. Shutdown is
+  idempotent and uses no timeout or sleep. A shutdown requested without a prior close reports the
+  `Exit` reason; the final framebuffer size is logged and ticks/elapsed time are left to WP4.
+- The platform never holds a lock across an SDL call, a game callback, or the event wait. The only
+  blocking waits are SDL's event wait, the startup/exit signals, and the thread join.
+
+### 7.2 Modes, input, and time target behavior
+
+Target behavior (`Planned`, M2 WP3/WP4):
 
 - `IWindow` calls may originate on any thread and are marshaled to the OS/window thread. Title
-  applies immediately; size and fullscreen recreate the swapchain; cursor visibility toggles;
-  close requests a graceful exit after the current tick.
+  applies immediately; size and fullscreen change the window; cursor visibility toggles; close
+  requests a graceful exit after the current tick.
 - `IInput` is pumped on the OS/window thread and frozen at tick start; edge flags are true for
   exactly one tick; text is dispatched on the tick thread before `Tick`; mouse coordinates are
   framebuffer pixels. On focus loss, held keys/buttons are synthesized as released and
   wheel/text state is cleared.
 - `IInput` reads are thread-safe snapshots and are not part of the frame snapshot. The render
   thread cannot read them.
-- While minimized, presentation is skipped; on restore the newest snapshot is drawn. DPI handling is
-  decided in M2 (see roadmap).
-
-See [Threading](threading.md#5-input-across-threads-windowed-only).
+- While minimized, presentation is skipped; on restore the newest snapshot is drawn. The tick
+  loop continues while minimized, and `Size` keeps the last non-minimized framebuffer size.
+- `ITime` wiring (first-tick zero, raw monotonic `Time`, clamped `DeltaTime`) and the windowed
+  loop are M2 WP4; see [Threading](threading.md#5-input-across-threads-windowed-only).
 
 ## 8. Related documents
 

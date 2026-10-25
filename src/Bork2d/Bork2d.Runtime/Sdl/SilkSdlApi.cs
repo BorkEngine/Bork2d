@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Bork2d.Api;
 using Silk.NET.Core.Loader;
 using Silk.NET.SDL;
@@ -42,6 +43,18 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
 
     /// <inheritdoc/>
     public SdlVersion Version { get; }
+
+    /// <inheritdoc/>
+    public string VideoDriver
+    {
+        get
+        {
+            ThrowIfDisposed();
+
+            var driver = _sdl.GetCurrentVideoDriver();
+            return driver is null ? string.Empty : Marshal.PtrToStringUTF8((nint)driver) ?? string.Empty;
+        }
+    }
 
     /// <inheritdoc/>
     public string GetError()

@@ -10,8 +10,11 @@ namespace Bork2d.Tests;
 /// <remarks>
 /// Every test is skipped unless <c>BORK2D_RUN_WINDOW_TESTS=1</c>. CI never runs these, so it never
 /// initializes SDL video or opens a window. The tests stay small on purpose: the functional proof
-/// remains the windowed AOT demo (M2 WP5).
+/// remains the windowed AOT demo (M2 WP5). The class shares the <c>RealSdlWindow</c> collection with
+/// the platform window tests because SDL video is process-global and must not be initialized
+/// concurrently.
 /// </remarks>
+[Collection("RealSdlWindow")]
 public sealed class SdlWindowTests
 {
     private readonly ITestOutputHelper _output;

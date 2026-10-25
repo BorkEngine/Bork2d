@@ -1,9 +1,11 @@
 # Threading and Frame Handoff
 
 > **Status:** the M1 scene graph implements the structural and per-object
-> `System.Threading.Lock` rules in §2 and the public API has no thread affinity. The render
-> thread, snapshot ring, and frame handoff are `Planned` (M7), window/input marshaling is
-> `Planned` (M2), and asset loader threads are `Planned` (M3). The engine has no debug-only
+> `System.Threading.Lock` rules in §2 and the public API has no thread affinity. The M2 windowed
+> platform's OS/window thread, command queue, confirmed-state snapshot, and event pump are
+> implemented internally (§5.1) but are not wired to the engine yet (M2 WP4). The input freeze and
+> text dispatch are `Planned` (M2 WP3), the render thread, snapshot ring, and frame handoff are
+> `Planned` (M7), and asset loader threads are `Planned` (M3). The engine has no debug-only
 > tick-active, structural, or slot-state checks.
 
 ## 1. Threads by mode
@@ -156,7 +158,37 @@ older `Ready` snapshots are dropped and the newest is shown.
 
 ## 5. Input across threads (windowed only)
 
-`Planned` for M2; M1 throws `NotSupportedException` from the `IInput` getter.
+`Planned` for M2 WP3; M1 throws `NotSupportedException` from the `IInput` getter.
+
+### 5.1 Window thread, command queue, and confirmed state (M2 WP2, internal)
+
+`Current (internal).` The windowed platform owns one OS/window thread; it is the only thread that
+calls SDL. The tick thread never calls SDL and never waits for a window command.
+
+- **Commands.** `IWindow.Title/Size/Fullscreen/CursorVisible` setters validate on the caller
+  thread, drop requests redundant with the last requested value, coalesce pending requests per
+  property (latest value wins while the order between different properties is preserved), and
+  enqueue into one MPSC queue guarded by a `System.Threading.Lock`. Setters then push one
+  registered SDL user event to wake the pump. They never block and never call SDL.
+- **State.** The OS thread drains the queue before waiting and re-checks it after each wait, so a
+  wake-up is not lost. After applying a command or handling a window event it publishes an
+  immutable confirmed snapshot (title, window points, framebuffer pixels, scale, fullscreen,
+  cursor, minimized, focused, visible, alive) with a volatile write. Getters read that snapshot
+  without blocking and may lag one pump (D-M2-04).
+- **Events.** One pump handles resize/size-changed, minimize/restore/maximize, focus gained/lost,
+  fullscreen changes, close/`SDL_QUIT`, and DPI/scale changes in event order. A close request
+  takes the graceful-exit path but does not destroy the window; the OS thread keeps pumping until
+  shutdown.
+- **Fatal errors.** An unrecoverable SDL error is stored as a `Bork2dException`, requests an
+  error exit, and stops the pump. The tick-side host rethrows it after `Teardown` (M2 WP4).
+- **Shutdown.** `Shutdown` sets the stop flag, pushes a user event to release the event wait, and
+  joins the thread. The OS thread destroys the window before quitting and disposing SDL. There is
+  no timeout, sleep, or pacing wait.
+- **Locks.** The command-queue lock and the proxy's attach/detach lock are the platform's only
+  locks. Neither is held across an SDL call, a game callback, or the event wait, and they are never
+  held together. Each lock protects a short critical section only.
+
+### 5.2 Input freeze and handoff (M2 WP3, planned)
 
 - SDL events are pumped on the OS/window thread, including while waiting for work; handlers that
   touch engine/game state are marshaled to the tick thread. At tick start input is frozen: keys,
