@@ -1,7 +1,8 @@
 # Projects and Dependencies
 
-> **Status:** the dependency rules below are the target. Today only `Common → Api` exists;
-> `Runtime`, `Render`, and `Assets` are empty projects with no references.
+> **Status:** the dependency rules below are the target. `Common → Api`, `Runtime → Api, Common,
+> Assets, Render`, and `Tests → all` are wired. `Bork2d.Runtime` now has the M1 builder/host
+> skeleton; `Assets` and `Render` are still empty until their milestones (M3/M6).
 
 ## 1. Current projects
 
@@ -9,7 +10,7 @@
 | --- | --- | --- | --- | --- |
 | `Bork2d.Api` | `net11.0` | none | `Partial` | Public contracts and value types. |
 | `Bork2d.Common` | `net11.0` | `Bork2d.Api` | `Partial` | Engine implementation, entity state, transforms, snapshots, time. |
-| `Bork2d.Runtime` | `net11.0` | none | `Empty` | Public builder/host; later SDL platform and composition. |
+| `Bork2d.Runtime` | `net11.0` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render` | `Partial` | Public builder/app/host (M1); later SDL platform and full composition. |
 | `Bork2d.Render` | `net11.0` | none | `Empty` | Vulkan renderer. |
 | `Bork2d.Assets` | `net11.0` | none | `Empty` | Pack VFS, loaders, descriptors, sprite assets, baking support. |
 | `Bork2d.Editor` | `net11.0` (planned) | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets` (+ Avalonia) | `Planned` | Avalonia editor library/app; JIT. |
@@ -95,7 +96,7 @@ decision log.
 | Assembly | Public types |
 | --- | --- |
 | `Bork2d.Api` | All contract interfaces and value types: `IEngine<TLayer>`, `IGame<TLayer>`, `ITime`, `IWindow`, `IInput`, `IAssets`, `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, `ILoggerFactory`, and future public exceptions/attributes. |
-| `Bork2d.Runtime` | `Bork2dAppBuilder<TLayer>`, `Bork2dApp`, and their option types. Nothing else. |
+| `Bork2d.Runtime` | `Bork2dAppBuilder<TLayer>`, `Bork2dApp`. Nothing else; options/runtime/stubs stay internal. |
 | `Bork2d.Editor` | `Bork2dEditorBuilder`, `Bork2dEditorApp`, and the public editor service types needed by `Project.Editor`. |
 
 ### Internal assemblies

@@ -1,0 +1,315 @@
+using Bork2d.Api;
+using Bork2d.Common;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace Bork2d.Runtime;
+
+/// <summary>
+/// Configures and builds a <see cref="Bork2dApp"/> for a game.
+/// </summary>
+/// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
+/// <remarks>
+/// <para>
+/// The builder is configured and built once. It has no thread affinity: configuration and
+/// <see cref="Build"/> may run on any thread. <see cref="Build"/> validates the configuration and
+/// creates the logger, engine, and scene root; it does not create a window, GPU resources, or
+/// threads.
+/// </para>
+/// <para>
+/// The game is injected as a caller-constructed instance. There is no parameterless-constructor
+/// constraint, reflection, or <c>Activator</c> usage.
+/// </para>
+/// </remarks>
+public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
+{
+    private readonly Bork2dAppOptions<TLayer> _options = new();
+
+    /// <summary>
+    /// Gets the collected options. Exposed internally for tests; not part of the public API.
+    /// </summary>
+    internal Bork2dAppOptions<TLayer> Options => _options;
+
+    /// <summary>
+    /// Supplies the caller-constructed game instance.
+    /// </summary>
+    /// <param name="game">The game instance. It must stay alive through <c>Run</c>.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="game"/> is <see langword="null"/>.</exception>
+    public Bork2dAppBuilder<TLayer> WithGame(IGame<TLayer> game)
+    {
+        ArgumentNullException.ThrowIfNull(game);
+
+        _options.Game = game;
+        _options.GameSetCount++;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the base assets pack path.
+    /// </summary>
+    /// <param name="path">A non-empty pack path. The file is not required to exist in M1.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is empty or whitespace.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is <see langword="null"/>.</exception>
+    public Bork2dAppBuilder<TLayer> WithAssetsPack(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new ArgumentException("The assets pack path must be non-empty.", nameof(path));
+        }
+
+        _options.AssetsPackPath = path;
+        return this;
+    }
+
+    /// <summary>
+    /// Configures Microsoft.Extensions.Logging for the app.
+    /// </summary>
+    /// <param name="configure">The logging configuration callback.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <remarks>
+    /// The callback is stored for WP5. The M1 host installs a null logger factory and does not
+    /// invoke the callback yet.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is <see langword="null"/>.</exception>
+    public Bork2dAppBuilder<TLayer> WithLogging(Action<ILoggingBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        _options.ConfigureLogging = configure;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the window title. Windowed mode only.
+    /// </summary>
+    /// <param name="title">The non-empty window title.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <exception cref="ArgumentException"><paramref name="title"/> is empty or whitespace.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="title"/> is <see langword="null"/>.</exception>
+    public Bork2dAppBuilder<TLayer> WithTitle(string title)
+    {
+        ArgumentNullException.ThrowIfNull(title);
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            throw new ArgumentException("The window title must be non-empty.", nameof(title));
+        }
+
+        _options.Title = title;
+        _options.WindowOptionsSet |= Bork2dWindowOptionFlags.Title;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the initial windowed framebuffer size.
+    /// </summary>
+    /// <param name="width">The positive width in pixels.</param>
+    /// <param name="height">The positive height in pixels.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    public Bork2dAppBuilder<TLayer> WithSize(int width, int height)
+    {
+        _options.Width = width;
+        _options.Height = height;
+        _options.WindowOptionsSet |= Bork2dWindowOptionFlags.Size;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets whether the window is resizable. Windowed mode only.
+    /// </summary>
+    /// <param name="resizable">Whether the window may be resized.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    public Bork2dAppBuilder<TLayer> WithResizable(bool resizable)
+    {
+        _options.Resizable = resizable;
+        _options.WindowOptionsSet |= Bork2dWindowOptionFlags.Resizable;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets whether the window starts fullscreen. Windowed mode only.
+    /// </summary>
+    /// <param name="fullscreen">Whether the window starts fullscreen.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    public Bork2dAppBuilder<TLayer> WithFullscreen(bool fullscreen)
+    {
+        _options.Fullscreen = fullscreen;
+        _options.WindowOptionsSet |= Bork2dWindowOptionFlags.Fullscreen;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the preferred vertical-sync mode. Windowed mode only.
+    /// </summary>
+    /// <param name="enabled">Whether vertical sync is preferred.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    public Bork2dAppBuilder<TLayer> WithVSync(bool enabled)
+    {
+        _options.VSync = enabled;
+        _options.WindowOptionsSet |= Bork2dWindowOptionFlags.VSync;
+        return this;
+    }
+
+    /// <summary>
+    /// Selects headless mode: no window, GPU, or render thread.
+    /// </summary>
+    /// <param name="ticksPerSecond">The tick rate; <c>0</c> means uncapped.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    public Bork2dAppBuilder<TLayer> WithHeadless(int ticksPerSecond = 60)
+    {
+        _options.Mode = Bork2dAppMode.Headless;
+        _options.HeadlessSelected = true;
+        _options.HeadlessTicksPerSecond = ticksPerSecond;
+        return this;
+    }
+
+    /// <summary>
+    /// Selects offscreen mode: windowless rendering to an internal target.
+    /// </summary>
+    /// <param name="width">The positive offscreen target width.</param>
+    /// <param name="height">The positive offscreen target height.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    public Bork2dAppBuilder<TLayer> WithOffscreen(int width, int height)
+    {
+        _options.Mode = Bork2dAppMode.Offscreen;
+        _options.OffscreenSelected = true;
+        _options.OffscreenWidth = width;
+        _options.OffscreenHeight = height;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the gameplay delta-time clamp.
+    /// </summary>
+    /// <param name="seconds">The positive clamp in seconds. This is not a pacing delay.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    public Bork2dAppBuilder<TLayer> WithMaxDeltaTime(double seconds)
+    {
+        _options.MaxDeltaTime = seconds;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets whether GPU validation layers are requested.
+    /// </summary>
+    /// <param name="enabled">Whether validation is requested.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    public Bork2dAppBuilder<TLayer> WithValidation(bool enabled)
+    {
+        _options.Validation = enabled;
+        return this;
+    }
+
+    /// <summary>
+    /// Validates the configuration and creates the app.
+    /// </summary>
+    /// <returns>The built app. The caller owns it and must dispose it.</returns>
+    /// <exception cref="Bork2dException">The configuration is invalid.</exception>
+    public Bork2dApp Build()
+    {
+        var game = Validate();
+
+        var engine = new Engine<TLayer, IGame<TLayer>>(
+            game,
+            new StopwatchTime(),
+            new UnsupportedWindow(),
+            new UnsupportedAssets());
+
+        ILoggerFactory loggerFactory = NullLoggerFactory.Instance;
+        var runtime = new AppRuntime<TLayer>(engine, game, loggerFactory, _options);
+        return new Bork2dApp(runtime);
+    }
+
+    private IGame<TLayer> Validate()
+    {
+        if (_options.GameSetCount == 0)
+        {
+            throw new Bork2dException(
+                "A game instance is required. Call WithGame(...) with a caller-constructed instance "
+                + "before Build().");
+        }
+
+        if (_options.GameSetCount > 1)
+        {
+            throw new Bork2dException(
+                "WithGame may be called only once per builder; the game instance is ambiguous.");
+        }
+
+        if (_options.Game is not { } game)
+        {
+            throw new Bork2dException("A non-null game instance is required before Build().");
+        }
+
+        if (_options.HeadlessSelected && _options.OffscreenSelected)
+        {
+            throw new Bork2dException(
+                "Headless and offscreen modes are mutually exclusive. Select exactly one mode.");
+        }
+
+        LayerValidation.Validate<TLayer>();
+
+        switch (_options.Mode)
+        {
+            case Bork2dAppMode.Windowed:
+                RequirePositive(_options.Width, "window width");
+                RequirePositive(_options.Height, "window height");
+                break;
+
+            case Bork2dAppMode.Headless:
+                RejectWindowOptions();
+                if (_options.HeadlessTicksPerSecond < 0)
+                {
+                    throw new Bork2dException(
+                        $"Headless ticks per second must be >= 0; got {_options.HeadlessTicksPerSecond}.");
+                }
+
+                break;
+
+            case Bork2dAppMode.Offscreen:
+                RejectWindowOptions();
+                RequirePositive(_options.OffscreenWidth, "offscreen width");
+                RequirePositive(_options.OffscreenHeight, "offscreen height");
+                break;
+
+            default:
+                throw new Bork2dException($"Unknown app mode '{_options.Mode}'.");
+        }
+
+        if (_options.MaxDeltaTime <= 0 || double.IsNaN(_options.MaxDeltaTime))
+        {
+            throw new Bork2dException(
+                $"Max delta time must be greater than zero; got {_options.MaxDeltaTime}.");
+        }
+
+        if (string.IsNullOrWhiteSpace(_options.AssetsPackPath))
+        {
+            throw new Bork2dException("The assets pack path must be non-empty.");
+        }
+
+        if (string.IsNullOrWhiteSpace(_options.Title))
+        {
+            throw new Bork2dException("The window title must be non-empty.");
+        }
+
+        return game;
+    }
+
+    private void RejectWindowOptions()
+    {
+        if (_options.WindowOptionsSet != Bork2dWindowOptionFlags.None)
+        {
+            throw new Bork2dException(
+                $"Window options ({_options.WindowOptionsSet}) cannot be combined with "
+                + $"'{_options.Mode}' mode.");
+        }
+    }
+
+    private static void RequirePositive(int value, string name)
+    {
+        if (value <= 0)
+        {
+            throw new Bork2dException($"The {name} must be positive; got {value}.");
+        }
+    }
+}
