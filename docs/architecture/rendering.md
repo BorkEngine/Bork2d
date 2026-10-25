@@ -255,7 +255,8 @@ excluded from the one-draw promise until it is.
 ### 7.1 World space
 
 - +X right, +Y up.
-- Rotation in radians, positive counter-clockwise around +Z.
+- Rotation in degrees, positive counter-clockwise around +Z, normalized to `[0, 360)` on
+  assignment. Internal matrix/projection math converts to radians at the boundary.
 - Scale is a multiplier; negative scale mirrors.
 - One world unit is abstract. A sprite's source pixels become units by dividing by its
   pixels-per-unit `scale`; `Camera.Size` and positions use units.

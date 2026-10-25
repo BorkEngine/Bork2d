@@ -64,7 +64,7 @@ public sealed class SceneCreationTests
         var engine = TestEngineFactory.Create();
         var parent = engine.CreateTransform(engine.Root);
         parent.LocalPosition = new Vector2(10f, 5f);
-        parent.LocalRotation = 0.5f;
+        parent.LocalRotation = 30f;
         parent.LocalScale = new Vector2(2f, 2f);
 
         var child = engine.CreateTransform(parent);

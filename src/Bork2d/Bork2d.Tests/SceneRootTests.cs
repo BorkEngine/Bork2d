@@ -1,4 +1,5 @@
 using System.Numerics;
+using Bork2d.Api;
 using Bork2d.Common;
 using Xunit;
 
@@ -6,6 +7,18 @@ namespace Bork2d.Tests;
 
 public sealed class SceneRootTests
 {
+    [Fact]
+    public void RootIsNotATransform()
+    {
+        var engine = TestEngineFactory.Create();
+
+        Assert.IsType<SceneRoot>(engine.Root);
+        Assert.Equal(typeof(object), typeof(SceneRoot).BaseType);
+        Assert.False(typeof(Transform).IsAssignableFrom(typeof(SceneRoot)));
+        Assert.Contains(typeof(ISceneRoot), typeof(SceneRoot).GetInterfaces());
+        Assert.DoesNotContain(typeof(Transform), typeof(SceneRoot).GetInterfaces());
+    }
+
     [Fact]
     public void RootIsAnIdentityTransformWithIdZero()
     {

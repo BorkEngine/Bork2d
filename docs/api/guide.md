@@ -250,7 +250,7 @@ camera.ClearColor = Color.Black;
 ```
 
 - `Size` is the **half** visible height in units. Width follows from viewport aspect.
-- World is Y-up, +X right. Rotation is radians, CCW.
+- World is Y-up, +X right. Rotation is in degrees, CCW, normalized to `[0, 360)` on assignment.
 - `Viewport` is normalized `(x, y, w, h)`, top-left origin.
 - Camera rotation/position come from its transform. Camera scale is not a zoom control.
 - Multiple cameras are supported; each non-empty camera issues one instanced draw.
@@ -296,7 +296,7 @@ sprite.Layer = GameLayer.World;
 sprite.ZIndex = 10;
 sprite.Tint = Color.White;
 sprite.LocalPosition = new Vector2(3, 1);
-sprite.LocalRotation = MathF.PI / 4f; // radians, CCW
+sprite.LocalRotation = 45f; // degrees, CCW
 sprite.LocalScale = new Vector2(2, 2);
 ```
 
@@ -325,7 +325,7 @@ Parenting:
 var rig = engine.CreateTransform(engine.Root);
 var turret = engine.CreateSpriteRender(rig);
 turret.LocalPosition = new Vector2(0.5f, 0);
-rig.LocalRotation = MathF.PI / 2f;
+rig.LocalRotation = 90f;
 ```
 
 Creating an object under a parent attaches it with its default local values, so it starts at the

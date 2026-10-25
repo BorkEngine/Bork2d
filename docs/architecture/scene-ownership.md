@@ -76,6 +76,12 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
 `ICamera<TLayer>` and `ISpriteRender<TLayer>` remain transforms; they can be parented anywhere
 in the rooted tree, not only directly under `Root`.
 
+The public contract is unchanged (`ISceneRoot : ITransform`), but the engine implements the root
+as a dedicated root node that implements `ISceneRoot` directly and is **not** a transform entity.
+Root and transforms share only the internal `ISceneNode` structural contract (child list, local /
+world matrix, structural lock); neither `ISceneNode` nor the concrete root type is public. Callers
+must treat `Root` through `ISceneRoot`/`ITransform` and must not assume a concrete transform type.
+
 Rules:
 
 - `Root.Parent` is always `null`; assigning a parent throws.
@@ -84,9 +90,10 @@ Rules:
 - Re-parenting preserves the composed world matrix exactly and recomputes local values. The
   internal transform stores the local affine matrix, so shear from a non-uniform scale combined
   with rotation survives a re-parent.
-- Local position/rotation/scale are an authored scalar view over that matrix: they round-trip
-  what was authored (negative scale axes, angles outside `(-π, π]`). A re-parent refreshes them
-  from the exact matrix and keeps the authored mirror axis when possible.
+- Local position/rotation/scale are an authored scalar view over that matrix: negative scale axes
+  round-trip, and `LocalRotation` is always in degrees normalized to `[0, 360)` (`-90` → `270`,
+  `360`/`720` → `0`). A re-parent refreshes them from the exact matrix, normalizes the decomposed
+  rotation back to `[0, 360)` degrees, and keeps the authored mirror axis when possible.
 - Removing a child (`Parent = null`) does not clear its local/world state.
 - Re-adding a removed object to a parent restores it without creating a new object.
 - `ITransform.DetachAll()` detaches direct children; their `Parent` becomes `null`.
@@ -159,11 +166,14 @@ scene-scoped ownership and does not change the leak semantics.
 
 Implemented in WP3 inside `Bork2d.Common` (all implementation types are internal):
 
-1. `EntityList<T>` and the weak registry are removed; the scene is a root-owned transform tree.
+1. `EntityList<T>` and the weak registry are removed; the scene is a root-owned scene tree with a
+   dedicated root node and transform entities.
 2. `ISceneRoot`/`IEngine.Root` are implemented; parent and local setters throw
-   `InvalidOperationException`, and the root stays a read-only identity transform.
+   `InvalidOperationException`, and the root stays a read-only identity transform. The root is a
+   dedicated node implementing `ISceneRoot` directly; it does not inherit the transform entity
+   type. Root and transforms share the internal `ISceneNode` structural contract.
 3. `CreateTransform`/`CreateCamera`/`CreateSpriteRender` attach to the supplied parent;
-   the camera/sprite creators reject a `null` parent.
+   the camera/sprite creators reject a `null` parent and non-engine parents.
 4. Parent add/remove, self/cycle rejection, world-preserving re-parent, `DetachAll()` on any
    transform, and root teardown all run under one scene-graph structural `System.Threading.Lock`.
    The transform stores its local affine matrix, so re-parenting preserves the composed world
@@ -174,8 +184,8 @@ Implemented in WP3 inside `Bork2d.Common` (all implementation types are internal
    monotonic and never reused.
 6. `Bork2d.Tests` covers rooted/unparented lifetime with `WeakReference`, remove/re-add, root
    teardown/re-add, read-only root, self/cycle rejection, exact-matrix world-preserving re-parent,
-   authored local scalar round-trip (negative scale axes and angles outside `(-π, π]`), entity-ID
-   order, and concurrent creation/mutation from workers.
+   authored local scalar round-trip (negative scale axes and degrees normalized to `[0, 360)`),
+   entity-ID order, and concurrent creation/mutation from workers.
 7. Scene entities have no `IDisposable`/`Dispose`/`IsAlive` and do not self-register anywhere.
 8. API docs and the threading/lifecycle notes were updated in the same change; the M1 spec's
    final status pass remains WP8.

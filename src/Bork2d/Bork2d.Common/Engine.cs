@@ -57,7 +57,7 @@ internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
         var transform = new Transform(_graph);
         if (parent is not null)
         {
-            transform.AttachAsNewChild(RequireEngineTransform(parent));
+            transform.AttachAsNewChild(RequireEngineNode(parent));
         }
 
         return transform;
@@ -65,17 +65,17 @@ internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
 
     public ICamera<TLayer> CreateCamera(ITransform parent)
     {
-        var parentTransform = RequireEngineTransform(parent);
+        var parentNode = RequireEngineNode(parent);
         var camera = new Camera<TLayer>(_graph);
-        camera.AttachAsNewChild(parentTransform);
+        camera.AttachAsNewChild(parentNode);
         return camera;
     }
 
     public ISpriteRender<TLayer> CreateSpriteRender(ITransform parent)
     {
-        var parentTransform = RequireEngineTransform(parent);
+        var parentNode = RequireEngineNode(parent);
         var sprite = new SpriteRender<TLayer>(_graph);
-        sprite.AttachAsNewChild(parentTransform);
+        sprite.AttachAsNewChild(parentNode);
         return sprite;
     }
 
@@ -91,15 +91,15 @@ internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
         }
     }
 
-    private static Transform RequireEngineTransform(ITransform parent)
+    private static ISceneNode RequireEngineNode(ITransform parent)
     {
         ArgumentNullException.ThrowIfNull(parent);
-        if (parent is not Transform transform)
+        if (parent is not ISceneNode node)
         {
             throw new Bork2dException(
-                $"A parent must be an engine-owned transform; got '{parent.GetType().FullName}'.");
+                $"A parent must be an engine-owned scene node; got '{parent.GetType().FullName}'.");
         }
 
-        return transform;
+        return node;
     }
 }

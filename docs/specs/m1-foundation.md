@@ -49,6 +49,7 @@ M1 is complete when all of these are demonstrated:
 | Threads | No thread affinity. Any thread may call the public API during `Setup`/`Tick`/`Teardown`; locks/queues make it safe. |
 | AOT | Runtime/game AOT-safe; editor/baker JIT later. |
 | Logging | `IEngine.LoggerFactory`; `WithLogging(Action<ILoggingBuilder>)`; pretty ZLogger default. |
+| Rotation | Public unit is **degrees**, positive CCW; `LocalRotation` normalized to `[0, 360)` on assignment (D-025). Internal matrix math stays in radians. |
 | Style | Warnings-as-errors, style errors, `dotnet format` gate, all projects. |
 | Tests | xUnit. |
 | Pack | Format accepted; actual pack implementation is M3. M1 exposes only builder option validation. |
@@ -128,11 +129,15 @@ Acceptance: API compiles, docs match, dependency test allows only the intended r
 
 Replace `EntityList<T>` and the weak registry with:
 
-- `Transform` child storage (`List<ITransform>`/array) and parent management;
-- `SceneRoot : Transform, ISceneRoot`:
+- `Transform` child storage (`List<Transform>`/array) and parent management;
+- an internal `ISceneNode` structural contract shared by `Transform` and `SceneRoot` (graph,
+  entity ID, parent node, local/world matrix, child-list operations); it is not public;
+- `SceneRoot` implements `ISceneRoot` **directly** (it does **not** inherit `Transform`):
   - read-only: parent/local setters throw `InvalidOperationException`;
-  - inherits `DetachAll()` from `ITransform`;
+  - inherits `DetachAll()` from `ITransform` and implements it over its own child list;
   - root itself remains valid;
+- `Transform` stores the parent as an internal scene node and exposes it as `ITransform`; only
+  engine-owned nodes (root or transform) are accepted as parents;
 - parent attach/detach:
   - remove from old parent, add to new parent;
   - reject self/cycles;
