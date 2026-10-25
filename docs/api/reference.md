@@ -1,10 +1,10 @@
 # API Reference
 
-> **Status:** target contract. `Current` means the member exists in `Bork2d.Api` today;
-> `Planned` means an agreed addition that is **not** in the scaffold; `Open` means the shape
-> or semantics is undecided. The current code is partial; see
-> [Projects and dependencies](../architecture/projects.md) and the
-> [roadmap](../roadmap.md).
+> **Status:** describes the M1 contract. `Current` means the member exists in `Bork2d.Api` and is
+> implemented for the M1 one-tick host; `Planned` means an agreed addition that is **not
+> implemented yet**; `Open` means the shape or semantics is undecided. The window/input, asset,
+> and rendering implementations are later milestones; see
+> [Projects and dependencies](../architecture/projects.md) and the [roadmap](../roadmap.md).
 
 ## 1. Contract-wide rules
 
@@ -25,7 +25,7 @@ are snapshots.
 | `builder/Build/Run/Dispose` | Any thread; no main-thread requirement. |
 | `IEngine.LoggerFactory` | Any thread; Microsoft.Extensions.Logging factories/loggers are thread-safe. |
 | `IAssets.LoadSprite` / `LoadAsset<T>` / `LoadData` / `LoadPack` / `Exists` | Any thread; requests are thread-safe. Completion is asynchronous. `Browse` is for tools, not per-frame. |
-| Value types (`Sprite`, `AssetInfo`, `Color`, `Vector2`, enums) | Any thread; they are copies. |
+| Value types (`Sprite`, `Color`, `Vector2`, enums; `AssetInfo` is M3) | Any thread; they are copies. |
 | Renderer, swapchain, GPU uploads | Render thread only; no public API. |
 | Asset parsing/decompression/resource table | Asset threads only; no public API. |
 
@@ -136,14 +136,14 @@ assume a concrete transform type.
 | --- | --- | --- |
 | `Time` | `Current` | Monotonic time/delta; snapshot reads from any thread. |
 | `Window` | `Current` | Window controls. Windowed only; throws in offscreen/headless. |
-| `Input` | `Current` | Input state. Windowed only; throws in offscreen/headless. M1 scaffold throws `NotSupportedException` (windowed input is M2). |
+| `Input` | `Current` | Input state. Windowed only; throws in offscreen/headless. The M1 host has no window, so `Input` throws `NotSupportedException` until the M2 window/input implementation. |
 | `Assets` | `Current` | Pack/asset requests; thread-safe methods. |
 | `LoggerFactory` | `Current` | App-owned Microsoft.Extensions.Logging/ZLogger factory created by the builder; create per-category loggers from it. Non-null for built apps; usable in `Setup`. Disposed by `Bork2dApp.Dispose()`. |
-| `Root` | `Current` | Read-only root of the strong scene graph; app-owned. `Root.DetachAll()` detaches children. Implemented in the M1 engine (WP3); the public host that creates the engine is WP4. |
+| `Root` | `Current` | Read-only root of the strong scene graph; app-owned. `Root.DetachAll()` detaches children. Created by `Bork2dAppBuilder.Build()` in the M1 host. |
 | `CreateTransform(parent)` | `Current` | Creates a transform under `parent`, or standalone when `parent` is null. A new node is attached with its default local values, so it starts at the parent's origin. Inside `Setup`/`Tick`; workers may create during a tick. Implemented in WP3. |
 | `CreateCamera(parent)` | `Current` | Creates a camera under `parent`; parent is required. Workers may create during a tick. Implemented in WP3. |
 | `CreateSpriteRender(parent)` | `Current` | Creates a sprite renderable under `parent`; parent is required. Workers may create during a tick. Implemented in WP3. |
-| `Exit()` | `Current` | Graceful shutdown after the current tick; any thread. The M1 scaffold sets the shutdown flag read by the placeholder loop; the real loop is WP4. |
+| `Exit()` | `Current` | Graceful shutdown request; any thread. The M1 one-tick smoke finishes its `Setup`/`Tick`/`Teardown` sequence regardless; the mode loop that consumes the request is M2/M7. |
 
 Notes:
 
@@ -300,6 +300,9 @@ public readonly record struct AssetInfo(
     long Size,
     string PackPath);
 ```
+
+`LoadPack`, `Browse`, `Exists`, and `AssetInfo` are **`Planned` for M3**. The M1 `IAssets`
+interface contains only `LoadAsset<T>`, `LoadSprite`, and `LoadData`.
 
 | Member | Status | Semantics |
 | --- | --- | --- |
@@ -459,8 +462,9 @@ public readonly record struct Sprite(int Id)
 - Equality by `Id`; no public implicit `int` conversion.
 - Not serializable; data/save files use asset paths.
 
-### `AssetInfo`
+### `AssetInfo` (planned, M3)
 
+Planned for the M3 pack/browse API; it is not in the M1 `Bork2d.Api`. When it lands,
 `AssetInfo(Path, IsRaw, IsCompressed, Length, Size, PackPath)` describes one visible asset in
 the merged pack filesystem. `Length` is stored bytes; `Size` is decompressed bytes;
 `PackPath` is the pack that supplies the visible entry. No payload is loaded.
@@ -488,9 +492,9 @@ CLR default is `None`; `CreateCamera(parent)` explicitly sets `Color`.
 
 ### `KeyCode` / `MouseButton`
 
-- `KeyCode` maps physical SDL scancodes; final set `Planned`. Scaffold contains sample members
-  only (`A`; `Left`).
-- `MouseButton` will cover left/right/middle/back/forward; scaffold contains `Left`.
+- `KeyCode` maps physical SDL scancodes; final set `Planned`. M1 contains sample members only
+  (`A`; `Left`).
+- `MouseButton` will cover left/right/middle/back/forward; M1 contains `Left`.
 - Numeric values are unstable; do not serialize them.
 - Text uses `OnTextTyped`, not `KeyCode`.
 
@@ -635,7 +639,7 @@ for argument/programming errors raised directly by callers.
 | `ISceneRoot` / `IEngine.Root` | Declarations present. Implemented in the internal M1 engine (WP3): read-only identity root that owns the scene. The WP4 host creates the engine and clears the root on `Dispose`. |
 | Parent-required creators | Implemented (WP3): attached to the supplied parent; a `null` parent throws `ArgumentNullException`. |
 | `ITransform.DetachAll` | Implemented (WP3): detaches direct children under the structural lock on any transform. |
-| `IEngine.Input` | Declaration present. Scaffold throws `NotSupportedException`; the M1 host has no window, so input remains a stub until M2. |
+| `IEngine.Input` | Declaration present. The M1 host has no window, so `Input` throws `NotSupportedException` until the M2 window/input implementation. |
 | `IEngine.Exit` | Declaration present. The one-tick M1 smoke ignores it after the tick; the real loop is M2/M7. |
 | `IEngine.LoggerFactory` | Implemented (WP5): non-null app-owned Microsoft.Extensions.Logging/ZLogger factory, usable in `Setup`; disposed by the app. |
 | Startup logging | Implemented (WP5): `Build` logs mode, validation result, and layer type from `Bork2d.Runtime`. |
@@ -650,13 +654,13 @@ for argument/programming errors raised directly by callers.
 | Builder/app | `Current` (WP4): public `Bork2dAppBuilder<TLayer>`, validation, one-tick `Run`, idempotent `Dispose`, and M1 stubs. Real window/GPU loop is M2/M7. |
 | Threading | The one-tick run, builder, and app `Dispose` have no thread affinity; the WP3 scene tree provides the engine-owned structural and per-object locks. |
 | Headless/offscreen | Mode selection and validation exist (WP4), but both use the same one-tick smoke in M1; real mode startup is M6/M7. |
-| NativeAOT | No analyzers/publish. |
+| NativeAOT | `Current` (WP6): `IsAotCompatible` plus trim/AOT analyzers on the runtime libraries; `Bork2d.AotSmoke` publishes/runs locally with zero AOT/trim warnings. A local gate, not CI. |
 | Camera defaults | Implemented (WP3): size 10, full viewport, all declared layers, black clear, `ZIndex` 0. |
 | Camera ordering | `ICamera.ZIndex` property implemented (WP3): default 0; ascending/higher-later contract documented, ordering applied in M8; ties unspecified. |
 | Entity identity/order | None: no entity IDs, no ordered discovery, no public tree enumeration (WP3/D-026). |
 | Frame snapshots | Internal value-only `CameraSnapshot`/`SpriteSnapshot` structs planned for M7; not part of `Bork2d.Api`. Capture is unordered after `Tick`. |
 | Entity ownership | Root-owned strong **unordered** tree (WP3); no weak registry, no entity `Dispose`/`IsAlive`. |
-| Layer semantics | Undefined; target one bit/mask with validation. |
+| Layer semantics | Builder validation (WP3): an `int`-backed `[Flags]` enum with 1–32 named single-bit values; `None = 0` allowed, composites rejected. Render-time invalid-layer diagnostics are M8. |
 | Sprite sizing | No assets; target UVs/pivot/topology/optional indices/pixels-per-unit scale. |
 | Assets/PCK | `Bork2d.Assets` empty. |
 

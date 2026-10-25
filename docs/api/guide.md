@@ -468,6 +468,9 @@ for tools and diagnostics, not per-frame gameplay.
   same object later. `Root.DetachAll()` detaches the scene's top-level children;
   `ITransform.DetachAll()` works on any transform. Both are thread-affinity-free; calls are
   allowed during Setup/Tick/Teardown.
+- The scene tree is **unordered** and has no entity IDs, ordered discovery, or public child
+  enumeration. Snapshot capture (M7) walks it in no specified order; use `ZIndex` values, not
+  creation order, when draw order matters.
 - Losing a reference to a **rooted** object does not remove it; remove it from the scene to
   release it. Losing a reference to an **unparented** object lets it be collected.
 - Create cameras/sprites/transforms inside the `Setup`/`Tick`/`Teardown` window. Workers may

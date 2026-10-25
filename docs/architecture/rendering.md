@@ -324,7 +324,7 @@ never treated as world units.
 
 ### 7.5 Defaults
 
-`CreateCamera(parent)` is planned to apply:
+`CreateCamera(parent)` applies:
 
 | Property | Default |
 | --- | --- |
@@ -333,9 +333,11 @@ never treated as world units.
 | `CullingMask` | all declared layer flags |
 | `Clear` | `ClearKind.Color` |
 | `ClearColor` | `Color.Black` |
+| `ZIndex` | `0` |
 | Transform | identity at origin |
 
-The current implementation uses `Cyan` and a zero mask; both are placeholders.
+These defaults are implemented in the M1 camera (WP3). Renderer behavior (drawing, sprite
+sorting, camera ordering) remains M6/M8 work.
 
 ## 8. Sorting, layers, and clears
 
@@ -379,7 +381,8 @@ the GPU. Frustum/AABB culling is a planned optimization; it must not change logi
 - A full-screen HUD camera with `Clear.None` and a higher `ZIndex` is the overlay pattern.
 
 Camera order is an explicit property (`ICamera<TLayer>.ZIndex`); ties remain unspecified and do
-not change one-draw-per-camera.
+not change one-draw-per-camera. M1 exposes the property and default; the renderer applies the
+ordering in M8 (D-026).
 
 ## 9. Synchronization and frames in flight
 
@@ -526,7 +529,7 @@ linear instance packing with zero steady-state allocations.
 | Bindless overflow | Hard startup failure, lower capacity, or a documented fallback that adds draws. |
 | Sampler defaults | Per-descriptor point/linear and wrap defaults; editor overrides. |
 | Mipmaps/compression | v1 raw RGBA8 only? Mips/KTX2 timeline. |
-| Camera order | `ZIndex` ascending (accepted); ties unspecified. |
+| Camera order | Resolved (D-026): `ZIndex` ascending; ties unspecified; applied in M8. |
 | Frustum culling | v1 layer mask only; AABB later. |
 | Offscreen readback | Internal discard now; public capture later. |
 | MSAA | None in v1; confirm no 2D need. |

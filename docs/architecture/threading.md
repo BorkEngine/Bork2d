@@ -1,9 +1,10 @@
 # Threading and Frame Handoff
 
 > **Status:** target design for frame handoff. The M1 scene tree (WP3) is implemented with the
-> structural + per-object `System.Threading.Lock` rules in §2; there is still no render thread,
-> no snapshot ring, and `Engine.Run()` is a placeholder. This document defines the thread
-> contract the implementation must satisfy.
+> structural + per-object `System.Threading.Lock` rules in §2, and the public `Bork2dApp.Run()`
+> is a one-tick `Setup` → `Tick` → `Teardown` smoke that returns. There is still no render
+> thread, no snapshot ring, and no mode loop. This document defines the thread contract the
+> implementation must satisfy.
 
 ## 1. Threads by mode
 
@@ -415,8 +416,8 @@ The threading milestone is not done until tests 1–4 pass reliably under stress
 
 | Area | Current | Target |
 | --- | --- | --- |
-| Main loop | `while (true) { _game.Tick(); }` | Mode-aware loop with bounded snapshot ring. |
-| Time | `StopwatchTime` unused | Wired with delta clamp; no target rate. |
+| Main loop | One-tick `Setup` → `Tick` → `Teardown` smoke (`Bork2dApp.Run`); no mode loop. | Mode-aware loop with bounded snapshot ring. |
+| Time | `StopwatchTime` created by `Build()`; `NewFrame` is not called by the smoke. | Wired with delta clamp; no target rate. |
 | Render thread | None | Windowed/offscreen. |
 | Snapshot slots | None | Three slots held until frame fence. |
 | Headless | None | No SDL/GPU/render thread; timer-paced (default 60, 0 = uncapped). |

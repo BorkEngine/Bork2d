@@ -1,22 +1,24 @@
 # Projects and Dependencies
 
-> **Status:** the dependency rules below are the target. `Common → Api`, `Runtime → Api, Common,
-> Assets, Render`, and `Tests → all` are wired. `Bork2d.Runtime` now has the M1 builder/host
-> skeleton and app-owned Microsoft.Extensions.Logging/ZLogger configuration; `Bork2d.AotSmoke` is
-> the M1 NativeAOT one-tick smoke executable. All runtime/game projects enable `IsAotCompatible`
-> with the trim and AOT analyzers (WP6). `Assets` and `Render` are still empty until their
-> milestones (M3/M6).
+> **Status:** the dependency rules below are `Current` for the M1 project graph and enforced by
+> the dependency test. `Common → Api`, `Assets → Api, Common`, `Render → Api, Common, Assets`,
+> `Runtime → Api, Common, Assets, Render`, and `Tests → all` are wired. `Bork2d.Runtime` contains
+> the M1 builder/host and app-owned Microsoft.Extensions.Logging/ZLogger configuration;
+> `Bork2d.AotSmoke` is the M1 NativeAOT one-tick smoke executable. All runtime/game projects
+> enable `IsAotCompatible` with the trim and AOT analyzers (WP6). `Assets` and `Render` are wired
+> but have no implementation until their milestones (M3/M6).
 
 ## 1. Current projects
 
 | Project | Target framework | References | State | Responsibility |
 | --- | --- | --- | --- | --- |
 | `Bork2d.Api` | `net11.0` | none | `Partial` | Public contracts and value types. |
-| `Bork2d.Common` | `net11.0` | `Bork2d.Api` | `Partial` | Engine implementation, entity state, transforms, snapshots, time, Nerdbank.MessagePack generated-shape policy. |
+| `Bork2d.Common` | `net11.0` | `Bork2d.Api` | `Partial` | Engine implementation: root-owned unordered scene tree, transforms, time, layer validation, Nerdbank.MessagePack generated-shape policy. Snapshot structs are M7. |
 | `Bork2d.Runtime` | `net11.0` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render` | `Partial` | Public builder/app/host and app-owned logging (M1); later SDL platform and full composition. |
-| `Bork2d.Render` | `net11.0` | none | `Empty` | Vulkan renderer. |
-| `Bork2d.Assets` | `net11.0` | none | `Empty` | Pack VFS, loaders, descriptors, sprite assets, baking support. |
+| `Bork2d.Render` | `net11.0` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets` | `Empty` | Vulkan renderer; the project reference graph is wired, the implementation is empty. |
+| `Bork2d.Assets` | `net11.0` | `Bork2d.Api`, `Bork2d.Common` | `Empty` | Pack VFS, loaders, descriptors, sprite assets, baking support; references wired, no implementation. |
 | `Bork2d.AotSmoke` | `net11.0` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Runtime` | `Smoke` | NativeAOT one-tick smoke executable (WP6); not part of the game template. |
+| `Bork2d.Tests` | `net11.0` | all five engine projects plus the `Bork2d.AotSmoke` project | `Current` | xUnit suite, dependency-matrix test, and AOT/test coverage. The AotSmoke project reference only copies the app next to the tests; no test type uses it. |
 | `Bork2d.Editor` | `net11.0` (planned) | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets` (+ Avalonia) | `Planned` | Avalonia editor library/app; JIT. |
 
 All existing projects live in `src/Bork2d/` and are listed in
@@ -114,7 +116,7 @@ decision log.
 
 | Assembly | Public types |
 | --- | --- |
-| `Bork2d.Api` | All contract interfaces and value types: `IEngine<TLayer>`, `IGame<TLayer>`, `ITime`, `IWindow`, `IInput`, `IAssets`, `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, `ILoggerFactory`, and future public exceptions/attributes. |
+| `Bork2d.Api` | All contract interfaces and value types: `IEngine<TLayer>`, `IGame<TLayer>`, `ITime`, `IWindow`, `IInput`, `IAssets`, `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `Bork2dException`, `ILoggerFactory`, and future public exceptions/attributes. `AssetInfo` is planned for M3 with the pack/browse API. |
 | `Bork2d.Runtime` | `Bork2dAppBuilder<TLayer>`, `Bork2dApp`. Nothing else; options/runtime/stubs stay internal. |
 | `Bork2d.Editor` | `Bork2dEditorBuilder`, `Bork2dEditorApp`, and the public editor service types needed by `Project.Editor`. |
 
@@ -247,9 +249,9 @@ Target state:
 5. **Does it add a reference arrow?** Update the matrix in this document and the decision
    log. The dependency test will fail otherwise.
 
-## 8. Migration from the current graph
+## 8. M1 migration (completed)
 
-`Current → Planned` work for the foundation milestone:
+The foundation milestone completed the graph migration:
 
 | Change | Reason |
 | --- | --- |
@@ -258,13 +260,14 @@ Target state:
 | Add `Render → Api, Common, Assets` references | Renderer consumes snapshots and the resource table. |
 | Make implementation types `internal` and add `InternalsVisibleTo` | Stop leaking `Common`/`Render`/`Assets` as public APIs. |
 | Move platform code (SDL) into `Runtime` internals | Keep `Common` platform-independent; `Render` must not call SDL. |
-| Add `Bork2d.Editor` and `Bork2d.Tests` projects | Editor and test coverage are planned deliverables. |
-| Add AOT/trim analyzers and a publish smoke test | NativeAOT is a baseline requirement, not a late packaging step. |
+| Add `Bork2d.Tests` (xUnit + dependency test) | Test coverage and an enforced reference matrix. |
+| Add `Bork2d.AotSmoke` with `PublishAot` | NativeAOT is a baseline requirement, not a late packaging step. |
+| Add AOT/trim analyzers to the runtime libraries | Catch reflection/trimming problems during normal builds. |
 | Delete placeholder `Class1` files | They are not part of the design. |
-| Add `Directory.Build.props`, `global.json`, test project | Baseline quality and reproducibility. |
+| Add `Directory.Build.props`, `global.json`, `.editorconfig`, `.gitattributes` | Baseline quality and reproducibility. |
 
-The migration is the first roadmap milestone; it should not change gameplay behavior because
-there is no runnable engine yet.
+`Bork2d.Editor` remains planned (M5). `Bork2d.Render`/`Bork2d.Assets` are reference-wired but
+still empty; their references are asserted by the dependency test so the graph cannot drift.
 
 ## 9. Related documents
 
