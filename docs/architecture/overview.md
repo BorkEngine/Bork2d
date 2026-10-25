@@ -1,0 +1,286 @@
+# Architecture Overview
+
+> **Status:** target design with a partial implementation. The sections marked `Current`
+> describe the scaffold; everything else is `Planned` unless called out.
+
+## 1. Purpose
+
+Bork2d is a small, opinionated 2D engine. It is not a general-purpose scene toolkit. The
+design optimises for three things:
+
+1. **A small public contract.** A game developer writes against two assemblies and never
+   sees SDL, Vulkan, Silk.NET, the pack filesystem, or the renderer internals.
+2. **Predictable frame Behavior.** Gameplay is tick-scoped and reaches a quiescent point
+   before capture; rendering consumes immutable snapshots and never touches live game state.
+3. **Cheap draws.** Every camera renders its visible sprites with one instanced draw call,
+   using bindless textures and dynamic rendering.
+
+The engine also ships a data-only editor: no scene editing, only texture slicing and editing
+of custom serializable classes.
+
+## 2. Goals
+
+- **2D-first, sprite-based rendering** with cameras, layers, z-ordering, tint, and transforms.
+- **Vulkan 1.3** renderer with dynamic rendering, descriptor indexing (bindless textures),
+  and instancing. No render-pass/framebuffer objects for the swapchain.
+- **SDL2** for window creation, input, and Vulkan surface integration.
+- **Separate tick and render threads.** While the renderer presents frame N, the game ticks
+  frame N+1.
+- **Explicit thread model.** Game code may run worker threads inside a tick. Engine registries
+  are safe for concurrent creation/disposal, and distinct entities can be mutated in parallel;
+  all workers must be joined before the tick ends and before the snapshot is taken. Concurrent
+  access to the same entity is the game's responsibility.
+- **NativeAOT runtime.** The game/runtime is published with NativeAOT and is trim-safe; the
+  editor and build tools stay JIT. Runtime serialization is source-generated, and game code is
+  passed to the builder as an instance.
+- **Packed, ID-based assets.** Game code and snapshots carry `Sprite` handles; the runtime reads
+  `assets.pck` (plus overlays), loads/decompresses in the background, and skips handles whose
+  sprite/texture is not ready. TOML is source/editor format only.
+- **Headless and offscreen modes.** Dedicated servers can run with no window, GPU, or render
+  thread; tests can render windowless to an internal offscreen target.
+- **A short, composable startup API** through a builder in `Bork2d.Runtime`.
+- **Windows first**, with portable boundaries so Linux/macOS do not require an architectural
+  rewrite.
+- **A game solution layout that keeps game code clean:** `Project.Common` (game + assets),
+  `Project.Desktop` (host), `Project.Editor` (extensible Avalonia editor host).
+
+## 3. Non-goals for v1
+
+These are explicitly out of scope until the roadmap says otherwise:
+
+- 3D rendering, HDR rendering, MSAA, post-processing.
+- A full ECS, scene-graph editing, prefabs, or a scene editor.
+- Physics, collision, audio, networking, and in-game UI.
+- Fixed-timestep simulation with render interpolation. v1 uses a variable timestep.
+- Hot reload of assets or shaders (a later optimization).
+- Multi-window hosting; one app process, with windowed, offscreen, or headless mode.
+- Linux/macOS as supported targets at v1. The abstractions must not block them.
+- A visual shader/material system, per-sprite custom materials, or variable-topology sprite
+  meshes in v1.
+- Persisting runtime `Sprite` handles. Assets are referenced by stable keys in data.
+
+## 4. System context
+
+```mermaid
+flowchart TB
+  subgraph game["Game solution"]
+    PC["Project.Common<br/>game code + assets"]
+    PD["Project.Desktop<br/>entry point"]
+    PE["Project.Editor<br/>asset editing host"]
+  end
+
+  subgraph engine["Bork2d"]
+    API["Bork2d.Api<br/>public contracts"]
+    RT["Bork2d.Runtime<br/>builder + host + modes"]
+    CORE["Bork2d.Common<br/>engine state + snapshots"]
+    REN["Bork2d.Render<br/>Vulkan renderer"]
+    ASSETS["Bork2d.Assets<br/>pack VFS + loading"]
+    EDITOR["Bork2d.Editor<br/>Avalonia editor"]
+  end
+
+  SDL["SDL2"]
+  VK["Vulkan 1.3"]
+  OS["OS + GPU driver"]
+
+  PC --> API
+  PD --> RT
+  PD --> PC
+  PE --> EDITOR
+  PE --> PC
+
+  RT --> API
+  RT --> CORE
+  RT --> REN
+  RT --> ASSETS
+  CORE --> API
+  REN --> API
+  REN --> CORE
+  REN --> ASSETS
+  ASSETS --> CORE
+  EDITOR --> ASSETS
+  EDITOR --> CORE
+
+  RT --> SDL
+  REN --> VK
+  SDL --> OS
+  VK --> OS
+```
+
+The developer-visible dependency chain is intentionally short:
+
+- `Project.Common` references **only** `Bork2d.Api` (plus BCL/System.Numerics).
+- `Project.Desktop` references **only** `Bork2d.Runtime` (plus `Project.Common`).
+- The engine projects are never referenced directly by game code.
+
+The exact reference rules and the public/internal split are in
+[Projects and dependencies](projects.md).
+
+## 5. Runtime topology
+
+The engine owns a main/tick thread and asset loader threads in every mode. It additionally
+owns a render thread in windowed and offscreen modes. The game may add short-lived workers
+inside a tick.
+
+| Mode | Main/tick | Render thread | SDL | Vulkan | Pacing |
+| --- | :-: | :-: | :-: | :-: | --- |
+| Windowed | yes | yes | yes | swapchain | bounded run-ahead; presentation/GPU rate |
+| Offscreen | yes | yes | no | offscreen target | bounded run-ahead; GPU rate |
+| Headless | yes | no | no | no | uncapped (no artificial delay) |
+
+| Thread | Owner | Responsibilities | Never does |
+| --- | --- | --- | --- |
+| **Main / tick** | `Bork2d.Runtime` | `IGame.Setup/Tick/Teardown`, tick scope, entity/asset requests, time, snapshot publication (windowed/offscreen), SDL events (windowed), shutdown. | Create or submit Vulkan work. |
+| **Render** | `Bork2d.Render` | Vulkan instance handoff, device, swapchain (windowed) or offscreen targets, GPU uploads, instance building, draws, present (windowed), fences. | Touch SDL window state or game objects. |
+| **Asset loader(s)** | `Bork2d.Assets` | Pack opening, file/decompression I/O, MessagePack/sprite/texture decoding, immutable resource table, upload requests. | Touch Vulkan or the swapchain. |
+
+```mermaid
+flowchart LR
+  subgraph main["Main (tick) thread"]
+    SDL["SDL window + events (windowed)"]
+    GAME["IGame.Tick"]
+    BUILD["Snapshot builder (windowed/offscreen)"]
+  end
+
+  subgraph render["Render thread (windowed/offscreen)"]
+    CONTROL["Control queue"]
+    DEVICE["Vulkan device + swapchain/offscreen"]
+    CONVERT["Resolve sprites + build instances"]
+    DRAW["One draw per non-empty camera"]
+    PRESENT["Present (windowed)"]
+  end
+
+  subgraph assets["Asset threads"]
+    PACK["Pack VFS + decode"]
+    TABLE["Immutable resource table"]
+  end
+
+  SDL --> GAME --> BUILD
+  BUILD -- "3 snapshot slots" --> CONVERT
+  TABLE --> CONVERT
+  PACK --> TABLE
+  SDL -- "resize / close / fullscreen" --> CONTROL
+  CONTROL --> DEVICE
+  CONVERT --> DRAW --> PRESENT
+  PRESENT -. "frame fence frees snapshot + frame slot" .-> BUILD
+```
+
+All scene mutation happens inside the tick window. The main thread owns the loop, time, and
+snapshot capture; game workers may create or mutate distinct entities during the tick and must
+be joined before it returns. The renderer receives a copy of what to draw, never a reference to
+a live entity. Assets are read from pack overlays by loader threads and published through an
+immutable resource table; GPU upload happens on the render thread.
+
+## 6. Frame model at a glance
+
+One tick (windowed/offscreen):
+
+1. SDL events are pumped on the main thread (windowed only): input edges, resize, close, text.
+2. The loop acquires a free snapshot slot. It waits only when the ring is full; there is no
+   target tick rate, deadline timer, or `Sleep`.
+3. `ITime` advances: `DeltaTime` is wall-clock time since the previous tick start, clamped.
+4. `IGame.Tick()` runs on the main thread and opens the tick window. The game may create and
+   mutate distinct entities, including from joined workers; all workers must finish before
+   `Tick` returns.
+5. The engine copies cameras and sprite renderables into the slot, converts generic layer types
+   to bits, and publishes it.
+6. The render thread takes the newest published snapshot, resolves sprite handles against the
+   current asset table, sorts/filters, and copies instances into its GPU frame buffer.
+7. The renderer draws one instanced call per non-empty camera and presents (windowed) or renders
+   offscreen. The frame fence frees the snapshot slot and the GPU frame slot; the tick may then
+   run ahead again.
+
+A render frame may show a snapshot one or more ticks old if the tick is faster; a snapshot may
+never be presented if a newer one supersedes it. The tick can run ahead only as far as the
+three-slot ring allows, then it blocks on a free slot. Headless mode has no ring or renderer and
+ticks uncapped, with no artificial delay. The state machine is in
+[Threading and frame handoff](threading.md).
+
+## 7. Invariants
+
+These are the rules the implementation and all future changes must preserve. Violating one
+is an architecture bug, not a code-style preference.
+
+1. **Only `Bork2d.Api` and `Bork2d.Runtime` are public surfaces.** Internal projects may
+   change or disappear between releases.
+2. **`Bork2d.Api` contains no GPU, OS, or third-party types.** No Vulkan handles, no SDL
+   types, no Silk.NET namespaces, no `IntPtr` window handles. It uses BCL types only.
+3. **All scene mutation happens inside the tick window, and the tick is quiescent at
+   capture.** Cameras, sprites, transforms, parenting, and disposal are mutated only during
+   `Setup`, `Tick`, or `Teardown`. During a tick, game workers may create or mutate distinct
+   entities; they must be joined before `Tick` returns. The engine serialises structural
+   state (IDs, registries) but not concurrent writes to the same entity/property; the game
+   must synchronise shared entities.
+4. **Snapshots are immutable after publication.** The render thread never reads a live
+   entity, never mutates snapshot memory, and never blocks the tick on a specific frame. The
+   tick may wait only when the snapshot ring is full or a GPU frame slot is unavailable.
+5. **Snapshots carry handles, not assets.** `Sprite` is an opaque ID; the renderer resolves it
+   against the pack-backed resource table at draw time and skips anything not ready.
+6. **A camera draws its visible sprites with at most one instanced draw call.** Empty cameras
+   draw zero calls. The total is one per non-empty camera, not one per sprite or texture. Each
+   instance carries the sprite asset's four quad vertices and UVs.
+7. **Layers are single bits; culling masks are combinations.** A renderable with layer `0` or
+   more than one bit set is invalid and is skipped with a debug diagnostic.
+8. **World units are abstract, Y-up, with CCW radians.** `Camera.Size` is the half visible
+   height. Sprite assets carry vertices, UVs, and a per-sprite pixels-to-units scale; there is
+   no global setting.
+9. **There is no depth buffer in v1.** Draw order is layer, then z-index, then stable entity
+   order. `ClearKind.Depth` is reserved and does nothing.
+10. **At most one window and one app process in v1.** Modes are windowed, offscreen, or
+    headless; headless has no window or GPU.
+11. **No steady-state per-frame allocations** in the tick snapshot builder or renderer hot path.
+12. **The runtime is NativeAOT- and trim-safe.** No runtime reflection, assembly scanning,
+    runtime TOML, or dynamic code; serializers are source-generated. The editor/baker are JIT.
+13. **`assets.pck` is the runtime asset source.** TOML and source images live in
+    `Project.Common`; only baked MessagePack/raw assets ship. Overlays are packs, later wins.
+14. **Pre-1.0 means breaking changes are allowed**, but every public change must update the API
+    guide, API reference, and decision log in the same change.
+
+## 8. Project responsibilities
+
+| Project | Responsibility | Status |
+| --- | --- | --- |
+| `Bork2d.Api` | Public contracts and value types. The only assembly `Project.Common` needs. | `Partial` |
+| `Bork2d.Common` | Engine implementation, entity state, transform math, snapshot building, time. Platform-agnostic. | `Partial` |
+| `Bork2d.Runtime` | Public builder/host: SDL platform (windowed), Vulkan bootstrap, headless/offscreen composition root. | `Empty` |
+| `Bork2d.Render` | Vulkan device, swapchain (windowed) or offscreen targets, pipelines, bindless textures, instance buffers, draws, present. | `Empty` |
+| `Bork2d.Assets` | Pack VFS, overlays, decompression, texture descriptors, sprite assets, resource table, baking support. | `Empty` |
+| `Bork2d.Editor` | Avalonia editor library/app: asset browser, slicing, TOML data editing, bake/pack invocation; **JIT**. | `Planned` |
+| Tests | Unit tests for math, pack/format, state machines, input, layers; AOT/GPU smoke/stress tests. | `Planned` |
+
+The current solution contains only the five existing projects; `Bork2d.Editor` and tests are
+planned. `examples/` is empty; `docs/` contains this documentation set.
+
+## 9. Current baseline
+
+What actually exists today:
+
+- Five projects targeting `net11.0`; the only project reference is `Common → Api`.
+- API contracts for engine, game, time, window, input, assets, camera, sprite, transform,
+  plus `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`.
+- A placeholder `Engine` that calls `Setup()` and then loops `Tick()` with no time update,
+  no renderer, no exit path, and no disposal.
+- `EntityList` using `ConcurrentDictionary<uint, WeakReference<T>>`.
+- `Transform` with local properties and stubbed global properties; parenting is not implemented.
+- `Camera` and `SpriteRender` implementations registered in entity lists; defaults are
+  placeholder values (`ClearColor = Cyan`, culling mask `0`).
+- `StopwatchTime`, not wired into `Engine`.
+- `Runtime`, `Render`, and `Assets` contain only an empty `Class1`.
+
+What that means for the documents:
+
+- API reference members are marked `Current` only when the declaration exists today.
+- Builders, `IEngine.Input`, `IEngine.Exit`, `IGame.Teardown`, flip flags, pack/asset loading,
+  headless/offscreen modes, NativeAOT settings, and the renderer are `Planned`.
+- The roadmap starts with foundation/AOT and platform work, then assets and the editor, then
+  the renderer.
+
+## 10. Read next
+
+- [Projects and dependencies](projects.md) — the reference graph and game solution layout.
+- [Runtime lifecycle](runtime-lifecycle.md) — builder, modes, startup, shutdown.
+- [Threading and frame handoff](threading.md) — bounded run-ahead and the snapshot ring.
+- [Assets and pack files](assets.md) — `assets.pck`, overlays, descriptors, sprites.
+- [Editor](editor.md) — Avalonia builder and source asset authoring.
+- [NativeAOT](nativeaot.md) — runtime constraints and source generation.
+- [Rendering](rendering.md) — windowed/offscreen Vulkan and the one-draw contract.
+- [Implementation roadmap](../roadmap.md) — the order in which this gets built.

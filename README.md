@@ -1,0 +1,68 @@
+# Bork2d
+
+Bork2d is a focused 2D game engine for .NET. It uses **Vulkan 1.3** for rendering and
+**SDL2** for windowing through **Silk.NET**. Gameplay ticks on the main thread while a
+dedicated render thread presents the previous frame; each tick publishes an immutable frame
+snapshot. The runtime is **NativeAOT** and assets are packed into **`assets.pck`**, referenced
+by opaque IDs. Windowed, offscreen, and headless modes are supported.
+
+> **Status: pre-alpha / documentation-first.** The solution builds, but the engine is not
+> runnable yet: there is no window, renderer, pack, or asset system, and `Engine.Run()` is a
+> placeholder loop. The documentation describes the target design and tags what already
+> exists. See the [roadmap](docs/roadmap.md).
+
+## Projects
+
+| Project | Role |
+| --- | --- |
+| [`Bork2d.Api`](src/Bork2d/Bork2d.Api) | Public contracts and value types used by game code. |
+| [`Bork2d.Runtime`](src/Bork2d/Bork2d.Runtime) | Public startup builder/host; modes, platform, composition. |
+| [`Bork2d.Common`](src/Bork2d/Bork2d.Common) | Engine state, entities, transforms, snapshots, time. |
+| [`Bork2d.Render`](src/Bork2d/Bork2d.Render) | Vulkan renderer (windowed/offscreen). |
+| [`Bork2d.Assets`](src/Bork2d/Bork2d.Assets) | Pack VFS, loading, texture descriptors, sprite assets, bake support. |
+| `Bork2d.Editor` | Planned Avalonia editor library/app; JIT, not in the solution yet. See [Editor docs](docs/architecture/editor.md). |
+
+Game developers only consume `Bork2d.Api` and `Bork2d.Runtime`; everything else is an
+implementation detail. A game solution is split into `Project.Common` (game + source assets),
+`Project.Desktop` (entry point), and `Project.Editor` (thin editor host).
+
+## Build
+
+```powershell
+dotnet build src/Bork2d/Bork2d.slnx
+```
+
+Current requirements: .NET SDK `11.0.100-rc.1` (target `net11.0`), Windows. The finished
+engine additionally needs a Vulkan 1.3-capable GPU/driver and the SDL2 native runtime. The
+runtime/game is intended to publish with NativeAOT; the editor and build tools stay JIT.
+
+## Documentation
+
+Start at the [documentation index](docs/README.md).
+
+- [Architecture overview](docs/architecture/overview.md) — goals, invariants, modes.
+- [Projects and dependencies](docs/architecture/projects.md) — public boundary and game layout.
+- [Runtime lifecycle](docs/architecture/runtime-lifecycle.md) — builder, modes, pacing, shutdown.
+- [Threading and frame handoff](docs/architecture/threading.md) — bounded run-ahead snapshots.
+- [Assets and pack files](docs/architecture/assets.md) — `assets.pck`, overlays, descriptors, sprites.
+- [Editor](docs/architecture/editor.md) — Avalonia builder and asset/data authoring.
+- [Data and serialization](docs/architecture/data-and-serialization.md) — TOML → MessagePack.
+- [NativeAOT](docs/architecture/nativeaot.md) — runtime constraints and CI.
+- [Rendering](docs/architecture/rendering.md) — Vulkan 1.3, one instanced draw per camera.
+- [API guide](docs/api/guide.md) and [API reference](docs/api/reference.md).
+- [Implementation roadmap](docs/roadmap.md) and [decision log](docs/decisions.md).
+
+## Design at a glance
+
+- Tick and render overlap; no fixed tick rate, no artificial delay. Three snapshot slots bound
+  run-ahead; the tick waits only when the ring is full.
+- Windowed, offscreen (windowless Vulkan), and headless (no GPU/SDL) modes.
+- NativeAOT runtime; source-generated MessagePack; game passed to the builder as an instance.
+- Assets: `assets.pck` with MessagePack header entries and uint64 offsets; later pack overlays
+  win; debug uncompressed, release Zstd-compressed only when smaller.
+- Textures: MessagePack descriptors + raw RGBA8 payloads. Sprites: MessagePack quads with
+  vertices, UVs, and per-sprite units-per-pixel scale; TOML source, baked.
+- One instanced draw per non-empty camera, bindless texture pages, dynamic rendering.
+- Layers are `[Flags]` bits (one per renderable, mask per camera).
+- Abstract world units, Y-up; `Camera.Size` is half the visible height; no global PPU.
+- Editor is an Avalonia JIT tool with compile-time builder registrations; no scene editing.

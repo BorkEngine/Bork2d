@@ -1,0 +1,202 @@
+# NativeAOT
+
+> **Status:** target constraint from M1. The runtime and game desktop host are
+> NativeAOT-compatible; the editor and build tools stay JIT. This is not implemented or
+> validated yet.
+
+## 1. Scope
+
+| Component | NativeAOT required? | Why |
+| --- | --- | --- |
+| `Bork2d.Api` | Yes | It is referenced by the AOT game and must avoid dynamic/reflection traps. |
+| `Bork2d.Common` | Yes | Runtime scene, snapshots, transforms, time. |
+| `Bork2d.Assets` | Yes | Pack parsing, decompression, MessagePack decoding, resource tables. |
+| `Bork2d.Render` | Yes | Vulkan renderer and uploads. |
+| `Bork2d.Runtime` | Yes | Builder, SDL platform, host. |
+| `Project.Desktop` | Yes | The shipped game/headless server is published with `PublishAot`. |
+| `Bork2d.Editor` | No (JIT) | Avalonia desktop tool; may reflect over the game model. |
+| Asset baker / pack tool | No (JIT) | Build-time tool; may reflect over game assemblies. |
+| Tests | Mixed | Unit tests JIT; at least one AOT publish smoke test. |
+
+The editor being JIT is deliberate: it keeps a rich Avalonia UI and reflection-based property
+grid out of the runtime's AOT/trimming constraints. The compile-time editor builder still
+avoids assembly scanning, so the boundary is explicit.
+
+## 2. Build settings
+
+Target settings for runtime/game projects:
+
+```xml
+<PropertyGroup>
+  <PublishAot>true</PublishAot>
+  <IsAotCompatible>true</IsAotCompatible>
+  <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+  <EnableAotAnalyzer>true</EnableAotAnalyzer>
+  <InvariantGlobalization>false</InvariantGlobalization> <!-- decide at M1 -->
+</PropertyGroup>
+```
+
+Notes:
+
+- `IsAotCompatible`/`EnableAotAnalyzer` on engine libraries catch reflection and dynamic-code
+  warnings during normal builds, not only at publish.
+- `PublishAot` is set on `Project.Desktop` (the executable). Libraries do not publish
+  independently.
+- Native assets (SDL2, Vulkan loader) must be deployed for the target RID. The exact
+  `RuntimeIdentifier` and native-copy story are part of M1/M6.
+- AOT publish is a CI job, not only a release step. A JIT-clean build can still fail AOT.
+- Trimming warnings are treated as errors for engine projects; game code should also enable
+  the analyzers.
+
+## 3. Runtime constraints
+
+The runtime must not depend on:
+
+- `Activator.CreateInstance`, `Type.GetType`, `Assembly.Load`, `AssemblyLoadContext`, or
+  assembly scanning;
+- `Reflection.Emit`, expression compilation, or dynamically generated types;
+- runtime TOML parsing or reflection-based serializers;
+- convention-based discovery of game types, assets, or editor registrations;
+- `MakeGenericType`/`MethodInfo.Invoke` on unknown types;
+- unregistered MessagePack formatters;
+- `dynamic` and runtime code generation in hot paths.
+
+It may use:
+
+- static generics and `typeof(T)` metadata that the AOT compiler can see;
+- source-generated MessagePack formatters;
+- explicit builder registrations (`WithGame(instance)`, `WithAssetType<T>()`,
+  `WithWindow<T>()`);
+- hand-written parsers for the pack header and known asset kinds;
+- `DllImport`/Silk.NET bindings for SDL2/Vulkan.
+
+### Game startup
+
+The game is constructed by the developer and passed in:
+
+```csharp
+var game = new MyGame(logger, network, saveStore);
+
+using var app = new Bork2dAppBuilder<GameLayer>()
+    .WithGame(game)
+    .WithAssetsPack("assets.pck")
+    .Build();
+
+app.Run();
+```
+
+There is no `new()` constraint and no reflection-based construction. This is required for
+AOT and also allows arbitrary constructor injection.
+
+## 4. Serialization and assets
+
+- Runtime data assets are MessagePack, decoded by **source-generated** formatters.
+- `LoadAsset<T>` works only for types with a generated formatter/context registration. A
+  missing formatter is a build/startup error; there is no reflection fallback.
+- Pack header entries, texture descriptors, and sprite assets have hand-written/source-generated
+  readers; they are part of the engine, not user types.
+- Custom game data uses the source-generated MessagePack path; TOML exists only in
+  `Project.Common` and is consumed by the JIT baker/editor.
+- Zstd uses the .NET 11 built-in implementation, avoiding an extra native codec.
+- Asset paths are data, not type names. Loading never resolves a type from a string.
+
+See [Assets and pack files](assets.md) and [Data and serialization](data-and-serialization.md).
+
+## 5. Editor and tooling boundary
+
+`Bork2d.Editor` and the asset baker may use:
+
+- reflection over `Project.Common` types for the property grid;
+- TOML parsing/writing with reflection;
+- `AssemblyLoadContext` if the project descriptor loads a game assembly;
+- Avalonia and other desktop-tool dependencies.
+
+They must not leak these dependencies into `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, or
+`Bork2d.Render`. The runtime projects compile with AOT analyzers and no reference to the
+editor.
+
+The editor builder still uses explicit registrations:
+
+```csharp
+new Bork2dEditorBuilder()
+    .WithProject("../MyGame.Common")
+    .WithAssetType<EnemyDefinition>()
+    .WithWindow<MyToolWindow>()
+    .Build()
+    .Run();
+```
+
+That is a deliberate choice for determinism and a possible future AOT editor, not a current
+AOT requirement.
+
+## 6. Native libraries and Silk.NET
+
+- SDL2 and the Vulkan loader are native dependencies; they are deployed per target RID.
+- Silk.NET bindings are used instead of dynamic P/Invoke discovery. Validate the chosen
+  Silk.NET versions under AOT in M1 (SDL) and M6 (Vulkan).
+- No runtime shader compilation: SPIR-V is built offline.
+- The headless server should not initialize SDL or Vulkan; `WithHeadless()` must not load or
+  call into the graphics/windowing paths.
+
+These are validation items, not assumptions. If a Silk.NET path uses reflection/dynamic code
+incompatibly with AOT, isolate it behind an adapter and record the workaround.
+
+## 7. Testing and CI
+
+Required checks:
+
+1. `dotnet build` with AOT/trim analyzers and warnings-as-errors.
+2. `dotnet publish -c Release -r win-x64 -p:PublishAot=true` for a sample Desktop app.
+3. Run the AOT-published **headless** app in CI (no GPU required): load a pack, tick, browse,
+   exit.
+4. Run the AOT-published windowed/offscreen app on a GPU runner before release.
+5. Trim/AOT warning budget: zero warnings for engine projects; game warnings reviewed.
+6. A smoke test that no `LoadAsset<T>` type lacks a generated formatter.
+
+A JIT unit-test pass is necessary but not sufficient; AOT failures often appear only at
+publish/runtime.
+
+## 8. Risks
+
+| Risk | Impact | Mitigation |
+| --- | --- | --- |
+| Silk.NET or a dependency uses reflection/dynamic code | AOT publish/runtime failure | Validate in M1/M6; isolate adapters; pin versions. |
+| MessagePack source generation misses a custom type | Runtime load failure | Build-time validation; `LoadAsset<T>` registration checks; tests. |
+| TOML/reflection leaks into runtime | AOT warnings/failure | Project boundary and analyzers; TOML only in baker/editor. |
+| Trimming removes needed code | Subtle runtime failures | `IsAotCompatible`, analyzers, AOT smoke tests. |
+| Native SDL2/Vulkan deployment | Missing DllNotFound at runtime | RID-specific packaging and clean-machine tests. |
+| Server pulls in SDL/Vulkan initialization | Unwanted GPU/window dependency | `WithHeadless()` path that never initializes graphics. |
+| Editor keeps reflection while runtime forbids it | Boundary confusion | Separate assemblies/projects; editor JIT; runtime analyzers. |
+
+## 9. Open decisions
+
+| Topic | Question | Proposed direction |
+| --- | --- | --- |
+| MessagePack generation | Exact source-generator setup (`MessagePackSerializerContext` vs per-type resolvers). | Context + generated formatters in Assets; no reflection resolver. |
+| Globalization | `InvariantGlobalization` true or false? | Decide in M1 based on text/culture needs. |
+| AOT target RIDs | Windows x64 first; Linux later? | win-x64 first; Linux when platform support is added. |
+| Trimming game code | Are game projects required to be fully trim-clean? | Engine yes; game warnings visible, release-reviewed. |
+| Editor AOT | Ever? | Not required; keep registrations AOT-friendly anyway. |
+| Native library packaging | How SDL2/Vulkan loaders are copied/deployed. | MSBuild targets + documented redistributables (M1/M6). |
+| AOT diagnostics | Startup check for missing formatters? | Yes: fail fast with the type name. |
+
+## 10. Current status
+
+| Area | Current | Target |
+| --- | --- | --- |
+| AOT analyzers/settings | None | M1 |
+| `WithGame(instance)` | Builder absent | M1 |
+| Runtime source-generated assets | No asset pipeline | M3/M4 |
+| AOT headless smoke | None | M1 publish/build; full pack/tick/exit in M7; release gate M9 |
+| Silk.NET AOT validation | Not started | M1 (SDL), M6 (Vulkan) |
+| Editor JIT boundary | Editor absent | M5 |
+| AOT publish CI | None | M1 baseline, M9 release gate |
+
+## 11. Related documents
+
+- [Projects and dependencies](projects.md#6-build-packaging-and-versioning) — project graph and
+  build settings.
+- [Assets and pack files](assets.md#13-nativeaot) — runtime pack constraints.
+- [Data and serialization](data-and-serialization.md) — source-generated MessagePack.
+- [Editor](editor.md#9-runtime-and-aot-boundary) — JIT editor boundary.
+- [Roadmap](../roadmap.md) — M1 baseline, M9 release gate.
