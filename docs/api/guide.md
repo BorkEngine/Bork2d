@@ -1,9 +1,10 @@
 # API Guide
 
 > **Status: target guide.** This is how the engine is meant to be used, not a description of a
-> finished runtime. Members marked `Planned` in the [API reference](reference.md) do not exist
-> in the current scaffold. The startup builder, modes, `IEngine.Input`, `IGame.Teardown`,
-> pack API, and asset schema are the main planned additions shown here.
+> finished runtime. `IEngine.Input`, `IEngine.Root`, `IEngine.LoggerFactory`, `IGame.Teardown`,
+> the parent-required creators, and `Bork2dException` now exist as declarations; the M1 runtime
+> still stubs or partially implements them (see the [API reference](reference.md)). The startup
+> builder, modes, pack API, and asset schema remain the main planned additions shown here.
 
 ## 1. What you reference
 
@@ -167,7 +168,7 @@ public sealed class MyGame : IGame<GameLayer>
             _player.LocalPosition += Vector2.Normalize(direction) * 4f * dt;
     }
 
-    // Planned: once on the engine tick thread before shutdown.
+    // Once on the engine tick thread before shutdown.
     public void Teardown()
     {
         // App-owned Root.DetachAll() handles normal scene teardown. Detach/remove objects
@@ -488,7 +489,7 @@ See [NativeAOT](../architecture/nativeaot.md).
 | Touching entities from the render thread | Corrupt snapshots | Renderer only reads snapshots. |
 | Two workers mutating one entity without sync | Lost updates/data races | One owner per entity or external sync. |
 | Assuming equal `ZIndex` keeps insertion order | Reordering surprises | Use distinct z; entity ID is the stable tie-break. |
-| Creating/disposing outside a tick | Undefined ordering | Use `Setup`/`Tick`/`Teardown`. |
+| Creating/detaching outside a tick | Undefined ordering | Use `Setup`/`Tick`/`Teardown`. |
 | Forgetting to parent a created camera/sprite | It is not in the scene and is collectible | Pass `engine.Root` or a rooted parent. |
 | Losing a reference to a rooted object | It persists until removed from the scene | Intentional scene ownership; `Parent = null` or `Root.DetachAll()` to release it. |
 | Using a removed object | Still valid; not rendered until re-attached | Re-attach with `Parent = ...`; no `IsAlive` check needed. |

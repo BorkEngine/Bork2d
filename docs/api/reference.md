@@ -100,16 +100,16 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
 {
     ITime Time { get; }
     IWindow Window { get; }
-    IInput Input { get; }        // Planned
+    IInput Input { get; }
     IAssets Assets { get; }
-    ILoggerFactory LoggerFactory { get; } // Planned
+    ILoggerFactory LoggerFactory { get; }
     ISceneRoot Root { get; }
 
     ITransform CreateTransform(ITransform? parent = null);
     ICamera<TLayer> CreateCamera(ITransform parent);
     ISpriteRender<TLayer> CreateSpriteRender(ITransform parent);
 
-    void Exit();                 // Planned
+    void Exit();
 }
 ```
 
@@ -131,14 +131,14 @@ root is an identity transform: setting parent, position, rotation, or scale thro
 | --- | --- | --- |
 | `Time` | `Current` | Monotonic time/delta; snapshot reads from any thread. |
 | `Window` | `Current` | Window controls. Windowed only; throws in offscreen/headless. |
-| `Input` | `Planned` | Input state. Windowed only; throws in offscreen/headless. |
+| `Input` | `Current` | Input state. Windowed only; throws in offscreen/headless. M1 scaffold throws `NotSupportedException` (windowed input is M2). |
 | `Assets` | `Current` | Pack/asset requests; thread-safe methods. |
-| `LoggerFactory` | `Planned` | Microsoft.Extensions.Logging factory configured by the builder with ZLogger; create per-category loggers. |
-| `Root` | `Planned` | Read-only root of the strong scene graph; app-owned. `Root.DetachAll()` detaches children. |
-| `CreateTransform(parent)` | `Planned` | Creates a transform under `parent`, or standalone when `parent` is null. Inside `Setup`/`Tick`; workers may create during a tick. |
-| `CreateCamera(parent)` | `Planned` | Creates a camera under `parent`; parent is required. Workers may create during a tick. |
-| `CreateSpriteRender(parent)` | `Planned` | Creates a sprite renderable under `parent`; parent is required. Workers may create during a tick. |
-| `Exit()` | `Planned` | Graceful shutdown after the current tick; any thread. |
+| `LoggerFactory` | `Current` | Microsoft.Extensions.Logging factory configured by the builder with ZLogger; create per-category loggers. M1 scaffold returns `NullLoggerFactory.Instance` until the logging work wires the real factory. |
+| `Root` | `Current` | Read-only root of the strong scene graph; app-owned. `Root.DetachAll()` detaches children. M1 scaffold throws `NotSupportedException` until the scene graph lands (WP3). |
+| `CreateTransform(parent)` | `Current` | Creates a transform under `parent`, or standalone when `parent` is null. Inside `Setup`/`Tick`; workers may create during a tick. M1 scaffold returns a standalone `Transform` and ignores `parent` until WP3. |
+| `CreateCamera(parent)` | `Current` | Creates a camera under `parent`; parent is required. Workers may create during a tick. M1 scaffold validates `parent` but does not attach until WP3. |
+| `CreateSpriteRender(parent)` | `Current` | Creates a sprite renderable under `parent`; parent is required. Workers may create during a tick. M1 scaffold validates `parent` but does not attach until WP3. |
+| `Exit()` | `Current` | Graceful shutdown after the current tick; any thread. The M1 scaffold sets the shutdown flag read by the placeholder loop; the real loop is WP4. |
 
 Notes:
 
@@ -165,7 +165,7 @@ public interface IGame<TLayer> where TLayer : struct, Enum
 {
     void Setup(IEngine<TLayer> engine);
     void Tick();
-    // void Teardown(); // Planned
+    void Teardown();
 }
 ```
 
@@ -173,7 +173,7 @@ public interface IGame<TLayer> where TLayer : struct, Enum
 | --- | --- | --- |
 | `Setup(IEngine<TLayer>)` | `Current` | Once on the engine tick thread before the first tick. Create entities, request assets. |
 | `Tick()` | `Current` | Once per tick on the engine tick thread. Must return; no `async void`; join workers before returning. |
-| `Teardown()` | `Planned` | Once on the engine tick thread before shutdown. Release game resources; the app clears `Root`. Asset requests are not guaranteed to complete. |
+| `Teardown()` | `Current` | Once on the engine tick thread before shutdown. Release game resources; the app clears `Root`. Asset requests are not guaranteed to complete. |
 | `Run`/`Update`/`Draw` | — | Not part of the contract. The host owns the loop; the snapshot is built after `Tick`. |
 
 `Setup`, `Tick`, and `Teardown` are not concurrent. Exceptions propagate out of
@@ -251,7 +251,8 @@ public interface IInput
 }
 ```
 
-Access via `IEngine.Input` (`Planned`). **Windowed only**; offscreen/headless throw.
+Access via `IEngine.Input` (declaration `Current`; windowed implementation is M2). **Windowed
+only**; offscreen/headless throw.
 
 | Member | Status | Semantics |
 | --- | --- | --- |
@@ -348,7 +349,9 @@ public interface ICamera<TLayer> : ITransform
   viewport; `None` overlays.
 - Defaults above. `Clear.Depth` is accepted for forward compatibility.
 - Works in headless/offscreen, but headless never renders.
-- `Dispose()` is not part of camera lifetime; detach with `Parent = null` or clear the root.
+- Cameras are not `IDisposable` and have no `IsAlive` state; detach with `Parent = null` or
+  clear the root. The M1 scaffold's `Camera<T>` still implements `IDisposable` internally; that
+  is not part of the contract and WP3 removes it.
 
 ## 9. `ISpriteRender<TLayer>`
 
@@ -378,7 +381,9 @@ public interface ISpriteRender<TLayer> : ITransform
 - Sorting: layer numeric → `ZIndex` → entity ID. A not-ready asset yields no instance.
 - Headless: entities can exist but never produce an instance.
 - Create with `IEngine.CreateSpriteRender(parent)`; use `Root` or a rooted transform.
-- `Dispose()` is not part of sprite lifetime; detach or clear the root.
+- Sprite renderables are not `IDisposable` and have no `IsAlive` state; detach with
+  `Parent = null` or clear the root. The M1 scaffold's `SpriteRender<T>` still implements
+  `IDisposable` internally; that is not part of the contract and WP3 removes it.
 
 ## 10. `ITransform`
 
@@ -397,7 +402,7 @@ public interface ITransform
 | Member | Status | Semantics |
 | --- | --- | --- |
 | `Parent` | `Current` | Parent or `null`. Re-parenting preserves world transform; self/cycles rejected; `Root.Parent` cannot be set. |
-| `DetachAll()` | `Planned` | Detaches direct children; grandchildren remain attached. Any transform can call it, not just root. |
+| `DetachAll()` | `Current` | Detaches direct children; grandchildren remain attached. Any transform can call it, not just root. M1 scaffold throws `NotSupportedException` until the scene graph lands (WP3). |
 | `LocalPosition` | `Current` | Position relative to parent, world units. |
 | `LocalRotation` | `Current` | Radians, CCW, relative to parent. |
 | `LocalScale` | `Current` | Scale relative to parent; negative mirrors. |
@@ -576,17 +581,23 @@ and same-object composite updates still require game synchronization where atomi
 | Game exception | Propagates out of `Run()` after shutdown. |
 | Renderer fatal / device lost | Propagates out of `Run()` after shutdown; no auto recovery. |
 
-A public `Bork2dException` is planned in `Bork2d.Api` for engine-originated failures. BCL
-exceptions remain for argument/programming errors.
+A public `Bork2dException` in `Bork2d.Api` represents engine-originated failures. It exposes the
+standard constructors (parameterless, message, message + inner exception). BCL exceptions remain
+for argument/programming errors raised directly by callers.
 
 ## 15. Status summary: current gaps
 
 | Contract | Current state |
 | --- | --- |
-| `IEngine.Input` / `Exit` | Missing. |
-| `IEngine.Root` | Missing; root-owned scene graph planned (M1). |
-| `IEngine.LoggerFactory` | Missing; ZLogger configuration planned. |
-| `IGame.Teardown` | Missing. |
+| `ISceneRoot` / `IEngine.Root` | Declarations present. Scaffold `Root` throws `NotSupportedException`; root-owned scene graph is WP3. |
+| Parent-required creators | Declarations present. Scaffold validates `parent` but does not attach; attachment is WP3. |
+| `ITransform.DetachAll` | Declaration present. Scaffold `Transform.DetachAll` throws `NotSupportedException`; implementation is WP3. |
+| `IEngine.Input` | Declaration present. Scaffold throws `NotSupportedException`; windowed input is M2. |
+| `IEngine.Exit` | Declaration present. Scaffold sets a shutdown flag read by the placeholder `Run`; the real loop is WP4. |
+| `IEngine.LoggerFactory` | Declaration present. Scaffold returns `NullLoggerFactory.Instance`; the real factory is wired by the logging work. |
+| `IGame.Teardown` | Declaration present. The M1 host invokes it (WP4). |
+| `Bork2dException` | Present in `Bork2d.Api` with standard constructors. |
+| Scene entity `IDisposable` | Removed from `ICamera`/`ISpriteRender`. Scaffold `Camera`/`SpriteRender` still implement it internally until WP3. |
 | `ITransform` world reads | Uncomputed class stubs; not in the interface. |
 | `ICamera` screen/world | Missing. |
 | `ISpriteRender` flip | Missing; planned snapshot flag. |
@@ -597,7 +608,7 @@ exceptions remain for argument/programming errors.
 | Headless/offscreen | Missing. |
 | NativeAOT | No analyzers/publish. |
 | Camera defaults | Scaffold uses cyan/zero mask; target black/all layers. |
-| Entity ownership | Weak references; target root-owned strong tree (M1). |
+| Entity ownership | Weak references; target root-owned strong tree (WP3). |
 | Layer semantics | Undefined; target one bit/mask with validation. |
 | Sprite sizing | No assets; target UVs/pivot/topology/optional indices/pixels-per-unit scale. |
 | Assets/PCK | `Bork2d.Assets` empty. |
