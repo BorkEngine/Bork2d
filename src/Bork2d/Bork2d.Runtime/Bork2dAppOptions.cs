@@ -44,8 +44,8 @@ internal sealed class Bork2dAppOptions<TLayer> where TLayer : struct, Enum
     /// Gets or sets the logging configuration accepted by <c>WithLogging</c>.
     /// </summary>
     /// <remarks>
-    /// Stored for WP5. The M1 host installs <see cref="NullLoggerFactory.Instance"/> and does not
-    /// invoke the action yet.
+    /// When set, <c>Build</c> invokes it exactly once instead of installing the default ZLogger
+    /// console provider.
     /// </remarks>
     internal Action<ILoggingBuilder>? ConfigureLogging { get; set; }
 

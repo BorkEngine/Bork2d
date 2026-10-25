@@ -331,6 +331,14 @@
   configures a pretty ZLogger console provider. `Bork2d.Api` references
   `Microsoft.Extensions.Logging.Abstractions` only; `Bork2d.Runtime` carries ZLogger. The app
   owns/disposes the default factory; user-supplied configuration uses the same lifetime.
+- **Settled in WP5 (M1):** pinned `Microsoft.Extensions.Logging` `11.0.0-rc.1.26425.128` and
+  `ZLogger` `2.5.10` in `Bork2d.Runtime`. The default is ZLogger console with the plain-text
+  prefix `yyyy-MM-dd HH:mm:ss.fff [Level] Category: message` (local time, no ANSI colors); the
+  minimum level is `Debug` in debug builds and `Information` in release builds; there is no file
+  sink. `WithLogging` is invoked exactly once at `Build` and suppresses the default provider. The
+  app disposes the factory and the provider instances added with `AddProvider`; the logging
+  container disposes providers it creates. `Build` logs the startup mode, validation result, and
+  layer type once from `Bork2d.Runtime`.
 - **Consequences:** Game code can create category loggers from the engine factory; a default
   run is readable without configuration. ZLogger/MEL must be validated for NativeAOT/trimming.
   Logging is thread-safe and available in windowed/offscreen/headless modes.

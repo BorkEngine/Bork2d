@@ -210,7 +210,7 @@ public sealed class Bork2dAppTests
     }
 
     [Fact]
-    public void WithLoggingIsAcceptedWithoutAProvider()
+    public void WithLoggingIsInvokedAtBuildWithoutAddingADefaultProvider()
     {
         var game = new TestGame<GameLayer>();
         var configured = false;
@@ -223,7 +223,7 @@ public sealed class Bork2dAppTests
         app.Run();
 
         Assert.Equal(1, game.TickCount);
-        Assert.False(configured);
+        Assert.True(configured);
     }
 
     [Fact]
