@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="Bork2d.Api/Bork2d.Api.csproj" />
+  <Project Path="Bork2d.AotSmoke/Bork2d.AotSmoke.csproj" />
   <Project Path="Bork2d.Assets/Bork2d.Assets.csproj" />
   <Project Path="Bork2d.Common/Bork2d.Common.csproj" />
   <Project Path="Bork2d.Render/Bork2d.Render.csproj" />
