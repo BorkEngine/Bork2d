@@ -1,10 +1,11 @@
 # API Guide
 
 > **Status: target guide.** This is how the engine is meant to be used, not a description of a
-> finished runtime. `IEngine.Input`, `IEngine.Root`, `IEngine.LoggerFactory`, `IGame.Teardown`,
-> the parent-required creators, and `Bork2dException` now exist as declarations; the M1 runtime
-> still stubs or partially implements them (see the [API reference](reference.md)). The startup
-> builder, modes, pack API, and asset schema remain the main planned additions shown here.
+> finished runtime. The scene graph is implemented in the M1 engine (WP3): `IEngine.Root` is the
+> read-only owner, `ITransform.DetachAll` and the parent-required creators work, and
+> `Bork2dException` exists. The public host that creates the engine (WP4), windowed input,
+> logging, and the pack/asset APIs remain partial or planned (see the
+> [API reference](reference.md)).
 
 ## 1. What you reference
 
@@ -301,12 +302,13 @@ turret.LocalPosition = new Vector2(0.5f, 0);
 rig.LocalRotation = MathF.PI / 2f;
 ```
 
-Reparenting preserves the child's world transform. Cycles are rejected; `Root.Parent` cannot be
-set, and all root transform setters throw. The hierarchy is evaluated on the tick thread; the
-renderer never walks it. A rooted object whose game reference is lost stays alive until detached
-or cleared; an unparented object is collectible. Detaching does not destroy the object; the same
-instance can be re-attached later. `rig.DetachAll()` detaches the turret; `turret` remains valid
-and can be parented again.
+Creating an object under a parent attaches it with its default local values, so it starts at the
+parent's origin. Assigning `Parent` later preserves the child's world transform; cycles are
+rejected; `Root.Parent` cannot be set, and all root transform setters throw. The hierarchy is
+evaluated on the tick thread; the renderer never walks it. A rooted object whose game reference is
+lost stays alive until detached or cleared; an unparented object is collectible. Detaching does
+not destroy the object; the same instance can be re-attached later. `rig.DetachAll()` detaches the
+turret; `turret` remains valid and can be parented again.
 
 ## 7. Input
 

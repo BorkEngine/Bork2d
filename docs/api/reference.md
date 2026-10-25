@@ -134,10 +134,10 @@ root is an identity transform: setting parent, position, rotation, or scale thro
 | `Input` | `Current` | Input state. Windowed only; throws in offscreen/headless. M1 scaffold throws `NotSupportedException` (windowed input is M2). |
 | `Assets` | `Current` | Pack/asset requests; thread-safe methods. |
 | `LoggerFactory` | `Current` | Microsoft.Extensions.Logging factory configured by the builder with ZLogger; create per-category loggers. M1 scaffold returns `NullLoggerFactory.Instance` until the logging work wires the real factory. |
-| `Root` | `Current` | Read-only root of the strong scene graph; app-owned. `Root.DetachAll()` detaches children. M1 scaffold throws `NotSupportedException` until the scene graph lands (WP3). |
-| `CreateTransform(parent)` | `Current` | Creates a transform under `parent`, or standalone when `parent` is null. Inside `Setup`/`Tick`; workers may create during a tick. M1 scaffold returns a standalone `Transform` and ignores `parent` until WP3. |
-| `CreateCamera(parent)` | `Current` | Creates a camera under `parent`; parent is required. Workers may create during a tick. M1 scaffold validates `parent` but does not attach until WP3. |
-| `CreateSpriteRender(parent)` | `Current` | Creates a sprite renderable under `parent`; parent is required. Workers may create during a tick. M1 scaffold validates `parent` but does not attach until WP3. |
+| `Root` | `Current` | Read-only root of the strong scene graph; app-owned. `Root.DetachAll()` detaches children. Implemented in the M1 engine (WP3); the public host that creates the engine is WP4. |
+| `CreateTransform(parent)` | `Current` | Creates a transform under `parent`, or standalone when `parent` is null. A new node is attached with its default local values, so it starts at the parent's origin. Inside `Setup`/`Tick`; workers may create during a tick. Implemented in WP3. |
+| `CreateCamera(parent)` | `Current` | Creates a camera under `parent`; parent is required. Workers may create during a tick. Implemented in WP3. |
+| `CreateSpriteRender(parent)` | `Current` | Creates a sprite renderable under `parent`; parent is required. Workers may create during a tick. Implemented in WP3. |
 | `Exit()` | `Current` | Graceful shutdown after the current tick; any thread. The M1 scaffold sets the shutdown flag read by the placeholder loop; the real loop is WP4. |
 
 Notes:
@@ -350,8 +350,7 @@ public interface ICamera<TLayer> : ITransform
 - Defaults above. `Clear.Depth` is accepted for forward compatibility.
 - Works in headless/offscreen, but headless never renders.
 - Cameras are not `IDisposable` and have no `IsAlive` state; detach with `Parent = null` or
-  clear the root. The M1 scaffold's `Camera<T>` still implements `IDisposable` internally; that
-  is not part of the contract and WP3 removes it.
+  clear the root. The engine camera type is internal and has no destruction lifecycle.
 
 ## 9. `ISpriteRender<TLayer>`
 
@@ -382,8 +381,8 @@ public interface ISpriteRender<TLayer> : ITransform
 - Headless: entities can exist but never produce an instance.
 - Create with `IEngine.CreateSpriteRender(parent)`; use `Root` or a rooted transform.
 - Sprite renderables are not `IDisposable` and have no `IsAlive` state; detach with
-  `Parent = null` or clear the root. The M1 scaffold's `SpriteRender<T>` still implements
-  `IDisposable` internally; that is not part of the contract and WP3 removes it.
+  `Parent = null` or clear the root. The engine sprite type is internal and has no destruction
+  lifecycle.
 
 ## 10. `ITransform`
 
@@ -402,7 +401,7 @@ public interface ITransform
 | Member | Status | Semantics |
 | --- | --- | --- |
 | `Parent` | `Current` | Parent or `null`. Re-parenting preserves world transform; self/cycles rejected; `Root.Parent` cannot be set. |
-| `DetachAll()` | `Current` | Detaches direct children; grandchildren remain attached. Any transform can call it, not just root. M1 scaffold throws `NotSupportedException` until the scene graph lands (WP3). |
+| `DetachAll()` | `Current` | Detaches direct children; grandchildren remain attached. Any transform can call it, not just root. Implemented in WP3 under the structural lock. |
 | `LocalPosition` | `Current` | Position relative to parent, world units. |
 | `LocalRotation` | `Current` | Radians, CCW, relative to parent. |
 | `LocalScale` | `Current` | Scale relative to parent; negative mirrors. |
@@ -412,8 +411,9 @@ public interface ITransform
 
 - World transforms are evaluated/captured on the tick thread; the renderer never walks the
   hierarchy.
-- The scaffold declares global properties on `Transform` but does not compute them; treat them
-  as stubs.
+- World position/rotation/scale stay planned on the public interface; the internal transform
+  evaluates them for world-preserving re-parenting and tests. The renderer will consume the
+  captured world matrix.
 - `IEngine.CreateTransform(parent = null)` returns a standalone transform when unparented; it
   is not rendered and is collectible when the game drops it.
 - `Parent` attaches to a strong tree. A parented object remains alive even if game code loses
@@ -589,16 +589,16 @@ for argument/programming errors raised directly by callers.
 
 | Contract | Current state |
 | --- | --- |
-| `ISceneRoot` / `IEngine.Root` | Declarations present. Scaffold `Root` throws `NotSupportedException`; root-owned scene graph is WP3. |
-| Parent-required creators | Declarations present. Scaffold validates `parent` but does not attach; attachment is WP3. |
-| `ITransform.DetachAll` | Declaration present. Scaffold `Transform.DetachAll` throws `NotSupportedException`; implementation is WP3. |
+| `ISceneRoot` / `IEngine.Root` | Declarations present. Implemented in the internal M1 engine (WP3): read-only identity root that owns the scene. The public host/builder that creates the engine is WP4. |
+| Parent-required creators | Implemented (WP3): attached to the supplied parent; a `null` parent throws `ArgumentNullException`. |
+| `ITransform.DetachAll` | Implemented (WP3): detaches direct children under the structural lock on any transform. |
 | `IEngine.Input` | Declaration present. Scaffold throws `NotSupportedException`; windowed input is M2. |
 | `IEngine.Exit` | Declaration present. Scaffold sets a shutdown flag read by the placeholder `Run`; the real loop is WP4. |
 | `IEngine.LoggerFactory` | Declaration present. Scaffold returns `NullLoggerFactory.Instance`; the real factory is wired by the logging work. |
 | `IGame.Teardown` | Declaration present. The M1 host invokes it (WP4). |
 | `Bork2dException` | Present in `Bork2d.Api` with standard constructors. |
-| Scene entity `IDisposable` | Removed from `ICamera`/`ISpriteRender`. Scaffold `Camera`/`SpriteRender` still implement it internally until WP3. |
-| `ITransform` world reads | Uncomputed class stubs; not in the interface. |
+| Scene entity `IDisposable` | Removed from `ICamera`/`ISpriteRender` and from the internal Common types (WP3). |
+| `ITransform` world reads | Not on the public interface; the internal transform evaluates them for re-parenting and tests. |
 | `ICamera` screen/world | Missing. |
 | `ISpriteRender` flip | Missing; planned snapshot flag. |
 | `IAssets` pack/browse/exists | Missing. |
@@ -607,8 +607,8 @@ for argument/programming errors raised directly by callers.
 | Threading | Single-threaded placeholder; target any-thread API with locks. |
 | Headless/offscreen | Missing. |
 | NativeAOT | No analyzers/publish. |
-| Camera defaults | Scaffold uses cyan/zero mask; target black/all layers. |
-| Entity ownership | Weak references; target root-owned strong tree (WP3). |
+| Camera defaults | Implemented (WP3): size 10, full viewport, all declared layers, black clear. |
+| Entity ownership | Root-owned strong tree (WP3); no weak registry, no entity `Dispose`/`IsAlive`. |
 | Layer semantics | Undefined; target one bit/mask with validation. |
 | Sprite sizing | No assets; target UVs/pivot/topology/optional indices/pixels-per-unit scale. |
 | Assets/PCK | `Bork2d.Assets` empty. |

@@ -1,7 +1,7 @@
 # Scene Ownership
 
-> **Status:** accepted for M1; implementation planned. This replaces the scaffold's
-> weak-reference registry. See the [M1 implementation spec](../specs/m1-foundation.md).
+> **Status:** current for M1 (implemented in WP3). This replaces the scaffold's weak-reference
+> registry. See the [M1 implementation spec](../specs/m1-foundation.md).
 
 ## 1. Problem
 
@@ -29,6 +29,9 @@ scene membership, not by the process or the GC.
   without recreating it.
 - `CreateCamera(parent)` and `CreateSpriteRender(parent)` require a parent, so the developer
   makes the membership decision at creation. `engine.Root` is the common parent.
+- A newly created object is attached with its default local values (position zero, rotation
+  zero, scale one), so it starts at the parent's origin. Assigning `Parent` afterwards preserves
+  the world transform instead.
 - `CreateTransform(parent = null)` may be standalone for math or temporary use; it is not
   rendered and is not retained unless parented.
 - Detaching (`Parent = null`) removes the object from its parent. If no game reference remains,
@@ -120,7 +123,7 @@ it from the scene is the explicit release; `Root.DetachAll()` bounds the whole s
 
 ## 6. Performance
 
-The root tree is expected to be cheaper than the current weak dictionary:
+The root tree replaces the previous weak dictionary:
 
 - parent add/remove: amortized O(1) with a child list and swap-back removal, under the
   structural `System.Threading.Lock`;
@@ -147,17 +150,27 @@ scene-scoped ownership and does not change the leak semantics.
 | Arena/generational IDs | Viable, but a large API rewrite; a lost ID still leaves a scene object until removal. |
 | Auto-parent everything to `Root` | Recreates permanent ownership; losing a reference still leaks. |
 
-## 8. M1 implementation tasks
+## 8. M1 implementation status
 
-1. Replace `EntityList<T>` with a rooted transform tree.
-2. Add `ISceneRoot`, `IEngine.Root`, and read-only root setters.
-3. Change `CreateTransform`/`CreateCamera`/`CreateSpriteRender` to the parent-aware signatures.
-4. Implement parent add/remove, cycle rejection, `Root.DetachAll()` detach, and re-attach.
-5. Capture cameras/sprites by traversing the rooted tree; remove weak registries.
-6. Add ownership/lifetime tests, including remove/re-add, root clear/re-add, lost-reference/GC,
-   root read-only setters, cycles, and concurrent distinct-entity operations.
-7. Remove `IDisposable`/`Dispose`/`IsAlive` from scene entities.
-8. Update API docs, threading notes, and the M1 spec.
+Implemented in WP3 inside `Bork2d.Common` (all implementation types are internal):
+
+1. `EntityList<T>` and the weak registry are removed; the scene is a root-owned transform tree.
+2. `ISceneRoot`/`IEngine.Root` are implemented; parent and local setters throw
+   `InvalidOperationException`, and the root stays a read-only identity transform.
+3. `CreateTransform`/`CreateCamera`/`CreateSpriteRender` attach to the supplied parent;
+   the camera/sprite creators reject a `null` parent.
+4. Parent add/remove, self/cycle rejection, world-preserving re-parent, `DetachAll()` on any
+   transform, and root teardown all run under one scene-graph structural `System.Threading.Lock`.
+   Property access uses a per-object `Lock`; no path takes the structural lock while holding a
+   per-object lock.
+5. Discovery traverses the rooted tree and returns transforms in entity-ID order; entity IDs are
+   monotonic and never reused.
+6. `Bork2d.Tests` covers rooted/unparented lifetime with `WeakReference`, remove/re-add, root
+   teardown/re-add, read-only root, self/cycle rejection, world-preserving re-parent, entity-ID
+   order, and concurrent creation/mutation from workers.
+7. Scene entities have no `IDisposable`/`Dispose`/`IsAlive` and do not self-register anywhere.
+8. API docs and the threading/lifecycle notes were updated in the same change; the M1 spec's
+   final status pass remains WP8.
 
 ## 9. Related documents
 
