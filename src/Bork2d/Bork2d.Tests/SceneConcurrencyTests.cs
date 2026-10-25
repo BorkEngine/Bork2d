@@ -58,9 +58,9 @@ public sealed class SceneConcurrencyTests
             for (var item = 0; item < TransformsPerWorker; item++)
             {
                 var transform = transforms[worker][item];
-                Assert.Equal(new Vector2(worker, item), transform.LocalPosition);
-                Assert.Equal(item * 0.25f, transform.LocalRotation);
-                Assert.Equal(new Vector2(worker, item), transform.LocalScale);
+                TestAssertions.Close(new Vector2(worker, item), transform.LocalPosition);
+                TestAssertions.Close((item % 8) * 0.25f, transform.LocalRotation);
+                TestAssertions.Close(new Vector2(worker + 1f, item + 1f), transform.LocalScale);
                 if (item % 2 == 0)
                 {
                     Assert.Null(transform.Parent);
@@ -91,8 +91,8 @@ public sealed class SceneConcurrencyTests
         {
             var transform = engine.CreateTransform(engine.Root);
             transform.LocalPosition = new Vector2(worker, index);
-            transform.LocalRotation = index * 0.25f;
-            transform.LocalScale = transform.LocalPosition;
+            transform.LocalRotation = (index % 8) * 0.25f;
+            transform.LocalScale = new Vector2(worker + 1f, index + 1f);
             if (index % 2 == 0)
             {
                 transform.Parent = null;

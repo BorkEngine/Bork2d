@@ -27,6 +27,7 @@ public sealed class TransformHierarchyTests
         child.LocalRotation = 0.25f;
         child.LocalScale = new Vector2(0.5f, 2f);
 
+        var worldMatrix = ((Transform)child).WorldMatrix();
         var worldPosition = ((Transform)child).WorldPosition();
         var worldRotation = ((Transform)child).WorldRotation();
         var worldScale = ((Transform)child).WorldScale();
@@ -34,13 +35,53 @@ public sealed class TransformHierarchyTests
         child.Parent = second;
 
         Assert.Same(second, child.Parent);
-        AssertClose(worldPosition, ((Transform)child).WorldPosition());
-        AssertClose(worldRotation, ((Transform)child).WorldRotation());
-        AssertClose(worldScale, ((Transform)child).WorldScale());
+        TestAssertions.Close(worldMatrix, ((Transform)child).WorldMatrix());
+        TestAssertions.Close(worldPosition, ((Transform)child).WorldPosition());
+        TestAssertions.Close(worldRotation, ((Transform)child).WorldRotation());
+        TestAssertions.Close(worldScale, ((Transform)child).WorldScale());
 
         var rooted = Assert.IsType<SceneRoot>(engine.Root).GetRootedTransformsInIdOrder();
         Assert.Contains(rooted, transform => ReferenceEquals(transform, child));
         Assert.Equal(3, rooted.Count);
+    }
+
+    [Fact]
+    public void ReparentingPreservesTheComposedWorldMatrixThroughANestedHierarchy()
+    {
+        var engine = TestEngineFactory.Create();
+
+        var first = engine.CreateTransform(engine.Root);
+        first.LocalPosition = new Vector2(2f, -3f);
+        first.LocalRotation = 0.9f;
+        first.LocalScale = new Vector2(3f, 0.5f);
+
+        var second = engine.CreateTransform(engine.Root);
+        second.LocalPosition = new Vector2(-4f, 1.5f);
+        second.LocalRotation = -0.35f;
+        second.LocalScale = new Vector2(0.75f, 2.5f);
+
+        var middle = engine.CreateTransform(first);
+        middle.LocalPosition = new Vector2(1.5f, 0.5f);
+        middle.LocalRotation = 0.4f;
+        middle.LocalScale = new Vector2(2f, 0.75f);
+
+        var child = engine.CreateTransform(middle);
+        child.LocalPosition = new Vector2(-0.5f, 2f);
+        child.LocalRotation = 0.65f;
+        child.LocalScale = new Vector2(1.25f, 0.5f);
+
+        var worldMatrix = ((Transform)child).WorldMatrix();
+        var worldPosition = ((Transform)child).WorldPosition();
+        var worldRotation = ((Transform)child).WorldRotation();
+        var worldScale = ((Transform)child).WorldScale();
+
+        child.Parent = second;
+
+        Assert.Same(second, child.Parent);
+        TestAssertions.Close(worldMatrix, ((Transform)child).WorldMatrix());
+        TestAssertions.Close(worldPosition, ((Transform)child).WorldPosition());
+        TestAssertions.Close(worldRotation, ((Transform)child).WorldRotation());
+        TestAssertions.Close(worldScale, ((Transform)child).WorldScale());
     }
 
     [Fact]
@@ -60,9 +101,36 @@ public sealed class TransformHierarchyTests
         child.Parent = null;
 
         Assert.Null(child.Parent);
-        Assert.Equal(new Vector2(1f, 2f), child.LocalPosition);
-        Assert.Equal(0.3f, child.LocalRotation);
-        Assert.Equal(new Vector2(0.5f, 0.25f), child.LocalScale);
+        TestAssertions.Close(new Vector2(1f, 2f), child.LocalPosition);
+        TestAssertions.Close(0.3f, child.LocalRotation);
+        TestAssertions.Close(new Vector2(0.5f, 0.25f), child.LocalScale);
+    }
+
+    [Fact]
+    public void SettingLocalPositionPreservesTheRestOfTheLocalMatrix()
+    {
+        var engine = TestEngineFactory.Create();
+        var parent = engine.CreateTransform(engine.Root);
+        parent.LocalPosition = new Vector2(1f, 2f);
+        parent.LocalRotation = 0.75f;
+        parent.LocalScale = new Vector2(2f, 3f);
+
+        var child = engine.CreateTransform(parent);
+        child.LocalPosition = new Vector2(1f, 2f);
+        child.LocalRotation = 0.4f;
+        child.LocalScale = new Vector2(0.5f, 2f);
+
+        var world = ((Transform)child).WorldMatrix();
+
+        child.LocalPosition = new Vector2(-3f, 6f);
+        var moved = ((Transform)child).WorldMatrix();
+
+        TestAssertions.Close(world.M11, moved.M11);
+        TestAssertions.Close(world.M12, moved.M12);
+        TestAssertions.Close(world.M21, moved.M21);
+        TestAssertions.Close(world.M22, moved.M22);
+        Assert.NotEqual(world.Translation, moved.Translation);
+        TestAssertions.Close(new Vector2(-3f, 6f), child.LocalPosition);
     }
 
     [Fact]
@@ -78,15 +146,15 @@ public sealed class TransformHierarchyTests
         child.LocalPosition = new Vector2(1f, 2f);
         child.LocalRotation = 0.25f;
         child.LocalScale = new Vector2(0.5f, 2f);
-        var worldPosition = ((Transform)child).WorldPosition();
+        var worldMatrix = ((Transform)child).WorldMatrix();
 
         child.Parent = parent;
 
         Assert.Same(parent, child.Parent);
-        Assert.Equal(new Vector2(1f, 2f), child.LocalPosition);
-        Assert.Equal(0.25f, child.LocalRotation);
-        Assert.Equal(new Vector2(0.5f, 2f), child.LocalScale);
-        AssertClose(worldPosition, ((Transform)child).WorldPosition());
+        TestAssertions.Close(new Vector2(1f, 2f), child.LocalPosition);
+        TestAssertions.Close(0.25f, child.LocalRotation);
+        TestAssertions.Close(new Vector2(0.5f, 2f), child.LocalScale);
+        TestAssertions.Close(worldMatrix, ((Transform)child).WorldMatrix());
     }
 
     [Fact]
@@ -132,19 +200,5 @@ public sealed class TransformHierarchyTests
         Assert.Throws<Bork2dException>(() => { transform.Parent = foreign; });
         Assert.Throws<Bork2dException>(() => { engine.CreateTransform(foreign); });
         Assert.Same(engine.Root, transform.Parent);
-    }
-
-    private static void AssertClose(Vector2 expected, Vector2 actual)
-    {
-        Assert.True(
-            Vector2.Distance(expected, actual) <= 1e-4f,
-            $"Expected world position {expected}, got {actual}.");
-    }
-
-    private static void AssertClose(float expected, float actual)
-    {
-        Assert.True(
-            MathF.Abs(expected - actual) <= 1e-4f,
-            $"Expected world rotation {expected}, got {actual}.");
     }
 }

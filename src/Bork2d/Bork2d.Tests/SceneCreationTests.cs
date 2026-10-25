@@ -77,7 +77,7 @@ public sealed class SceneCreationTests
         Assert.Equal(Vector2.One, child.LocalScale);
         Assert.Same(parent, sprite.Parent);
         Assert.Same(parent, camera.Parent);
-        AssertClose(new Vector2(10f, 5f), ((Transform)child).WorldPosition());
+        TestAssertions.Close(new Vector2(10f, 5f), ((Transform)child).WorldPosition());
     }
 
     [Fact]
@@ -95,12 +95,5 @@ public sealed class SceneCreationTests
         Assert.Equal(Vector2.Zero, transform.LocalPosition);
         Assert.Equal(Vector2.One, transform.LocalScale);
         Assert.Equal(3, Assert.IsType<SceneRoot>(engine.Root).GetRootedTransformsInIdOrder().Count);
-    }
-
-    private static void AssertClose(Vector2 expected, Vector2 actual)
-    {
-        Assert.True(
-            Vector2.Distance(expected, actual) <= 1e-4f,
-            $"Expected world position {expected}, got {actual}.");
     }
 }

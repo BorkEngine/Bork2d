@@ -108,16 +108,16 @@ public sealed class SceneLifetimeTests
         transform.Parent = null;
 
         Assert.Null(transform.Parent);
-        Assert.Equal(new Vector2(3f, -4f), transform.LocalPosition);
-        Assert.Equal(0.5f, transform.LocalRotation);
-        Assert.Equal(new Vector2(2f, 3f), transform.LocalScale);
+        TestAssertions.Close(new Vector2(3f, -4f), transform.LocalPosition);
+        TestAssertions.Close(0.5f, transform.LocalRotation);
+        TestAssertions.Close(new Vector2(2f, 3f), transform.LocalScale);
 
         transform.Parent = engine.Root;
 
         Assert.Same(engine.Root, transform.Parent);
-        Assert.Equal(new Vector2(3f, -4f), transform.LocalPosition);
-        Assert.Equal(0.5f, transform.LocalRotation);
-        Assert.Equal(new Vector2(2f, 3f), transform.LocalScale);
+        TestAssertions.Close(new Vector2(3f, -4f), transform.LocalPosition);
+        TestAssertions.Close(0.5f, transform.LocalRotation);
+        TestAssertions.Close(new Vector2(2f, 3f), transform.LocalScale);
         Assert.Contains(Root(engine).GetRootedTransformsInIdOrder(), rooted => ReferenceEquals(rooted, transform));
     }
 

@@ -414,6 +414,11 @@ public interface ITransform
 - World position/rotation/scale stay planned on the public interface; the internal transform
   evaluates them for world-preserving re-parenting and tests. The renderer will consume the
   captured world matrix.
+- The internal local matrix is the source of truth: re-parenting preserves the composed world
+  matrix exactly (including shear from a non-uniform scale combined with rotation), and
+  `LocalPosition` changes only the translation. `LocalRotation`/`LocalScale` read the decomposed
+  local matrix and their setters recompose it, so writing either discards shear; the read
+  rotation is the equivalent angle normalized to `(-π, π]`.
 - `IEngine.CreateTransform(parent = null)` returns a standalone transform when unparented; it
   is not rendered and is collectible when the game drops it.
 - `Parent` attaches to a strong tree. A parented object remains alive even if game code loses

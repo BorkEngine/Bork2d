@@ -81,7 +81,9 @@ Rules:
 - `Root.Parent` is always `null`; assigning a parent throws.
 - Setting any local transform value on `Root` throws `InvalidOperationException`.
 - Setting `Parent` on a normal transform rejects cycles, including self-parenting.
-- Re-parenting preserves the world transform and recomputes local values.
+- Re-parenting preserves the composed world matrix exactly and recomputes local values. The
+  internal transform stores the local affine matrix, so shear from a non-uniform scale combined
+  with rotation survives a re-parent.
 - Removing a child (`Parent = null`) does not clear its local/world state.
 - Re-adding a removed object to a parent restores it without creating a new object.
 - `ITransform.DetachAll()` detaches direct children; their `Parent` becomes `null`.
@@ -161,8 +163,10 @@ Implemented in WP3 inside `Bork2d.Common` (all implementation types are internal
    the camera/sprite creators reject a `null` parent.
 4. Parent add/remove, self/cycle rejection, world-preserving re-parent, `DetachAll()` on any
    transform, and root teardown all run under one scene-graph structural `System.Threading.Lock`.
-   Property access uses a per-object `Lock`; no path takes the structural lock while holding a
-   per-object lock.
+   The transform stores its local affine matrix, so re-parenting preserves the composed world
+   matrix exactly (including shear) and `LocalPosition` changes only the translation. Property
+   access uses a per-object `Lock`; no path takes the structural lock while holding a per-object
+   lock.
 5. Discovery traverses the rooted tree and returns transforms in entity-ID order; entity IDs are
    monotonic and never reused.
 6. `Bork2d.Tests` covers rooted/unparented lifetime with `WeakReference`, remove/re-add, root

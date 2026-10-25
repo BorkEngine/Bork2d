@@ -9,20 +9,24 @@ namespace Bork2d.Common;
 /// <remarks>
 /// <para>
 /// Structural changes (attach, detach, traversal) are serialized by the graph's structural
-/// <see cref="SceneGraph.StructuralLock"/>; local transform values are serialized by the
-/// per-object <see cref="Sync"/> lock. The lock order is structural lock first, per-object lock
-/// second; no code path acquires the structural lock while holding a per-object lock.
+/// <see cref="SceneGraph.StructuralLock"/>; the local matrix is serialized by the per-object
+/// <see cref="Sync"/> lock. The lock order is structural lock first, per-object lock second; no
+/// code path acquires the structural lock while holding a per-object lock.
 /// </para>
 /// <para>
-/// A parent holds its children strongly. There is no destruction state: detaching keeps the
-/// object and its local values valid, and the same instance can be attached again later.
+/// The local affine matrix is the source of truth. <see cref="WorldMatrix"/> composes it through
+/// the parent chain, and re-parenting assigns the exact local matrix derived from the old world
+/// matrix and the inverse of the new parent's world matrix. A non-uniform scale combined with
+/// rotation therefore survives a re-parent, even though it introduces shear that a T/R/S triple
+/// cannot represent.
 /// </para>
 /// <para>
-/// <see cref="WorldMatrix"/> composes the full local-to-world affine matrix. The scalar helpers
-/// (<see cref="WorldPosition"/>, <see cref="WorldRotation"/>, <see cref="WorldScale"/>) exist for
-/// world-preserving re-parenting and tests: position comes from the composed matrix, while
-/// rotation and scale accumulate local values (a T/R/S triple cannot represent the shear that a
-/// non-uniform scale combined with rotation introduces).
+/// <see cref="LocalPosition"/> reads the matrix translation; its setter changes only the
+/// translation and keeps the rest of the matrix. <see cref="LocalRotation"/> and
+/// <see cref="LocalScale"/> decompose the local matrix on read, and their setters recompose it
+/// from the decomposed rotation/scale plus the current translation, so writing them discards any
+/// shear. A parent holds its children strongly and there is no destruction state: detaching keeps
+/// the object and its local matrix valid, and the same instance can be attached again later.
 /// </para>
 /// </remarks>
 internal class Transform : ITransform
@@ -30,9 +34,7 @@ internal class Transform : ITransform
     private readonly Lock _sync = new();
     private Transform? _parent;
     private List<Transform>? _children;
-    private Vector2 _localPosition = Vector2.Zero;
-    private float _localRotation;
-    private Vector2 _localScale = Vector2.One;
+    private Matrix3x2 _localMatrix = Matrix3x2.Identity;
 
     internal Transform(SceneGraph graph)
         : this(graph, graph.NextEntityId())
@@ -72,7 +74,7 @@ internal class Transform : ITransform
         {
             lock (_sync)
             {
-                return _localPosition;
+                return _localMatrix.Translation;
             }
         }
 
@@ -80,7 +82,8 @@ internal class Transform : ITransform
         {
             lock (_sync)
             {
-                _localPosition = value;
+                _localMatrix.M31 = value.X;
+                _localMatrix.M32 = value.Y;
             }
         }
     }
@@ -91,7 +94,8 @@ internal class Transform : ITransform
         {
             lock (_sync)
             {
-                return _localRotation;
+                Decompose(_localMatrix, out _, out var rotation);
+                return rotation;
             }
         }
 
@@ -99,7 +103,8 @@ internal class Transform : ITransform
         {
             lock (_sync)
             {
-                _localRotation = value;
+                Decompose(_localMatrix, out var scale, out _);
+                _localMatrix = Compose(scale, value, _localMatrix.Translation);
             }
         }
     }
@@ -110,7 +115,8 @@ internal class Transform : ITransform
         {
             lock (_sync)
             {
-                return _localScale;
+                Decompose(_localMatrix, out var scale, out _);
+                return scale;
             }
         }
 
@@ -118,7 +124,8 @@ internal class Transform : ITransform
         {
             lock (_sync)
             {
-                _localScale = value;
+                Decompose(_localMatrix, out _, out var rotation);
+                _localMatrix = Compose(value, rotation, _localMatrix.Translation);
             }
         }
     }
@@ -142,21 +149,23 @@ internal class Transform : ITransform
     }
 
     /// <summary>
-    /// Gets the accumulated world rotation in radians.
+    /// Gets the world rotation in radians, decomposed from the composed world matrix.
     /// </summary>
     internal float WorldRotation()
     {
         using var scope = Graph.StructuralLock.EnterScope();
-        return WorldRotationCore();
+        Decompose(WorldMatrixCore(), out _, out var rotation);
+        return rotation;
     }
 
     /// <summary>
-    /// Gets the accumulated world scale.
+    /// Gets the world scale, decomposed from the composed world matrix.
     /// </summary>
     internal Vector2 WorldScale()
     {
         using var scope = Graph.StructuralLock.EnterScope();
-        return WorldScaleCore();
+        Decompose(WorldMatrixCore(), out var scale, out _);
+        return scale;
     }
 
     public void DetachAll()
@@ -199,7 +208,7 @@ internal class Transform : ITransform
 
     /// <summary>
     /// Attaches a newly created node to <paramref name="parent"/> without changing its local
-    /// values.
+    /// matrix.
     /// </summary>
     /// <remarks>
     /// Used only by the engine during creation: a brand-new node has no observable world state
@@ -272,15 +281,10 @@ internal class Transform : ITransform
             }
         }
 
-        var localPosition = Vector2.Zero;
-        var localRotation = 0f;
-        var localScale = Vector2.One;
-
+        var local = Matrix3x2.Identity;
         if (newParent is not null)
         {
-            var worldPosition = WorldMatrixCore().Translation;
-            var worldRotation = WorldRotationCore();
-            var worldScale = WorldScaleCore();
+            var world = WorldMatrixCore();
             var parentWorld = newParent.WorldMatrixCore();
             if (!Matrix3x2.Invert(parentWorld, out var parentInverse))
             {
@@ -288,16 +292,7 @@ internal class Transform : ITransform
                     "Cannot preserve the world transform against a parent with a singular world transform.");
             }
 
-            var parentScale = newParent.WorldScaleCore();
-            if (parentScale.X == 0f || parentScale.Y == 0f)
-            {
-                throw new Bork2dException(
-                    "Cannot preserve the world transform against a parent with a zero world scale.");
-            }
-
-            localPosition = Vector2.Transform(worldPosition, parentInverse);
-            localRotation = worldRotation - newParent.WorldRotationCore();
-            localScale = worldScale / parentScale;
+            local = world * parentInverse;
         }
 
         DetachFromCurrentParentCore();
@@ -308,9 +303,7 @@ internal class Transform : ITransform
             newParent.AddChildCore(this);
             lock (_sync)
             {
-                _localPosition = localPosition;
-                _localRotation = localRotation;
-                _localScale = localScale;
+                _localMatrix = local;
             }
         }
     }
@@ -366,37 +359,29 @@ internal class Transform : ITransform
     {
         lock (_sync)
         {
-            return Matrix3x2.CreateScale(_localScale)
-                * Matrix3x2.CreateRotation(_localRotation)
-                * Matrix3x2.CreateTranslation(_localPosition);
+            return _localMatrix;
         }
     }
 
-    private float WorldRotationCore()
+    private static void Decompose(in Matrix3x2 matrix, out Vector2 scale, out float rotation)
     {
-        var rotation = 0f;
-        for (var node = this; node is not null; node = node._parent)
+        var xAxis = new Vector2(matrix.M11, matrix.M12);
+        var yAxis = new Vector2(matrix.M21, matrix.M22);
+        var scaleX = xAxis.Length();
+        var scaleY = yAxis.Length();
+        if ((matrix.M11 * matrix.M22) - (matrix.M12 * matrix.M21) < 0f)
         {
-            lock (node._sync)
-            {
-                rotation += node._localRotation;
-            }
+            scaleY = -scaleY;
         }
 
-        return rotation;
+        scale = new Vector2(scaleX, scaleY);
+        rotation = MathF.Atan2(matrix.M12, matrix.M11);
     }
 
-    private Vector2 WorldScaleCore()
+    private static Matrix3x2 Compose(Vector2 scale, float rotation, Vector2 translation)
     {
-        var scale = Vector2.One;
-        for (var node = this; node is not null; node = node._parent)
-        {
-            lock (node._sync)
-            {
-                scale *= node._localScale;
-            }
-        }
-
-        return scale;
+        return Matrix3x2.CreateScale(scale)
+            * Matrix3x2.CreateRotation(rotation)
+            * Matrix3x2.CreateTranslation(translation);
     }
 }
