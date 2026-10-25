@@ -544,8 +544,8 @@ carries indices), asset/pack unloading, and public offscreen readback.
 
 ## 10. Immediate next actions
 
-1. M1 implementation is complete on `m-1/wp-8` (WP1–WP7 are merged on `m-1/common`); human
-   review decides the outcome. The final PR is **not** merged or approved by the agents.
+1. M1 implementation is complete on `m-1/common` (WP1–WP8 merged); human review decides the
+   outcome. The final PR is **not** merged or approved by the agents.
 2. After human approval/merge, update this progress log and start M2 (SDL windowed platform,
    [spec](specs/m1-foundation.md) is the M1 record).
 3. Prototype the pack reader/writer against the exact header layout in M3; validate the
@@ -558,7 +558,7 @@ carries indices), asset/pack unloading, and public offscreen readback.
 | Milestone | Status | Evidence |
 | --- | --- | --- |
 | M0 Documentation | Complete (2026-10-25) | `docs/` set, decision log, accepted ownership/pack/editor/pacing decisions. |
-| M1 Foundation/AOT | Implemented (WP1–WP8); final PR pending | WP1–WP7 are merged on `m-1/common`; WP8 is the documentation final pass on `m-1/wp-8`. 135 tests; Debug/Release 0 warnings; format clean; `Bork2d.AotSmoke` publishes and runs locally with zero AOT/trim warnings. CI is build/test/format on `develop` only. Final PR not merged or reviewed. [M1 spec](specs/m1-foundation.md). |
+| M1 Foundation/AOT | Implemented (WP1–WP8); final PR pending | WP1–WP8 are merged on `m-1/common`. 135 tests; Debug/Release 0 warnings; format clean; `Bork2d.AotSmoke` publishes and runs locally with zero AOT/trim warnings. CI is build/test/format on `develop` only. Final PR not merged or reviewed. [M1 spec](specs/m1-foundation.md). |
 | M2 SDL platform | Not started | — |
 | M3 Assets/pack | Not started | — |
 | M4 Serialization/bake | Not started | — |
