@@ -1,11 +1,10 @@
 # API Guide
 
-> **Status: target guide.** This is how the engine is meant to be used, not a description of a
-> finished runtime. The scene graph is implemented in the M1 engine (WP3): `IEngine.Root` is the
-> read-only owner, `ITransform.DetachAll` and the parent-required creators work, and
-> `Bork2dException` exists. The public host that creates the engine (WP4), windowed input,
-> logging, and the pack/asset APIs remain partial or planned (see the
-> [API reference](reference.md)).
+> **Status: implemented for the M1 smoke, target for the full runtime.** The public builder and
+> host now exist in `Bork2d.Runtime`: `Build()` validates the options and `Run()` performs one
+> `Setup` → `Tick` → `Teardown` sequence, then returns. Window/input, the asset pack, logging
+> providers, and the real loop remain later milestones (M2/M3/M5/M7); `IWindow`, `IInput`, and
+> `IAssets` currently throw `NotSupportedException`. See the [API reference](reference.md#12-runtime-surface).
 
 ## 1. What you reference
 
@@ -42,17 +41,24 @@ app.Run();
   test doubles, and logging your host owns. The engine factory itself does not exist until
   `Build()`; for engine logging, create the logger from `engine.LoggerFactory` in `Setup`.
   There is no parameterless-constructor/reflection requirement.
-- `Build()` validates configuration; `Run()` blocks until shutdown in the full design (M1: one smoke tick); app `Dispose()` cleans up.
+- `Build()` validates configuration. `Run()` blocks until shutdown in the full design; **in M1
+  it is a smoke path** that calls `Setup`, exactly one `Tick`, and `Teardown`, then returns. No
+  window, GPU, pack, render thread, or pacing loop starts. App `Dispose()` detaches the root's
+  direct children and disposes the logger factory.
 - The game instance must stay alive through `Run()`.
-- Windowed/offscreen have no target tick rate; pacing follows the renderer, with no artificial
-  delay. Headless is timer-paced via `WithHeadless(ticksPerSecond)` (default 60, `0` uncapped).
-- Logging is configured with `WithLogging`; if omitted, a pretty ZLogger console provider is
-  installed, and `IEngine.LoggerFactory` is always available.
+- In the full design, windowed/offscreen have no target tick rate; pacing follows the renderer
+  with no artificial delay, and headless is timer-paced via `WithHeadless(ticksPerSecond)`
+  (default 60, `0` uncapped). M1 validates and stores these options but runs the same one-tick
+  smoke in every mode.
+- `WithLogging` is accepted and stored for WP5. Until the logging work lands, the host uses
+  `NullLoggerFactory.Instance` and does not install the pretty ZLogger console default;
+  `IEngine.LoggerFactory` is always available.
 - `IEngine.Root` owns the scene. Create cameras/sprites under `Root` or a transform under it;
   parented objects persist, unparented objects are collectible. `Root.DetachAll()` detaches the
   scene's top-level children; `ITransform.DetachAll()` does the same for any transform.
-- The default pack is `assets.pck`; `WithAssetsPack` can point elsewhere. A missing/malformed
-  base pack is a startup error that throws `Bork2dException`; there is no empty-FS fallback.
+- The default pack path is `assets.pck`; `WithAssetsPack` can point elsewhere. M1 validates only
+  that a supplied path is non-empty and never touches the filesystem. Pack existence, parsing,
+  and the `Bork2dException` startup failure arrive with the M3 pack/asset implementation.
 
 ### Modes
 
@@ -82,33 +88,39 @@ server.Run();
 ```
 
 These are separate hosts, not three modes in one process. `WithHeadless(ticksPerSecond = 60)`
-and `WithOffscreen()` are mutually exclusive with window options. `0` means uncapped headless.
-`IWindow` and `IInput` throw in both windowless modes. See
+and `WithOffscreen()` are mutually exclusive with each other and with window options. `0` means
+uncapped headless. In M1 all three modes build and validate, but `Run()` still performs the same
+one `Setup`/`Tick`/`Teardown` smoke; mode startup, SDL, Vulkan, and the render thread are later
+milestones. There is no window in M1, so `IWindow` members and `IInput` throw
+`NotSupportedException`; in the target design they throw only in windowless modes, so code that
+must run in all modes should not depend on them. See
 [Runtime lifecycle](../architecture/runtime-lifecycle.md#2-modes).
 
 ### Logging
 
-If you do nothing, the builder installs a pretty ZLogger console provider. You can replace or
-extend it:
+In M1 the host uses `NullLoggerFactory.Instance`; WP5 installs the pretty ZLogger console
+provider by default. `WithLogging` is accepted and stored now so startup code is already shaped
+for WP5, but the callback is not invoked yet:
 
 ```csharp
 using var app = new Bork2dAppBuilder<GameLayer>()
     .WithGame(game)
     .WithLogging(logging =>
     {
-        // Configure Microsoft.Extensions.Logging providers, including ZLogger.
+        // Configure Microsoft.Extensions.Logging providers, including ZLogger (WP5).
     })
     .Build();
 ```
 
-The engine exposes the resulting factory:
+The engine exposes the factory through `IEngine.LoggerFactory`:
 
 ```csharp
 ILogger logger = _engine.LoggerFactory.CreateLogger("MyGame");
 logger.LogInformation("Loaded level {Level}", "start");
 ```
 
-See [Logging](../architecture/logging.md) for defaults, categories, and AOT notes.
+In M1 that factory is the null factory; WP5 replaces it with the configured one. See
+[Logging](../architecture/logging.md) for defaults, categories, and AOT notes.
 
 ## 3. Write a game
 
@@ -616,8 +628,9 @@ using var app = new Bork2dAppBuilder<GameLayer>()
 app.Run();
 ```
 
-No window, SDL, Vulkan, or render thread is initialized. `IWindow`/`IInput` are unavailable.
-The tick loop is paced at 60 Hz by default; pass `WithHeadless(0)` for uncapped.
+In M1 this runs the same one-tick smoke as every other mode: no window, SDL, Vulkan, render
+thread, or 60 Hz pacing timer exists yet. `IWindow`/`IInput` are unavailable. In the target
+headless mode, the tick loop is paced at 60 Hz by default; pass `WithHeadless(0)` for uncapped.
 
 ## 15. Where to go next
 

@@ -1,8 +1,9 @@
 namespace Bork2d.Runtime;
 
 // Temporary build anchor: keeps the declared project references in the compiled assembly
-// metadata until the M4 builder and later composition code consume them. The dependency matrix
-// test asserts the emitted references.
+// metadata. The builder/host consume Api and Common directly; Assets and Render stay anchored
+// until the M3 asset and M6 render composition consume them. The dependency matrix test asserts
+// the emitted references.
 internal static class AssemblyReferenceAnchor
 {
     internal static Type ApiContract => typeof(Bork2d.Api.IEngine<>);

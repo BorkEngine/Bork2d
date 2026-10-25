@@ -491,7 +491,9 @@ Planned flags for `FlipX`/`FlipY`; the planned snapshot reserves the field.
 
 ## 12. Runtime surface
 
-> **Status: `Planned`.** `Bork2d.Runtime` is empty today. Names/signatures may change in M1.
+> **Status: `Current` (M1 skeleton).** `Bork2d.Runtime` now contains the public builder, the
+> one-tick smoke app, validation, and the M1 stubs. Window/input/assets behavior, logging
+> providers, and real loop modes are later milestones (M2/M3/M5/M7).
 
 ### `Bork2dAppBuilder<TLayer>`
 
@@ -521,19 +523,29 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 
 - Created/configured on any thread; `Build()` validates once.
 - `WithGame` takes a **caller-constructed instance**; no `new()`/reflection. The caller keeps
-  the instance alive through `Run()`.
+  the instance alive through `Run()`. It must be called exactly once.
 - Mode is windowed by default, or mutually exclusive `WithHeadless(ticksPerSecond)`/
-  `WithOffscreen(w,h)`.
+  `WithOffscreen(w,h)`. Selecting both fails `Build()`.
 - `WithHeadless` defaults to 60 ticks/second; `0` means uncapped. This is the only mode with an
-  intentional pacing timer.
-- Window options apply only to windowed mode and are validated.
-- `WithAssetsPack` default is `assets.pck`.
-- `WithLogging` configures Microsoft.Extensions.Logging with ZLogger. If omitted, the app adds
-  a pretty ZLogger console provider by default. See [Logging](../architecture/logging.md).
-- `WithMaxDeltaTime` is a safety clamp, not a pacing delay.
-- `WithValidation` defaults to on in debug.
+  intentional pacing timer. M1 validates/stores the rate; actual pacing is M7.
+- Window options apply only to windowed mode; `WithTitle`, `WithSize`, `WithResizable`,
+  `WithFullscreen`, and `WithVSync` are rejected when combined with headless or offscreen.
+- `WithAssetsPack` defaults to `assets.pck`. M1 validates only that a supplied path is
+  non-empty; it does not require the file to exist, and pack loading is M3.
+- `WithLogging(Action<ILoggingBuilder>)` is accepted and stored for WP5. The M1 host uses
+  `NullLoggerFactory.Instance` and does not install a ZLogger/default provider yet; see
+  [Logging](../architecture/logging.md).
+- `WithMaxDeltaTime` is a safety clamp, not a pacing delay. It must be positive.
+- `WithValidation` defaults to on in debug. It is stored for the windowed/offscreen GPU
+  validation layers (M2+); M1 has no GPU.
 - There is **no** `WithTickRate`; windowed/offscreen pacing is bounded run-ahead, headless uses
   the `WithHeadless` tick rate.
+- `Build()` throws `Bork2dException` for engine configuration errors (missing or duplicate game,
+  conflicting modes, invalid layer enum, non-positive sizes/delta, negative headless rate).
+  Null/blank call arguments throw `ArgumentNullException`/`ArgumentException` at the call.
+- `Build()` creates the logger (an internal null factory in M1), options, internal engine, and
+  `IEngine.Root`; it creates no window, GPU resources, threads, or filesystem state.
+- The default windowed configuration builds in M1 even though no window exists yet.
 
 ### `Bork2dApp`
 
@@ -546,13 +558,24 @@ public sealed class Bork2dApp : IDisposable
 ```
 
 - `Run()` starts/blocks in the full design. In **M1** it is a smoke path: `Setup` → one `Tick` →
-  `Teardown`, then returns. M2/M7 replace it with the real loop.
+  `Teardown`, then returns. There is no window, GPU work, pack, render thread, or pacing loop yet;
+  M2/M7 replace this with the real loop.
 - `Run()` may be called from any thread; no main-thread requirement.
-- `Dispose()` is idempotent and safe before/after `Run`; it clears the root and disposes the
-  logger. It is app lifetime, not an entity lifetime API.
-- Stop with `IEngine.Exit()` or the window close button (windowed).
-- Exceptions propagate after cleanup.
+- `Run()` may be called once. A second call throws `InvalidOperationException`; calling it after
+  `Dispose()` throws `ObjectDisposedException`.
+- If `Setup` throws, the exception propagates and `Teardown` is not called. If `Tick` throws,
+  `Teardown` is still attempted and the original exception propagates. If both `Tick` and
+  `Teardown` throw, `Run()` throws an `AggregateException` containing both. A failed run clears
+  the root's direct children before rethrowing; the app still counts as run.
+- `Dispose()` is idempotent and safe before/after `Run`; it calls `Root.DetachAll()` (direct
+  children), disposes the logger factory when it is `IDisposable`, and never calls
+  `IGame.Teardown` again. It is app lifetime, not an entity lifetime API.
+- Stop with `IEngine.Exit()` or the window close button (windowed); the one-tick M1 smoke
+  completes its tick regardless.
 - `Run` return shape is `Open`; v1 uses `void` + exceptions.
+- `IEngine.Window`, `IEngine.Input`, and `IEngine.Assets` are M1 throwing stubs. `Window` members
+  and `Input` throw `NotSupportedException` (window/input are M2); `Assets` methods throw
+  `NotSupportedException` (pack/assets are M3).
 
 ## 13. Threading matrix
 
@@ -597,13 +620,13 @@ for argument/programming errors raised directly by callers.
 
 | Contract | Current state |
 | --- | --- |
-| `ISceneRoot` / `IEngine.Root` | Declarations present. Implemented in the internal M1 engine (WP3): read-only identity root that owns the scene. The public host/builder that creates the engine is WP4. |
+| `ISceneRoot` / `IEngine.Root` | Declarations present. Implemented in the internal M1 engine (WP3): read-only identity root that owns the scene. The WP4 host creates the engine and clears the root on `Dispose`. |
 | Parent-required creators | Implemented (WP3): attached to the supplied parent; a `null` parent throws `ArgumentNullException`. |
 | `ITransform.DetachAll` | Implemented (WP3): detaches direct children under the structural lock on any transform. |
-| `IEngine.Input` | Declaration present. Scaffold throws `NotSupportedException`; windowed input is M2. |
-| `IEngine.Exit` | Declaration present. Scaffold sets a shutdown flag read by the placeholder `Run`; the real loop is WP4. |
-| `IEngine.LoggerFactory` | Declaration present. Scaffold returns `NullLoggerFactory.Instance`; the real factory is wired by the logging work. |
-| `IGame.Teardown` | Declaration present. The M1 host invokes it (WP4). |
+| `IEngine.Input` | Declaration present. Scaffold throws `NotSupportedException`; the M1 host has no window, so input remains a stub until M2. |
+| `IEngine.Exit` | Declaration present. The one-tick M1 smoke ignores it after the tick; the real loop is M2/M7. |
+| `IEngine.LoggerFactory` | Declaration present. The internal engine returns `NullLoggerFactory.Instance`; `WithLogging` is stored but providers are wired in WP5. |
+| `IGame.Teardown` | Declaration present. The M1 host invokes it once after the tick (WP4). |
 | `Bork2dException` | Present in `Bork2d.Api` with standard constructors. |
 | Scene entity `IDisposable` | Removed from `ICamera`/`ISpriteRender` and from the internal Common types (WP3). |
 | `ITransform` world reads | Not on the public interface; the internal transform evaluates them for re-parenting and tests. |
@@ -611,9 +634,9 @@ for argument/programming errors raised directly by callers.
 | `ISpriteRender` flip | Missing; planned snapshot flag. |
 | `IAssets` pack/browse/exists | Missing. |
 | `IAssets` unload/readiness | Missing; load-and-keep deferred. |
-| Builder/app | `Bork2d.Runtime` empty; `WithGame` currently would require a new API. |
-| Threading | Single-threaded placeholder; target any-thread API with locks. |
-| Headless/offscreen | Missing. |
+| Builder/app | `Current` (WP4): public `Bork2dAppBuilder<TLayer>`, validation, one-tick `Run`, idempotent `Dispose`, and M1 stubs. Real window/GPU loop is M2/M7. |
+| Threading | The one-tick run, builder, and app `Dispose` have no thread affinity; the WP3 scene graph provides the structural/per-object locks. |
+| Headless/offscreen | Mode selection and validation exist (WP4), but both use the same one-tick smoke in M1; real mode startup is M6/M7. |
 | NativeAOT | No analyzers/publish. |
 | Camera defaults | Implemented (WP3): size 10, full viewport, all declared layers, black clear. |
 | Entity ownership | Root-owned strong tree (WP3); no weak registry, no entity `Dispose`/`IsAlive`. |
