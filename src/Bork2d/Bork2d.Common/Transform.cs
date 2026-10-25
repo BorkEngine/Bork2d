@@ -16,4 +16,6 @@ public class Transform: ITransform
     public Vector2 GlobalPosition { get; set; } = Vector2.Zero;
     public float GlobalRotation { get; set; } = 0.0f;
     public Vector2 GlobalScale { get; set; } = Vector2.One;
+
+    public void DetachAll() => throw new NotSupportedException("The scene graph is implemented in WP3.");
 }
