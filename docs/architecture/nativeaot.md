@@ -56,7 +56,8 @@ Notes:
 - Native assets (SDL2, Vulkan loader) must be deployed for the target RID. The exact
   `RuntimeIdentifier` and native-copy story are part of M2/M6.
 - AOT publish is a **required local gate**, not a CI job (human decision 2026-10-25): CI runs
-  build/tests/format on `develop` only. See [Testing and CI](#7-testing-and-ci).
+  build/tests/format on pull requests targeting `develop` and on `develop` pushes. See
+  [Testing and CI](#7-testing-and-ci).
 
 ## 3. Runtime constraints
 
@@ -177,9 +178,10 @@ Required checks:
    trim warnings; `IEngine.LoggerFactory` is usable.
 
 The AOT publish/run commands are a **required local gate** for WP6+, WP7, and the final
-`m-1/common` verification. CI is build/test/format only and runs on pushes to `develop` after a
-milestone merge, so it does not catch AOT regressions itself. A JIT unit-test pass is necessary
-but not sufficient; AOT failures often appear only at publish/runtime.
+`m-1/common` verification. CI is build/test/format only and runs on pull requests targeting
+`develop` and on `develop` pushes after a merge, so it does not catch AOT regressions itself. A
+JIT unit-test pass is necessary but not sufficient; AOT failures often appear only at
+publish/runtime.
 
 ## 8. Risks
 

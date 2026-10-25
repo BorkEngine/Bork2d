@@ -76,12 +76,13 @@ Deliver:
   `error`;
 - `global.json` pinning the installed SDK (`11.0.100-rc.1`) with the chosen roll-forward policy;
 - `Bork2d.Tests` using **xUnit** and a dependency test;
-- CI: build, tests, format verify on pushes to `develop`; AOT publish/run is a required local
-  gate, not a CI job;
+- CI: build, tests, format verify on pull requests targeting `develop` and on pushes to
+  `develop`; AOT publish/run is a required local gate, not a CI job;
 - remove placeholder `Class1` files.
 
 Acceptance: `dotnet build`, `dotnet test`, `dotnet format --verify-no-changes`, and the local
-AOT publish/run gate pass. CI runs the build/test/format jobs after a merge to `develop`.
+AOT publish/run gate pass. CI runs the build/test/format jobs on pull requests targeting
+`develop` and after a merge to `develop`.
 
 ### WP2 — API contract changes
 
@@ -401,7 +402,7 @@ reflect these choices.
 | Structural locking | **One engine-owned global structural `System.Threading.Lock`** shared by every node the engine creates, plus per-object property locks. There is no `SceneGraph` holder (D-026). |
 | Camera ordering | `ICamera<TLayer>.ZIndex` (int, default `0`) exists and round-trips in M1. Cameras apply in ascending `ZIndex` (higher later); ties are unspecified; the renderer applies it in M8 (D-026). |
 | Snapshots | **Not in M1.** Internal value-only `CameraSnapshot`/`SpriteSnapshot` structs and capture after `Tick` are M7; no entity IDs and no live node references (D-026). |
-| AOT and CI | AOT publish/run (`Bork2d.AotSmoke`, `win-x64`) is a **required local gate**. CI runs build/test/format only, on pushes to `develop` (human decision 2026-10-25). |
+| AOT and CI | AOT publish/run (`Bork2d.AotSmoke`, `win-x64`) is a **required local gate**. CI runs build/test/format only, on pull requests targeting `develop` and on pushes to `develop` (human decision 2026-10-25). |
 
 ## 11. Related documents
 

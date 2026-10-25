@@ -332,7 +332,7 @@ failures are rethrown on the caller's thread, with cleanup in a `finally`.
 - Asset data (`LoadData`, `LoadAsset<T>`, `Browse`) works; sprite handles can resolve CPU
   metadata but no texture is uploaded and nothing is drawn.
 - NativeAOT headless startup must not touch SDL/Vulkan; it is a required local gate, not a CI
-  job (CI runs build/test/format on pushes to `develop` only).
+  job (CI runs build/test/format on pull requests targeting `develop` and on `develop` pushes).
 - Intended for dedicated servers, data tools, and CI simulation.
 
 ### 10.2 `WithOffscreen(width, height)`

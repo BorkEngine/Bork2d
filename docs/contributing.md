@@ -1,8 +1,8 @@
 # Contributing
 
 > **Status:** current. The warnings/style/format/AOT gates are active from M1 and run in this
-> repository today. CI runs build, tests, and format verification on pushes to `develop` only;
-> the NativeAOT publish/run smoke is a required local gate.
+> repository today. CI runs build, tests, and format verification on pull requests targeting
+> `develop` and on pushes to `develop`; the NativeAOT publish/run smoke is a required local gate.
 
 ## 1. Prerequisites
 
@@ -23,8 +23,8 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 ```
 
 The solution builds with **zero warnings**; CI treats warnings and style violations as errors.
-CI runs only on pushes to `develop` (after a milestone merge), not on pull requests or task
-branches.
+CI runs on pull requests targeting `develop` and on pushes to `develop`; it does not run on
+milestone/task branch pushes.
 
 NativeAOT publish/run is a **required local gate** for runtime-affecting changes:
 
@@ -96,7 +96,8 @@ The standard baseline (exact `.editorconfig` values finalised with the tooling i
 - Add unit tests with behavior changes; pack/format tests for asset changes; threading tests
   for snapshot changes; GPU/visual tests for renderer changes.
 - The dependency test runs in CI. The AOT publish smoke is a required local gate, not a CI job:
-  CI runs build/tests/format on `develop` only (human decision 2026-10-25).
+  CI runs build/tests/format on pull requests targeting `develop` and on `develop` pushes
+  (human decision 2026-10-25).
 - A GPU/validation runner is required for windowed/offscreen checks; headless/data tests must
   run without a GPU.
 - Do not merge with disabled tests, flaky retries without a tracking entry, or a lowered
