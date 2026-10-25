@@ -87,7 +87,7 @@ throw even for the default windowed configuration.
 | Option | Default | Status | Meaning |
 | --- | --- | --- | --- |
 | `WithGame(IGame<TLayer> game)` | required | `Current` | Caller-owned game instance. Must not be null. |
-| `WithAssetsPack(string path)` | `assets.pck` | `Current (path only)` | Base pack path (see [assets](assets.md)). M1 checks non-empty only; pack is M3. |
+| `WithAssetsPack(string path)` | `assets.pck` | `Current (path only)` | Base pack path (see [assets](assets.md)). M1 validates the path shape only (non-empty); the pack is M3. |
 | `WithLogging(Action<ILoggingBuilder>)` | pretty ZLogger console | `Current` | Configures the app-owned logging factory. Invoked once at `Build`; suppresses the default provider. |
 | `WithTitle(string)` | assembly name | `Current (stored)` | Window title (windowed only). |
 | `WithSize(int width, int height)` | `1280 × 720` | `Current (stored)` | Initial framebuffer size (windowed only). |
@@ -113,15 +113,15 @@ Validation performed by `Build()`:
 3. Exactly one mode is selected (default windowed, or headless, or offscreen).
 4. Window-only options are not combined with headless/offscreen.
 5. `TLayer` is an `int`-backed flags enum with 1–32 named single-bit values.
-6. Sizes are positive; max delta is positive; headless tick rate is `>= 0`; asset pack path is
+6. Sizes are positive; max delta is positive; headless tick rate is `>= 0`; the window title is
    non-empty.
 7. Logging configuration, if supplied, is non-null. Validation runs first; then the factory is
    created, the `WithLogging` callback is invoked exactly once (or the default pretty ZLogger
    console provider is installed), and the startup mode/validation message is logged from the
    `Bork2d.Runtime` category. The app owns and disposes the factory.
-8. The M1 pack path is validated as non-empty only. It does not need to exist and `Build()` does
-   not touch the filesystem; existence, parsing, and checksum failures arrive with the M3 pack
-   implementation and throw at startup then.
+8. The M1 pack path is validated for shape only (non-empty; the default is `assets.pck`). It does
+   not need to exist and `Build()` does not touch the filesystem; existence, parsing, and
+   checksum failures arrive with the M3 pack implementation and throw at startup then.
 
 ## 4. Startup sequences
 
@@ -331,7 +331,8 @@ failures are rethrown on the caller's thread, with cleanup in a `finally`.
   intentional pacing delay in the engine, intended for dedicated servers.
 - Asset data (`LoadData`, `LoadAsset<T>`, `Browse`) works; sprite handles can resolve CPU
   metadata but no texture is uploaded and nothing is drawn.
-- NativeAOT headless startup must not touch SDL/Vulkan; this is a CI smoke test.
+- NativeAOT headless startup must not touch SDL/Vulkan; it is a required local gate, not a CI
+  job (CI runs build/test/format on pushes to `develop` only).
 - Intended for dedicated servers, data tools, and CI simulation.
 
 ### 10.2 `WithOffscreen(width, height)`
@@ -412,7 +413,7 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
 | Entity ownership | Root-owned strong transform tree with a read-only root (WP3) | — |
 | Assets | Empty | M3/M4 |
 | Render thread | Empty | M6/M7 |
-| NativeAOT | None | M1 baseline, M9 gate |
+| NativeAOT | `Current` (WP6): `IsAotCompatible` plus trim/AOT analyzers on the runtime libraries; `Bork2d.AotSmoke` publishes/runs locally with zero AOT/trim warnings. A local gate, not CI. | M9 release gate |
 
 ## 13. Open questions
 

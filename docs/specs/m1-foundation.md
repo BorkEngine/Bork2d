@@ -1,7 +1,9 @@
 # M1 — Foundation and NativeAOT Baseline: Implementation Spec
 
-> **Status:** ready for implementation. **M0 is complete** (2026-10-25). This spec supersedes
-> the older M1 bullet list in the roadmap; the roadmap links here.
+> **Status:** implemented (WP1–WP8); final PR `m-1/common` → `develop` pending human review.
+> **M0 is complete** (2026-10-25). This spec supersedes the older M1 bullet list in the roadmap;
+> the roadmap links here. M1 shipped 135 tests, Debug/Release builds with zero warnings, a clean
+> `dotnet format` check, and a local NativeAOT publish/run smoke. It is not merged or reviewed.
 
 ## 1. Goal
 
@@ -74,11 +76,12 @@ Deliver:
   `error`;
 - `global.json` pinning the installed SDK (`11.0.100-rc.1`) with the chosen roll-forward policy;
 - `Bork2d.Tests` using **xUnit** and a dependency test;
-- CI: build, tests, format verify, AOT publish smoke;
+- CI: build, tests, format verify on pushes to `develop`; AOT publish/run is a required local
+  gate, not a CI job;
 - remove placeholder `Class1` files.
 
-Acceptance: `dotnet build`, `dotnet test`, and `dotnet format --verify-no-changes` pass locally
-and in CI.
+Acceptance: `dotnet build`, `dotnet test`, `dotnet format --verify-no-changes`, and the local
+AOT publish/run gate pass. CI runs the build/test/format jobs after a merge to `develop`.
 
 ### WP2 — API contract changes
 
@@ -273,11 +276,12 @@ not CI (human decision 2026-10-25); run it for runtime-affecting changes and bef
 Update same-change:
 
 - `docs/api/reference.md`, `docs/api/guide.md`;
-- `docs/architecture/overview.md`, `runtime-lifecycle.md`, `threading.md`;
-- `docs/architecture/scene-ownership.md`;
-- `docs/decisions.md` (D-023/D-024);
-- `docs/roadmap.md` (M0 complete, M1 progress);
-- root/docs README status.
+- `docs/architecture/overview.md`, `runtime-lifecycle.md`, `threading.md`, `nativeaot.md`,
+  `projects.md`;
+- `docs/architecture/scene-ownership.md`, `rendering.md`;
+- `docs/decisions.md` (D-023/D-024/D-025/D-026 and the index);
+- `docs/roadmap.md` (M0 complete, M1 implemented/final PR pending);
+- root `README.md`, `docs/README.md`, `docs/contributing.md` status and commands.
 
 ## 5. Implementation order
 
@@ -358,39 +362,46 @@ WP1 and WP2 can overlap; WP3 must land before WP4 because the builder creates `R
 
 ## 9. Acceptance checklist
 
-- [ ] Build rules and `.editorconfig` active in all projects.
-- [ ] `dotnet format --verify-no-changes` passes.
-- [ ] Dependency test passes.
-- [ ] `ISceneRoot`/`IEngine.Root` implemented and read-only.
-- [ ] Parent-required creators implemented.
-- [ ] Remove/re-add preserves object/state.
-- [ ] `Root.DetachAll()` detaches; refs remain usable.
-- [ ] No `Dispose`/`IsAlive` on scene entities.
-- [ ] Lost-reference GC tests pass.
-- [ ] Root setter/cycle tests pass.
-- [ ] Camera `ZIndex` default/round-trip test passes; no entity IDs or ordered discovery exist.
-- [ ] Builder validation tests pass.
-- [ ] One-tick `Run` smoke passes.
-- [ ] ZLogger default + `IEngine.LoggerFactory` smoke passes.
+- [x] Build rules and `.editorconfig` active in all projects.
+- [x] `dotnet format --verify-no-changes` passes.
+- [x] Dependency test passes.
+- [x] `ISceneRoot`/`IEngine.Root` implemented and read-only.
+- [x] Parent-required creators implemented.
+- [x] Remove/re-add preserves object/state.
+- [x] `Root.DetachAll()` detaches; refs remain usable.
+- [x] No `Dispose`/`IsAlive` on scene entities.
+- [x] Lost-reference GC tests pass.
+- [x] Root setter/cycle tests pass.
+- [x] Camera `ZIndex` default/round-trip test passes; no entity IDs or ordered discovery exist.
+- [x] Builder validation tests pass.
+- [x] One-tick `Run` smoke passes.
+- [x] ZLogger default + `IEngine.LoggerFactory` smoke passes.
 - [x] AOT publish smoke runs with zero warnings.
-- [ ] No weak `EntityList` in shipped code.
-- [ ] Any-thread API smoke/tests pass.
-- [ ] Docs/API/decision log updated.
-- [ ] M0 marked complete; M1 progress table updated.
+- [x] No weak `EntityList` in shipped code.
+- [x] Any-thread API smoke/tests pass.
+- [x] Docs/API/decision log updated.
+- [x] M0 marked complete; M1 progress table updated.
 
-## 10. Open questions
+## 10. M1 open-question resolutions
 
-1. **`DetachAll()` scope:** direct children (current) vs recursively detaching all descendants.
-   Recommendation: direct children; root-level `DetachAll` removes the whole scene tree intact.
-2. **Per-object locking granularity:** lock per entity vs striped locks. Start per-entity with
-   `System.Threading.Lock`; keep lock-free/`Interlocked` paths where possible.
-3. **`IWindow` any-thread semantics:** queue all operations to the OS/window thread; confirm
-   blocking getters vs snapshots.
-4. **`CreateTransform(parent = null)`:** keep optional for standalone math (current), or require
-   a parent everywhere.
-5. **Lifetime scopes:** defer to M2/M7 or add `ISceneScope` in M1? Defer.
-6. **ZLogger version/format:** pin latest stable; pretty local-time console; file sink opt-in.
-7. **`WithAssetsPack` in M1:** validate path only; existence/parse enforcement lands with M3.
+The questions raised before implementation are resolved as follows; the M1 code and docs
+reflect these choices.
+
+| Question | Resolution |
+| --- | --- |
+| `DetachAll()` scope | **Direct children.** `Root.DetachAll()` removes the scene's top-level children; subtrees stay intact and remain re-attachable. |
+| Per-object locking granularity | **One `System.Threading.Lock` per entity** for local property access. Prefer lock-free/`Interlocked` paths where practical; a composite multi-property update still needs game synchronization (D-024). |
+| `IWindow` any-thread semantics | No thread affinity. Calls may originate on any thread during the tick window; window operations will be marshaled to the OS/window thread in M2. M1 has no window, so `IWindow`/`IInput` throw. |
+| `CreateTransform(parent = null)` | **Optional.** A standalone transform is legal for math/temporary use; it is not retained unless parented. |
+| Lifetime scopes | **Deferred.** Not part of M1; root ownership is the lifetime model. |
+| ZLogger version/format | Pinned `ZLogger` `2.5.10` + `Microsoft.Extensions.Logging` `11.0.0-rc.1.26425.128`; plain-text console prefix with local time/milliseconds, level, and category; no colors; `Debug` minimum in Debug builds and `Information` in Release (D-021). |
+| `WithAssetsPack` in M1 | **Path shape only** (non-empty; default `assets.pck`). No filesystem access; existence/parse/checksum enforcement lands with the M3 pack. |
+| Rotation unit | **Degrees**, positive CCW, normalized to `[0, 360)` on assignment and getter; non-finite values throw. Internal matrix math stays in radians (D-025). |
+| Scene identity/order | **No entity IDs, unordered tree, no ordered discovery, no public child enumeration** in M1 (D-026). Tests assert parent relationships, reference identity, and GC behavior, not IDs or order. |
+| Structural locking | **One engine-owned global structural `System.Threading.Lock`** shared by every node the engine creates, plus per-object property locks. There is no `SceneGraph` holder (D-026). |
+| Camera ordering | `ICamera<TLayer>.ZIndex` (int, default `0`) exists and round-trips in M1. Cameras apply in ascending `ZIndex` (higher later); ties are unspecified; the renderer applies it in M8 (D-026). |
+| Snapshots | **Not in M1.** Internal value-only `CameraSnapshot`/`SpriteSnapshot` structs and capture after `Tick` are M7; no entity IDs and no live node references (D-026). |
+| AOT and CI | AOT publish/run (`Bork2d.AotSmoke`, `win-x64`) is a **required local gate**. CI runs build/test/format only, on pushes to `develop` (human decision 2026-10-25). |
 
 ## 11. Related documents
 

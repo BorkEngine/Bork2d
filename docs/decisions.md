@@ -234,13 +234,13 @@
 - **Context:** Gameplay wants many threads inside a tick, joined before it ends, without the
   renderer reading live state.
 - **Decision:** All scene mutation happens inside the tick window. Game workers may create and
-  mutate **distinct** entities concurrently; the engine serializes structural state and
-  captures the snapshot after `Tick` returns. The engine does not serialize concurrent access
-  to the same entity/property; the game synchronizes that. Main-only APIs stay main-only.
-  Workers join before `Tick` returns.
-- **Consequences:** Parallel spawning/per-entity updates are legal and cheap; no per-property
-  locks. Same-entity races are the game's responsibility. Structural state must stay
-  thread-safe; no entity IDs are allocated.
+  mutate **distinct** entities concurrently; the engine serializes structural changes and
+  individual property access (D-024) and captures the snapshot after `Tick` returns. A logical
+  multi-property update that must be atomic is the game's responsibility. Workers join before
+  `Tick` returns.
+- **Consequences:** Parallel spawning/per-entity updates are legal. Individual property access
+  uses a per-object `Lock` (D-024), while composite same-object updates remain the game's
+  responsibility. Structural state must stay thread-safe; no entity IDs are allocated.
 - **Alternatives:** Single-writer main-thread mutation; locks on every property; ECS/job system.
 - **Docs:** [Threading](architecture/threading.md#2-tick-scoped-concurrency)
 
@@ -249,11 +249,12 @@
 - **Status:** Accepted
 - **Context:** Game and dedicated-server builds should be AOT-published/trimmed; the editor and
   build tools have different constraints.
-- **Decision:** Runtime/game projects (`Api`, `Common`, `Assets`, `Render`, `Runtime`,
-  `Project.Desktop`) are NativeAOT- and trim-safe from M1. No runtime reflection, assembly
-  scanning, runtime TOML, or dynamic code. Nerdbank.MessagePack shapes are source-generated.
-  The editor and baker remain JIT and may use reflection/TOML. `WithGame(instance)` avoids
-  reflection-based construction.
+- **Decision:** Runtime libraries (`Api`, `Common`, `Assets`, `Render`, `Runtime`) are
+  NativeAOT- and trim-safe from M1, proved by the local `Bork2d.AotSmoke` publish/run gate. No
+  runtime reflection, assembly scanning, runtime TOML, or dynamic code.
+  Nerdbank.MessagePack shapes are source-generated. The editor and baker remain JIT and may use
+  reflection/TOML. `WithGame(instance)` avoids reflection-based construction. The game
+  template's `Project.Desktop` takes over the executable role in M9.
 - **Consequences:** AOT/trim analyzers and publish smoke are baseline; some libraries may need
   adapters; game constructors can take dependencies; missing generated shapes fail fast.
   Editor stays rich/JIT.
@@ -362,7 +363,7 @@
 
 ## D-023 Root-owned scene graph
 
-- **Status:** Accepted
+- **Status:** Accepted; implemented in M1
 - **Context:** A global strong registry would retain every created camera/sprite/transform until
   app shutdown; losing a reference would leak permanently. Weak ownership auto-collects but
   makes camera/renderable lifetime nondeterministic.
@@ -388,7 +389,7 @@
 
 ## D-024 Thread-affinity-free API
 
-- **Status:** Accepted
+- **Status:** Accepted; implemented in M1
 - **Context:** Requiring the process main thread for engine calls makes embedding, tooling, and
   worker-driven game code fragile. The engine already needs synchronization for workers.
 - **Decision:** No public engine API requires the process main thread. Calls may originate on any
@@ -407,7 +408,7 @@
 
 ## D-025 Degrees and normalized rotation
 
-- **Status:** Accepted
+- **Status:** Accepted; implemented in M1
 - **Context:** The M1 public `ITransform.LocalRotation` originally used radians, which is awkward
   for authoring and serialized scene data, and the value could differ between assignment and a
   re-parent refresh. M1 needs one public unit and one canonical range.
@@ -429,7 +430,8 @@
 
 ## D-026 No entity IDs, unordered tree, camera `ZIndex`, internal snapshots
 
-- **Status:** Accepted
+- **Status:** Accepted; entity storage and camera `ZIndex` implemented in M1; snapshots and
+  ordering applied in M7/M8
 - **Context:** M1 briefly exposed a `SceneGraph` holder that allocated monotonic entity IDs and
   ordered discovery by them. That identity leaked into tests, docs, and the future snapshot
   contract (tie-breaking and camera order) even though no runtime code consumed it.

@@ -1,27 +1,37 @@
 # Contributing
 
-> **Status:** target process, enforced from M1. The current scaffold predates the full
-> `.editorconfig`/analyzers, so expect a formatting pass when the build rules land.
+> **Status:** current. The warnings/style/format/AOT gates are active from M1 and run in this
+> repository today. CI runs build, tests, and format verification on pushes to `develop` only;
+> the NativeAOT publish/run smoke is a required local gate.
 
 ## 1. Prerequisites
 
-- .NET SDK pinned by `global.json` (currently the installed `11.0.100-rc.1`).
+- .NET SDK pinned by `global.json` (`11.0.100-rc.1`, target `net11.0`).
 - Windows for the windowed/Vulkan targets; headless builds/tests should stay cross-platform
   where practical.
-- Vulkan 1.3 GPU/driver for windowed/offscreen tests; not required for unit/headless tests.
-- SDL2 native binaries for windowed runs.
-- NativeAOT toolchain for the runtime publish checks.
+- Vulkan 1.3 GPU/driver for windowed/offscreen checks from M6; not required for M1 unit tests.
+- SDL2 native binaries for windowed runs from M2.
+- NativeAOT toolchain (MSVC) for the local runtime publish check.
 
 ## 2. Build and test
 
 ```powershell
-dotnet build src/Bork2d/Bork2d.slnx
-dotnet test src/Bork2d/Bork2d.slnx
-dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes
+dotnet build src/Bork2d/Bork2d.slnx -c Debug
+dotnet build src/Bork2d/Bork2d.slnx -c Release
+dotnet test src/Bork2d/Bork2d.slnx -c Debug
+dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 ```
 
-The solution is expected to build with **zero warnings**. CI treats warnings and style
-violations as errors.
+The solution builds with **zero warnings**; CI treats warnings and style violations as errors.
+CI runs only on pushes to `develop` (after a milestone merge), not on pull requests or task
+branches.
+
+NativeAOT publish/run is a **required local gate** for runtime-affecting changes:
+
+```powershell
+dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
+& src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe
+```
 
 ## 3. Build, style, and warnings
 

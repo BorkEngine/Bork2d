@@ -216,7 +216,7 @@ but not sufficient; AOT failures often appear only at publish/runtime.
 | AOT headless smoke | Implemented (WP6): `Bork2d.AotSmoke` publishes/runs one tick with default logging and a generated-shape round trip; zero AOT/trim warnings. | M1; full pack/tick/exit in M7; release gate M9 |
 | Silk.NET AOT validation | Not started; Silk.NET/SDL deliberately excluded from M1. | M2 (SDL), M6 (Vulkan) |
 | Editor JIT boundary | Editor absent. | M5 |
-| AOT publish CI | Local gate only (human decision); CI is build/test/format on `develop`. | M1 baseline, M9 release gate |
+| AOT publish/run gate | Local gate only (human decision); CI is build/test/format on `develop`. | M1 baseline, M9 release gate |
 
 ## 11. Related documents
 

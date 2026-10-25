@@ -195,8 +195,8 @@ Implemented in WP3 inside `Bork2d.Common` (all implementation types are internal
    parent relationships in the unordered tree, distinct references under concurrency, and
    camera `ZIndex` defaults/round-trip.
 7. Scene entities have no `IDisposable`/`Dispose`/`IsAlive` and do not self-register anywhere.
-8. API docs and the threading/lifecycle notes were updated in the same change; the M1 spec's
-   final status pass remains WP8.
+8. API docs and the threading/lifecycle notes were updated in the same change; WP8 completed the
+   M1 documentation final pass.
 
 ## 9. Related documents
 
