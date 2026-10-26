@@ -1,4 +1,5 @@
 using Bork2d.Api;
+using Bork2d.Assets;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
@@ -205,23 +206,21 @@ public sealed class AssetServiceLifecycleTests
     }
 
     [Fact]
-    public void LoadSpriteIsADocumentedStubForPresentPaths()
+    public async Task LoadSpriteReturnsARealHandleForPresentPaths()
     {
         using var directory = TempPackDirectory.CreateUnderTemp();
-        string packPath = directory.WritePack(
-            "base.pck",
-            builder => builder.AddRaw("sprites/player", [1]));
+        string packPath = SpriteTestSupport.WriteSpritePack(directory);
 
         using var host = new AssetServiceHost(packPath);
         host.Start();
 
-        Assert.Equal(Sprite.Empty, host.Service.LoadSprite("sprites/player"));
+        Sprite handle = host.Service.LoadSprite(SpriteTestSupport.SpritePath);
+        Assert.NotEqual(Sprite.Empty, handle);
 
-        var log = Assert.Single(
-            host.Logs,
-            entry => entry.Level == LogLevel.Debug
-                && entry.Message.Contains("sprites/player", StringComparison.Ordinal));
-        Assert.Contains("WP4", log.Message, StringComparison.Ordinal);
+        await host.Service.GetSpriteCompletion(handle).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(host.Service.TryGetSpriteResource(handle, out SpriteResource? resource));
+        Assert.True(resource.IsValid);
 
         Assert.Throws<ArgumentNullException>(() => host.Service.LoadSprite(null!));
         Assert.Throws<ArgumentException>(() => host.Service.LoadSprite("sprites/player.toml"));
