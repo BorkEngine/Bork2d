@@ -1,121 +1,130 @@
 using System.Numerics;
 using Bork2d.Api.Assets;
 using Bork2d.Api.Rendering;
-using Bork2d.Assets.Pack;
-using Bork2d.Common.Serialization;
+using Bork2d.BakeFixture;
 
 namespace Bork2d.AotSmoke.Smoke;
 
 /// <summary>
-/// Builds the temporary pack used by the default NativeAOT smoke run and holds the expected values.
+/// Holds the canonical paths and the exact expected values of the baked fixture pack that the
+/// default NativeAOT smoke run loads.
 /// </summary>
 /// <remarks>
-/// The pack is written to an absolute temporary path with the public <see cref="PackBuilder"/>
-/// (D-M3-19), loaded by the app, and deleted by the caller after the app has disposed (which closes
-/// the pack handles). It contains raw data, a generated-shape data asset, a texture descriptor, its
-/// raw payload, and a public <see cref="SpriteAsset"/>, so the AOT run exercises the public asset
-/// shapes and their path references. No binary fixture is committed.
+/// The pack is produced by the imported <c>build/Bork2d.Bake.targets</c> from the committed
+/// <c>Bork2d.BakeFixture</c> asset tree and contains exactly five entries: <c>data/game</c>, the
+/// <c>roots/stats</c> struct root, <c>sprites/player</c>, <c>textures/player</c>, and the raw
+/// <c>textures/raw/player</c> payload. The smoke opens it with
+/// <see cref="Path.Combine(string, string)"/> on <see cref="AppContext.BaseDirectory"/>, so the
+/// published executable reads the pack next to itself instead of building a temporary pack or
+/// depending on the process current directory. No binary fixture is committed.
 /// </remarks>
 internal static class AssetSmoke
 {
-    /// <summary>The canonical path of the raw asset in the smoke pack.</summary>
-    internal const string RawPath = "data/smoke";
+    /// <summary>The baked pack file name next to the app and in the publish directory.</summary>
+    internal const string PackFileName = "assets.pck";
 
-    /// <summary>The canonical path of the MessagePack asset in the smoke pack.</summary>
-    internal const string MessagePackPath = "data/smoke-data";
+    /// <summary>The canonical path of the baked class-root custom data.</summary>
+    internal const string GamePath = "data/game";
 
-    /// <summary>The canonical path of the texture descriptor in the smoke pack.</summary>
-    internal const string TexturePath = "textures/smoke";
+    /// <summary>The canonical path of the baked struct-root custom data.</summary>
+    internal const string StatsRootPath = "roots/stats";
 
-    /// <summary>The canonical path of the raw texture payload in the smoke pack.</summary>
-    internal const string TexturePayloadPath = "textures/raw/smoke";
+    /// <summary>The canonical path of the baked sprite asset.</summary>
+    internal const string SpritePath = "sprites/player";
 
-    /// <summary>The canonical path of the sprite asset in the smoke pack.</summary>
-    internal const string SpritePath = "sprites/smoke";
+    /// <summary>The canonical path of the baked texture descriptor.</summary>
+    internal const string TexturePath = "textures/player";
 
-    /// <summary>The expected value of the raw asset.</summary>
-    internal const string Name = "bork2d-aot-smoke";
+    /// <summary>The canonical path of the baked raw texture payload.</summary>
+    internal const string TexturePayloadPath = "textures/raw/player";
 
-    /// <summary>The expected integer value of the MessagePack asset.</summary>
-    internal const int Value = 42;
-
-    /// <summary>The expected scale of the MessagePack asset.</summary>
-    internal const float Scale = 1.5f;
-
-    /// <summary>The expected linear color of the MessagePack asset.</summary>
-    internal static Color Tint => new(R: 1f, G: 0.5f, B: 0.25f, A: 1f);
-
-    /// <summary>The expected entry count of the smoke pack.</summary>
+    /// <summary>The exact entry count of the baked fixture pack.</summary>
     internal const int EntryCount = 5;
 
-    /// <summary>The known raw payload bytes stored in the pack.</summary>
-    internal static ReadOnlySpan<byte> RawPayload => [0x42, 0x4F, 0x52, 0x4B, 0x32, 0x44, 0x01, 0x7F];
+    /// <summary>The expected <c>name</c> of the baked <see cref="GameConfig"/>.</summary>
+    internal const string GameName = "campaign";
 
-    /// <summary>The known RGBA8 texture payload stored in the pack.</summary>
-    internal static ReadOnlySpan<byte> TexturePayload => [0x11, 0x22, 0x33, 0xFF];
+    /// <summary>The expected <c>health</c> of the baked <see cref="GameConfig"/>.</summary>
+    internal const int GameHealth = 120;
+
+    /// <summary>The expected <c>max_players</c> of the baked <see cref="GameConfig"/>.</summary>
+    internal const int GameMaxPlayers = 4;
+
+    /// <summary>The expected <c>must</c> value of the baked <see cref="GameConfig"/>.</summary>
+    internal const string GameMust = "present";
+
+    /// <summary>The expected nested struct of the baked <see cref="GameConfig"/>.</summary>
+    internal static Stats GameStats => new(Attack: 3, Defense: 7);
+
+    /// <summary>The expected linear tint of the baked <see cref="GameConfig"/>.</summary>
+    internal static Color GameTint => new(R: 1f, G: 0.5f, B: 0.25f, A: 1f);
+
+    /// <summary>The expected <c>attack</c> of the baked <see cref="StatsRoot"/>.</summary>
+    internal const int StatsRootAttack = 11;
+
+    /// <summary>The expected <c>defense</c> of the baked <see cref="StatsRoot"/>.</summary>
+    internal const int StatsRootDefense = 13;
+
+    /// <summary>The expected value of the baked <see cref="StatsRoot"/>.</summary>
+    internal static StatsRoot GameStatsRoot => new(Attack: StatsRootAttack, Defense: StatsRootDefense);
+
+    /// <summary>The expected four top-left-origin UVs of the baked <see cref="SpriteAsset"/>.</summary>
+    internal static Vector2[] SpriteUvs =>
+    [
+        new(0f, 0f),
+        new(1f, 0f),
+        new(1f, 1f),
+        new(0f, 1f),
+    ];
+
+    /// <summary>The expected pixels-per-world-unit scale of the baked <see cref="SpriteAsset"/>.</summary>
+    internal const float SpriteScale = 16f;
+
+    /// <summary>The expected normalized pivot of the baked <see cref="SpriteAsset"/>.</summary>
+    internal static Vector2 SpritePivot => new(0.5f, 0.5f);
+
+    /// <summary>The expected topology of the baked <see cref="SpriteAsset"/>.</summary>
+    internal const SpriteTopology SpriteAssetTopology = SpriteTopology.Triangles;
+
+    /// <summary>The expected index buffer of the baked <see cref="SpriteAsset"/>.</summary>
+    internal static ushort[] SpriteIndices => [0, 1, 2, 0, 2, 3];
+
+    /// <summary>The expected pixel width of the baked <see cref="TextureDescriptor"/>.</summary>
+    internal const uint TextureWidth = 2;
+
+    /// <summary>The expected pixel height of the baked <see cref="TextureDescriptor"/>.</summary>
+    internal const uint TextureHeight = 2;
+
+    /// <summary>The expected pixel format of the baked <see cref="TextureDescriptor"/>.</summary>
+    internal const string TextureFormat = "rgba8";
+
+    /// <summary>The expected sampler filter of the baked <see cref="TextureDescriptor"/>.</summary>
+    internal const string TextureFilter = "nearest";
+
+    /// <summary>The expected sampler wrap mode of the baked <see cref="TextureDescriptor"/>.</summary>
+    internal const string TextureWrap = "repeat";
 
     /// <summary>
-    /// The fixture's class root that the WP6 baked-pack smoke loads from the baked fixture pack.
+    /// The exact 2x2 RGBA8 payload the baked <c>textures/raw/player</c> entry stores: red opaque,
+    /// green half transparent, blue quarter transparent, white fully transparent.
     /// </summary>
-    /// <remarks>
-    /// Referencing the type at compile time keeps the <c>Bork2d.BakeFixture</c> assembly in the AOT
-    /// app's reference graph (Q-16) and proves the boundary in the dependency test. WP5 does not read
-    /// this property, so the default smoke behavior is unchanged; WP6 replaces the temporary pack with
-    /// the baked fixture pack and executes <c>LoadAsset&lt;GameConfig&gt;</c>.
-    /// </remarks>
-    internal static Type BakedGameConfigType => typeof(Bork2d.BakeFixture.GameConfig);
+    internal static ReadOnlySpan<byte> TexturePayload =>
+    [
+        255, 0, 0, 255,
+        0, 255, 0, 128,
+        0, 0, 255, 64,
+        255, 255, 255, 0,
+    ];
 
-    /// <summary>Builds the smoke pack at a new absolute temporary path.</summary>
-    /// <returns>The absolute pack path; the caller deletes it.</returns>
-    internal static string CreatePack()
-    {
-        string path = Path.Combine(Path.GetTempPath(), $"bork2d-aot-{Guid.NewGuid():N}.pck");
+    /// <summary>The name used by the in-memory generated-shape round trip (not the baked pack).</summary>
+    internal const string SmokeName = "bork2d-aot-smoke";
 
-        var builder = new PackBuilder(PackCompressionMode.Debug);
-        builder.AddRaw(RawPath, RawPayload);
-        builder.AddMessagePack(MessagePackPath, CreateData());
-        builder.AddMessagePack(TexturePath, CreateTextureDescriptor());
-        builder.AddRaw(TexturePayloadPath, TexturePayload);
-        builder.AddMessagePack(SpritePath, CreateSprite());
-        builder.Write(path);
+    /// <summary>The integer used by the in-memory generated-shape round trip.</summary>
+    internal const int SmokeValue = 42;
 
-        return path;
-    }
+    /// <summary>The scale used by the in-memory generated-shape round trip.</summary>
+    internal const float SmokeScale = 1.5f;
 
-    /// <summary>Creates the expected MessagePack asset value.</summary>
-    internal static MessagePackSmokeData CreateData() => new()
-    {
-        Name = Name,
-        Value = Value,
-        Scale = Scale,
-        Tint = AssetSmoke.Tint,
-    };
-
-    /// <summary>Creates the public texture descriptor used by the sprite asset.</summary>
-    internal static TextureDescriptor CreateTextureDescriptor() => new()
-    {
-        Payload = TexturePayloadPath,
-        Width = 1,
-        Height = 1,
-        Format = "rgba8",
-        Filter = "nearest",
-        Wrap = "clamp",
-    };
-
-    /// <summary>Creates the public sprite asset that references the texture descriptor.</summary>
-    internal static SpriteAsset CreateSprite() => new()
-    {
-        Texture = TexturePath,
-        Uvs =
-        [
-            new Vector2(0f, 0f),
-            new Vector2(1f, 0f),
-            new Vector2(1f, 1f),
-            new Vector2(0f, 1f),
-        ],
-        Scale = 1f,
-        Pivot = new Vector2(0.5f, 0.5f),
-        Topology = SpriteTopology.Quad,
-        Indices = null,
-    };
+    /// <summary>The linear tint used by the in-memory generated-shape round trip.</summary>
+    internal static Color SmokeTint => new(R: 1f, G: 0.5f, B: 0.25f, A: 1f);
 }
