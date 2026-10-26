@@ -167,6 +167,7 @@ internal static class Program
             Name = "bork2d-aot-smoke",
             Value = Value,
             Scale = Scale,
+            Tint = AssetSmoke.Tint,
         };
 
         var roundTripped = MessagePackSmokeSerializer.RoundTrip(original);
@@ -180,9 +181,12 @@ internal static class Program
         SmokeChecks.Require(
             roundTripped.Scale == Scale,
             "the MessagePack generated shape must round-trip the scale.");
+        SmokeChecks.Require(
+            roundTripped.Tint == original.Tint,
+            "the MessagePack generated shape must round-trip the Color surrogate.");
 
         Console.WriteLine($"MessagePack generated-shape round trip: name={roundTripped.Name}, "
-            + $"value={roundTripped.Value}, scale={roundTripped.Scale}");
+            + $"value={roundTripped.Value}, scale={roundTripped.Scale}, tint={roundTripped.Tint}");
     }
 
     private static void VerifyRootIsCleared(SmokeGame game)

@@ -241,7 +241,7 @@ internal sealed class AssetService : IAssets, IDisposable
 
     /// <inheritdoc/>
     public Task<T> LoadAsset<T>(string assetPath)
-        where T : class, IShapeable<T>
+        where T : IShapeable<T>
     {
         string canonicalPath = AssetPath.Normalize(assetPath);
         ThrowIfDisposed();
@@ -268,7 +268,7 @@ internal sealed class AssetService : IAssets, IDisposable
 
     /// <inheritdoc/>
     public Task<T> LoadAsset<T>(AssetRef<T> reference)
-        where T : class, IShapeable<T>
+        where T : IShapeable<T>
     {
         if (reference.Path is null)
         {

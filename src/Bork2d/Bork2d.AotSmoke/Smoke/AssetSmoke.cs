@@ -1,5 +1,6 @@
 using System.Numerics;
 using Bork2d.Api.Assets;
+using Bork2d.Api.Rendering;
 using Bork2d.Assets.Pack;
 using Bork2d.Common.Serialization;
 
@@ -41,6 +42,9 @@ internal static class AssetSmoke
     /// <summary>The expected scale of the MessagePack asset.</summary>
     internal const float Scale = 1.5f;
 
+    /// <summary>The expected linear color of the MessagePack asset.</summary>
+    internal static Color Tint => new(R: 1f, G: 0.5f, B: 0.25f, A: 1f);
+
     /// <summary>The expected entry count of the smoke pack.</summary>
     internal const int EntryCount = 5;
 
@@ -73,6 +77,7 @@ internal static class AssetSmoke
         Name = Name,
         Value = Value,
         Scale = Scale,
+        Tint = AssetSmoke.Tint,
     };
 
     /// <summary>Creates the public texture descriptor used by the sprite asset.</summary>

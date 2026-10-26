@@ -106,7 +106,21 @@ points; the D-M3 rows are the authoritative wording for M3-specific behavior.
 | D-M3-19 | Accepted | The default AOT smoke builds a temporary pack, loads raw and generated-shape MessagePack assets, browses/exists, then deletes it; `--windowed` keeps the M2 demo with `WithoutAssets()`. |
 | D-M3-20 | Accepted | `Bork2d.Assets` pins `Nerdbank.MessagePack` 1.4.95, `PolyType` 1.4.1, and `System.IO.Hashing` 11.0.0-rc.1.26425.128; Zstd is the .NET 11 built-in codec. |
 | D-M3-21 | Accepted | Five sequential work packages (pack format/writer, VFS/browse, loader/threading, descriptors/sprites, runtime/AOT/docs/acceptance); no parallel wave. |
-| D-M3-22 | Accepted | Supersedes D-M3-16. `IAssets.LoadAsset<T>` is `Task<T> LoadAsset<T>(string assetPath) where T : class, IShapeable<T>`; `Bork2d.Api` references PolyType 1.4.1 for this contract. `PackBuilder.AddMessagePack<T>` keeps its `T : IShapeable<T>` constraint. |
+| D-M3-22 | Accepted (the `class` constraint is superseded by D-M4-11) | Supersedes D-M3-16. `IAssets.LoadAsset<T>` is `Task<T> LoadAsset<T>(string assetPath) where T : class, IShapeable<T>`; `Bork2d.Api` references PolyType 1.4.1 for this contract. `PackBuilder.AddMessagePack<T>` keeps its `T : IShapeable<T>` constraint. D-M4-11 removes the `class` constraint; the shape contract itself remains. |
+
+## M4 serialization and bake decisions (approved 2026-10-26)
+
+Detailed approvals. D-M4-01, D-M4-02, D-M4-11, D-M4-12, and the Q-04/Q-09 resolutions are landed by
+WP1; the remaining D-M4 entries are added by the work packages that implement them.
+
+| ID | Status | Decision |
+| --- | --- | --- |
+| D-M4-01 | Accepted | Bake tooling shape: a new JIT `Bork2d.Bake` library plus a `Bork2d.Bake.Cli` console. The M5 editor reuses the library; MSBuild invokes the CLI. The tooling surface is internal with `InternalsVisibleTo` (Q-02). |
+| D-M4-02 | Accepted | Type mapping: the manifest is generated from `Project.Common` metadata and compiled into a **generated bake host** that references `Project.Common` and `Bork2d.Bake`. The host calls typed, generated bind/write code. No runtime reflection over game members; `Project.Common`'s game types reference `Bork2d.Api` only, and Q-04 may add a referenced data library that contains a mapped type. |
+| D-M4-11 | Accepted | Struct roots: a top-level asset root may be any struct, including a `readonly record struct`. `IAssets.LoadAsset<T>` (both overloads), `AssetRef<TAsset>`, and `AssetRefMarshaler<TAsset>` use `where T : IShapeable<T>`; `AssetRef<TAsset>` can target a struct. The deserializer rejects an empty or MessagePack `nil` root before deserializing, so a struct root never silently becomes `default`; both are `AssetErrorKind.Decode` faults. This supersedes the `class` part of D-M3-22 (its shape contract remains) and is a public API change approved under D-014. |
+| D-M4-12 | Accepted | Registration, `partial`, and `Color`: PolyType `[GenerateShape]` is the single shape attribute; the descriptor is the registration list; there is no `Bork2dSerializableAttribute` and no `Bork2d.Bake.Generators`. A `[GenerateShape]` root must be `partial` because PolyType injects `IShapeable<T>` through a partial declaration. `Color` gets `[TypeShape(Marshaler = typeof(ColorMarshaler))]` and stays non-`partial` with no `[GenerateShape]`; `ColorMarshaler` is public serialization infrastructure (`[EditorBrowsable(Never)]`) and serializes the linear float surrogate `[r, g, b, a]`. A null surrogate is a decode fault. Supersedes D-M4-03 and D-M4-10. |
+| Q-04 | Accepted | Type resolution searches `Project.Common`, then the assemblies it references, then `Bork2d.Api`; an ambiguous full name names every candidate. A mapped type may live outside `Project.Common` when the library containing it is referenced by `Project.Common`. |
+| Q-09 | Accepted | The incremental manifest uses XXH3 (`System.IO.Hashing.XxHash128`, 16-byte uppercase hex, explicit field framing), not SHA-256. |
 
 ## Superseding a decision
 

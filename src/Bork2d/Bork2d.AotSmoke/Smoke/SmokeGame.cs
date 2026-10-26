@@ -239,6 +239,9 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
             data.Scale == AssetSmoke.Scale,
             "LoadAsset<MessagePackSmokeData> must round-trip the scale.");
         SmokeChecks.Require(
+            data.Tint == AssetSmoke.Tint,
+            "LoadAsset<MessagePackSmokeData> must round-trip the Color marshaler surrogate.");
+        SmokeChecks.Require(
             sprite.Texture.Path == AssetSmoke.TexturePath,
             "LoadAsset<SpriteAsset> must round-trip the texture reference.");
         SmokeChecks.Require(

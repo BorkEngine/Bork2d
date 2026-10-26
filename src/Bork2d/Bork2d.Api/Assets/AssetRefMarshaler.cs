@@ -14,7 +14,7 @@ namespace Bork2d.Api.Assets;
 /// </remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public sealed class AssetRefMarshaler<TAsset> : IMarshaler<AssetRef<TAsset>, string?>
-    where TAsset : class, IShapeable<TAsset>
+    where TAsset : IShapeable<TAsset>
 {
     /// <inheritdoc/>
     public string? Marshal(AssetRef<TAsset> value) => value.Path;

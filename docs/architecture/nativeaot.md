@@ -93,12 +93,13 @@ reflection-based construction, which also allows constructor injection. See the
   (a map with `X`/`Y`); there is no `vertices` field. `AssetRef<T>`/`DataRef` use public PolyType
   path marshalers so a consumer assembly can generate a closed shape for a reference property; the
   marshalers are infrastructure types, not game-facing API.
-- `LoadAsset<T>` is declared as `Task<T> LoadAsset<T>(string assetPath) where T : class,
-  IShapeable<T>` (D-M3-22). `T` must carry a compiled generated shape (for example `[GenerateShape]`
-  on the root type), so a missing shape is a **compile-time** error. There is no unconstrained call,
-  reflection-shape fallback, runtime "missing shape" fault, or `NBMsgPack051` suppression. Pack
-  header/entry classes, texture descriptors, sprite assets, and custom game data all use generated
-  shapes; TOML exists only in `Project.Common` and the JIT baker/editor.
+- `LoadAsset<T>` is declared as `Task<T> LoadAsset<T>(string assetPath) where T : IShapeable<T>`
+  (D-M3-22, relaxed from `class` by D-M4-11). `T` must carry a compiled generated shape (for example
+  `[GenerateShape]` on the root type), so a missing shape is a **compile-time** error. There is no
+  unconstrained call, reflection-shape fallback, runtime "missing shape" fault, or `NBMsgPack051`
+  suppression. A struct root uses the same path; a MessagePack `nil` root is a `Decode` fault, never
+  a silent default. Pack header/entry classes, texture descriptors, sprite assets, and custom game
+  data all use generated shapes; TOML exists only in `Project.Common` and the JIT baker/editor.
 - The loader body deserializes with the shape from `T.GetTypeShape()` passed explicitly to the
   serializer, so the reflection-shape provider is never consulted. It performs file I/O, Zstd
   decompression, exact-size checking, and generated-shape deserialization; it does not validate

@@ -33,8 +33,8 @@ public interface IAssets
     /// <typeparamref name="T"/>.
     /// </summary>
     /// <typeparam name="T">
-    /// The asset type. It must satisfy <see cref="IShapeable{T}"/> through a compiled
-    /// <c>[GenerateShape]</c> annotation; reflection-shape fallback is not supported.
+    /// The asset type, a class or a struct. It must satisfy <see cref="IShapeable{T}"/> through a
+    /// compiled <c>[GenerateShape]</c> annotation; reflection-shape fallback is not supported.
     /// </typeparam>
     /// <param name="assetPath">The canonical asset path.</param>
     /// <returns>
@@ -48,11 +48,13 @@ public interface IAssets
     /// <remarks>
     /// The returned task faults when the path is not in the merged filesystem, when the winning
     /// entry is raw rather than MessagePack, or when decoding fails. The deserialized value is
-    /// returned as stored; asset fields and references are not validated here. Use
+    /// returned as stored; asset fields and references are not validated here. A MessagePack
+    /// <c>nil</c> payload is a <see cref="AssetErrorKind.Decode"/> fault for both class and struct
+    /// roots; a value-type root never silently becomes <c>default</c>. Use
     /// <see cref="LoadData(string)"/> for opaque bytes.
     /// </remarks>
     Task<T> LoadAsset<T>(string assetPath)
-        where T : class, IShapeable<T>;
+        where T : IShapeable<T>;
 
     /// <summary>
     /// Loads the MessagePack asset named by a typed reference.
@@ -69,7 +71,7 @@ public interface IAssets
     /// when the reference has a path. An absent reference is not a valid load request.
     /// </remarks>
     Task<T> LoadAsset<T>(AssetRef<T> reference)
-        where T : class, IShapeable<T>;
+        where T : IShapeable<T>;
 
     /// <summary>
     /// Loads the decompressed bytes of an asset, whether it is raw or MessagePack.

@@ -1,3 +1,5 @@
+using PolyType;
+
 namespace Bork2d.Api.Rendering;
 
 /// <summary>
@@ -9,8 +11,11 @@ namespace Bork2d.Api.Rendering;
 /// <param name="A">The alpha component.</param>
 /// <remarks>
 /// Sprite tints and clear colors are authored in linear space; sRGB conversion happens at output.
-/// Use the predefined members for common colors.
+/// Use the predefined members for common colors. A color is serialized by <see cref="ColorMarshaler"/>
+/// as a four-element linear float array (<c>[r, g, b, a]</c>); it has no generated object shape and
+/// stays non-<c>partial</c>.
 /// </remarks>
+[TypeShape(Marshaler = typeof(ColorMarshaler))]
 public readonly record struct Color(float R, float G, float B, float A)
 {
     /// <summary>Fully transparent black.</summary>
