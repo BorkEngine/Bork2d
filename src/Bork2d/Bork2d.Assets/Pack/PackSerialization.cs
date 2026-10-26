@@ -45,13 +45,15 @@ internal static class PackSerialization
     /// </summary>
     /// <remarks>
     /// The shape is passed explicitly from <see cref="IShapeable{T}"/>; the serializer's
-    /// reflection-shape provider is never consulted. The caller owns the stream and is responsible
-    /// for verifying that the declared payload size was consumed exactly.
+    /// reflection-shape provider is never consulted. A root may be a class or a struct: the loader
+    /// rejects an empty or MessagePack <c>nil</c> payload before calling this method, so a value-type
+    /// root is never silently defaulted. The caller owns the stream and is responsible for verifying
+    /// that the declared payload size was consumed exactly.
     /// </remarks>
     /// <typeparam name="T">The shapeable asset type.</typeparam>
     /// <param name="stream">The readable payload stream.</param>
     /// <returns>The deserialized asset, or <see langword="null"/> for a MessagePack nil payload.</returns>
     internal static T? DeserializeAsset<T>(Stream stream)
-        where T : class, IShapeable<T>
+        where T : IShapeable<T>
         => _serializer.Deserialize<T>(stream, T.GetTypeShape());
 }

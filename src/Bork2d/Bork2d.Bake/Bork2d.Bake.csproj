@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <!-- Tooling is a JIT library. It references the public contracts and the pack writer, and
+             never Bork2d.Common (Q-20). -->
+        <ProjectReference Include="..\Bork2d.Api\Bork2d.Api.csproj" />
+        <ProjectReference Include="..\Bork2d.Assets\Bork2d.Assets.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Tomlyn parses source TOML, StbImageSharp decodes texture sources (WP3), and
+             System.IO.Hashing supplies the incremental manifest digest (XXH3, Q-09). -->
+        <PackageReference Include="StbImageSharp" Version="2.30.16" />
+        <PackageReference Include="System.IO.Hashing" Version="11.0.0-rc.1.26425.128" />
+        <PackageReference Include="Tomlyn" Version="2.10.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Bake tooling is internal by default; only tooling hosts and tests see it (Q-02). -->
+        <InternalsVisibleTo Include="Bork2d.BakeHost" />
+        <InternalsVisibleTo Include="Bork2d.Bake.Cli" />
+        <InternalsVisibleTo Include="Bork2d.Editor" />
+        <InternalsVisibleTo Include="Bork2d.Tests" />
+    </ItemGroup>
+
+</Project>

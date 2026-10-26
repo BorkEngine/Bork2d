@@ -20,6 +20,7 @@
     <ItemGroup>
         <InternalsVisibleTo Include="Bork2d.Runtime" />
         <InternalsVisibleTo Include="Bork2d.Render" />
+        <InternalsVisibleTo Include="Bork2d.Bake" />
         <InternalsVisibleTo Include="Bork2d.Editor" />
         <InternalsVisibleTo Include="Bork2d.Tests" />
     </ItemGroup>

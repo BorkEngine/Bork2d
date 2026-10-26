@@ -190,7 +190,7 @@ public sealed class PackReferenceValidationTests
         => PackArchive.Open(new MemoryStream(builder.Build(), writable: false));
 
     private static T Deserialize<T>(PackArchive archive, string path)
-        where T : class, IShapeable<T>
+        where T : IShapeable<T>
     {
         Assert.True(archive.TryGetEntry(path, out PackEntry? entry));
         return new MessagePackSerializer().Deserialize<T>(archive.ReadDecompressedBytes(entry!))!;

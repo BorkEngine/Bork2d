@@ -10,7 +10,7 @@ namespace Bork2d.Tests.Assets.Service;
 public sealed class AssetApiContractTests
 {
     [Fact]
-    public void LoadAssetRequiresAClassWithTheShapeableConstraint()
+    public void LoadAssetRequiresOnlyTheShapeableConstraint()
     {
         MethodInfo method = typeof(IAssets)
             .GetMethods()
@@ -21,12 +21,12 @@ public sealed class AssetApiContractTests
         Assert.True(method.IsGenericMethodDefinition);
 
         Type parameter = Assert.Single(method.GetGenericArguments());
-        Assert.True(
+        Assert.False(
             parameter.GenericParameterAttributes.HasFlag(
                 GenericParameterAttributes.ReferenceTypeConstraint),
-            "LoadAsset<T> must constrain T to a reference type.");
-        Assert.True(
-            !parameter.GenericParameterAttributes.HasFlag(
+            "LoadAsset<T> must accept both class and struct roots (D-M4-11).");
+        Assert.False(
+            parameter.GenericParameterAttributes.HasFlag(
                 GenericParameterAttributes.DefaultConstructorConstraint),
             "LoadAsset<T> must not require a parameterless constructor.");
 
@@ -34,6 +34,37 @@ public sealed class AssetApiContractTests
         Assert.True(constraint.IsGenericType);
         Assert.Equal(typeof(IShapeable<>), constraint.GetGenericTypeDefinition());
         Assert.Same(parameter, Assert.Single(constraint.GetGenericArguments()));
+    }
+
+    [Fact]
+    public void TypedLoadSurfaceUsesTheShapeOnlyConstraintEverywhere()
+    {
+        MethodInfo[] loaders = typeof(IAssets)
+            .GetMethods()
+            .Where(method => method.Name == nameof(IAssets.LoadAsset) && method.IsGenericMethodDefinition)
+            .ToArray();
+        Assert.Equal(2, loaders.Length);
+
+        foreach (MethodInfo loader in loaders)
+        {
+            AssertShapeOnlyConstraint(Assert.Single(loader.GetGenericArguments()), loader.Name);
+        }
+
+        AssertShapeOnlyConstraint(
+            Assert.Single(typeof(AssetRef<>).GetGenericArguments()),
+            nameof(AssetRef<PackTestStruct>));
+        AssertShapeOnlyConstraint(
+            Assert.Single(typeof(AssetRefMarshaler<>).GetGenericArguments()),
+            nameof(AssetRefMarshaler<PackTestStruct>));
+    }
+
+    [Fact]
+    public void ShapeOnlyConstraintAcceptsAValueTypeTarget()
+    {
+        AssetRef<PackTestStruct> reference = new("data/boss");
+
+        Assert.Equal("data/boss", reference.Path);
+        Assert.True(reference.HasValue);
     }
 
     [Fact]
@@ -144,6 +175,23 @@ public sealed class AssetApiContractTests
 
     private static Type UnwrapGeneric(Type type)
         => type.IsGenericType ? type.GetGenericTypeDefinition() : type;
+
+    private static void AssertShapeOnlyConstraint(Type parameter, string owner)
+    {
+        Assert.False(
+            parameter.GenericParameterAttributes.HasFlag(
+                GenericParameterAttributes.ReferenceTypeConstraint),
+            $"{owner} must not constrain its type parameter to a reference type (D-M4-11).");
+        Assert.False(
+            parameter.GenericParameterAttributes.HasFlag(
+                GenericParameterAttributes.DefaultConstructorConstraint),
+            $"{owner} must not require a parameterless constructor.");
+
+        Type constraint = Assert.Single(parameter.GetGenericParameterConstraints());
+        Assert.True(constraint.IsGenericType);
+        Assert.Equal(typeof(IShapeable<>), constraint.GetGenericTypeDefinition());
+        Assert.Same(parameter, Assert.Single(constraint.GetGenericArguments()));
+    }
 
     private static string Describe(MethodInfo method)
     {

@@ -66,12 +66,14 @@ from the top-left, and an integer `ZIndex` sorts higher later. Sprite asset geom
 `Bork2d.Api` declares the interfaces in §2–§10 across the area namespaces in §1.5, plus the value
 types `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, `AssetRef<TAsset>`, `DataRef`,
 and `SpriteTopology`, the public assets `SpriteAsset` and `TextureDescriptor`, `Bork2dException`,
-and the error pair `AssetException`/`AssetErrorKind`; `ILoggerFactory` is a Microsoft.Extensions.Logging
+the error pair `AssetException`/`AssetErrorKind`, and the `ColorMarshaler`/`AssetRefMarshaler<TAsset>`/
+`DataRefMarshaler` serialization infrastructure; `ILoggerFactory` is a Microsoft.Extensions.Logging
 type exposed by `IEngine` (not defined in `Bork2d.Api`). The runtime is NativeAOT- and trim-safe: no
 reflection, assembly scanning, runtime TOML, or dynamic code; `LoadAsset<T>` requires a
 [PolyType](https://github.com/AArnott/PolyType) `IShapeable<T>` shape (a Nerdbank.MessagePack
-`[GenerateShape]` type) and the game is passed as an instance. `Bork2d.Api` references PolyType
-`1.4.1` for the shape contract and the asset-reference path marshalers (D-035); it does not
+`[GenerateShape]` type) and the game is passed as an instance. A class or a struct root uses the
+same path; a MessagePack `nil` root is a `Decode` fault. `Bork2d.Api` references PolyType
+`1.4.1` for the shape contract and the value marshalers (D-035, D-M4-12); it does not
 reference Nerdbank.MessagePack, `System.IO.Hashing`, Zstd, or file I/O. See
 [NativeAOT](../architecture/nativeaot.md).
 
@@ -92,7 +94,7 @@ namespace. Add the using for each area you touch (D-034).
 | `Bork2d.Api` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
 | `Bork2d.Api.Assets` | `IAssets`, `AssetInfo`, `AssetException`, `AssetErrorKind`, `AssetRef<TAsset>`, `DataRef`, `SpriteAsset`, `TextureDescriptor`, `SpriteTopology` |
 | `Bork2d.Api.Scene` | `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
-| `Bork2d.Api.Rendering` | `Color`, `ClearKind` |
+| `Bork2d.Api.Rendering` | `Color`, `ColorMarshaler`, `ClearKind` |
 | `Bork2d.Api.Input` | `IInput`, `KeyCode`, `MouseButton` |
 | `Bork2d.Api.Platform` | `IWindow`, `ITime` |
 
@@ -261,7 +263,7 @@ the clock, dispatches text, then calls `Tick`. In headless/offscreen there is no
 
 ## 7. `IAssets`
 
-`Status: Current (M3; asset-reference refactor D-035).` `IEngine.Assets` returns the real
+`Status: Current (M3; asset-reference refactor D-035; struct roots D-M4-11).` `IEngine.Assets` returns the real
 app-scoped service in every mode: the base pack is opened at `Run()` before the window and
 `Setup`, or an empty virtual filesystem is used when the app was built with
 `Bork2dAppBuilder.WithoutAssets()`. The service owns one dedicated loader thread, an unbounded FIFO
@@ -273,8 +275,8 @@ is no sprite handle, sprite resource, or readiness API. Pack open/parse/mount fa
 ```csharp
 public interface IAssets
 {
-    Task<T> LoadAsset<T>(string assetPath) where T : class, IShapeable<T>;
-    Task<T> LoadAsset<T>(AssetRef<T> reference) where T : class, IShapeable<T>;
+    Task<T> LoadAsset<T>(string assetPath) where T : IShapeable<T>;
+    Task<T> LoadAsset<T>(AssetRef<T> reference) where T : IShapeable<T>;
     Task<byte[]> LoadData(string assetPath);
     Task<byte[]> LoadData(DataRef reference);
     void LoadPack(string packPath);
@@ -284,12 +286,14 @@ public interface IAssets
 ```
 
 `IShapeable<T>` is `PolyType.IShapeable<T>`; `Bork2d.Api` references PolyType `1.4.1` for this
-contract (D-M3-22). A missing shape is a compile-time error; there is no unconstrained or
+contract (D-M3-22). `T` may be a class or a struct (D-M4-11): a `readonly record struct` root loads
+through the same path, and a MessagePack `nil` root is a `Decode` fault for both kinds rather than a
+silent `default`. A missing shape is a compile-time error; there is no unconstrained or
 reflection-shape fallback.
 
 | Member | Contract |
 | --- | --- |
-| `LoadAsset<T>(string)` | Loads a MessagePack asset using the compiled shape on `T`. A fresh instance per call. Raw entries fault with `AssetException(RawAsset)`; missing paths fault with `NotFound`; decode failures fault with `Decode`. The value is returned as stored: fields and `AssetRef`/`DataRef` links are not validated at load. Use `LoadData` for raw bytes. |
+| `LoadAsset<T>(string)` | Loads a MessagePack asset using the compiled shape on `T`. A fresh instance per call. Raw entries fault with `AssetException(RawAsset)`; missing paths fault with `NotFound`; decode failures fault with `Decode`. An empty payload and a MessagePack `nil` root are `Decode` faults for class and struct roots alike (D-M4-11). The value is returned as stored: fields and `AssetRef`/`DataRef` links are not validated at load. Use `LoadData` for raw bytes. |
 | `LoadAsset<T>(AssetRef<T>)` | Equivalent to the string overload when the reference has a path. An absent reference (null `Path`) is not a load request and throws `ArgumentException`; an empty or invalid path also throws. |
 | `LoadData(string)` | Decompressed bytes for any asset kind, as a fresh `byte[]` per call. Missing → `AssetException(NotFound)`; a declared size above `Array.MaxLength` → `AssetException(InvalidData)`. |
 | `LoadData(DataRef)` | Equivalent to the string overload when the reference has a path; an absent/invalid reference throws `ArgumentException`. |
@@ -312,12 +316,13 @@ reflection-shape fallback.
   `ArgumentNullException`.
 - **Loading and trust.** `LoadData`/`LoadAsset<T>` validate the path and the disposed state
   synchronously; a missing path, a raw entry via `LoadAsset<T>`, or a decode failure faults the
-  returned `Task` instead of throwing. Requests resolve their winning pack entry at enqueue time,
-  so a later overlay mount never changes an in-flight request. The loader thread only reads,
-  decompresses, and deserializes; task continuations run asynchronously, never inline on the caller
-  or loader thread. It does not validate asset fields or follow links. A mounted pack is trusted:
-  `PackBuilder` validates reference integrity at pack creation and the M4 baker/editor validates
-  source fields. If a linked asset is missing, loading that link faults `NotFound`.
+  returned `Task` instead of throwing. A value-type root has no null value: a MessagePack `nil`
+  payload is a `Decode` fault, never a silent default. Requests resolve their winning pack entry at
+  enqueue time, so a later overlay mount never changes an in-flight request. The loader thread only
+  reads, decompresses, and deserializes; task continuations run asynchronously, never inline on the
+  caller or loader thread. It does not validate asset fields or follow links. A mounted pack is
+  trusted: `PackBuilder` validates reference integrity at pack creation and the M4 baker/editor
+  validates source fields. If a linked asset is missing, loading that link faults `NotFound`.
 - **References.** `AssetRef<TAsset>` and `DataRef` hold canonical path strings; `null` means the
   reference is absent and is valid. `SpriteAsset.Texture` is an `AssetRef<TextureDescriptor>` and
   `TextureDescriptor.Payload` is a `DataRef`. Load them with the reference overloads; an absent
@@ -477,15 +482,25 @@ public interface ITransform
 
 `AssetRef<TAsset>` is `readonly record struct AssetRef<TAsset>(string? Path)` with
 `static AssetRef<TAsset> None => default` and `HasValue => Path is not null`. It constrains
-`TAsset : class, IShapeable<TAsset>`. `DataRef` is the same shape without a type parameter.
-Both serialize as their path string, so a reference field is a string (nil for absent) in the pack.
-`null` means absent and is valid; empty/whitespace/non-canonical paths are rejected by
-`PackBuilder`. Load with `IAssets.LoadAsset<T>(AssetRef<T>)` / `LoadData(DataRef)`; an absent
-reference is not a load request and throws `ArgumentException`.
+`TAsset : IShapeable<TAsset>` (D-M4-11), so a value-type asset root can be referenced; `DataRef` is
+the same shape without a type parameter. Both serialize as their path string, so a reference field
+is a string (nil for absent) in the pack. `null` means absent and is valid;
+empty/whitespace/non-canonical paths are rejected by `PackBuilder`. Load with
+`IAssets.LoadAsset<T>(AssetRef<T>)` / `LoadData(DataRef)`; an absent reference is not a load
+request and throws `ArgumentException`.
 
-`AssetRefMarshaler<TAsset>` and `DataRefMarshaler` are public PolyType serialization
-infrastructure: a consumer assembly needs them to generate a closed shape for a reference property.
-They are not game-facing API and have no runtime behavior to call.
+`AssetRefMarshaler<TAsset>`, `DataRefMarshaler`, and `ColorMarshaler` are public PolyType
+serialization infrastructure: a consumer assembly needs them to generate a closed shape for a
+reference or color property. They are not game-facing API and have no runtime behavior to call.
+
+`Color` is `readonly record struct Color(float R, float G, float B, float A)`: linear RGBA in
+`[0,1]` with `Transparent`, `Black`, `White`, `Red`, `Green`, `Blue`, `Yellow`, `Cyan`,
+`Magenta`, and `Gray`; linear-space tint, sRGB output; a device without an sRGB format is an M6
+startup failure (see roadmap). It carries `[TypeShape(Marshaler = typeof(ColorMarshaler))]` and
+stays non-`partial`; its serialized form is the linear float surrogate `[r, g, b, a]`, not an
+object map, and a `null` surrogate is a `Decode` fault. Existing packs written with the old object
+map form are not readable after this change (pre-1.0 pack content is not a compatibility promise;
+the pack has no per-asset version, D-M3-05).
 
 `SpriteAsset` is a public generated-shape asset: `AssetRef<TextureDescriptor> Texture`,
 `Vector2[]? Uvs`, `float Scale`, `Vector2 Pivot`, `SpriteTopology Topology`, `ushort[]? Indices`.
@@ -498,11 +513,6 @@ validation; the M4 baker/editor owns that. `SpriteTopology` is `Quad`, `Triangle
 long Length, long Size, string PackPath)` (`Current`, M3): one visible pack entry as returned by
 `IAssets.Browse`. The fields come from the pack header; `PackPath` is the supplied pack identifier,
 and `Length`/`Size` are `long` even though v1 stores `uint32`. See §7.
-
-`Color` is `readonly record struct Color(float R, float G, float B, float A)`: linear RGBA in
-`[0,1]` with `Transparent`, `Black`, `White`, `Red`, `Green`, `Blue`, `Yellow`, `Cyan`,
-`Magenta`, and `Gray`; linear-space tint, sRGB output; a device without an sRGB format is an M6
-startup failure (see roadmap).
 
 `ClearKind` values:
 
@@ -628,7 +638,7 @@ builder.Write("assets.pck");   // overwrites; relative to the current directory
 | `PackCompressionMode.Release` | Payloads use maximum-quality Zstd only when strictly smaller than the raw bytes. |
 | `PackBuilder(PackCompressionMode)` | Selects the payload policy. The header is always maximum-quality Zstd in both modes. |
 | `AddRaw(string, ReadOnlySpan<byte>)` | Adds an opaque payload; the bytes are copied. |
-| `AddMessagePack<T>(string, T)` | Serializes `T` with Nerdbank.MessagePack generated shapes; constrained to `T : IShapeable<T>` (no reflection resolver). Also collects `AssetRef<T>`/`DataRef` values in the object graph. |
+| `AddMessagePack<T>(string, T)` | Serializes `T` with Nerdbank.MessagePack generated shapes; constrained to `T : IShapeable<T>` (no reflection resolver). Also collects `AssetRef<T>`/`DataRef` values in the object graph, including values exposed by a marshaler surrogate (for example a `Color`). |
 | `Build()` | Returns the complete pack as one `byte[]`; limited by `Array.MaxLength`; does not consume the builder. Validates all non-null references first. |
 | `Write(string)` | Streams the pack to an overwritten file, resolving relative paths against the process current directory. Validates all non-null references before opening the file. |
 | `Write(Stream)` | Streams the pack and leaves the destination open. Does not require the whole pack in one array. Validates all non-null references before writing. |

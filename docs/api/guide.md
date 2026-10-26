@@ -356,6 +356,9 @@ public sealed partial class GameConfig
     public required string Name { get; set; }
     public int MaxPlayers { get; set; }
 }
+
+[GenerateShape]
+public readonly partial record struct LevelTuning(int Gravity, int JumpSpeed);
 ```
 
 ```csharp
@@ -368,6 +371,7 @@ IReadOnlyList<AssetInfo> sprites = _engine.Assets.Browse("sprites");
 
 // Typed assets need a compiled shape; raw bytes use LoadData.
 GameConfig config = await _engine.Assets.LoadAsset<GameConfig>("data/config");
+LevelTuning tuning = await _engine.Assets.LoadAsset<LevelTuning>("data/level-tuning");
 byte[] pixels = await _engine.Assets.LoadData("textures/raw/player");
 
 // Sprites are normal public assets; reference links are typed path values.
@@ -383,13 +387,21 @@ byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
   are mutually exclusive; a missing or malformed base pack fails `Run()` with `Bork2dException`
   before any window or `Setup`.
 - **Typed assets and references.** `LoadAsset<T>` requires a compiled `[GenerateShape]` shape
-  (`where T : class, IShapeable<T>`, D-M3-22); a missing shape is a compile-time error, not a
-  runtime fallback. `SpriteAsset.Texture` is an `AssetRef<TextureDescriptor>` and
+  (`where T : IShapeable<T>`, D-M3-22/D-M4-11); a missing shape is a compile-time error, not a
+  runtime fallback. `T` may be a class or a struct: a `readonly record struct` root loads through the
+  same path and can be referenced with `AssetRef<LevelTuning>`. A value-type root has no null value,
+  so a MessagePack `nil` payload is an `AssetException(Decode)` fault, never a silent `default`.
+  `SpriteAsset.Texture` is an `AssetRef<TextureDescriptor>` and
   `TextureDescriptor.Payload` is a `DataRef`; resolve them with the reference overloads. A `null`
   reference means absent and is not a load request (it throws `ArgumentException`). Both sprite and
   descriptor are public MessagePack assets in `Bork2d.Api.Assets`; field validation (UV extents,
   dimensions, pivot, topology) belongs to the M4 baker/editor, not the loader. `PackBuilder`
   validates every non-null reference when it builds a pack; the runtime trusts the pack.
+- **Colors.** `Color` is linear RGBA and serializes as the float array `[r, g, b, a]` through the
+  public `ColorMarshaler` infrastructure, not as an object map; `Color` stays non-`partial`. The
+  marshaler is generated into the assembly that declares the containing asset type, so a game
+  assembly gets it automatically. A `nil` color surrogate is a `Decode` fault. Re-bake packs that
+  contain the older object-map color form; v1 packs have no per-asset schema version.
 - **Loading and errors.** A valid missing path, a raw entry passed to `LoadAsset<T>`, and
   decode/size failures fault the returned task instead of throwing:
 

@@ -18,6 +18,8 @@
         <ProjectReference Include="..\Bork2d.Api\Bork2d.Api.csproj" />
         <ProjectReference Include="..\Bork2d.Common\Bork2d.Common.csproj" />
         <ProjectReference Include="..\Bork2d.Assets\Bork2d.Assets.csproj" />
+        <ProjectReference Include="..\Bork2d.Bake\Bork2d.Bake.csproj" />
+        <ProjectReference Include="..\Bork2d.Bake.Cli\Bork2d.Bake.Cli.csproj" />
         <ProjectReference Include="..\Bork2d.Render\Bork2d.Render.csproj" />
         <ProjectReference Include="..\Bork2d.Runtime\Bork2d.Runtime.csproj" />
         <ProjectReference Include="..\Bork2d.AotSmoke\Bork2d.AotSmoke.csproj" />
