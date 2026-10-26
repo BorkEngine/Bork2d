@@ -125,6 +125,9 @@ internal static class BakeDiagnosticCodes
     /// <summary>A TOML source is not valid UTF-8.</summary>
     internal const string SourceNotUtf8 = "BK1028";
 
+    /// <summary>The host-generation incremental state could not be written.</summary>
+    internal const string HostIncrementalStateWriteFailed = "BK1029";
+
     /// <summary>A reference path is not canonical.</summary>
     internal const string ReferenceNotCanonical = "BK3001";
 
@@ -181,4 +184,7 @@ internal static class BakeDiagnosticCodes
 
     /// <summary>The pack could not be written or atomically replaced.</summary>
     internal const string PackWriteFailed = "BK5002";
+
+    /// <summary>The incremental manifest or pack record could not be written.</summary>
+    internal const string IncrementalManifestWriteFailed = "BK5003";
 }

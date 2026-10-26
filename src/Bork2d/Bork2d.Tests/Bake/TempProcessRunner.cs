@@ -46,6 +46,12 @@ internal static class TempProcessRunner
         startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         startInfo.Environment["DOTNET_NOLOGO"] = "1";
 
+        // Persistent MSBuild nodes (and the build server) inherit the redirected stdout/stderr
+        // handles, so reading to EOF would block after the build process itself exits. Neither is
+        // useful for a one-shot test build, so both are disabled.
+        startInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+        startInfo.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
+
         using Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException($"Failed to start '{fileName}'.");
 

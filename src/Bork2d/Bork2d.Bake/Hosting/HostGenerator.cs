@@ -1,5 +1,6 @@
 using System.Text;
 using Bork2d.Bake.Diagnostics;
+using Bork2d.Bake.Incremental;
 using Bork2d.Bake.Project;
 
 namespace Bork2d.Bake.Hosting;
@@ -17,6 +18,11 @@ namespace Bork2d.Bake.Hosting;
 /// <para>
 /// Files are only rewritten when their content changes (or <c>--force</c> is passed), so an unchanged
 /// descriptor and <c>Project.Common</c> leave timestamps and downstream incremental builds alone.
+/// The generator additionally records its inputs and the content hash of both generated files in
+/// <c>obj/bork2d/bake/host-generation.json</c>. When that state, the descriptor, the
+/// <c>Project.Common</c> assembly, the generator version, the configuration, and the output directory
+/// are unchanged and both files still match the recorded content, generation returns
+/// <see cref="HostGenerationResult.Changed"/> false without reading <c>Project.Common</c> metadata.
 /// </para>
 /// </remarks>
 internal static class HostGenerator
@@ -63,6 +69,33 @@ internal static class HostGenerator
                 $"Invalid Project.Common path '{options.CommonAssemblyPath}': {exception.Message}",
                 options.CommonAssemblyPath);
             return null;
+        }
+
+        string directory = Path.GetFullPath(options.OutputDirectory);
+        string projectPath = Path.Combine(directory, GeneratedBakeHostProjectWriter.FileName);
+        string manifestPath = Path.Combine(directory, GeneratedBakeManifestWriter.FileName);
+        string statePath = BakeManifestPaths.HostGenerationStatePath(descriptor.DescriptorDirectory);
+        string? descriptorHash = TryHashFile(descriptor.DescriptorPath);
+        string? commonHash = TryHashFile(commonPath);
+
+        if (!options.Force
+            && descriptorHash is not null
+            && commonHash is not null
+            && CanSkipGeneration(
+                options,
+                descriptorHash,
+                commonHash,
+                directory,
+                projectPath,
+                manifestPath,
+                statePath))
+        {
+            return new HostGenerationResult(
+                changed: false,
+                projectPath,
+                manifestPath,
+                types: [],
+                references: []);
         }
 
         if (!BakeTypeResolver.TryCreate(commonPath, diagnostics, out BakeTypeResolver? resolver))
@@ -127,10 +160,6 @@ internal static class HostGenerator
                 references.References,
                 options.Configuration);
 
-            string directory = Path.GetFullPath(options.OutputDirectory);
-            string projectPath = Path.Combine(directory, GeneratedBakeHostProjectWriter.FileName);
-            string manifestPath = Path.Combine(directory, GeneratedBakeManifestWriter.FileName);
-
             bool created;
             try
             {
@@ -163,6 +192,21 @@ internal static class HostGenerator
                 return null;
             }
 
+            if (descriptorHash is not null && commonHash is not null)
+            {
+                WriteGenerationState(
+                    statePath,
+                    descriptorHash,
+                    commonHash,
+                    options.Configuration,
+                    directory,
+                    projectPath,
+                    manifestPath,
+                    projectSource,
+                    manifestSource,
+                    diagnostics);
+            }
+
             return new HostGenerationResult(
                 created,
                 projectPath,
@@ -171,6 +215,103 @@ internal static class HostGenerator
                 references.References);
         }
     }
+
+    private static bool CanSkipGeneration(
+        HostGenerationOptions options,
+        string descriptorHash,
+        string commonAssemblyHash,
+        string directory,
+        string projectPath,
+        string manifestPath,
+        string statePath)
+    {
+        BakeHostGenerationState? state = BakeHostGenerationStore.TryRead(statePath);
+        if (state is null
+            || state.Version != BakeHostGenerationState.CurrentVersion
+            || !string.Equals(
+                state.GeneratorVersion,
+                BakeToolInfo.Version,
+                StringComparison.Ordinal)
+            || !string.Equals(state.DescriptorHash, descriptorHash, StringComparison.Ordinal)
+            || !string.Equals(
+                state.CommonAssemblyHash,
+                commonAssemblyHash,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                state.Configuration,
+                options.Configuration,
+                StringComparison.Ordinal)
+            || !PathEquals(state.OutputDirectory, directory)
+            || !PathEquals(state.ProjectPath, projectPath)
+            || !PathEquals(state.ManifestPath, manifestPath)
+            || !File.Exists(projectPath)
+            || !File.Exists(manifestPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            string generatedHash = BakeHash.HashFields(
+                File.ReadAllBytes(projectPath),
+                File.ReadAllBytes(manifestPath));
+            return string.Equals(state.GeneratedHash, generatedHash, StringComparison.Ordinal);
+        }
+        catch (Exception exception) when (IsIoFailure(exception))
+        {
+            return false;
+        }
+    }
+
+    private static void WriteGenerationState(
+        string statePath,
+        string descriptorHash,
+        string commonAssemblyHash,
+        string configuration,
+        string directory,
+        string projectPath,
+        string manifestPath,
+        string projectSource,
+        string manifestSource,
+        BakeDiagnostics diagnostics)
+    {
+        string generatedHash = BakeHash.HashFields(
+            Encoding.UTF8.GetBytes(projectSource),
+            Encoding.UTF8.GetBytes(manifestSource));
+
+        var state = new BakeHostGenerationState(
+            BakeHostGenerationState.CurrentVersion,
+            BakeToolInfo.Version,
+            descriptorHash,
+            commonAssemblyHash,
+            configuration,
+            directory,
+            projectPath,
+            manifestPath,
+            generatedHash);
+
+        BakeHostGenerationStore.TryWrite(statePath, state, diagnostics);
+    }
+
+    private static string? TryHashFile(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? BakeHash.HashFile(path) : null;
+        }
+        catch (Exception exception) when (IsIoFailure(exception))
+        {
+            return null;
+        }
+    }
+
+    private static bool PathEquals(string left, string right)
+        => string.Equals(
+            left,
+            right,
+            OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal);
 
     private static BakeHostReferenceSet CollectReferences(
         BakeTypeResolver resolver,

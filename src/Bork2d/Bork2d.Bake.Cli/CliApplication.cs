@@ -2,6 +2,7 @@ using System.Reflection;
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Hosting;
+using Bork2d.Bake.Incremental;
 using Bork2d.Bake.Project;
 using Bork2d.Bake.Sources;
 using Bork2d.Bake.Textures;
@@ -19,12 +20,14 @@ namespace Bork2d.Bake.Cli;
 /// unexpected internal failure.
 /// </para>
 /// <para>
-/// <c>generate-host</c> writes the generated host project and manifest. <c>bake</c> runs the complete
-/// pipeline (descriptor, host, custom-data binding, textures, reference validation, pack) and writes
-/// the pack atomically unless <c>--check</c> is passed. <c>validate</c> without a host checks the
-/// descriptor, the reachable texture sources, and custom-data TOML syntax; with <c>--host</c> it runs
-/// the same validation pipeline as <c>bake --check</c> but never writes a pack. <c>--force</c> is
-/// accepted for the WP5 incremental manifest and is a documented no-op in WP4.
+/// <c>generate-host</c> writes the generated host project and manifest, and skips when its recorded
+/// inputs and generated content are unchanged. <c>bake</c> runs the complete pipeline (descriptor,
+/// host, custom-data binding, textures, reference validation, pack) unless the incremental manifest
+/// shows that the pack is current, and writes the pack and manifest atomically. <c>--check</c>
+/// validates everything and writes nothing, and never skips. <c>validate</c> without a host checks
+/// the descriptor, the reachable texture sources, and custom-data TOML syntax; with <c>--host</c> it
+/// runs the same validation pipeline as <c>bake --check</c> but never writes a pack. <c>--force</c>
+/// bypasses both incremental skips.
 /// </para>
 /// </remarks>
 internal static class CliApplication
@@ -243,11 +246,17 @@ internal static class CliApplication
 
         if (!quiet)
         {
-            string state = result.Changed ? "generated" : "up to date:";
-            output.WriteLine(
-                $"{ProgramName}: {state} '{result.ProjectPath}' "
-                    + $"({result.Types.Count} mapped type(s), {result.References.Count} "
-                    + "assembly reference(s)).");
+            if (result.Changed)
+            {
+                output.WriteLine(
+                    $"{ProgramName}: generated '{result.ProjectPath}' "
+                        + $"({result.Types.Count} mapped type(s), {result.References.Count} "
+                        + "assembly reference(s)).");
+            }
+            else
+            {
+                output.WriteLine($"{ProgramName}: up to date: '{result.ProjectPath}'.");
+            }
         }
 
         if (verbose)
@@ -398,25 +407,26 @@ internal static class CliApplication
             check,
             force);
         var diagnostics = new BakeDiagnostics();
-        BakeResult result = BakePipeline.Run(options, diagnostics);
+        BakeResult result = BakeIncrementalPlanner.Run(options, diagnostics);
         WriteDiagnostics(error, result.Diagnostics);
 
-        if (result.Status == BakeStatus.Success)
+        if (result.Status is BakeStatus.Success or BakeStatus.UpToDate)
         {
             if (!quiet)
             {
-                WriteBakeSuccessSummary(output, options, result);
+                if (result.Status == BakeStatus.UpToDate)
+                {
+                    WriteUpToDateSummary(output, options, result);
+                }
+                else
+                {
+                    WriteBakeSuccessSummary(output, options, result);
+                }
             }
 
             if (verbose)
             {
                 WriteEntryList(output, result.Entries);
-            }
-
-            if (force && !quiet)
-            {
-                output.WriteLine(
-                    "  --force is accepted and has no effect until the incremental manifest (WP5).");
             }
 
             return SuccessExitCode;
@@ -654,6 +664,18 @@ internal static class CliApplication
                 + "no pack written (--check).");
     }
 
+    private static void WriteUpToDateSummary(
+        TextWriter output,
+        BakeOptions options,
+        BakeResult result)
+    {
+        string mode = options.Mode == BakeMode.Release ? "release" : "debug";
+        output.WriteLine(
+            $"{ProgramName}: up to date: '{result.PackPath}' ({result.AssetCount} asset(s), "
+                + $"{result.TextureCount} texture(s), {result.ReferenceCount} reference(s), "
+                + $"{mode} mode); no inputs changed.");
+    }
+
     private static void WriteBakeFailureSummary(
         TextWriter output,
         BakeOptions options,
@@ -784,14 +806,16 @@ internal static class CliApplication
         writer.WriteLine("                [--configuration Debug|Release] [--force] "
             + "[--verbose|--quiet]");
         writer.WriteLine(
-            "               write the generated bake host project and manifest");
+            "               write the generated bake host project and manifest; skip when the "
+                + "recorded inputs and generated files are unchanged");
         writer.WriteLine(
             "  bake --project <bork2d.project.toml> --host <BakeHost.dll> [--output <assets.pck>]");
         writer.WriteLine("       [--mode debug|release] [--check] [--force] [--verbose|--quiet]");
         writer.WriteLine(
-            "               run the full bake and atomically write the pack; --check validates and");
+            "               run the full bake and atomically write the pack; skip when the "
+                + "incremental manifest is current;");
         writer.WriteLine(
-            "               writes nothing; --force is a no-op until the WP5 incremental manifest");
+            "               --check validates and writes nothing; --force always re-bakes");
         writer.WriteLine(
             "  validate --project <bork2d.project.toml> [--host <BakeHost.dll>] "
                 + "[--verbose|--quiet]");

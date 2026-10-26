@@ -1,0 +1,214 @@
+<Project>
+
+    <!--
+        Bork2d.Bake.targets - MSBuild integration for the Bork2d M4 bake (D-M4-08, Q-10/Q-11).
+
+        Import this file from the runnable app project that owns the runtime pack (the game's
+        Project.Desktop, or Bork2d.AotSmoke in this repository). The import opts the project in; a
+        project that does not import it is unaffected.
+
+        The chain runs after Build:
+          1. Bork2dPrepareBakeProject  (only when a fixture assets directory exists)
+          2. Bork2dBuildBakeCli        (builds the tooling CLI in the current configuration)
+          3. Bork2dGenerateBakeHost    (writes the generated host, incrementally)
+          4. Bork2dBuildBakeHost       (MSBuild builds the generated host project)
+          5. Bork2dBake                (incremental bake; the pack defaults to $(TargetDir)assets.pck)
+
+        Publish copies the pack next to the published app, and Clean removes the generated host, the
+        incremental state, the prepared fixture copy, and the pack. The tooling is never referenced by
+        the app: it is built and executed out of process (except the generated host, which is a normal
+        MSBuild build), so no Bake/Tomlyn/StbImageSharp assembly enters the app's publish graph.
+
+        Properties (all optional except a common assembly):
+          Bork2dProjectDescriptor       project descriptor; default <project>/bork2d.project.toml
+          Bork2dCommonAssembly          Project.Common assembly path; default $(TargetDir)<name>.dll
+          Bork2dBakeCommonAssemblyName  simple name used for the defaultValue above, e.g. MyGame.Common
+          Bork2dBakeHostDirectory       generated host directory; default <project>/obj/bork2d/bakehost
+          Bork2dBakeOutput              pack path; default $(TargetDir)assets.pck
+          Bork2dBakeMode                debug|release; default from $(Configuration)
+          Bork2dBakeVerbose             true adds the CLI verbose switch to both calls
+          Bork2dBakeForce               true adds the CLI force switch to both calls (bypasses both skips)
+          Bork2dBakeEnabled             false disables the chain entirely
+          Bork2dBakePreparedDirectory   fixture preparation directory; default <project>/obj/bork2d/fixture
+          Bork2dBakeUseFixtureAssets    true copies Bork2dFixtureProjectDir Assets/ into the prepared
+                                        directory and bakes the prepared descriptor (used by AotSmoke);
+                                        default false, so a project with its own descriptor is untouched
+          Bork2dFixtureProjectDir       fixture Project.Common-like project directory (with Assets/)
+          Bork2dBakeCliProject          bake CLI project; repo default
+          Bork2dWriteTextureScript      fixture texture generator script; repo default
+          Bork2dBakeTargetFramework     target framework used for the tooling paths; default net11.0
+          Bork2dDotNetHost              dotnet host executable; default dotnet
+
+        The file ships with the tooling at the repository root and uses repository defaults for the
+        CLI project, the fixture project, and the texture script, overridable for another checkout.
+    -->
+
+    <PropertyGroup>
+        <Bork2dBakeTargetFramework Condition="'$(Bork2dBakeTargetFramework)' == ''">net11.0</Bork2dBakeTargetFramework>
+        <Bork2dDotNetHost Condition="'$(Bork2dDotNetHost)' == ''">dotnet</Bork2dDotNetHost>
+        <Bork2dRepositoryRoot Condition="'$(Bork2dRepositoryRoot)' == ''">$([MSBuild]::EnsureTrailingSlash('$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))'))</Bork2dRepositoryRoot>
+        <Bork2dBakeCliProject Condition="'$(Bork2dBakeCliProject)' == ''">$(Bork2dRepositoryRoot)src\Bork2d\Bork2d.Bake.Cli\Bork2d.Bake.Cli.csproj</Bork2dBakeCliProject>
+        <Bork2dBakeCliProjectDirectory Condition="'$(Bork2dBakeCliProjectDirectory)' == ''">$([MSBuild]::EnsureTrailingSlash('$([System.IO.Path]::GetDirectoryName('$(Bork2dBakeCliProject)'))'))</Bork2dBakeCliProjectDirectory>
+        <Bork2dBakeCliAssembly Condition="'$(Bork2dBakeCliAssembly)' == ''">$(Bork2dBakeCliProjectDirectory)bin\$(Configuration)\$(Bork2dBakeTargetFramework)\Bork2d.Bake.Cli.dll</Bork2dBakeCliAssembly>
+        <Bork2dFixtureProjectDir Condition="'$(Bork2dFixtureProjectDir)' == ''">$(Bork2dRepositoryRoot)src\Bork2d\Bork2d.BakeFixture</Bork2dFixtureProjectDir>
+        <Bork2dFixtureProjectDir Condition="'$(Bork2dFixtureProjectDir)' != ''">$([MSBuild]::EnsureTrailingSlash('$(Bork2dFixtureProjectDir)'))</Bork2dFixtureProjectDir>
+        <Bork2dWriteTextureScript Condition="'$(Bork2dWriteTextureScript)' == ''">$(Bork2dRepositoryRoot)build\write-fixture-texture.ps1</Bork2dWriteTextureScript>
+    </PropertyGroup>
+
+    <!--
+        Resolves the defaults that depend on TargetDir, which the SDK defines after the project body
+        is evaluated. Runs before every other target in the chain.
+    -->
+    <Target Name="Bork2dInitializeBake" Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dBakeEnabled)' != 'false'">
+        <PropertyGroup>
+            <Bork2dProjectDescriptor Condition="'$(Bork2dProjectDescriptor)' == ''">$(MSBuildProjectDirectory)\bork2d.project.toml</Bork2dProjectDescriptor>
+            <Bork2dProjectDescriptor>$([System.IO.Path]::GetFullPath('$(Bork2dProjectDescriptor)'))</Bork2dProjectDescriptor>
+            <Bork2dCommonAssembly Condition="'$(Bork2dCommonAssembly)' == '' and '$(Bork2dBakeCommonAssemblyName)' != ''">$(TargetDir)$(Bork2dBakeCommonAssemblyName).dll</Bork2dCommonAssembly>
+            <Bork2dBakeHostDirectory Condition="'$(Bork2dBakeHostDirectory)' == ''">$(MSBuildProjectDirectory)\obj\bork2d\bakehost</Bork2dBakeHostDirectory>
+            <Bork2dBakePreparedDirectory Condition="'$(Bork2dBakePreparedDirectory)' == ''">$(MSBuildProjectDirectory)\obj\bork2d\fixture</Bork2dBakePreparedDirectory>
+            <Bork2dBakeOutput Condition="'$(Bork2dBakeOutput)' == ''">$(TargetDir)assets.pck</Bork2dBakeOutput>
+            <Bork2dBakeMode Condition="'$(Bork2dBakeMode)' == '' and '$(Configuration)' == 'Release'">release</Bork2dBakeMode>
+            <Bork2dBakeMode Condition="'$(Bork2dBakeMode)' == ''">debug</Bork2dBakeMode>
+            <Bork2dBakeVerbose Condition="'$(Bork2dBakeVerbose)' == ''">false</Bork2dBakeVerbose>
+            <_Bork2dBakeVerboseSwitch Condition="'$(Bork2dBakeVerbose)' == 'true'"> --verbose</_Bork2dBakeVerboseSwitch>
+            <_Bork2dBakeVerboseSwitch Condition="'$(_Bork2dBakeVerboseSwitch)' == ''"></_Bork2dBakeVerboseSwitch>
+            <_Bork2dBakeForceSwitch Condition="'$(Bork2dBakeForce)' == 'true'"> --force</_Bork2dBakeForceSwitch>
+            <_Bork2dBakeForceSwitch Condition="'$(_Bork2dBakeForceSwitch)' == ''"></_Bork2dBakeForceSwitch>
+        </PropertyGroup>
+
+        <Error Condition="'$(Configuration)' != 'Debug' and '$(Configuration)' != 'Release'"
+               Text="Bork2d bake supports the Debug and Release configurations only; got '$(Configuration)'. Set Bork2dBakeEnabled=false to skip the bake for a custom configuration." />
+        <Error Condition="'$(Bork2dCommonAssembly)' == ''"
+               Text="Bork2d bake needs Project.Common. Set Bork2dCommonAssembly to its assembly path, or Bork2dBakeCommonAssemblyName to its simple assembly name." />
+    </Target>
+
+    <!--
+        Copies the fixture project's Assets/ tree and descriptor into the consuming app's obj/ so the
+        bake reads a prepared tree that contains the generated texture. Only runs when the fixture
+        project actually has an Assets/ directory, so a real game project is unaffected. The committed
+        fixture has no binary PNG; build/write-fixture-texture.ps1 writes the deterministic 2x2 RGBA
+        texture into the prepared copy and is idempotent.
+    -->
+    <Target Name="Bork2dPrepareBakeProject"
+            DependsOnTargets="Bork2dInitializeBake"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dBakeEnabled)' != 'false' and '$(Bork2dBakeUseFixtureAssets)' == 'true' and '$(Bork2dFixtureProjectDir)' != '' and Exists('$(Bork2dFixtureProjectDir)Assets')">
+        <ItemGroup>
+            <_Bork2dFixtureAsset Include="$(Bork2dFixtureProjectDir)Assets\**\*" />
+        </ItemGroup>
+
+        <Copy SourceFiles="@(_Bork2dFixtureAsset)"
+              DestinationFiles="@(_Bork2dFixtureAsset->'$(Bork2dBakePreparedDirectory)\Assets\%(RecursiveDir)%(Filename)%(Extension)')"
+              SkipUnchangedFiles="true" />
+        <Copy SourceFiles="$(Bork2dFixtureProjectDir)bork2d.project.toml"
+              DestinationFiles="$(Bork2dBakePreparedDirectory)\bork2d.project.toml"
+              SkipUnchangedFiles="true"
+              Condition="Exists('$(Bork2dFixtureProjectDir)bork2d.project.toml')" />
+        <Exec Command="pwsh -NoProfile -File &quot;$(Bork2dWriteTextureScript)&quot; -Output &quot;$(Bork2dBakePreparedDirectory)\Assets\textures\player.png&quot;"
+              WorkingDirectory="$(MSBuildProjectDirectory)"
+              StandardOutputImportance="low" />
+
+        <PropertyGroup>
+            <Bork2dProjectDescriptor>$(Bork2dBakePreparedDirectory)\bork2d.project.toml</Bork2dProjectDescriptor>
+        </PropertyGroup>
+    </Target>
+
+    <!-- Builds the bake CLI in the current configuration; the generated host build is separate. -->
+    <Target Name="Bork2dBuildBakeCli"
+            DependsOnTargets="Bork2dInitializeBake"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dBakeEnabled)' != 'false'">
+        <MSBuild Projects="$(Bork2dBakeCliProject)"
+                 Targets="Restore"
+                 Properties="Configuration=$(Configuration)"
+                 RemoveProperties="RuntimeIdentifier;SelfContained;OutDir;OutputPath;PublishDir;BaseOutputPath;BaseIntermediateOutputPath"
+                 Condition="!Exists('$(Bork2dBakeCliProjectDirectory)obj\project.assets.json')" />
+        <MSBuild Projects="$(Bork2dBakeCliProject)"
+                 Targets="Build"
+                 Properties="Configuration=$(Configuration)"
+                 RemoveProperties="RuntimeIdentifier;SelfContained;OutDir;OutputPath;PublishDir;BaseOutputPath;BaseIntermediateOutputPath">
+            <Output TaskParameter="TargetOutputs" ItemName="_Bork2dBakeCliOutput" />
+        </MSBuild>
+
+        <PropertyGroup>
+            <Bork2dBakeCliAssembly Condition="'@(_Bork2dBakeCliOutput)' != ''">@(_Bork2dBakeCliOutput)</Bork2dBakeCliAssembly>
+        </PropertyGroup>
+        <Error Condition="!Exists('$(Bork2dBakeCliAssembly)')"
+               Text="Bork2d bake: the CLI assembly was not produced at '$(Bork2dBakeCliAssembly)'." />
+    </Target>
+
+    <!-- Runs generate-host; the CLI skips when the descriptor, common assembly, tool, and output are unchanged. -->
+    <Target Name="Bork2dGenerateBakeHost"
+            DependsOnTargets="Bork2dInitializeBake;Bork2dPrepareBakeProject;Bork2dBuildBakeCli"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dBakeEnabled)' != 'false'">
+        <Exec Command="&quot;$(Bork2dDotNetHost)&quot; &quot;$(Bork2dBakeCliAssembly)&quot; generate-host --project &quot;$(Bork2dProjectDescriptor)&quot; --common &quot;$(Bork2dCommonAssembly)&quot; --output &quot;$(Bork2dBakeHostDirectory)&quot; --configuration &quot;$(Configuration)&quot;$(_Bork2dBakeForceSwitch)$(_Bork2dBakeVerboseSwitch)"
+              WorkingDirectory="$(MSBuildProjectDirectory)"
+              StandardOutputImportance="high"
+              StandardErrorImportance="high" />
+        <Error Condition="!Exists('$(Bork2dBakeHostDirectory)\BakeHost.csproj')"
+               Text="Bork2d bake: generate-host did not produce '$(Bork2dBakeHostDirectory)\BakeHost.csproj'." />
+    </Target>
+
+    <!-- Builds the generated host with MSBuild (not a shell), in the current configuration. -->
+    <Target Name="Bork2dBuildBakeHost"
+            DependsOnTargets="Bork2dInitializeBake;Bork2dGenerateBakeHost"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dBakeEnabled)' != 'false'">
+        <MSBuild Projects="$(Bork2dBakeHostDirectory)\BakeHost.csproj"
+                 Targets="Restore"
+                 Properties="Configuration=$(Configuration)"
+                 RemoveProperties="RuntimeIdentifier;SelfContained;OutDir;OutputPath;PublishDir;BaseOutputPath;BaseIntermediateOutputPath"
+                 Condition="!Exists('$(Bork2dBakeHostDirectory)\obj\project.assets.json')" />
+        <MSBuild Projects="$(Bork2dBakeHostDirectory)\BakeHost.csproj"
+                 Targets="Build"
+                 Properties="Configuration=$(Configuration)"
+                 RemoveProperties="RuntimeIdentifier;SelfContained;OutDir;OutputPath;PublishDir;BaseOutputPath;BaseIntermediateOutputPath">
+            <Output TaskParameter="TargetOutputs" ItemName="_Bork2dBakeHostOutput" />
+        </MSBuild>
+
+        <PropertyGroup>
+            <Bork2dBakeHostAssembly Condition="'@(_Bork2dBakeHostOutput)' != ''">@(_Bork2dBakeHostOutput)</Bork2dBakeHostAssembly>
+            <Bork2dBakeHostAssembly Condition="'$(Bork2dBakeHostAssembly)' == ''">$(Bork2dBakeHostDirectory)\bin\$(Configuration)\$(Bork2dBakeTargetFramework)\Bork2d.BakeHost.dll</Bork2dBakeHostAssembly>
+        </PropertyGroup>
+        <Error Condition="!Exists('$(Bork2dBakeHostAssembly)')"
+               Text="Bork2d bake: the generated host assembly was not produced at '$(Bork2dBakeHostAssembly)'." />
+    </Target>
+
+    <!--
+        The bake. The CLI's incremental manifest decides skip vs full bake, so an unchanged project
+        stays up to date and a failed bake fails the build with canonical BK diagnostics. The guard
+        keeps the chain from re-entering the same project instance.
+    -->
+    <Target Name="Bork2dBake"
+            AfterTargets="Build"
+            DependsOnTargets="Bork2dInitializeBake;Bork2dPrepareBakeProject;Bork2dBuildBakeCli;Bork2dGenerateBakeHost;Bork2dBuildBakeHost"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dBakeEnabled)' != 'false' and '$(_Bork2dBakeCompleted)' != 'true'">
+        <PropertyGroup>
+            <_Bork2dBakeCompleted>true</_Bork2dBakeCompleted>
+        </PropertyGroup>
+        <Exec Command="&quot;$(Bork2dDotNetHost)&quot; &quot;$(Bork2dBakeCliAssembly)&quot; bake --project &quot;$(Bork2dProjectDescriptor)&quot; --host &quot;$(Bork2dBakeHostAssembly)&quot; --output &quot;$(Bork2dBakeOutput)&quot; --mode $(Bork2dBakeMode)$(_Bork2dBakeForceSwitch)$(_Bork2dBakeVerboseSwitch)"
+              WorkingDirectory="$(MSBuildProjectDirectory)"
+              StandardOutputImportance="high"
+              StandardErrorImportance="high" />
+    </Target>
+
+    <!-- Publish carries the pack next to the published app (Q-10). -->
+    <Target Name="Bork2dCopyBakeToPublish"
+            AfterTargets="Publish"
+            Condition="'$(Bork2dBakeEnabled)' != 'false' and '$(Bork2dBakeOutput)' != '' and Exists('$(Bork2dBakeOutput)')">
+        <Copy SourceFiles="$(Bork2dBakeOutput)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+    </Target>
+
+    <!-- Clean removes the generated host, the incremental state, the prepared fixture copy, and the pack. -->
+    <Target Name="Bork2dCleanBake" AfterTargets="Clean" Condition="'$(Bork2dBakeEnabled)' != 'false'">
+        <PropertyGroup>
+            <_Bork2dBakeCleanDescriptor Condition="'$(Bork2dProjectDescriptor)' != ''">$(Bork2dProjectDescriptor)</_Bork2dBakeCleanDescriptor>
+            <_Bork2dBakeCleanDescriptor Condition="'$(_Bork2dBakeCleanDescriptor)' == ''">$(MSBuildProjectDirectory)\bork2d.project.toml</_Bork2dBakeCleanDescriptor>
+            <_Bork2dBakeDescriptorDirectory>$([System.IO.Path]::GetDirectoryName('$(_Bork2dBakeCleanDescriptor)'))</_Bork2dBakeDescriptorDirectory>
+            <Bork2dBakeHostDirectory Condition="'$(Bork2dBakeHostDirectory)' == ''">$(MSBuildProjectDirectory)\obj\bork2d\bakehost</Bork2dBakeHostDirectory>
+            <Bork2dBakePreparedDirectory Condition="'$(Bork2dBakePreparedDirectory)' == ''">$(MSBuildProjectDirectory)\obj\bork2d\fixture</Bork2dBakePreparedDirectory>
+            <Bork2dBakeOutput Condition="'$(Bork2dBakeOutput)' == ''">$(TargetDir)assets.pck</Bork2dBakeOutput>
+        </PropertyGroup>
+
+        <RemoveDir Directories="$(Bork2dBakeHostDirectory);$(Bork2dBakePreparedDirectory);$(MSBuildProjectDirectory)\obj\bork2d\bake;$(_Bork2dBakeDescriptorDirectory)\obj\bork2d\bake" />
+        <Delete Files="$(Bork2dBakeOutput)" />
+    </Target>
+
+</Project>
