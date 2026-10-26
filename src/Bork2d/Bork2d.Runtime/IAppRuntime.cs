@@ -21,6 +21,6 @@ internal interface IAppRuntime : IDisposable
     /// <summary>Gets the logging configuration stored for WP5.</summary>
     Action<ILoggingBuilder>? ConfigureLogging { get; }
 
-    /// <summary>Runs the M1 one-tick smoke sequence.</summary>
+    /// <summary>Runs the configured windowed loop or the M1 one-tick sequence.</summary>
     void Run();
 }

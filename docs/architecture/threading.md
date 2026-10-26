@@ -1,16 +1,17 @@
 # Threading and Frame Handoff
 
-> **Status:** the M1 scene graph implements the structural and per-object
-> `System.Threading.Lock` rules in §2 and the public API has no thread affinity. The render
-> thread, snapshot ring, and frame handoff are `Planned` (M7), window/input marshaling is
-> `Planned` (M2), and asset loader threads are `Planned` (M3). The engine has no debug-only
-> tick-active, structural, or slot-state checks.
+> **Status:** implemented M2 (WP1–WP5; pending PR review). The M1 scene graph implements the
+> structural and per-object `System.Threading.Lock` rules in §2 and the public API has no thread
+> affinity. The M2 windowed platform's OS/window thread, command queue, confirmed-state snapshot,
+> event pump, input freeze, and the runtime tick loop that drives them are `Current` (§5). The
+> render thread, snapshot ring, and frame handoff are `Planned` (M7), and asset loader threads are
+> `Planned` (M3). The engine has no debug-only tick-active, structural, or slot-state checks.
 
 ## 1. Threads by mode
 
 | Thread | Windowed | Offscreen | Headless | Responsibilities |
 | --- | :-: | :-: | :-: | --- |
-| **Tick** | yes | yes | yes | Time, `IGame.Setup/Tick/Teardown`, tick scope, scene/asset requests, snapshot capture, shutdown. May be any host thread. |
+| **Tick** | yes | yes | yes | Windowed loop, time, `IGame.Setup/Tick/Teardown`, input freeze/text dispatch, tick scope, scene/asset requests, snapshot capture (M7), shutdown. May be any host thread. |
 | **OS/window** | yes | no | no | SDL video/events and window operations; public `IWindow` calls are marshaled here. |
 | **Render** | yes | yes | no | Vulkan device, swapchain or offscreen targets, uploads, sprite resolution, sorting, instance building, draws, fences, present. |
 | **Asset loader(s)** | yes | yes | yes | Pack parsing, decompression, MessagePack/descriptor/sprite decoding, immutable resource table, upload requests. |
@@ -45,7 +46,7 @@ The guarantees are deliberately precise:
   re-parenting the same subtree still needs game synchronization.
 - **The API is any-thread.** `IWindow`, `IInput`, `ITime`, `Exit`, scene operations, and the
   builder do not require the process main thread. `IGame` callbacks run on the engine tick
-  thread; `IWindow` operations are marshaled to the OS/window thread (`Planned`, M2);
+  thread; `IWindow` operations are marshaled to the OS/window thread (M2, current);
   `IInput`/`ITime` reads are snapshots.
 - **Asset requests are thread-safe and non-blocking** (`Planned`, M3): completion is
   asynchronous, so a caller cannot assume a sprite is ready. Workers may create cameras/sprites,
@@ -156,16 +157,105 @@ older `Ready` snapshots are dropped and the newest is shown.
 
 ## 5. Input across threads (windowed only)
 
-`Planned` for M2; M1 throws `NotSupportedException` from the `IInput` getter.
+`Current (M2).` The windowed host attaches the window/input proxies before `Setup`, runs the loop
+below, and detaches them after the platform shuts down. Headless/offscreen create no platform, so
+`IEngine.Input` throws `NotSupportedException` from the getter.
 
-- SDL events are pumped on the OS/window thread, including while waiting for work; handlers that
-  touch engine/game state are marshaled to the tick thread. At tick start input is frozen: keys,
-  mouse position/delta/wheel, and text describe events since the previous tick. Edge flags are
-  true for exactly one tick; `OnTextTyped` is dispatched on the engine tick thread before `Tick`.
-- Mouse coordinates are framebuffer pixels, top-left origin; wheel delta accumulates per tick.
-  On focus loss, held keys/buttons are synthesized as released and wheel/text state is cleared.
-  `IInput` reads are thread-safe snapshots, not part of the frame snapshot and not readable from
-  the render thread's public API.
+### 5.1 Window thread, command queue, and confirmed state (M2 WP2, internal)
+
+`Current (internal).` The windowed platform owns one OS/window thread; it is the only thread that
+calls SDL. The tick thread never calls SDL and never waits for a window command.
+
+- **Commands.** `IWindow.Title/Size/Fullscreen/CursorVisible` setters validate on the caller
+  thread, drop requests redundant with the last requested value, coalesce pending requests per
+  property (latest value wins while the order between different properties is preserved), and
+  enqueue into one MPSC queue guarded by a `System.Threading.Lock`. Setters then push one
+  registered SDL user event to wake the pump. They never block and never call SDL.
+- **State.** The OS thread drains the queue before waiting and re-checks it after each wait, so a
+  wake-up is not lost. After applying a command or handling a window event it publishes an
+  immutable confirmed snapshot (title, window points, framebuffer pixels, scale, fullscreen,
+  cursor, minimized, focused, visible, alive) with a volatile write. Getters read that snapshot
+  without blocking and may lag one pump (D-M2-04).
+- **Events.** One pump handles resize/size-changed, minimize/restore/maximize, focus gained/lost,
+  fullscreen changes, close/`SDL_QUIT`, and DPI/scale changes in event order. A close request
+  takes the graceful-exit path but does not destroy the window; the OS thread keeps pumping until
+  shutdown.
+- **Fatal errors.** An unrecoverable SDL error is stored as a `Bork2dException`, requests an
+  error exit, and stops the pump. The OS thread then runs its cleanup, so it may destroy the window
+  before the tick thread reaches `Teardown`; the window/input proxies stay attached until the host
+  shuts the platform down, so `Teardown` can still attempt best-effort access. The tick-side host
+  reads the fatal exception after `Teardown` and rethrows it. Normal exit/close paths leave the
+  window alive through `Teardown` and destroy it only afterwards (accepted M2 fatal-path behavior).
+- **Shutdown.** `Shutdown` sets the stop flag, pushes a user event to release the event wait, and
+  joins the thread. The OS thread destroys the window before quitting and disposing SDL. There is
+  no timeout, sleep, or pacing wait.
+- **Locks.** The platform uses the command-queue lock, the input-accumulator lock, and short-lived
+  proxy locks (window attach/detach and input subscription). None is held across an SDL call, a game
+  callback, or the event wait, and the command-queue and input locks are never held together. Each
+  lock protects a short critical section only.
+
+### 5.2 Input freeze and handoff (M2 WP3)
+
+`Status: Current (internal).` The OS/window thread accumulates events into `InputAccumulator`;
+the tick thread freezes it once per tick into one of two preallocated `InputSnapshot` instances and
+publishes it with a volatile reference write. Reads during `Tick` see only that instance and are
+stable; events applied after the freeze belong to the next one.
+
+- **Accumulation.** A non-repeat key down on an up key sets held plus a press edge; an up on a down
+  key sets a release edge and clears held; duplicates, repeats, undefined scancodes, the unknown
+  scancode zero, and buttons other than the five supported ones are ignored. The five mouse buttons
+  map from SDL's one-based index and pressed mask (`Left=1`, `Middle=2`, `Right=3`, `X1=4`, `X2=5`).
+  Motion is stored in window points; the wheel accumulates with natural scrolling normalized so
+  positive is up/away; text is appended character by character (a surrogate pair is two chars).
+- **Focus.** Loss synthesizes a release for every held key/button, clears held state, wheel, and
+  pending text, stops SDL text input, and forces the next delta to zero. Regain reads
+  `SDL_GetKeyboardState`/`SDL_GetMouseState` outside the input lock, overwrites held state and the
+  mouse position without press edges, starts text input, and also forces the next delta to zero.
+  Transitions apply in event order, so loss+regain between freezes leaves the loss's release edges
+  and the re-seeded held state.
+- **Freeze.** The lock copies the down/pressed/released bitsets, mouse masks, position, and wheel,
+  transfers and clears text, and clears pending edges/wheel; the unlock is followed by the delta
+  computation and the snapshot publication. Delta is zero on the first freeze, a focus transition,
+  and while unfocused; otherwise it is the new position minus the previous freeze position. The
+  freeze path is allocation-free in steady state; only arrived text can grow a buffer.
+- **Handoff.** `InputProxy.Freeze` publishes the snapshot and `InputProxy.DispatchText` raises
+  `OnTextTyped` for the frozen characters in order on the tick thread; handler exceptions propagate.
+  Edges are true for exactly one tick. Mouse coordinates are framebuffer pixels (window points times
+  the confirmed scale), top-left origin.
+- **Lifecycle.** Reads before the first freeze are a preallocated empty snapshot; reads during
+  `Teardown` are the most recent snapshot; after detach every member throws
+  `ObjectDisposedException`. Subscription is thread-safe and no lock is held while a handler runs.
+  Input is not part of the frame snapshot and is not exposed to a render thread.
+
+### 5.3 Tick loop and handoff wiring
+
+`Status: Current.` The windowed runtime driver runs entirely on the `Run()` caller thread; the OS
+thread never invokes a game callback.
+
+- **Attach.** After `SdlWindowPlatform.Start()` succeeds, the runtime attaches the window/input
+  proxies before `IGame.Setup`, so `IEngine.Window`/`IEngine.Input` are live in `Setup`.
+- **Per tick.** `input.Freeze()` publishes the tick-start snapshot, `time.NewFrame()` advances the
+  clock, `input.DispatchText()` raises `OnTextTyped` in order, and `IGame.Tick()` runs. Text
+  handlers observe the current tick's `ITime`; events applied during `Tick` land in the next freeze.
+- **Stop boundary.** The loop re-checks the engine exit token, the platform's close/`SDL_QUIT`
+  request, and the fatal exception at each boundary before the next freeze. `Exit()` during a tick
+  lets that tick complete; `Exit()`/close during `Setup` runs zero ticks.
+- **Teardown.** `Teardown` runs once with the window/input proxies still attached; normal
+  exit/close paths have a live window there, but a fatal OS-thread error may already have destroyed
+  it, so the game can only attempt best-effort access. The platform is then shut down (destroy
+  window, quit SDL, join the OS thread) and only afterwards are the proxies detached, so retained
+  references throw `ObjectDisposedException`.
+- **No pacing.** The loop has no target rate, deadline, `Thread.Sleep`, `SpinWait`, or yield; it
+  consumes a core in M2 until M7 supplies frame backpressure. No lock is held across a game
+  callback, an SDL call, or the event wait.
+- **Errors.** A game or text-handler failure stops the loop, is captured, and is rethrown after
+  teardown and platform shutdown; a fatal OS-thread error is stored on the platform, read after
+  shutdown, and rethrown (aggregated with a teardown failure). On the fatal path the OS thread may
+  have destroyed the window before `Teardown`; the proxies remain attached for best-effort access.
+  One tick + teardown failure becomes an `AggregateException`.
+- **Deterministic coverage.** `Bork2d.Tests` drives the real runtime and platform with
+  `FakeSdlApi`, synchronizing through an applied window command instead of sleeps; app runs join
+  with a bounded timeout and every test leaves no platform thread running.
 
 ## 6. Asset and pack coordination
 
@@ -189,8 +279,10 @@ Thread-specific rules:
   snapshot publication, control messages, and stop. It never outlives the Vulkan
   instance/surface (windowed) or device (offscreen). The asset thread is cancellable and
   joinable; in-flight loads are abandoned at shutdown.
-- Background errors are stored and rethrown on the `Run()` caller after cleanup (`Planned`). The
-  tick is a transaction and is not aborted mid-way for a render error. No `Thread.Abort`, no
+- The windowed OS thread is stopped and joined before `Run()` returns or throws; the window is
+  destroyed before SDL quits. Background errors are stored and rethrown on the `Run()` caller after
+  cleanup (the M2 platform fatal path is `Current`; the render-thread path is `Planned`). The tick
+  is a transaction and is not aborted mid-way for a render error. No `Thread.Abort`, no
   finalizer-based shutdown, no blocking join inside a render callback.
 
 ## 8. Memory ordering
@@ -216,10 +308,13 @@ Thread-specific rules:
    with distinct references, detach/re-attach is safe, no entity-ID or order assertions.
 4. **Shutdown.** Stop during publish, take, or simulated GPU work; all threads exit within a
    timeout and every slot ends `Free`.
-5. **Modes and allocation.** Headless has no SDL/render thread and paces to its rate (`0`
-   uncapped); offscreen has no surface/swapchain; fixed entity counts allocate nothing.
+5. **Modes and allocation.** Headless has no SDL/render thread and no clock advance; offscreen has
+   no surface/swapchain; fixed entity counts allocate nothing.
 
-`Bork2d.Tests` covers §2's scene rules today; 1, 2, 4, and parts of 5 come with M7.
+`Bork2d.Tests` covers §2's scene rules, the M2 window/input/loop threading (fake SDL seam, bounded
+joins, no sleeps), and parts of 5 today; 1, 2, 4, and renderer pacing come with M7. The suite is
+292 tests: 283 deterministic tests in CI plus 9 opt-in real-window tests
+(`BORK2D_RUN_WINDOW_TESTS=1`).
 
 ## 10. Related documents
 

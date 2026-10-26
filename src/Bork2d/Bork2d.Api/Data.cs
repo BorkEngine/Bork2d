@@ -28,15 +28,3 @@ public enum ClearKind
     Depth,
     Color,
 }
-
-public enum KeyCode
-{
-    A,
-    // etc...
-}
-
-public enum MouseButton
-{
-    Left,
-    // etc...
-}

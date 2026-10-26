@@ -1,9 +1,9 @@
 # API Guide
 
-> **Status:** the builder and host exist in `Bork2d.Runtime`; `Build()` validates and `Run()`
-> performs one `Setup` → `Tick` → `Teardown` sequence. Window/input are M2, the asset pipeline is
-> M3, and the renderer is M8. In M1 `IWindow` returns a stub whose members throw
-> `NotSupportedException`, the `IInput` getter throws, and `IAssets` methods throw. See the
+> **Status:** implemented M2 (WP1–WP5; pending PR review). The builder and host exist in
+> `Bork2d.Runtime`; `Build()` validates and `Run()` runs the uncapped windowed loop (window, input,
+> time) or the one-tick headless/offscreen sequence. Assets are M3 and the renderer is M8;
+> `IAssets` remains a throwing stub. See the
 > [API reference](reference.md#12-runtime-surface).
 
 ## 1. What you reference
@@ -39,25 +39,27 @@ app.Run();
 - `WithGame` takes an **instance**, so constructor injection works for services and test doubles.
   There is no parameterless-constructor or reflection requirement. The game must stay alive through
   `Run()`.
-- `Build()` validates the configuration. `Run()` blocks until shutdown in the full design; in M1 it
-  is a smoke path that calls `Setup`, exactly one `Tick`, and `Teardown`, then returns. No window,
-  GPU, pack, render thread, or pacing loop starts in M1.
-- `using`/`Dispose()` detaches the root's direct children and disposes the app-owned logger
-  factory. It never calls `Teardown` again.
+- `Build()` validates the configuration. `Run()` blocks until shutdown. Windowed mode creates one
+  visible window and runs an uncapped `Tick` loop until `IEngine.Exit()`, the close button, or a
+  fatal error; headless/offscreen call `Setup`, exactly one `Tick`, and `Teardown`, then return.
+  There is no GPU work, pack loading, render thread, or frame limiter in M2.
+- `using`/`Dispose()` detaches the root's direct children and the window/input proxies and disposes
+  the app-owned logger factory. It never calls `Teardown` again. `Dispose()` while `Run()` is active
+  throws `InvalidOperationException`; call `IEngine.Exit()` or close the window first.
 - The builder, `Build`, `Run`, and `Dispose` have no thread affinity. See
   [`IEngine<TLayer>`](reference.md#2-ienginetlayer) for the engine surface.
 
 ### Modes
 
-| Mode | Selection | M1 behavior | Target |
+| Mode | Selection | M2 behavior | Target |
 | --- | --- | --- | --- |
-| Windowed (default) | `WithTitle`/`WithSize`/`WithVSync` | Validates; one-tick smoke. | SDL window and input (M2); renderer (M8). |
-| Offscreen | `WithOffscreen(width, height)` | Same one-tick smoke. | Windowless rendering; frames discarded in v1 (M6/M8). |
-| Headless | `WithHeadless(ticksPerSecond = 60)` | Same one-tick smoke. | No SDL/Vulkan/render thread; paced to the rate, `0` = uncapped (M7). |
+| Windowed (default) | `WithTitle`/`WithSize`/`WithVSync` | Visible SDL window, input, time, and an uncapped loop until exit/close. | Renderer (M8). |
+| Offscreen | `WithOffscreen(width, height)` | One-tick `Setup`/`Tick`/`Teardown`; no window, input, SDL, or clock advance. | Windowless rendering (M6/M8). |
+| Headless | `WithHeadless(ticksPerSecond = 60)` | One-tick `Setup`/`Tick`/`Teardown`; no window, input, SDL, or clock advance. | Paced loop at the rate, `0` = uncapped (M7). |
 
 The modes are mutually exclusive, and window-only options are rejected in headless/offscreen.
-They are separate hosts, not three modes in one process. In M1 all three build and validate but run
-the same smoke; `IWindow` members and `IInput` throw regardless. See
+They are separate hosts, not three modes in one process. In headless/offscreen `IWindow` members
+and the `IInput` getter throw `NotSupportedException` and `ITime` stays `0`. See
 [Runtime lifecycle](../architecture/runtime-lifecycle.md#2-modes).
 
 ### Logging
@@ -71,6 +73,23 @@ the `ILoggingBuilder`, owns provider configuration, and the app disposes the fac
 `validation=passed`, and the layer type. Create game loggers from `engine.LoggerFactory` in
 `Setup`; the factory is not available in the game constructor. See
 [Logging](../architecture/logging.md).
+
+### Windowed AOT demo
+
+`Bork2d.AotSmoke` is the reference windowed host. With no arguments it keeps the M1 headless
+one-tick smoke; the demo is opt-in and NativeAOT-published:
+
+```powershell
+dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64 --nologo
+& src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed
+& src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed --ticks 120
+```
+
+The interactive demo creates a camera/transform/sprite tree, moves the transform with WASD or the
+arrow keys using `ITime.DeltaTime`, logs input transitions and text rather than every frame, and
+exits on Escape (`IEngine.Exit()`) or the window close button. `--ticks N` exits with code 0 after
+exactly `N` completed ticks and is the automated acceptance run; `--ticks` requires `--windowed`
+and `N >= 1`. Invalid or unknown arguments print usage and exit with code 2.
 
 ## 3. Write a game
 
@@ -129,9 +148,9 @@ public sealed class MyGame : IGame<GameLayer>
 }
 ```
 
-Target label: the sprite line requires `IAssets` (M3) and rendering requires M8; in M1 `Setup`
-throws at `LoadSprite` because `IEngine.Assets` is a stub. The camera/transform/time code is
-`Current`, but `Time.DeltaTime` stays `0` in M1 because the app never advances the clock.
+Target label: the sprite line requires `IAssets` (M3) and rendering requires M8; in M2 `Setup`
+throws at `LoadSprite` because `IEngine.Assets` is a stub. The camera/transform code is `Current`;
+time is `Current` in windowed mode and stays `0` in the one-tick modes.
 
 ## 4. Layers
 
@@ -202,50 +221,75 @@ sprite.LocalScale = new Vector2(2, 2);
 
 ## 7. Input
 
-`Status: target for M2.` Input is windowed only. In M1 `IEngine.Input` throws
-`NotSupportedException`, and `KeyCode` declares only `A`; `MouseButton` declares only `Left`. The
-full key/button set is `Planned`.
+`Status: Current (M2, windowed).` The windowed host freezes physical input once per tick, advances
+the clock, dispatches queued text, then calls `Tick`. Headless/offscreen have no input: the
+`IEngine.Input` getter throws `NotSupportedException`.
 
 ```csharp
-var input = _engine.Input;
-
-if (input.IsKeyDown(KeyCode.A))
-    _player.LocalPosition += new Vector2(-4f * (float)_engine.Time.DeltaTime, 0);
-
-if (input.IsMousePressed(MouseButton.Left))
+public void Tick()
 {
-    Vector2 pixel = input.MousePosition; // framebuffer pixels, top-left; not world units
-    HandleClick(_player, pixel);
+    var input = _engine.Input;
+    var dt = (float)_engine.Time.DeltaTime;
+
+    if (input.IsKeyDown(KeyCode.A))
+        _player.LocalPosition += new Vector2(-240f * dt, 0);
+
+    if (input.IsKeyPressed(KeyCode.Space))
+        Jump();
+
+    if (input.IsMouseDown(MouseButton.Left))
+    {
+        // Framebuffer pixels, top-left origin: not logical points and not world units.
+        Vector2 pixel = input.MousePosition;
+        HandleDrag(_player, pixel, input.MouseDelta);
+    }
+
+    var scroll = input.MouseWheelDelta; // positive = up/away; reset next tick
+}
+
+public void Setup()
+{
+    _engine.Input.OnTextTyped += character => _name += character;
 }
 ```
 
-- `IsKeyDown`/`IsMouseDown` are held state; `IsKeyPressed`/`IsKeyReleased` (and the mouse
-  equivalents) are true for exactly one tick after the transition. A fast tap between ticks can
-  report both pressed and released in the same tick with `Down == false`; edges reset after
-  `Tick`, focus loss synthesizes releases, and input is a tick-start snapshot.
-- Input is not part of render snapshots. Full semantics are in the
-  [API reference](reference.md#6-iinput).
-
+- `IsKeyDown`/`IsMouseDown` are held state. `IsKeyPressed`/`IsKeyReleased` (and the mouse
+  equivalents) are true for exactly one tick after the transition. A tap between ticks can report
+  both edges with `Down == false`; key repeat creates no press edge.
+- `KeyCode` is a physical scancode, not a character: use `OnTextTyped` for committed text. A
+  surrogate pair arrives as two `char` events, in order, before that tick's `Tick`.
+- Input is frozen at tick start, so reads are stable for the whole `Tick`; events that arrive during
+  `Tick` appear in the next tick. Reads before the first tick are empty. In windowed mode
+  `MousePosition`/`MouseDelta` are framebuffer **physical pixels** (the DPI note in §9 applies).
+- Moving between monitors can change the display scale; the platform converts points to pixels at
+  each freeze, so do not cache absolute pixel positions across ticks.
+- Focus loss synthesizes releases and clears wheel/text; focus regain re-seeds held state and reports
+  zero delta. Input is not part of render snapshots. `KeyCode`/`MouseButton` numeric values are
+  unstable: never serialize them, and undefined values are safe `false` queries.
+- Full semantics are in the [API reference](reference.md#6-iinput).
 ## 8. Time
 
 ```csharp
-var dt = (float)_engine.Time.DeltaTime; // seconds
-var now = _engine.Time.Time;            // seconds since the first tick
+var dt = (float)_engine.Time.DeltaTime; // seconds, clamped to MaxDeltaTime
+var now = _engine.Time.Time;            // raw seconds since the first tick
 ```
 
-- `Status: Partial.` `StopwatchTime` exists, but the M1 app never calls `NewFrame` and never
-  clamps, so both values are `0`. Target (M2): monotonic seconds, first-tick `DeltaTime` `0`,
-  `DeltaTime` clamped by `MaxDeltaTime` (default 0.25 s).
-- Variable timestep; no accumulator, fixed step, or render interpolation. Windowed/offscreen pace
-  against the renderer with no artificial delay; headless is timer-paced to
-  `ticksPerSecond` (default 60, `0` = uncapped; M7).
+- `Status: Current (M2, windowed).` The first tick publishes `Time = 0` and `DeltaTime = 0`;
+  afterwards `Time` is raw monotonic seconds (never clamped) and `DeltaTime` is the interval
+  between tick starts clamped by `MaxDeltaTime` (default 0.25 s).
+- In headless/offscreen the one-tick host never advances the clock, so both values stay `0` until
+  M7. Do not assume a non-zero delta or a tick count.
+- Variable timestep; no accumulator, fixed step, or render interpolation. The windowed loop is
+  uncapped in M2 (M7 adds frame-handoff backpressure); headless pacing is M7.
 - For deterministic simulation, run your own fixed-step accumulator inside `Tick`. See
   [Threading](../architecture/threading.md).
 
 ## 9. Window
 
-`Status: target for M2.` In M1 `IEngine.Window` returns an `UnsupportedWindow`; the property
-itself does not throw, but every member throws `NotSupportedException`.
+`Status: Current (M2, windowed).` In windowed mode the window is created visible before `Setup` and
+destroyed after `Teardown`. `IEngine.Window` always returns an object; in headless/offscreen its
+members throw `NotSupportedException`, and after a windowed run retained references throw
+`ObjectDisposedException`.
 
 ```csharp
 _engine.Window.Title = "Level 1";
@@ -253,13 +297,28 @@ _engine.Window.Size = new Vector2(1920, 1080);
 _engine.Window.Fullscreen = true;
 ```
 
-The target is windowed only (offscreen/headless throw), with calls marshaled from any thread.
-`Size` is in framebuffer pixels; do not set it every tick. High-DPI logical scaling is decided in
-M2 (see [roadmap](../roadmap.md#9-open-decisions)).
+- `Size` is **framebuffer physical pixels**, not logical points. At 150% Windows scaling, a
+  1280x720 request becomes an 853x480 window whose framebuffer still reports 1280x720; mouse
+  coordinates use the same framebuffer-pixel unit. Do not set `Size` every tick.
+- Setters validate and enqueue; they never block on SDL. Getters return the last confirmed state
+  and may lag one event pump. `Size` is ignored while fullscreen (debug log); while minimized it
+  becomes the restored size, and `IsMinimized` is readable from any thread.
+- Escape is **game-handled**: the engine never binds it. Exit from the game, and the close button
+  always requests a graceful exit:
+
+```csharp
+public void Tick()
+{
+    if (_engine.Input.IsKeyPressed(KeyCode.Escape))
+    {
+        _engine.Exit(); // finishes this tick, then Run() tears down and returns
+    }
+}
+```
 
 ## 10. Assets
 
-`Status: target for M3.` In M1 `IEngine.Assets` returns an `UnsupportedAssets`; `LoadSprite`,
+`Status: target for M3.` In M2 `IEngine.Assets` returns an `UnsupportedAssets`; `LoadSprite`,
 `LoadAsset<T>`, and `LoadData` throw `NotSupportedException`. `Build()` validates only that the
 pack path is non-empty.
 
@@ -291,6 +350,9 @@ byte[] raw = await _engine.Assets.LoadData("textures/raw/player");
 - Create entities inside `Setup`/`Tick`/`Teardown`. Any thread may call the public API there; no
   process-main-thread requirement. Structural attach/detach is serialized by the engine-owned
   structural lock; local properties use per-object locks.
+- `Run()` runs until `IEngine.Exit()` or the close button. `Dispose()` during an active `Run()`
+  throws `InvalidOperationException`; dispose after `Run()` returns. A failed `Run()` still counts
+  as the app's one run and still detaches the root's children.
 - Workers may mutate **distinct** entities concurrently and must join before `Tick` returns.
   Composite updates to the same entity need game-level synchronization. Frame snapshots are
   captured after `Tick` (M7); workers must not write scene state afterwards. Worker exceptions

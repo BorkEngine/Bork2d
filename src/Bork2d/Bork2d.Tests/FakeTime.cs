@@ -1,8 +1,8 @@
-using Bork2d.Api;
+using Bork2d.Common;
 
 namespace Bork2d.Tests;
 
-internal sealed class FakeTime : ITime
+internal sealed class FakeTime : IFrameTime
 {
     public double DeltaTime => 0;
 

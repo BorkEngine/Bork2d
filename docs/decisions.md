@@ -1,7 +1,7 @@
 # Decision Log
 
 > Lightweight ADRs. **Accepted** = in force; **Proposed** = needs sign-off before the relevant
-> milestone; **Superseded** = replaced by a later entry. Last review: 2026-10-25.
+> milestone; **Superseded** = replaced by a later entry. Last review: 2026-10-26.
 > Unresolved choices are tracked in [Roadmap §9](roadmap.md#9-open-decisions), not here.
 
 ## Decisions
@@ -34,6 +34,13 @@
 | D-024 | Accepted | No public API requires the process main thread. One engine-owned structural `System.Threading.Lock` serializes parent changes; per-object `Lock`s protect properties. |
 | D-025 | Accepted | Public rotation is degrees, positive counter-clockwise, normalized to `[0, 360)` on set and get; non-finite values throw. Internal matrix math uses radians. |
 | D-026 | Accepted | The scene is unordered: no entity IDs, ordered discovery, or child enumeration. Cameras apply in ascending `ZIndex`; ties are unspecified. Snapshots are internal value-only structs (M7). |
+| D-027 | Accepted | Windowed mode runs one engine-owned OS/window thread that owns SDL; `IWindow` setters enqueue commands and getters read the last confirmed snapshot. Extends D-024 to the platform. |
+| D-028 | Accepted | The M2 real loop is windowed only: a visible window before `Setup`, an uncapped `Setup` → `Tick`… → `Teardown`, stop on `Exit`/close/fatal, and destruction after `Teardown`. Headless/offscreen stay one-tick. |
+| D-029 | Accepted | Sizes and mouse input are physical framebuffer pixels (per-monitor-v2 DPI awareness plus `SDL_WINDOWS_DPI_SCALING=1`); fullscreen is borderless on the primary monitor; ticks continue while minimized and `Size` keeps the last non-minimized framebuffer size. |
+| D-030 | Accepted | `IWindow.IsMinimized`, the full readable `KeyCode` scancode set (247 members plus `Unknown = 0`), and the five `MouseButton` members are the only public-surface additions in M2. |
+| D-031 | Accepted | `Silk.NET.SDL` 2.23.0 is pinned; its `Ultz.Native.SDL` 2.32.10 dependency ships win-x64 `SDL2.dll`, whose runtime `SDL_GetVersion` is 2.30.8. NativeAOT uses Silk.NET's default resolver with a narrow `IL3000;IL3002` suppression in `Bork2d.AotSmoke` only; the `--windowed [--ticks N]` demo is the windowed gate. |
+| D-032 | Accepted | M2 time/exit/lifetime: first tick `Time = DeltaTime = 0`, then raw monotonic `Time` and clamped `DeltaTime`; `Exit()` stops before the next freeze; `Dispose()` during `Run()` throws; after shutdown `IWindow`/`IInput` throw `ObjectDisposedException`, `ITime` stays readable, and `Exit()` is a no-op. |
+| D-033 | Accepted | Accepted fatal-platform-error exception to D-028: after an unrecoverable post-startup SDL error the OS thread may destroy the window before `Teardown`; the proxies remain attached for best-effort access. Normal, `Exit`, and close paths destroy the window only after `Teardown`. |
 
 ## Detail: implemented and public-contract decisions
 
@@ -131,6 +138,110 @@
 - **Consequences:** Games must assign distinct keys where order matters. Tests assert
   relationships and identity, never IDs or order.
 - **Docs:** [Scene ownership](architecture/scene-ownership.md), [Threading](architecture/threading.md#3-frame-snapshot), [API reference](api/reference.md)
+
+### D-027 OS/window thread and queued window commands
+
+- **Decision:** A windowed app creates one engine-owned OS/window thread for the duration of
+  `Run()`. It owns `SDL_Init`, the window, the event pump, DPI/focus/minimize state, command
+  application, and `SDL_Quit`. `IWindow` setters validate and enqueue; getters read an immutable
+  confirmed snapshot. This extends D-024 (no public thread affinity) to the platform: the tick
+  thread never calls SDL and never waits for a window command.
+- **Consequences:** Getters may lag one pump and commands coalesce per property. The OS thread
+  cannot call the game, and no lock is held across an SDL call, a game callback, or the event
+  wait. The platform is internal to `Bork2d.Runtime`; the public surface stays `IWindow`.
+- **Docs:** [Threading](architecture/threading.md#51-window-thread-command-queue-and-confirmed-state-m2-wp2-internal),
+  [Runtime lifecycle](architecture/runtime-lifecycle.md#71-windowed-window-platform-m2-wp2-internal)
+
+### D-028 Windowed-only M2 loop, visible at `Run()`, shutdown order
+
+- **Decision:** Only windowed mode starts a real loop in M2. The window is created visible before
+  `Setup`, builder options are applied at creation, and the loop runs `Setup` → `Tick`… →
+  `Teardown` until `Exit()`, close/`SDL_QUIT`, or a fatal error. On normal, `Exit`, and close paths
+  the window is destroyed after `Teardown`; headless/offscreen keep the one-tick M1 sequence.
+  There is no target rate, frame limiter, `Thread.Sleep`, `SpinWait`, or yield in the windowed loop.
+- **Consequences:** The uncapped loop consumes a core until M7 supplies frame backpressure; this
+  is temporary, not a design goal. A request during `Setup` finishes `Setup`, runs zero ticks, and
+  tears down once. A close request keeps the window alive until `Teardown` so the game can still
+  use it.
+- **Docs:** [Runtime lifecycle](architecture/runtime-lifecycle.md#5-tick-loop-and-pacing),
+  [API reference](api/reference.md#bork2dapp)
+
+### D-029 Framebuffer DPI, borderless fullscreen, and minimize
+
+- **Decision:** `WithSize`, `IWindow.Size`, and mouse coordinates are framebuffer physical pixels.
+  The platform sets `SDL_WINDOWS_DPI_AWARENESS=permonitorv2` and `SDL_WINDOWS_DPI_SCALING=1` before
+  `SDL_Init`, so window sizes and SDL mouse state are window points while the framebuffer stays in
+  pixels; the platform converts at the boundary. Fullscreen is borderless desktop mode on the
+  primary monitor and leaving it restores the previous windowed bounds. Ticks continue while
+  minimized, `IsMinimized` is public, and `Size` keeps the last non-minimized framebuffer size.
+- **Consequences:** At non-100% Windows scaling the window's point size differs from its
+  framebuffer size (for example a 1280×720 request is an 853×480 window at 150%). Games must not
+  cache absolute pixel positions across DPI changes and should not set `Size` every tick.
+  Display/monitor selection and exclusive fullscreen are out of scope.
+- **Docs:** [API reference](api/reference.md#5-iwindow), [API guide](api/guide.md#9-window)
+
+### D-030 `IWindow.IsMinimized` and the full input enums
+
+- **Decision:** The only public API changes in M2 are `IWindow.IsMinimized`, the full readable
+  `KeyCode` set (247 members plus `Unknown = 0`), and the five `MouseButton` members
+  (`Left`, `Right`, `Middle`, `Back`, `Forward`). `KeyCode` names readable SDL words rather than
+  mechanically concatenated ones (`PageUp`, `CapsLock`, `LeftCtrl`, `AudioFastForward`,
+  `KeypadMemStore`); values are the SDL scancodes and top-row digits are `Digit1`…`Digit0`.
+  Undefined values are safe queries that return `false`.
+- **Consequences:** A mapping test fails if the binding and the enum drift. Numeric values are
+  unstable and never serialized. Physical scancodes are layout positions, not characters; text
+  comes only from `OnTextTyped`. No focus/visibility/DPI-scale members are added.
+- **Docs:** [API reference](api/reference.md#11-value-types), [KeyCode](../src/Bork2d/Bork2d.Api/KeyCode.cs)
+
+### D-031 `Silk.NET.SDL` pin, native version, AOT resolver, and the windowed demo
+
+- **Decision:** `Bork2d.Runtime` pins `Silk.NET.SDL` **2.23.0**. Its transitive
+  `Ultz.Native.SDL` **2.32.10** supplies `runtimes/win-x64/native/SDL2.dll`, but the loaded binary
+  reports `SDL_GetVersion` **2.30.8** (its Windows file version is also 2.30.8). The package label
+  and the loaded binary version are recorded as different facts; M2 requires the runtime 2.30.8
+  behavior and every API it uses, including `SDL_GetWindowSizeInPixels` and the Windows DPI hints.
+  NativeAOT uses Silk.NET's default resolver (`Sdl.GetApi()`), and `Bork2d.AotSmoke` carries a
+  narrow project-level `IL3000;IL3002` `NoWarn` for the resolver's single-file probes. No other
+  suppression exists, and `SuppressTrimAnalysisWarnings` is not used. `Bork2d.AotSmoke
+  --windowed [--ticks N]` is the windowed acceptance demo and AOT gate.
+- **Consequences:** The SDL2 native ships from the package and is copied to the publish output; no
+  manual install or fallback binary is needed. A dependency update must re-verify the runtime
+  version and remove the suppression when Silk.NET stops probing `Assembly.Location`/`CodeBase`/
+  `DependencyContext`. CI still does not publish AOT; the gate is local.
+- **Docs:** [NativeAOT](architecture/nativeaot.md#6-native-libraries-and-silknet),
+  [Projects](architecture/projects.md#1-current-projects),
+  [Contributing](contributing.md#2-build-test-and-local-gates)
+
+### D-032 M2 time, `Exit`, `Dispose`, and post-shutdown contract
+
+- **Decision:** In windowed mode the first tick publishes `Time = 0` and `DeltaTime = 0`; afterwards
+  `Time` is raw monotonic seconds since the first tick and `DeltaTime` is the interval between tick
+  starts clamped to the builder's `MaxDeltaTime`. `Exit()` lets the current tick finish and stops
+  before the next freeze; `Exit()` during `Setup` runs zero ticks. `Dispose()` during an active
+  `Run()` throws `InvalidOperationException` from any thread. After the run or disposal, retained
+  `IWindow`/`IInput` objects throw `ObjectDisposedException`, `ITime` keeps its last values readable,
+  and `Exit()` is a no-op. Headless/offscreen keep the M1 one-tick path with a `0` clock.
+- **Consequences:** There is no `TickCount`, fixed step, accumulator, render interpolation, or
+  clock pause on focus loss/minimize. Games that need determinism implement their own fixed-step
+  accumulator. The clamp limits a stall's gameplay step; it is not a pacing delay.
+- **Docs:** [API reference](api/reference.md#4-itime),
+  [Runtime lifecycle](architecture/runtime-lifecycle.md#4-time)
+
+### D-033 Accepted fatal-platform-error exception to D-028
+
+- **Decision:** On an unrecoverable SDL error after startup, the OS thread stores a fatal
+  `Bork2dException`, requests an error exit, and runs its cleanup immediately, which may destroy
+  the window before the tick thread reaches `Teardown`. The window/input proxies stay attached
+  until the host shuts the platform down, so `Teardown` can still attempt best-effort access
+  (getters generally work; setters may be dropped). This is an accepted M2 exception to D-028.
+  Normal, `Exit`, and close paths keep the window alive through `Teardown` and destroy it only
+  afterwards.
+- **Consequences:** Games must not rely on a live window in `Teardown` after a fatal platform
+  error. `Run()` still rethrows the fatal failure after teardown and platform shutdown, aggregated
+  with a teardown failure. The exception is limited to the unrecoverable-error path; M6+ must
+  define the renderer/vsync equivalent rather than assuming M2's timing.
+- **Docs:** [Runtime lifecycle](architecture/runtime-lifecycle.md#6-shutdown-and-error-propagation),
+  [Threading](architecture/threading.md#51-window-thread-command-queue-and-confirmed-state-m2-wp2-internal)
 
 ## Superseding a decision
 
