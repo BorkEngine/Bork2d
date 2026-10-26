@@ -71,7 +71,90 @@ internal static class BakeDiagnosticCodes
     /// <summary>A <c>[textures]</c> filter or wrap value is not supported.</summary>
     internal const string DescriptorTextureSetting = "BK1010";
 
+    /// <summary>The <c>Project.Common</c> assembly or another required assembly was not found.</summary>
+    internal const string HostReferenceMissing = "BK1011";
+
+    /// <summary>A required assembly could not be read as managed metadata.</summary>
+    internal const string HostMetadataUnreadable = "BK1012";
+
+    /// <summary>The generated host file could not be written.</summary>
+    internal const string HostWriteFailed = "BK1013";
+
+    /// <summary>The generated host assembly is missing.</summary>
+    internal const string HostAssemblyMissing = "BK1014";
+
+    /// <summary>The generated host assembly, manifest, or ALC load failed.</summary>
+    internal const string HostLoadFailed = "BK1015";
+
+    /// <summary>The generated host does not expose an <c>IBakeManifest</c> implementation.</summary>
+    internal const string HostContractInvalid = "BK1016";
+
+    /// <summary>A tooling or asset type identity is not shared with the default load context.</summary>
+    internal const string HostTypeIdentityMismatch = "BK1017";
+
+    /// <summary>The generated host is stale for the current project descriptor.</summary>
+    internal const string HostStale = "BK1018";
+
+    /// <summary>A mapped root type has an unsupported shape kind at host load.</summary>
+    internal const string HostShapeUnsupported = "BK1019";
+
+    /// <summary>A mapped type full name was not found in any searched assembly.</summary>
+    internal const string TypeNotFound = "BK1020";
+
+    /// <summary>A mapped type full name exists in more than one candidate assembly.</summary>
+    internal const string TypeAmbiguous = "BK1021";
+
+    /// <summary>A mapped type name uses an unsupported form (assembly-qualified, nested, generic, ...).</summary>
+    internal const string TypeUnsupportedForm = "BK1022";
+
+    /// <summary>A mapped type does not implement <c>IShapeable&lt;T&gt;</c> for itself.</summary>
+    internal const string TypeNotShapeable = "BK1023";
+
+    /// <summary>A mapped type is not visible to the generated host.</summary>
+    internal const string TypeNotVisible = "BK1024";
+
+    /// <summary>A TOML source is not covered by any <c>[[types]]</c> prefix.</summary>
+    internal const string SourceUnmapped = "BK1025";
+
+    /// <summary>Two source files map to the same canonical asset path.</summary>
+    internal const string SourceDuplicate = "BK1026";
+
+    /// <summary>A TOML source could not be read.</summary>
+    internal const string SourceReadFailed = "BK1027";
+
+    /// <summary>A TOML source is not valid UTF-8.</summary>
+    internal const string SourceNotUtf8 = "BK1028";
+
     /// <summary>TOML syntax (including duplicate keys) in a source file.</summary>
-    /// <remarks>BK2xxx is the TOML parse/bind range; WP2 assigns the binder codes.</remarks>
     internal const string TomlSyntax = "BK2001";
+
+    /// <summary>A source table contains a key no mapped member handles.</summary>
+    internal const string BinderUnknownKey = "BK2002";
+
+    /// <summary>A required member has no source key.</summary>
+    internal const string BinderMissingRequired = "BK2003";
+
+    /// <summary>A source value has the wrong TOML type for the member.</summary>
+    internal const string BinderTypeMismatch = "BK2004";
+
+    /// <summary>An integer source value is outside the member type's range.</summary>
+    internal const string BinderNumericRange = "BK2005";
+
+    /// <summary>An enum source value is not an exact camelCase member name.</summary>
+    internal const string BinderEnumValue = "BK2006";
+
+    /// <summary>A source value cannot be parsed for the member (Guid, date-time, vector, ...).</summary>
+    internal const string BinderInvalidValue = "BK2007";
+
+    /// <summary>A member's type is not a supported TOML leaf or shape kind.</summary>
+    internal const string BinderUnsupportedLeaf = "BK2008";
+
+    /// <summary>More than one source key matches a member case-insensitively.</summary>
+    internal const string BinderAmbiguousKey = "BK2009";
+
+    /// <summary>A date-time value has no UTC offset, which the TOML mapping rejects.</summary>
+    internal const string BinderLocalDateTime = "BK2010";
+
+    /// <summary>A collection or dictionary shape cannot be constructed from TOML.</summary>
+    internal const string BinderUnsupportedCollection = "BK2011";
 }
