@@ -80,7 +80,9 @@ internal static class HostGenerator
                     descriptor.DescriptorPath,
                     diagnostics,
                     out Type? type,
-                    out string? assemblyPath))
+                    out string? assemblyPath,
+                    mapping.TypeLine,
+                    mapping.TypeColumn))
                 {
                     continue;
                 }
@@ -89,7 +91,9 @@ internal static class HostGenerator
                     type!,
                     diagnostics,
                     descriptor.DescriptorPath,
-                    out string csharpName))
+                    out string csharpName,
+                    mapping.TypeLine,
+                    mapping.TypeColumn))
                 {
                     continue;
                 }

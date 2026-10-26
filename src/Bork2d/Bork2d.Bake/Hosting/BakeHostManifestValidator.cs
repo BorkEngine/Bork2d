@@ -52,7 +52,9 @@ internal static class BakeHostManifestValidator
                     $"The generated bake host is stale: it has no MessagePack registration for the "
                         + $"descriptor mapping '{mapping.Prefix}' -> '{mapping.TypeName}'. Run "
                         + "'bork2d-bake generate-host' and rebuild the host.",
-                    descriptor.DescriptorPath);
+                    descriptor.DescriptorPath,
+                    mapping.TypeLine,
+                    mapping.TypeColumn);
                 valid = false;
             }
         }

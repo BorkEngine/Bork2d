@@ -216,13 +216,17 @@ internal sealed class BakeTypeResolver : IDisposable
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
     /// <param name="type">The resolved type when successful.</param>
     /// <param name="assemblyPath">The defining assembly path when successful.</param>
+    /// <param name="line">The optional 1-based descriptor line of the <c>type</c> value.</param>
+    /// <param name="column">The optional 1-based descriptor column of the <c>type</c> value.</param>
     /// <returns><see langword="true"/> when the type is a supported mapped root.</returns>
     internal bool TryResolve(
         string typeName,
         string? descriptorPath,
         BakeDiagnostics diagnostics,
         out Type? type,
-        out string? assemblyPath)
+        out string? assemblyPath,
+        int? line = null,
+        int? column = null)
     {
         ArgumentNullException.ThrowIfNull(typeName);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -230,7 +234,7 @@ internal sealed class BakeTypeResolver : IDisposable
         type = null;
         assemblyPath = null;
 
-        if (!TryValidateNameForm(typeName, descriptorPath, diagnostics))
+        if (!TryValidateNameForm(typeName, descriptorPath, diagnostics, line, column))
         {
             return false;
         }
@@ -252,7 +256,9 @@ internal sealed class BakeTypeResolver : IDisposable
                 BakeDiagnosticCodes.TypeNotFound,
                 $"The mapped type '{typeName}' was not found in Project.Common or its referenced "
                     + $"assemblies. Searched: {DescribeSearchOrder()}.",
-                descriptorPath);
+                descriptorPath,
+                line,
+                column);
             return false;
         }
 
@@ -267,7 +273,9 @@ internal sealed class BakeTypeResolver : IDisposable
                 BakeDiagnosticCodes.TypeAmbiguous,
                 $"The mapped type '{typeName}' is ambiguous; it is defined by {candidates.Count} "
                     + $"candidate assemblies: {details}.",
-                descriptorPath);
+                descriptorPath,
+                line,
+                column);
             return false;
         }
 
@@ -275,37 +283,37 @@ internal sealed class BakeTypeResolver : IDisposable
 
         if (resolved.IsInterface)
         {
-            return RejectForm(typeName, descriptorPath, diagnostics, "an interface");
+            return RejectForm(typeName, descriptorPath, diagnostics, line, column, "an interface");
         }
 
         if (resolved.IsEnum)
         {
-            return RejectForm(typeName, descriptorPath, diagnostics, "an enum");
+            return RejectForm(typeName, descriptorPath, diagnostics, line, column, "an enum");
         }
 
         if (IsDelegate(resolved))
         {
-            return RejectForm(typeName, descriptorPath, diagnostics, "a delegate");
+            return RejectForm(typeName, descriptorPath, diagnostics, line, column, "a delegate");
         }
 
         if (resolved.IsAbstract && resolved.IsSealed)
         {
-            return RejectForm(typeName, descriptorPath, diagnostics, "a static class");
+            return RejectForm(typeName, descriptorPath, diagnostics, line, column, "a static class");
         }
 
         if (resolved.IsAbstract)
         {
-            return RejectForm(typeName, descriptorPath, diagnostics, "an abstract type");
+            return RejectForm(typeName, descriptorPath, diagnostics, line, column, "an abstract type");
         }
 
         if (resolved.IsGenericType || resolved.ContainsGenericParameters)
         {
-            return RejectForm(typeName, descriptorPath, diagnostics, "a generic type");
+            return RejectForm(typeName, descriptorPath, diagnostics, line, column, "a generic type");
         }
 
         if (!resolved.IsClass && !(resolved.IsValueType && !resolved.IsEnum))
         {
-            return RejectForm(typeName, descriptorPath, diagnostics, "neither a class nor a struct");
+            return RejectForm(typeName, descriptorPath, diagnostics, line, column, "neither a class nor a struct");
         }
 
         if (!ImplementsSelfShapeable(resolved))
@@ -316,7 +324,9 @@ internal sealed class BakeTypeResolver : IDisposable
                 $"The mapped type '{typeName}' does not implement "
                     + $"PolyType.IShapeable<{typeName}>; add [GenerateShape] to a partial declaration "
                     + "of the type so PolyType generates its shape.",
-                descriptorPath);
+                descriptorPath,
+                line,
+                column);
             return false;
         }
 
@@ -329,7 +339,9 @@ internal sealed class BakeTypeResolver : IDisposable
                     + $"'{resolved.Assembly.GetName().Name}' does not grant "
                     + $"InternalsVisibleTo(\"{BakeHostIdentity.AssemblyName}\"); make the type public "
                     + "or add the grant.",
-                descriptorPath);
+                descriptorPath,
+                line,
+                column);
             return false;
         }
 
@@ -355,12 +367,16 @@ internal sealed class BakeTypeResolver : IDisposable
     /// <param name="diagnostics">The diagnostics bag to append to on an unquotable name.</param>
     /// <param name="descriptorPath">The descriptor path used in diagnostics.</param>
     /// <param name="csharpName">The C# name, for example <c>global::MyGame.Data.GameConfig</c>.</param>
+    /// <param name="line">The optional 1-based descriptor line of the <c>type</c> value.</param>
+    /// <param name="column">The optional 1-based descriptor column of the <c>type</c> value.</param>
     /// <returns><see langword="true"/> when the type can be written in generated C#.</returns>
     internal static bool TryGetCSharpName(
         Type type,
         BakeDiagnostics diagnostics,
         string? descriptorPath,
-        out string csharpName)
+        out string csharpName,
+        int? line = null,
+        int? column = null)
     {
         ArgumentNullException.ThrowIfNull(type);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -373,7 +389,9 @@ internal sealed class BakeTypeResolver : IDisposable
                 BakeSeverity.Error,
                 BakeDiagnosticCodes.TypeUnsupportedForm,
                 $"The mapped type '{type}' has no full name and cannot be written in generated C#.",
-                descriptorPath);
+                descriptorPath,
+                line,
+                column);
             return false;
         }
 
@@ -386,7 +404,9 @@ internal sealed class BakeTypeResolver : IDisposable
                     BakeDiagnosticCodes.TypeUnsupportedForm,
                     $"The mapped type '{fullName}' contains the name segment '{segment}', which is "
                         + "not a C# identifier and cannot be written in generated code.",
-                    descriptorPath);
+                    descriptorPath,
+                    line,
+                    column);
                 return false;
             }
         }
@@ -407,7 +427,9 @@ internal sealed class BakeTypeResolver : IDisposable
     private static bool TryValidateNameForm(
         string typeName,
         string? descriptorPath,
-        BakeDiagnostics diagnostics)
+        BakeDiagnostics diagnostics,
+        int? line,
+        int? column)
     {
         string? reason = null;
         if (string.IsNullOrWhiteSpace(typeName))
@@ -443,7 +465,9 @@ internal sealed class BakeTypeResolver : IDisposable
             BakeSeverity.Error,
             BakeDiagnosticCodes.TypeUnsupportedForm,
             $"The mapped type name '{typeName}' is not supported: {reason}.",
-            descriptorPath);
+            descriptorPath,
+            line,
+            column);
         return false;
     }
 
@@ -451,6 +475,8 @@ internal sealed class BakeTypeResolver : IDisposable
         string typeName,
         string? descriptorPath,
         BakeDiagnostics diagnostics,
+        int? line,
+        int? column,
         string form)
     {
         diagnostics.Add(
@@ -458,7 +484,9 @@ internal sealed class BakeTypeResolver : IDisposable
             BakeDiagnosticCodes.TypeUnsupportedForm,
             $"The mapped type '{typeName}' is {form}; a mapped custom-data root must be a "
                 + "non-abstract, non-static, non-generic class or struct.",
-            descriptorPath);
+            descriptorPath,
+            line,
+            column);
         return false;
     }
 

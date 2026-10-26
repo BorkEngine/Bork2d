@@ -243,6 +243,21 @@ public sealed class HostGenerationTests
         Assert.Contains("Game.Data", diagnostic.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void MissingMappedTypeDiagnosticPointsAtTheTypeValue()
+    {
+        (HostGenerationResult? result, IReadOnlyList<BakeDiagnostic> diagnostics) = Generate(
+            "data",
+            "BakeFixture.Common.Missing");
+
+        Assert.Null(result);
+        BakeDiagnostic diagnostic = Assert.Single(
+            diagnostics,
+            candidate => candidate.Code == BakeDiagnosticCodes.TypeNotFound);
+        Assert.Equal(8, diagnostic.Line);
+        Assert.Equal(8, diagnostic.Column);
+    }
+
     [Theory]
     [InlineData("BakeFixture.Common.HiddenConfig")]
     [InlineData("Game.Data.Weapon")]

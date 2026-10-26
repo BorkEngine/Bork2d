@@ -165,6 +165,51 @@ public sealed partial class IntDictionary
     public Dictionary<int, string>? ById { get; set; }
 }
 
+/// <summary>The §7.3 missing-value matrix for non-nullable reference members.</summary>
+[GenerateShape]
+public sealed partial class NonNullableSet
+{
+    [DefaultValue("initial")]
+    public string Name { get; set; } = "initial";
+
+    public string Missing { get; set; } = null!;
+
+    public Inner Child { get; set; } = null!;
+
+    public string? OptionalName { get; set; }
+
+    public string[]? Tags { get; set; }
+
+    public List<string> Items { get; set; } = null!;
+
+    public Dictionary<string, int> Map { get; set; } = null!;
+
+    public int Count { get; set; }
+}
+
+/// <summary>
+/// A required member forces member-initializer constructor binding; absent non-nullable reference
+/// members must still honor their initializers.
+/// </summary>
+[GenerateShape]
+public sealed partial class NonNullableInitializerSet
+{
+    public required string Trigger { get; set; }
+
+    [DefaultValue("initial")]
+    public string Name { get; set; } = "initial";
+
+    public string Missing { get; set; } = null!;
+
+    public Inner Child { get; set; } = null!;
+
+    public string? OptionalName { get; set; }
+
+    public List<string> Items { get; set; } = null!;
+
+    public int Count { get; set; }
+}
+
 /// <summary>A game enum whose names map to exact camelCase source values.</summary>
 public enum Mood
 {

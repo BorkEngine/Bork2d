@@ -34,6 +34,12 @@ namespace Bork2d.Bake.Toml;
 /// <c>DataRef</c> forms. A member type outside that table is a <c>BK2xxx</c> diagnostic, never a
 /// silent default.
 /// </para>
+/// <para>
+/// Missing-value handling also enforces the §7.3 non-nullable-reference rule: an absent
+/// non-nullable reference member that is not an enumerable/dictionary shape is a missing-value
+/// error unless a constructor default or member initializer supplies a non-null value. Absent
+/// collections, nullable references, and value types keep their C# defaults.
+/// </para>
 /// </remarks>
 internal static class TomlShapeBinder
 {
@@ -512,6 +518,16 @@ internal static class TomlShapeBinder
         return false;
     }
 
+    /// <summary>
+    /// Gets whether an absent member is governed by the §7.3 non-nullable-reference rule: the shape
+    /// reports non-nullability, the member type is a reference type, and it is not an
+    /// enumerable/dictionary shape (arrays, lists, and dictionaries are exempt and stay null).
+    /// </summary>
+    private static bool IsNonNullableReference(ITypeShape shape, bool isNonNullable)
+        => isNonNullable
+            && !shape.Type.IsValueType
+            && shape.Kind is not TypeShapeKind.Enumerable and not TypeShapeKind.Dictionary;
+
     private sealed class BindState
     {
         internal BindState(BakeBindContext context, BakeBindNode node)
@@ -827,18 +843,26 @@ internal static class TomlShapeBinder
 
     private delegate void MemberSetter<TDeclaring>(ref TDeclaring declaring, object? value);
 
+    private delegate object? MemberGetter<TDeclaring>(ref TDeclaring declaring);
+
     private sealed class MemberBinding
     {
         internal MemberBinding(
             int parameterIndex,
             string key,
             string memberPath,
-            bool required)
+            bool required,
+            bool nonNullable,
+            bool memberInitializer,
+            IPropertyShape? property)
         {
             ParameterIndex = parameterIndex;
             Key = key;
             MemberPath = memberPath;
             Required = required;
+            NonNullable = nonNullable;
+            MemberInitializer = memberInitializer;
+            Property = property;
         }
 
         internal int ParameterIndex { get; }
@@ -848,6 +872,12 @@ internal static class TomlShapeBinder
         internal string MemberPath { get; }
 
         internal bool Required { get; }
+
+        internal bool NonNullable { get; }
+
+        internal bool MemberInitializer { get; }
+
+        internal IPropertyShape? Property { get; }
     }
 
     private sealed class PropertyBinding
@@ -856,12 +886,14 @@ internal static class TomlShapeBinder
             IPropertyShape property,
             string key,
             string memberPath,
-            bool required)
+            bool required,
+            bool nonNullable)
         {
             Property = property;
             Key = key;
             MemberPath = memberPath;
             Required = required;
+            NonNullable = nonNullable;
         }
 
         internal IPropertyShape Property { get; }
@@ -871,6 +903,8 @@ internal static class TomlShapeBinder
         internal string MemberPath { get; }
 
         internal bool Required { get; }
+
+        internal bool NonNullable { get; }
     }
 
     private sealed class ConstructorVisitor : TypeShapeVisitor
@@ -913,17 +947,22 @@ internal static class TomlShapeBinder
                     ? key
                     : node.MemberPath + "." + key;
 
+                bool required = IsRequired(parameter, property);
                 bindings.Add(new MemberBinding(
                     i,
                     key,
                     memberPath,
-                    IsRequired(parameter, property)));
+                    required,
+                    !required && RequiresNonNullableValue(parameter),
+                    parameter.Kind == ParameterKind.MemberInitializer,
+                    property));
 
                 setters.Add(CreateSetter<TArgumentState>(parameter));
             }
 
             ReportUnknownKeys(table, knownKeys, node, context);
 
+            var absentMemberInitializers = new List<int>();
             for (int i = 0; i < bindings.Count; i++)
             {
                 MemberBinding binding = bindings[i];
@@ -942,6 +981,24 @@ internal static class TomlShapeBinder
                             $"Missing required key '{binding.MemberPath}'.",
                             node.Path,
                             binding.MemberPath);
+                    }
+                    else if (binding.NonNullable)
+                    {
+                        if (binding.MemberInitializer)
+                        {
+                            // A member initializer may still supply a non-null value, so the
+                            // resulting value is checked after construction.
+                            absentMemberInitializers.Add(i);
+                        }
+                        else
+                        {
+                            context.AddError(
+                                BakeDiagnosticCodes.BinderMissingRequired,
+                                $"Missing key '{binding.MemberPath}'; the non-nullable reference "
+                                    + "parameter has no non-null default.",
+                                node.Path,
+                                binding.MemberPath);
+                        }
                     }
 
                     IParameterShape parameter = shape.Parameters[binding.ParameterIndex];
@@ -963,7 +1020,46 @@ internal static class TomlShapeBinder
                 setters[i](ref argumentState, value);
             }
 
-            return shape.GetParameterizedConstructor()(ref argumentState);
+            TDeclaringType instance = shape.GetParameterizedConstructor()(ref argumentState);
+            ReportNullInitializers(
+                bindings,
+                absentMemberInitializers,
+                node,
+                context,
+                ref instance);
+            return instance;
+        }
+
+        private static void ReportNullInitializers<TDeclaringType>(
+            List<MemberBinding> bindings,
+            List<int> absentMemberInitializers,
+            BakeBindNode node,
+            BakeBindContext context,
+            ref TDeclaringType instance)
+        {
+            foreach (int index in absentMemberInitializers)
+            {
+                MemberBinding binding = bindings[index];
+                if (binding.Property is not { HasGetter: true } property)
+                {
+                    continue;
+                }
+
+                var getter = (MemberGetter<TDeclaringType>)property.Accept(
+                    new PropertyGetterFactory(),
+                    null)!;
+                if (getter(ref instance) is not null)
+                {
+                    continue;
+                }
+
+                context.AddError(
+                    BakeDiagnosticCodes.BinderMissingRequired,
+                    $"Missing key '{binding.MemberPath}'; the non-nullable reference member is "
+                        + "null after binding. Supply the key or initialize the member.",
+                    node.Path,
+                    binding.MemberPath);
+            }
         }
 
 
@@ -1009,6 +1105,7 @@ internal static class TomlShapeBinder
             TomlTable table = objectState.Table;
             var bindings = new List<PropertyBinding>(objectState.ObjectShape.Properties.Count);
             var setters = new List<MemberSetter<TDeclaringType>>(objectState.ObjectShape.Properties.Count);
+            var getters = new List<MemberGetter<TDeclaringType>?>(objectState.ObjectShape.Properties.Count);
             var knownKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (IPropertyShape property in objectState.ObjectShape.Properties)
@@ -1026,18 +1123,27 @@ internal static class TomlShapeBinder
                     ? key
                     : node.MemberPath + "." + key;
 
+                bool required = property.AttributeProvider.IsDefined<JsonRequiredAttribute>();
                 bindings.Add(new PropertyBinding(
                     property,
                     key,
                     memberPath,
-                    property.AttributeProvider.IsDefined<JsonRequiredAttribute>()));
+                    required,
+                    !required && RequiresNonNullableValue(property)));
 
                 object? setter = property.Accept(new PropertySetterFactory(), null);
                 setters.Add((MemberSetter<TDeclaringType>)setter!);
+                getters.Add(
+                    property.HasGetter && RequiresNonNullableValue(property)
+                        ? (MemberGetter<TDeclaringType>)property.Accept(
+                            new PropertyGetterFactory(),
+                            null)!
+                        : null);
             }
 
             ReportUnknownKeys(table, knownKeys, node, context);
 
+            var absent = new List<int>();
             for (int i = 0; i < bindings.Count; i++)
             {
                 PropertyBinding binding = bindings[i];
@@ -1058,6 +1164,7 @@ internal static class TomlShapeBinder
                             binding.MemberPath);
                     }
 
+                    absent.Add(i);
                     continue;
                 }
 
@@ -1074,7 +1181,38 @@ internal static class TomlShapeBinder
                 setters[i](ref instance, value);
             }
 
+            ReportNullNonNullableReferences(bindings, getters, absent, node, context, ref instance);
             return instance;
+        }
+
+        private static void ReportNullNonNullableReferences<TDeclaringType>(
+            List<PropertyBinding> bindings,
+            List<MemberGetter<TDeclaringType>?> getters,
+            List<int> absent,
+            BakeBindNode node,
+            BakeBindContext context,
+            ref TDeclaringType instance)
+        {
+            foreach (int index in absent)
+            {
+                PropertyBinding binding = bindings[index];
+                if (!binding.NonNullable || getters[index] is not { } getter)
+                {
+                    continue;
+                }
+
+                if (getter(ref instance) is not null)
+                {
+                    continue;
+                }
+
+                context.AddError(
+                    BakeDiagnosticCodes.BinderMissingRequired,
+                    $"Missing key '{binding.MemberPath}'; the non-nullable reference member is "
+                        + "null after binding. Supply the key or initialize the member.",
+                    node.Path,
+                    binding.MemberPath);
+            }
         }
 
         private static ArgumentSetter<TArgumentState> CreateSetter<TArgumentState>(
@@ -1190,6 +1328,15 @@ internal static class TomlShapeBinder
                 || (property is not null
                     && property.AttributeProvider.IsDefined<JsonRequiredAttribute>());
 
+        private static bool RequiresNonNullableValue(IParameterShape parameter)
+            => (!parameter.HasDefaultValue || parameter.DefaultValue is null)
+                && IsNonNullableReference(parameter.ParameterType, parameter.IsNonNullable);
+
+        private static bool RequiresNonNullableValue(IPropertyShape property)
+            => IsNonNullableReference(
+                property.PropertyType,
+                property.IsGetterNonNullable || property.IsSetterNonNullable);
+
         private static string ResolveKeyName(IParameterShape parameter, IPropertyShape? property)
         {
             JsonPropertyNameAttribute? attribute =
@@ -1245,6 +1392,20 @@ internal static class TomlShapeBinder
                 => setter(ref declaring, (TPropertyType)value!);
 
             return (MemberSetter<TDeclaringType>)Apply;
+        }
+    }
+
+    private sealed class PropertyGetterFactory : TypeShapeVisitor
+    {
+        public override object? VisitProperty<TDeclaringType, TPropertyType>(
+            IPropertyShape<TDeclaringType, TPropertyType> shape,
+            object? state)
+        {
+            Getter<TDeclaringType, TPropertyType> getter = shape.GetGetter();
+
+            object? Read(ref TDeclaringType declaring) => getter(ref declaring);
+
+            return (MemberGetter<TDeclaringType>)Read;
         }
     }
 }

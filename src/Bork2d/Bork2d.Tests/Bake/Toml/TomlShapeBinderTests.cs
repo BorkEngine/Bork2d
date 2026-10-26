@@ -138,6 +138,47 @@ public sealed class TomlShapeBinderTests
     }
 
     [Fact]
+    public void AbsentNonNullableReferenceStringAndNestedClassAreErrors()
+    {
+        BindResult result = BinderTestHarness.Bind<NonNullableSet>("count = 1\n");
+
+        Assert.Equal(2, result.Diagnostics.Count);
+        Assert.All(
+            result.Diagnostics,
+            diagnostic => Assert.Equal(BakeDiagnosticCodes.BinderMissingRequired, diagnostic.Code));
+        Assert.All(
+            result.Diagnostics,
+            diagnostic => Assert.Contains(
+                "non-nullable",
+                diagnostic.Message,
+                StringComparison.Ordinal));
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.MemberPath == "missing");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.MemberPath == "child");
+
+        var value = Assert.IsType<NonNullableSet>(result.Value);
+        Assert.Equal("initial", value.Name);
+        Assert.Null(value.OptionalName);
+        Assert.Null(value.Tags);
+        Assert.Null(value.Items);
+        Assert.Null(value.Map);
+    }
+
+    [Fact]
+    public void AbsentNullableReferencesCollectionsAndInitializerBackedMembersAreAllowed()
+    {
+        NonNullableSet value = BinderTestHarness.BindOk<NonNullableSet>(
+            "missing = \"present\"\n[child]\nweight = 1\n");
+
+        Assert.Equal("initial", value.Name);
+        Assert.Equal("present", value.Missing);
+        Assert.Equal(1, value.Child.Weight);
+        Assert.Null(value.OptionalName);
+        Assert.Null(value.Tags);
+        Assert.Null(value.Items);
+        Assert.Null(value.Map);
+    }
+
+    [Fact]
     public void CamelCaseIsCaseInsensitiveOnRead()
     {
         LeafSet value = BinderTestHarness.BindOk<LeafSet>("I32 = 7\nName = \"x\"\n");
@@ -341,6 +382,25 @@ public sealed class TomlShapeBinderTests
         Assert.Equal(new Stats(8, 9), value.Nested);
         Assert.Equal(new[] { 1, 2, 3 }, value.Values);
         Assert.Equal(7, value.Bonus);
+    }
+
+    [Fact]
+    public void ConstructorBoundNonNullableReferenceMembersHonorTheirInitializers()
+    {
+        BindResult result = BinderTestHarness.Bind<NonNullableInitializerSet>("trigger = \"t\"\n");
+
+        Assert.Equal(2, result.Diagnostics.Count);
+        Assert.All(
+            result.Diagnostics,
+            diagnostic => Assert.Equal(BakeDiagnosticCodes.BinderMissingRequired, diagnostic.Code));
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.MemberPath == "missing");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.MemberPath == "child");
+
+        var value = Assert.IsType<NonNullableInitializerSet>(result.Value);
+        Assert.Equal("t", value.Trigger);
+        Assert.Equal("initial", value.Name);
+        Assert.Null(value.OptionalName);
+        Assert.Null(value.Items);
     }
 
     [Fact]
