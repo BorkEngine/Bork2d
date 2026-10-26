@@ -1,36 +1,71 @@
+using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using Bork2d.Api;
+using Bork2d.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Bork2d.Runtime;
 
 /// <summary>
-/// Owns the generic engine and game for one built app and runs the M1 smoke sequence.
+/// Owns the generic engine and game for one built app and runs the configured host loop.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Windowed apps run an uncapped <c>Setup</c> → <c>Tick</c>… → <c>Teardown</c> loop on the <c>Run</c>
+/// caller thread until <see cref="IEngine{TLayer}.Exit"/>, a window close/<c>SDL_QUIT</c>, or a fatal
+/// platform error. The loop never calls SDL: it freezes input and advances the clock before each
+/// tick, dispatches text, and calls the game.
+/// </para>
+/// <para>
+/// Headless and offscreen apps keep the M1 one-tick sequence on the caller thread with no platform
+/// and no clock advance. Both drivers share the M1 error precedence: a <c>Setup</c> failure runs no
+/// <c>Teardown</c>; a <c>Tick</c> (or text-handler) failure still tears down; two failures are
+/// aggregated; a window start failure happens before <c>Setup</c> and tears nothing down.
+/// </para>
+/// <para>
+/// The runtime detaches the window/input proxies only after the platform has shut down, so retained
+/// references throw <see cref="ObjectDisposedException"/> per D-M2-17 while <c>Teardown</c> can still
+/// use the live window and input.
+/// </para>
+/// </remarks>
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
 internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, Enum
 {
-    private readonly IEngine<TLayer> _engine;
+    private readonly Engine<TLayer> _engine;
     private readonly IGame<TLayer> _game;
+    private readonly IFrameTime _time;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly ILogger _logger;
     private readonly Bork2dAppOptions<TLayer> _options;
+    private readonly WindowProxy? _windowProxy;
+    private readonly InputProxy? _inputProxy;
+    private readonly Func<ISdlApi> _sdlApiFactory;
     private bool _disposed;
 
     internal AppRuntime(
-        IEngine<TLayer> engine,
+        Engine<TLayer> engine,
         IGame<TLayer> game,
+        IFrameTime time,
         ILoggerFactory loggerFactory,
-        Bork2dAppOptions<TLayer> options)
+        Bork2dAppOptions<TLayer> options,
+        WindowProxy? windowProxy = null,
+        InputProxy? inputProxy = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(game);
+        ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(loggerFactory);
         ArgumentNullException.ThrowIfNull(options);
 
         _engine = engine;
         _game = game;
+        _time = time;
         _loggerFactory = loggerFactory;
+        _logger = loggerFactory.CreateLogger(Bork2dLogging.RuntimeCategory);
         _options = options;
+        _windowProxy = windowProxy;
+        _inputProxy = inputProxy;
+        _sdlApiFactory = options.SdlApiFactory ?? CreateDefaultSdlApi;
     }
 
     public ISceneRoot Root => _engine.Root;
@@ -41,8 +76,61 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
 
     public void Run()
     {
-        // Setup is intentionally outside the Tick/Teardown pair: if it throws there is nothing
-        // to tear down yet, and Run must surface the original exception.
+        try
+        {
+            if (_options.Mode == Bork2dAppMode.Windowed)
+            {
+                RunWindowed();
+            }
+            else
+            {
+                RunOneTick();
+            }
+        }
+        finally
+        {
+            // Post-shutdown Exit() is a no-op (D-M2-17); this also covers a failed run.
+            _engine.MarkStopped();
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _engine.MarkStopped();
+        try
+        {
+            // Detach before disposing the logger so a retained IWindow/IInput fails with
+            // ObjectDisposedException instead of touching a dead platform (D-M2-17).
+            _windowProxy?.Detach();
+            _inputProxy?.Detach();
+        }
+        finally
+        {
+            if (_loggerFactory is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
+    }
+
+    private static ISdlApi CreateDefaultSdlApi() => new SilkSdlApi();
+
+    /// <summary>
+    /// The M1 one-tick sequence: <c>Setup</c>, exactly one <c>Tick</c>, <c>Teardown</c>.
+    /// </summary>
+    /// <remarks>
+    /// The clock is not advanced and no platform exists. <c>Setup</c> is intentionally outside the
+    /// tick/teardown pair: if it throws there is nothing to tear down and the original exception must
+    /// reach the caller.
+    /// </remarks>
+    private void RunOneTick()
+    {
         _game.Setup(_engine);
 
         Exception? tickException = null;
@@ -84,17 +172,153 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         }
     }
 
-    public void Dispose()
+    /// <summary>
+    /// The windowed driver: start the platform, attach the proxies, run the uncapped loop, tear
+    /// down the game while the window is still alive, then shut the platform down.
+    /// </summary>
+    private void RunWindowed()
     {
-        if (_disposed)
+        var windowProxy = _windowProxy
+            ?? throw new InvalidOperationException("A windowed runtime requires a window proxy.");
+        var inputProxy = _inputProxy
+            ?? throw new InvalidOperationException("A windowed runtime requires an input proxy.");
+
+        var platform = new SdlWindowPlatform(CreatePlatformOptions(), _sdlApiFactory, _logger);
+
+        try
+        {
+            // Start blocks until the window exists or startup failed; on failure it has already
+            // joined the OS thread and released SDL.
+            platform.Start();
+        }
+        catch
+        {
+            // No platform ran, but the proxies must still be disposed for D-M2-17.
+            windowProxy.Detach();
+            inputProxy.Detach();
+            throw;
+        }
+
+        Exception? gameFailure = null;
+        Exception? teardownFailure = null;
+        var setupSucceeded = false;
+        long ticks = 0;
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            // Attach before Setup so the game sees the live window/input immediately.
+            windowProxy.Attach(platform);
+            inputProxy.Attach(platform);
+
+            try
+            {
+                // Exit/close received during startup mean no Setup and therefore no Tick/Teardown.
+                if (!_engine.ExitRequested && !platform.ExitRequested)
+                {
+                    _game.Setup(_engine);
+                    setupSucceeded = true;
+                }
+
+                while (!_engine.ExitRequested && !platform.ExitRequested)
+                {
+                    inputProxy.Freeze();
+                    _time.NewFrame();
+                    inputProxy.DispatchText();
+                    _game.Tick();
+                    ticks++;
+                }
+            }
+            catch (Exception exception)
+            {
+                gameFailure = exception;
+            }
+            finally
+            {
+                if (setupSucceeded)
+                {
+                    // The window and input are still alive here, so the game may issue best-effort
+                    // window commands; the platform is shut down immediately afterwards.
+                    try
+                    {
+                        _game.Teardown();
+                    }
+                    catch (Exception exception)
+                    {
+                        teardownFailure = exception;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            stopwatch.Stop();
+            platform.Shutdown();
+            windowProxy.Detach();
+            inputProxy.Detach();
+        }
+
+        var fatalException = platform.FatalException;
+        LogLoopStopped(platform, ticks, stopwatch.Elapsed.TotalSeconds);
+        ThrowFailures(gameFailure, fatalException, teardownFailure);
+    }
+
+    private WindowPlatformOptions CreatePlatformOptions()
+        => new(
+            _options.Title,
+            _options.Width,
+            _options.Height,
+            _options.Resizable,
+            _options.Fullscreen,
+            _options.VSync);
+
+    private void LogLoopStopped(SdlWindowPlatform platform, long ticks, double elapsedSeconds)
+    {
+        var framebuffer = platform.State.FramebufferSize;
+        _logger.LogInformation(
+            "Bork2d windowed loop stopped: reason={Reason}, ticks={Ticks}, "
+                + "elapsedSeconds={ElapsedSeconds:0.###}, finalFramebuffer={FramebufferWidth}x{FramebufferHeight}",
+            platform.StopReason,
+            ticks,
+            elapsedSeconds,
+            framebuffer.Width,
+            framebuffer.Height);
+    }
+
+    private static void ThrowFailures(
+        Exception? gameFailure,
+        Exception? fatalException,
+        Exception? teardownFailure)
+    {
+        var errors = new List<Exception>(capacity: 3);
+        if (gameFailure is not null)
+        {
+            errors.Add(gameFailure);
+        }
+
+        if (fatalException is not null)
+        {
+            errors.Add(fatalException);
+        }
+
+        if (teardownFailure is not null)
+        {
+            errors.Add(teardownFailure);
+        }
+
+        if (errors.Count == 0)
         {
             return;
         }
 
-        _disposed = true;
-        if (_loggerFactory is IDisposable disposable)
+        if (errors.Count == 1)
         {
-            disposable.Dispose();
+            ExceptionDispatchInfo.Capture(errors[0]).Throw();
+            return;
         }
+
+        throw new AggregateException(
+            "The windowed run failed; the original exceptions are inner.",
+            errors);
     }
 }

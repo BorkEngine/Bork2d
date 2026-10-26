@@ -8,7 +8,7 @@ internal enum Bork2dAppState
     /// <summary>Built but not yet run or disposed.</summary>
     Created = 0,
 
-    /// <summary><c>Run</c> is executing the M1 smoke sequence.</summary>
+    /// <summary><c>Run</c> is executing the windowed loop or the one-tick sequence.</summary>
     Running = 1,
 
     /// <summary><c>Run</c> returned or threw; it cannot be called again.</summary>

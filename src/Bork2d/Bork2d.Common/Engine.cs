@@ -8,34 +8,50 @@ namespace Bork2d.Common;
 /// The engine instance that owns the scene tree and its global structural lock.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The engine holds exactly one <see cref="SceneRoot"/> and no global camera, sprite, or
 /// transform lists. It also owns the single <see cref="Lock"/> that serializes structural scene
 /// changes; every node created by this engine shares it. Parented objects are retained by their
 /// parent; unparented objects are collectible when game code drops its last reference. No member
 /// requires a particular thread.
+/// </para>
+/// <para>
+/// The window and input implementations are injected by the composition root: a windowed app gets
+/// internal proxies that the runtime host attaches to a live platform before <c>Setup</c>, while
+/// headless and offscreen apps get the throwing window stub and no input. The exit flag is a
+/// three-state token so <see cref="Exit"/> becomes a no-op once the host has stopped the run.
+/// </para>
 /// </remarks>
-internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
+/// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
+internal sealed class Engine<TLayer> : IEngine<TLayer>
     where TLayer : struct, Enum
-    where TGame : IGame<TLayer>
 {
+    private const int ExitActive = 0;
+    private const int ExitRequestedState = 1;
+    private const int ExitStopped = 2;
+
     private readonly Lock _structuralLock = new();
     private readonly SceneRoot _root;
-    private readonly TGame _game;
+    private readonly IInput? _input;
     private readonly ILoggerFactory _loggerFactory;
-    private volatile bool _exitRequested;
+    private int _exitState;
 
     internal Engine(
-        TGame game,
         ITime time,
         IWindow window,
         IAssets assets,
+        IInput? input = null,
         ILoggerFactory? loggerFactory = null)
     {
+        ArgumentNullException.ThrowIfNull(time);
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(assets);
+
         LayerValidation.Validate<TLayer>();
 
-        _game = game;
         _root = new SceneRoot(_structuralLock);
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+        _input = input;
         Time = time;
         Window = window;
         Assets = assets;
@@ -47,12 +63,23 @@ internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
 
     public IAssets Assets { get; }
 
-    public IInput Input => throw new NotSupportedException(
-        "Input requires a window. Windowed input is implemented in M2; M1 has no window.");
+    public IInput Input => _input ?? throw new NotSupportedException(
+        "Input requires a windowed app. Headless and offscreen modes do not create a window or an "
+        + "input subsystem.");
 
     public ILoggerFactory LoggerFactory => _loggerFactory;
 
     public ISceneRoot Root => _root;
+
+    /// <summary>
+    /// Gets a value indicating whether <see cref="Exit"/> was called while the run is active.
+    /// </summary>
+    /// <remarks>
+    /// The windowed loop reads this token at each tick boundary. The one-tick modes never read it,
+    /// and it stays <see langword="false"/> after <see cref="MarkStopped"/> so a post-shutdown
+    /// <see cref="Exit"/> is a no-op.
+    /// </remarks>
+    internal bool ExitRequested => Volatile.Read(ref _exitState) == ExitRequestedState;
 
     public ITransform CreateTransform(ITransform? parent = null)
     {
@@ -81,17 +108,18 @@ internal sealed class Engine<TLayer, TGame> : IEngine<TLayer>
         return sprite;
     }
 
-    public void Exit() => _exitRequested = true;
-
-    public void Run()
+    public void Exit()
     {
-        _game.Setup(this);
-        while (!_exitRequested)
-        {
-            // Advance time
-            _game.Tick();
-        }
+        // Compare-exchange from Active so a caller racing the end of the run cannot resurrect a
+        // request after MarkStopped has moved the token to Stopped.
+        Interlocked.CompareExchange(ref _exitState, ExitRequestedState, ExitActive);
     }
+
+    /// <summary>
+    /// Marks the run as finished so later <see cref="Exit"/> calls are no-ops (D-M2-17).
+    /// </summary>
+    /// <remarks>Idempotent; called by the app runtime when a run completes or the app is disposed.</remarks>
+    internal void MarkStopped() => Interlocked.Exchange(ref _exitState, ExitStopped);
 
     private static ISceneNode RequireEngineNode(ITransform parent)
     {

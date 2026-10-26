@@ -203,13 +203,38 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     }
 
     /// <summary>
+    /// Supplies an internal test seam for the SDL adapter factory. Not part of the public API.
+    /// </summary>
+    /// <param name="factory">Creates the SDL seam on the OS/window thread.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <remarks>
+    /// <see cref="Build"/> never invokes the factory and never touches SDL. Only a windowed
+    /// <c>Run</c> invokes it, on the engine-owned OS/window thread. Tests use this to drive the real
+    /// windowed loop and platform with an in-memory fake.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    internal Bork2dAppBuilder<TLayer> WithSdlApiFactory(Func<ISdlApi> factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        _options.SdlApiFactory = factory;
+        return this;
+    }
+
+    /// <summary>
     /// Validates the configuration and creates the app.
     /// </summary>
     /// <returns>The built app. The caller owns it and must dispose it.</returns>
     /// <remarks>
+    /// <para>
     /// Validation runs first, then the app-owned logger factory is created, the startup
-    /// mode/validation message is logged, and the internal engine and runtime are created. The
-    /// factory is disposed if creation fails after it was built.
+    /// mode/validation message is logged, and the internal engine, clock, and runtime are created.
+    /// The factory is disposed if creation fails after it was built.
+    /// </para>
+    /// <para>
+    /// Windowed apps are created with unattached internal window/input proxies; headless and
+    /// offscreen apps keep the throwing window stub and no input. <see cref="Build"/> creates no
+    /// SDL state, window, or thread in any mode.
+    /// </para>
     /// </remarks>
     /// <exception cref="Bork2dException">The configuration is invalid.</exception>
     public Bork2dApp Build()
@@ -225,14 +250,40 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
                 _options.Mode,
                 typeof(TLayer).FullName);
 
-            var engine = new Engine<TLayer, IGame<TLayer>>(
-                game,
-                new StopwatchTime(),
-                new UnsupportedWindow(),
+            var time = new StopwatchTime(_options.MaxDeltaTime);
+
+            WindowProxy? windowProxy = null;
+            InputProxy? inputProxy = null;
+            IWindow window;
+            IInput? input;
+            if (_options.Mode == Bork2dAppMode.Windowed)
+            {
+                windowProxy = new WindowProxy();
+                inputProxy = new InputProxy();
+                window = windowProxy;
+                input = inputProxy;
+            }
+            else
+            {
+                window = new UnsupportedWindow();
+                input = null;
+            }
+
+            var engine = new Engine<TLayer>(
+                time,
+                window,
                 new UnsupportedAssets(),
+                input,
                 loggerFactory);
 
-            var runtime = new AppRuntime<TLayer>(engine, game, loggerFactory, _options);
+            var runtime = new AppRuntime<TLayer>(
+                engine,
+                game,
+                time,
+                loggerFactory,
+                _options,
+                windowProxy,
+                inputProxy);
             return new Bork2dApp(runtime);
         }
         catch

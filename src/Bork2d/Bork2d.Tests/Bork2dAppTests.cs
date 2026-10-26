@@ -12,7 +12,10 @@ public sealed class Bork2dAppTests
     public void RunCallsSetupTickAndTeardownExactlyOnce()
     {
         var game = new TestGame<GameLayer>();
-        using var app = new Bork2dAppBuilder<GameLayer>().WithGame(game).Build();
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .Build();
 
         app.Run();
 
@@ -25,7 +28,10 @@ public sealed class Bork2dAppTests
     public void RunCanBeCalledFromAnotherThread()
     {
         var game = new TestGame<GameLayer>();
-        using var app = new Bork2dAppBuilder<GameLayer>().WithGame(game).Build();
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .Build();
 
         var thread = new Thread(app.Run);
         thread.Start();
@@ -40,7 +46,10 @@ public sealed class Bork2dAppTests
     public void SecondRunThrows()
     {
         var game = new TestGame<GameLayer>();
-        using var app = new Bork2dAppBuilder<GameLayer>().WithGame(game).Build();
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .Build();
         app.Run();
 
         Assert.Throws<InvalidOperationException>(() => app.Run());
@@ -53,7 +62,10 @@ public sealed class Bork2dAppTests
     public void RunAfterDisposeThrowsObjectDisposed()
     {
         var game = new TestGame<GameLayer>();
-        var app = new Bork2dAppBuilder<GameLayer>().WithGame(game).Build();
+        var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .Build();
         app.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => app.Run());
@@ -77,7 +89,10 @@ public sealed class Bork2dAppTests
     public void DisposeIsIdempotent()
     {
         var game = new TestGame<GameLayer>();
-        var app = new Bork2dAppBuilder<GameLayer>().WithGame(game).Build();
+        var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .Build();
         app.Run();
 
         app.Dispose();
@@ -94,7 +109,10 @@ public sealed class Bork2dAppTests
         {
             OnSetup = engine => transform = engine.CreateTransform(engine.Root),
         };
-        var app = new Bork2dAppBuilder<GameLayer>().WithGame(game).Build();
+        var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .Build();
 
         app.Run();
 
@@ -122,7 +140,10 @@ public sealed class Bork2dAppTests
                 throw error;
             },
         };
-        using var app = new Bork2dAppBuilder<GameLayer>().WithGame(game).Build();
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .Build();
 
         var thrown = Assert.Throws<InvalidOperationException>(() => app.Run());
 
@@ -147,7 +168,10 @@ public sealed class Bork2dAppTests
             OnSetup = engine => transform = engine.CreateTransform(engine.Root),
             OnTick = () => throw error,
         };
-        var app = new Bork2dAppBuilder<GameLayer>().WithGame(game).Build();
+        var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .Build();
 
         var thrown = Assert.Throws<InvalidOperationException>(() => app.Run());
 
@@ -171,7 +195,10 @@ public sealed class Bork2dAppTests
         {
             OnTeardown = () => throw error,
         };
-        using var app = new Bork2dAppBuilder<GameLayer>().WithGame(game).Build();
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .Build();
 
         var thrown = Assert.Throws<InvalidOperationException>(() => app.Run());
 
@@ -211,6 +238,29 @@ public sealed class Bork2dAppTests
     }
 
     [Fact]
+    public void OneTickModesNeverCreateTheSdlPlatform()
+    {
+        var invoked = false;
+        var game = new TestGame<GameLayer>();
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .WithSdlApiFactory(() =>
+            {
+                invoked = true;
+                throw new InvalidOperationException("Headless mode must not create SDL.");
+            })
+            .Build();
+
+        app.Run();
+
+        Assert.False(invoked);
+        Assert.Equal(1, game.SetupCount);
+        Assert.Equal(1, game.TickCount);
+        Assert.Equal(1, game.TeardownCount);
+    }
+
+    [Fact]
     public void WithLoggingIsInvokedAtBuildWithoutAddingADefaultProvider()
     {
         var game = new TestGame<GameLayer>();
@@ -218,6 +268,7 @@ public sealed class Bork2dAppTests
 
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
+            .WithHeadless()
             .WithLogging(_ => configured = true)
             .Build();
 
@@ -228,21 +279,21 @@ public sealed class Bork2dAppTests
     }
 
     [Fact]
-    public void DisposeDisposesTheLoggerFactoryAndNeverCallsTeardown()
+    public void DisposeDetachesTheWindowAndInputProxiesAndDisposesTheLoggerFactory()
     {
         var game = new ScriptedGame<GameLayer>();
-        var engine = new Engine<GameLayer, ScriptedGame<GameLayer>>(
-            game,
-            new FakeTime(),
-            new FakeWindow(),
-            new FakeAssets());
+        var window = new WindowProxy();
+        var input = new InputProxy();
+        var time = new StopwatchTime(0.25);
+        var engine = new Engine<GameLayer>(time, window, new FakeAssets(), input);
         var loggerFactory = new FakeLoggerFactory();
         var options = new Bork2dAppOptions<GameLayer>
         {
             Game = game,
             GameSetCount = 1,
         };
-        var app = new Bork2dApp(new AppRuntime<GameLayer>(engine, game, loggerFactory, options));
+        var app = new Bork2dApp(
+            new AppRuntime<GameLayer>(engine, game, time, loggerFactory, options, window, input));
 
         app.Dispose();
         app.Dispose();
@@ -250,5 +301,7 @@ public sealed class Bork2dAppTests
         Assert.Equal(1, loggerFactory.DisposeCount);
         Assert.Equal(0, game.SetupCount);
         Assert.Equal(0, game.TeardownCount);
+        Assert.Throws<ObjectDisposedException>(() => { _ = window.Title; });
+        Assert.Throws<ObjectDisposedException>(() => { _ = input.IsKeyDown(KeyCode.A); });
     }
 }

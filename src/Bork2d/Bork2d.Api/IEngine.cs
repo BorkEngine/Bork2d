@@ -21,21 +21,35 @@ namespace Bork2d.Api;
 public interface IEngine<TLayer> where TLayer : struct, Enum
 {
     /// <summary>
-    /// Gets the monotonic time/delta snapshot. Readable from any thread. In M1 the host does not
-    /// advance the clock, so both values stay <c>0</c>.
+    /// Gets the monotonic time/delta snapshot. Readable from any thread.
     /// </summary>
+    /// <remarks>
+    /// A windowed app advances the clock once per tick; the first tick reports <c>0</c> for both
+    /// values. Headless and offscreen apps run one tick and never advance the clock, so both values
+    /// stay <c>0</c>. See <see cref="ITime"/> for the clamp and thread-safety rules.
+    /// </remarks>
     ITime Time { get; }
 
     /// <summary>
-    /// Gets the window controls. Windowed-only in the target design; in M1 every mode returns a
-    /// stub whose members throw <see cref="NotSupportedException"/>.
+    /// Gets the window controls. The property access never throws.
     /// </summary>
+    /// <remarks>
+    /// In windowed mode this is the internal proxy attached for the duration of <c>Run()</c>. In
+    /// headless and offscreen mode it is a stub whose members throw
+    /// <see cref="NotSupportedException"/>. After a windowed run returns, retained references remain
+    /// valid objects but their members throw <see cref="ObjectDisposedException"/> (D-M2-17).
+    /// </remarks>
     IWindow Window { get; }
 
     /// <summary>
-    /// Gets the input snapshot. Windowed-only in the target design; in M1 the getter throws
-    /// <see cref="NotSupportedException"/> in every mode.
+    /// Gets the input snapshot.
     /// </summary>
+    /// <remarks>
+    /// Windowed mode returns the internal proxy attached for the duration of <c>Run()</c>; the getter
+    /// itself never throws there, but a retained reference's members throw
+    /// <see cref="ObjectDisposedException"/> after the run. Headless and offscreen mode has no input
+    /// subsystem, so the getter itself throws <see cref="NotSupportedException"/>.
+    /// </remarks>
     IInput Input { get; }
 
     /// <summary>
@@ -86,7 +100,18 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     ISpriteRender<TLayer> CreateSpriteRender(ITransform parent);
 
     /// <summary>
-    /// Requests a graceful shutdown after the current tick. May be called from any thread.
+    /// Requests a graceful shutdown. May be called from any thread.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// In windowed mode the current tick finishes and the loop stops before the next freeze; the window
+    /// is destroyed and <c>Bork2dApp.Run()</c> returns normally. A request received during
+    /// <c>Setup</c> skips every tick but still calls <c>Teardown</c> once (D-M2-19).
+    /// </para>
+    /// <para>
+    /// Headless and offscreen keep the M1 one-tick behavior and ignore the request. After the run has
+    /// finished or the app has been disposed, this call is a no-op.
+    /// </para>
+    /// </remarks>
     void Exit();
 }

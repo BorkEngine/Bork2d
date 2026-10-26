@@ -77,7 +77,7 @@ public sealed class SceneConcurrencyTests
     }
 
     private static void RunWorker(
-        Engine<GameLayer, TestGame<GameLayer>> engine,
+        Engine<GameLayer> engine,
         int worker,
         ITransform[][] transforms,
         ICamera<GameLayer>[] cameras,
