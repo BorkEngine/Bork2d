@@ -183,7 +183,13 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         var inputProxy = _inputProxy
             ?? throw new InvalidOperationException("A windowed runtime requires an input proxy.");
 
-        var platform = new SdlWindowPlatform(CreatePlatformOptions(), _sdlApiFactory, _logger);
+        // Disposed on every path, including a startup failure: Start already joins the OS thread
+        // and releases SDL there, and Dispose releases the platform's wait signals (its Shutdown is
+        // idempotent, so the successful path keeps its explicit Shutdown ordering).
+        using var platform = new SdlWindowPlatform(
+            CreatePlatformOptions(),
+            _sdlApiFactory,
+            _logger);
 
         try
         {

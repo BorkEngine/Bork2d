@@ -181,7 +181,11 @@ calls SDL. The tick thread never calls SDL and never waits for a window command.
   takes the graceful-exit path but does not destroy the window; the OS thread keeps pumping until
   shutdown.
 - **Fatal errors.** An unrecoverable SDL error is stored as a `Bork2dException`, requests an
-  error exit, and stops the pump. The tick-side host reads it after `Teardown` and rethrows it.
+  error exit, and stops the pump. The OS thread then runs its cleanup, so it may destroy the window
+  before the tick thread reaches `Teardown`; the window/input proxies stay attached until the host
+  shuts the platform down, so `Teardown` can still attempt best-effort access. The tick-side host
+  reads the fatal exception after `Teardown` and rethrows it. Normal exit/close paths leave the
+  window alive through `Teardown` and destroy it only afterwards (accepted M2 fatal-path behavior).
 - **Shutdown.** `Shutdown` sets the stop flag, pushes a user event to release the event wait, and
   joins the thread. The OS thread destroys the window before quitting and disposing SDL. There is
   no timeout, sleep, or pacing wait.
@@ -236,17 +240,19 @@ thread never invokes a game callback.
 - **Stop boundary.** The loop re-checks the engine exit token, the platform's close/`SDL_QUIT`
   request, and the fatal exception at each boundary before the next freeze. `Exit()` during a tick
   lets that tick complete; `Exit()`/close during `Setup` runs zero ticks.
-- **Teardown.** `Teardown` runs once while the window and input are still attached (best-effort
-  window commands are allowed). The platform is then shut down (destroy window, quit SDL, join the
-  OS thread) and only afterwards are the proxies detached, so retained references throw
-  `ObjectDisposedException`.
+- **Teardown.** `Teardown` runs once with the window/input proxies still attached; normal
+  exit/close paths have a live window there, but a fatal OS-thread error may already have destroyed
+  it, so the game can only attempt best-effort access. The platform is then shut down (destroy
+  window, quit SDL, join the OS thread) and only afterwards are the proxies detached, so retained
+  references throw `ObjectDisposedException`.
 - **No pacing.** The loop has no target rate, deadline, `Thread.Sleep`, `SpinWait`, or yield; it
   consumes a core in M2 until M7 supplies frame backpressure. No lock is held across a game
   callback, an SDL call, or the event wait.
 - **Errors.** A game or text-handler failure stops the loop, is captured, and is rethrown after
   teardown and platform shutdown; a fatal OS-thread error is stored on the platform, read after
-  shutdown, and rethrown (aggregated with a teardown failure). One tick + teardown failure becomes
-  an `AggregateException`.
+  shutdown, and rethrown (aggregated with a teardown failure). On the fatal path the OS thread may
+  have destroyed the window before `Teardown`; the proxies remain attached for best-effort access.
+  One tick + teardown failure becomes an `AggregateException`.
 - **Deterministic coverage.** `Bork2d.Tests` drives the real runtime and platform with
   `FakeSdlApi`, synchronizing through an applied window command instead of sleeps; app runs join
   with a bounded timeout and every test leaves no platform thread running.

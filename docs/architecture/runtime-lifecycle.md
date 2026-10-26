@@ -192,11 +192,17 @@ the root's direct children on `Dispose()`. Headless skips render/asset shutdown 
 | Exception in `Setup` | `Run()` | Platform shut down; original exception; `Teardown` not called. |
 | Exception in `Tick` or a text handler | `Run()` | Platform shut down; `Teardown` attempted; original exception rethrown. |
 | `Tick` and `Teardown` both throw | `Run()` | `AggregateException` with both inner exceptions, after platform shutdown. |
-| Fatal platform error after startup | OS thread → `Run()` | Loop stops at the next boundary; `Teardown` attempted; fatal `Bork2dException` rethrown, aggregated with a teardown failure. |
+| Fatal platform error after startup | OS thread → `Run()` | Loop stops at the next boundary; `Teardown` attempted; fatal `Bork2dException` rethrown, aggregated with a teardown failure. The OS thread has already cleaned up, so the window may be destroyed before `Teardown`; the proxies remain attached for best-effort access. |
 | `IWindow`/`IInput` member after shutdown | Member | `ObjectDisposedException` (D-M2-17). |
 | `Dispose()` during `Run()` | `Dispose()` | `InvalidOperationException` from any thread; the loop continues. |
 | Second `Run()` / `Run()` after `Dispose()` | `Run()` | `InvalidOperationException` / `ObjectDisposedException`. |
 
+- **Fatal-path exception (accepted for M2).** On an unrecoverable SDL error after startup, the OS
+  thread stops pumping and runs its cleanup immediately, which may destroy the window before the
+  tick thread reaches `Teardown`. The window/input proxies stay attached until the host shuts the
+  platform down, so `Teardown` can still attempt best-effort access (getters work; setters may be
+  dropped). Normal `Exit()`/close paths keep the window alive through `Teardown` and destroy it only
+  afterwards, so D-M2-03 is unchanged there.
 - `Dispose()` after a failed `Run()` still attempts cleanup and suppresses only secondary
   exceptions, so the caller keeps the original exception.
 - The engine does not swallow exceptions. `Run()` is the single place where the OS-thread failure
@@ -235,7 +241,9 @@ internal to `Bork2d.Runtime` and has no public surface; the runtime host starts 
   restore, maximize, focus gained/lost, fullscreen changes, and DPI/scale changes in event order.
   A close request or `SDL_QUIT` requests a graceful exit but leaves the window alive so
   `Teardown` can still use it. An unrecoverable SDL error is stored as a fatal
-  `Bork2dException`, requests an error exit, and stops the pump.
+  `Bork2dException`, requests an error exit, and stops the pump; the OS thread's cleanup may then
+  destroy the window before the tick thread reaches `Teardown`, while the proxies stay attached for
+  best-effort access (accepted M2 fatal-path behavior; normal exit/close paths tear down first).
 - **Shutdown** sets the stop flag, pushes a user event to release the event wait, and joins the
   thread. The OS thread destroys the window first, then quits and disposes SDL. Shutdown is
   idempotent and uses no timeout or sleep. A shutdown requested without a prior close reports the
