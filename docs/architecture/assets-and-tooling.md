@@ -1,6 +1,6 @@
 # Assets, Bake, and Editor Tooling
 
-> **Status:** M3 is implemented; the M3 PR is pending human review. `Bork2d.Assets` provides the v1
+> **Status:** M3 is implemented and merged into `develop` (2026-10-26, PR #4). `Bork2d.Assets` provides the v1
 > pack reader/writer and the public `PackBuilder`/`PackCompressionMode` tooling surface, canonical
 > paths, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, one loader thread with
 > `LoadData`/`LoadAsset<T>`, the internal texture-descriptor/sprite models with validation and the

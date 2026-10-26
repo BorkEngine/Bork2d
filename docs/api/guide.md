@@ -1,8 +1,8 @@
 # API Guide
 
 > **Status:** implemented M3. M1 (foundation), M2 (SDL windowed host), and M3 (pack, VFS,
-> descriptors, runtime integration) exist in `Bork2d.Runtime`/`Bork2d.Assets`; the M3 PR is pending
-> human review. `Build()` validates and `Run()` runs the uncapped windowed loop (window, input,
+> descriptors, runtime integration) exist in `Bork2d.Runtime`/`Bork2d.Assets` and are merged into
+> `develop` (2026-10-26, PR #4). `Build()` validates and `Run()` runs the uncapped windowed loop (window, input,
 > time) or the one-tick headless/offscreen sequence, opening the base pack (or the
 > `WithoutAssets()` empty filesystem) before the window and `Setup`. The renderer is M8. See the
 > [API reference](reference.md#12-runtime-surface).

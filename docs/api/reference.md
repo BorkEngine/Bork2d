@@ -1,7 +1,8 @@
 # API Reference
 
 > **Status:** the implemented M3 contract. M1 (foundation), M2 (SDL windowed host), and M3 (pack,
-> VFS, descriptors, runtime integration) are implemented; the M3 PR is pending human review.
+> VFS, descriptors, runtime integration) are implemented and merged into `develop`
+> (2026-10-26, PR #4).
 > `Current` means implemented in this tree and covered by tests; `Partial` means the declaration
 > exists but behavior is stubbed, unwired, or incomplete; `Planned` means an agreed target that is
 > not implemented. Windowed mode runs a real SDL window, input, and time; headless/offscreen keep

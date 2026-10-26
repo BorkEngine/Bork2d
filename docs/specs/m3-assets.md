@@ -1,7 +1,7 @@
 # M3 — Assets: Pack, VFS, Descriptors (spec)
 
-> **Status:** **approved by the human owner (2026-10-26) and implemented by WP1–WP5.** The M3 PR is
-> pending human review and is **not merged**. WP1 (v1 pack reader/writer, canonical paths, and the
+> **Status:** **approved by the human owner (2026-10-26), implemented by WP1–WP5, and merged into
+> `develop` (2026-10-26, PR #4).** WP1 (v1 pack reader/writer, canonical paths, and the
 > public pack-tooling surface), WP2 (the D-M3-22 public contract correction, `AssetInfo`,
 > canonical-path/filesystem resolution, the internal base/overlay VFS, `LoadPack`, `Browse`/
 > `Exists`, atomic thread-safe mount, and the `IAssets`/`Data.cs` XML docs), WP3 (the public
@@ -958,6 +958,7 @@ All commands were run from the workspace clone on 2026-10-26 (Windows 11, SDK
 
 | Gate | Command | Observed result |
 | --- | --- | --- |
+| Merge | PR #4 (`m-3/common` → `develop`) | Merged 2026-10-26; all WP branches retained for review. |
 | Debug build | `dotnet build src/Bork2d/Bork2d.slnx -c Debug` | Build succeeded: **0 warnings, 0 errors**. |
 | Release build | `dotnet build src/Bork2d/Bork2d.slnx -c Release` | Build succeeded: **0 warnings, 0 errors**. |
 | Deterministic tests | `dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build` | **587 total: 578 passed, 9 skipped, 0 failed** (the 9 skips are the opt-in `[WindowFact]` tests). |
@@ -977,8 +978,8 @@ All commands were run from the workspace clone on 2026-10-26 (Windows 11, SDK
 The WPs are **sequential** (one wave each): they share `Bork2d.Assets`, the public contract, and the
 same docs. Branch model and review/merge rules are in [AGENTS.md](../../AGENTS.md).
 
-**All five work packages are implemented:** WP1–WP4 are merged into `m-3/common`, and WP5 is
-implemented on `m-3/wp-5` pending review (the M3 PR is not merged).
+**All five work packages are implemented:** WP1–WP4 were merged into `m-3/common`, and WP5 was
+merged with the rest of the milestone into `develop` (2026-10-26, PR #4).
 
 | WP | Branch | Delivers | Depends |
 | --- | --- | --- | --- |

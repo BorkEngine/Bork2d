@@ -1,7 +1,8 @@
 # Bork2d Documentation
 
 > **Status:** **M0 complete; M1 merged into `develop` (2026-10-25, PR #1); M2 merged into `develop`
-> (2026-10-26, PR #2); M3 implementation complete, PR pending human review (not merged).** The
+> (2026-10-26, PR #2); M3 (assets: pack, VFS, descriptors) merged into `develop` (2026-10-26,
+> PR #4).** The
 > repository contains the M1 build/quality baseline, public contracts, root-owned scene tree,
 > builder, logging, the NativeAOT smoke app, the M2 SDL windowed host (window, input, time,
 > uncapped loop), and the M3 asset pipeline (pack reader/writer, VFS, loader, descriptors/sprites

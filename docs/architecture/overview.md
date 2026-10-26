@@ -1,7 +1,7 @@
 # Architecture Overview
 
-> **Status:** M1 and M2 are merged into `develop`; M3 (pack, VFS, descriptors, runtime integration) is
-> implemented and its PR is pending human review. The builder, validation, windowed SDL host
+> **Status:** M1, M2, and M3 (pack, VFS, descriptors, runtime integration) are merged into
+> `develop` (2026-10-26, PR #4). The builder, validation, windowed SDL host
 > (window/input/time/loop), one-tick headless/offscreen host, scene graph, logging, asset pipeline,
 > and AOT baseline are `Current`; the editor (M5), Vulkan and frame handoff (M6/M7), and the sprite
 > renderer (M8) are `Planned`. TOML bake is M4. Status detail is in [the roadmap](../roadmap.md).

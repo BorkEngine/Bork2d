@@ -1,6 +1,6 @@
 # Contributing
 
-> **Status:** current through M3 (the M3 PR is pending human review). The warning/style/format/AOT
+> **Status:** current through M3 (merged into `develop` 2026-10-26, PR #4). The warning/style/format/AOT
 > gates and the docs link check are active. CI runs docs link check, build, tests, and format
 > verification on PRs to `develop` and pushes to `develop`; the NativeAOT publish/run smoke
 > (headless with a temporary pack, and windowed) is a required local gate.

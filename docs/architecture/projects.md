@@ -1,7 +1,7 @@
 # Projects and Dependencies
 
 > **Status:** the project graph is `Current` and enforced by the dependency test. M1, M2, and M3
-> are implemented; the M3 PR is pending human review. `Bork2d.Runtime` hosts the SDL window, input,
+> are implemented and merged into `develop` (2026-10-26, PR #4). `Bork2d.Runtime` hosts the SDL window, input,
 > time, the windowed loop, and the app-scoped asset service. `Bork2d.Assets` provides the v1 pack
 > reader/writer, its public tooling surface (`PackBuilder`/`PackCompressionMode`), canonical paths,
 > the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, the loader service (one dedicated

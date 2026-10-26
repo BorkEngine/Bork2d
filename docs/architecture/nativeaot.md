@@ -1,6 +1,6 @@
 # NativeAOT
 
-> **Status:** `Current` through M3 (the M3 PR is pending human review). `Bork2d.Api`,
+> **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4). `Bork2d.Api`,
 > `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`, and `Bork2d.Runtime` compile with
 > `IsAotCompatible` plus the trim and AOT analyzers, and `Bork2d.AotSmoke` publishes and runs with
 > zero AOT/trim warnings. The default smoke builds a small temporary pack with the public

@@ -1,8 +1,8 @@
 # Implementation Roadmap
 
 > **Status:** M0 complete; **M1 merged into `develop` (2026-10-25, PR #1)**; **M2 (SDL windowed
-> platform) merged into `develop` (2026-10-26, PR #2)**. **M3 (assets: pack, VFS, descriptors) is
-> implementation complete; its PR is pending human review** (not yet merged). The sequence is
+> platform) merged into `develop` (2026-10-26, PR #2)**. **M3 (assets: pack, VFS, descriptors)
+> merged into `develop` (2026-10-26, PR #4)**. The sequence is
 > dependency-ordered. A milestone is done when its exit criterion is demonstrated, not merely when
 > code is merged.
 
@@ -105,7 +105,7 @@ semantics match the reference; no Vulkan device; no `Sleep`/target rate; clean s
 
 ### M3 — Assets: pack, VFS, descriptors
 
-**Status:** implementation complete (WP1–WP5); **PR pending human review, not merged.** Full
+**Status:** merged into `develop` (2026-10-26, PR #4); all five WPs complete. Full
 record and acceptance evidence: [M3 spec](specs/m3-assets.md).
 
 Goal: load, overlay, browse, and describe packed assets without a renderer.
@@ -301,7 +301,7 @@ mode, and DPI/`IWindow.Size`) are resolved in the [M2 spec §4.1](specs/m2-sdl-p
 and the [decision log](decisions.md).
 
 The five M3 decisions are resolved by the approved [M3 spec §4](specs/m3-assets.md#4-locked-decisions)
-and implemented (M3 implementation complete; PR pending review):
+and implemented/merged (M3 merged 2026-10-26, PR #4):
 Zstd is the .NET 11 built-in (`ZstandardStream`, max quality 22); no automatic retry; no loose-file
 overlay; no policy size caps (`uint32` entry length/size, `uint64` offset, intrinsic/streaming
 bounds); RGBA8 + sRGB only. Remaining open decisions:
@@ -330,7 +330,7 @@ bounds); RGBA8 + sRGB only. Remaining open decisions:
 | M0 Documentation | Complete (2026-10-25) | Docs set, decision log, accepted ownership/pack/editor/pacing decisions. |
 | M1 Foundation/AOT | Merged (2026-10-25, PR #1) | 135 tests; Debug/Release zero warnings; format clean; AOT smoke publishes/runs locally; CI build/test/format on PRs to `develop` and `develop` pushes. [M1 spec](specs/m1-foundation.md). |
 | M2 SDL platform | Merged (2026-10-26, PR #2) | 292 tests (283 in CI, 292 with `BORK2D_RUN_WINDOW_TESTS=1`); Debug/Release zero warnings; format/docs clean; AOT headless and `--windowed --ticks 120` exit 0 with `SDL2.dll`; live-window 5,000,000-tick run exit 0; Escape/close graceful. [M2 spec](specs/m2-sdl-platform.md#125-acceptance-evidence-recorded-by-wp5). |
-| M3 Assets/pack | Implementation complete; PR pending human review (not merged) | 587 tests (578 deterministic + 9 opt-in real-window); Debug/Release zero warnings; format/docs clean; AOT publish zero AOT/trim warnings with `SDL2.dll`; default AOT run exit 0 loading a 2-entry temporary pack (raw + generated-shape MessagePack) and one tick; `--windowed --ticks 120` exit 0 with `WithoutAssets()`; crash-free pack/overlay failure matrix. [M3 spec](specs/m3-assets.md#123-acceptance-evidence-recorded-by-wp5). |
+| M3 Assets/pack | Merged (2026-10-26, PR #4) | 587 tests (578 deterministic + 9 opt-in real-window); Debug/Release zero warnings; format/docs clean; AOT publish zero AOT/trim warnings with `SDL2.dll`; default AOT run exit 0 loading a 2-entry temporary pack (raw + generated-shape MessagePack) and one tick; `--windowed --ticks 120` exit 0 with `WithoutAssets()`; crash-free pack/overlay failure matrix. [M3 spec](specs/m3-assets.md#123-acceptance-evidence-recorded-by-wp5). |
 | M4 Serialization/bake | Not started | — |
 | M5 Editor | Not started | — |
 | M6 Vulkan bring-up | Not started | — |

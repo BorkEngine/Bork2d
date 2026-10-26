@@ -1,7 +1,7 @@
 # Runtime Lifecycle
 
-> **Status:** implemented M3 (M1, M2, and the M3 asset integration; the M3 PR is pending human
-> review). The builder, its validation, the windowed `Bork2dApp.Run()` loop, the one-tick
+> **Status:** implemented M3 (M1, M2, and the M3 asset integration, merged into `develop`
+> 2026-10-26, PR #4). The builder, its validation, the windowed `Bork2dApp.Run()` loop, the one-tick
 > headless/offscreen path, app `Dispose()`, the internal windowed platform, the input/time
 > handoff, and the app-scoped asset service are `Current`. Windowed mode attaches real
 > `IWindow`/`IInput` proxies and advances `ITime`; headless/offscreen keep throwing stubs and a `0`

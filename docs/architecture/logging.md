@@ -1,6 +1,6 @@
 # Logging
 
-> **Status:** `Current` through M3 (the M3 PR is pending human review). The builder creates an
+> **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4). The builder creates an
 > app-owned Microsoft.Extensions.Logging factory, installs a plain-text ZLogger console provider by
 > default, logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`.
 > The windowed platform logs startup/stop/commands/failures, the runtime host logs the loop stop
