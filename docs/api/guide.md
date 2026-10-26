@@ -202,30 +202,53 @@ sprite.LocalScale = new Vector2(2, 2);
 
 ## 7. Input
 
-`Status: target for M2.` Input is windowed only. In M1 `IEngine.Input` throws
-`NotSupportedException`, and `KeyCode` declares only `A`; `MouseButton` declares only `Left`. The
-full key/button set is `Planned`.
+`Status: Current (M2, windowed input).` The windowed platform accumulates physical input, freezes it
+once per tick, and dispatches text on the tick thread. The runtime host that attaches it to
+`IEngine.Input` and starts the loop is M2 WP4, so in this tree the `IEngine.Input` getter still throws
+`NotSupportedException` in every mode.
 
 ```csharp
-var input = _engine.Input;
-
-if (input.IsKeyDown(KeyCode.A))
-    _player.LocalPosition += new Vector2(-4f * (float)_engine.Time.DeltaTime, 0);
-
-if (input.IsMousePressed(MouseButton.Left))
+public void Tick()
 {
-    Vector2 pixel = input.MousePosition; // framebuffer pixels, top-left; not world units
-    HandleClick(_player, pixel);
+    var input = _engine.Input;
+    var dt = (float)_engine.Time.DeltaTime;
+
+    if (input.IsKeyDown(KeyCode.A))
+        _player.LocalPosition += new Vector2(-240f * dt, 0);
+
+    if (input.IsKeyPressed(KeyCode.Space))
+        Jump();
+
+    if (input.IsMouseDown(MouseButton.Left))
+    {
+        // Framebuffer pixels, top-left origin: not logical points and not world units.
+        Vector2 pixel = input.MousePosition;
+        HandleDrag(_player, pixel, input.MouseDelta);
+    }
+
+    var scroll = input.MouseWheelDelta; // positive = up/away; reset next tick
+}
+
+public void Setup()
+{
+    _engine.Input.OnTextTyped += character => _name += character;
 }
 ```
 
-- `IsKeyDown`/`IsMouseDown` are held state; `IsKeyPressed`/`IsKeyReleased` (and the mouse
-  equivalents) are true for exactly one tick after the transition. A fast tap between ticks can
-  report both pressed and released in the same tick with `Down == false`; edges reset after
-  `Tick`, focus loss synthesizes releases, and input is a tick-start snapshot.
-- Input is not part of render snapshots. Full semantics are in the
-  [API reference](reference.md#6-iinput).
-
+- `IsKeyDown`/`IsMouseDown` are held state. `IsKeyPressed`/`IsKeyReleased` (and the mouse
+  equivalents) are true for exactly one tick after the transition. A tap between ticks can report
+  both edges with `Down == false`; key repeat creates no press edge.
+- `KeyCode` is a physical scancode, not a character: use `OnTextTyped` for committed text. A
+  surrogate pair arrives as two `char` events, in order, before that tick's `Tick`.
+- Input is frozen at tick start, so reads are stable for the whole `Tick`; events that arrive during
+  `Tick` appear in the next tick. Reads before the first tick are empty. In windowed mode
+  `MousePosition`/`MouseDelta` are framebuffer **physical pixels** (the DPI note in §9 applies).
+- Moving between monitors can change the display scale; the platform converts points to pixels at
+  each freeze, so do not cache absolute pixel positions across ticks.
+- Focus loss synthesizes releases and clears wheel/text; focus regain re-seeds held state and reports
+  zero delta. Input is not part of render snapshots. `KeyCode`/`MouseButton` numeric values are
+  unstable: never serialize them, and undefined values are safe `false` queries.
+- Full semantics are in the [API reference](reference.md#6-iinput).
 ## 8. Time
 
 ```csharp
