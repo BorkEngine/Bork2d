@@ -1,6 +1,6 @@
 # API Guide
 
-> **Status:** implemented M2 (WP1–WP5; pending PR review). The builder and host exist in
+> **Status:** implemented M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2). The builder and host exist in
 > `Bork2d.Runtime`; `Build()` validates and `Run()` runs the uncapped windowed loop (window, input,
 > time) or the one-tick headless/offscreen sequence. Assets are M3 and the renderer is M8;
 > `IAssets` remains a throwing stub. See the

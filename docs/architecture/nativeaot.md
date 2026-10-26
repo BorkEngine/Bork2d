@@ -1,6 +1,6 @@
 # NativeAOT
 
-> **Status:** `Current` through M2 (WP1–WP5; pending PR review).
+> **Status:** `Current` through M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2).
 > `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`, and `Bork2d.Runtime` compile with
 > `IsAotCompatible` plus the trim and AOT analyzers, and `Bork2d.AotSmoke` publishes and runs with
 > zero AOT/trim warnings. The smoke exercises the default logging path, a Nerdbank.MessagePack

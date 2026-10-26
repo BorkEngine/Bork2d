@@ -1,6 +1,6 @@
 # Threading and Frame Handoff
 
-> **Status:** implemented M2 (WP1–WP5; pending PR review). The M1 scene graph implements the
+> **Status:** implemented M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2). The M1 scene graph implements the
 > structural and per-object `System.Threading.Lock` rules in §2 and the public API has no thread
 > affinity. The M2 windowed platform's OS/window thread, command queue, confirmed-state snapshot,
 > event pump, input freeze, and the runtime tick loop that drives them are `Current` (§5). The

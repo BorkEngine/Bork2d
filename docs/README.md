@@ -1,7 +1,7 @@
 # Bork2d Documentation
 
-> **Status:** **M0 complete; M1 merged into `develop` (2026-10-25, PR #1); M2 implemented in the
-> WP1–WP5 branches (WP1–WP4 merged into `m-2/common`, WP5 pending review).** The repository contains
+> **Status:** **M0 complete; M1 merged into `develop` (2026-10-25, PR #1); M2 merged into `develop`
+> (2026-10-26, PR #2).** The repository contains
 > the M1 build/quality baseline, public contracts, root-owned scene tree, builder, logging, the
 > NativeAOT smoke app, and the M2 SDL windowed host (window, input, time, uncapped loop). Assets,
 > the editor, and the renderer are target designs for later milestones. Check status markers before

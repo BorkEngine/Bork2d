@@ -1,6 +1,6 @@
 # Runtime Lifecycle
 
-> **Status:** implemented M2 (WP1–WP5; pending PR review). The builder, its validation, the
+> **Status:** implemented M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2). The builder, its validation, the
 > windowed `Bork2dApp.Run()` loop, the one-tick headless/offscreen path, app `Dispose()`, the
 > internal windowed platform (OS/window thread, window commands, confirmed state), and the
 > input/time handoff are `Current`. Windowed mode attaches real `IWindow`/`IInput` proxies and

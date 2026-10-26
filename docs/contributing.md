@@ -1,6 +1,6 @@
 # Contributing
 
-> **Status:** current through M2 (WP1–WP5; pending PR review). The warning/style/format/AOT gates
+> **Status:** current through M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2). The warning/style/format/AOT gates
 > and the docs link check are active. CI runs docs link check, build, tests, and format
 > verification on PRs to `develop` and pushes to `develop`; the NativeAOT publish/run smoke
 > (headless and windowed) is a required local gate.

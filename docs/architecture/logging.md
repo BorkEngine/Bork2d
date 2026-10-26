@@ -1,6 +1,6 @@
 # Logging
 
-> **Status:** `Current` for M2 (WP1–WP5; pending PR review). The builder creates an app-owned
+> **Status:** `Current` for M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2). The builder creates an app-owned
 > Microsoft.Extensions.Logging factory, installs a plain-text ZLogger console provider by default,
 > logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`. The
 > windowed platform logs startup/stop/commands/failures and the runtime host logs the loop stop with

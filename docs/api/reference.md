@@ -1,6 +1,7 @@
 # API Reference
 
-> **Status:** the implemented M2 contract for the windowed host (M2 WP1–WP5; pending PR review).
+> **Status:** the implemented M2 contract for the windowed host (M2 WP1–WP5; merged into `develop`
+> 2026-10-26, PR #2).
 > `Current` means implemented in this tree and covered by tests; `Partial` means the declaration
 > exists but behavior is stubbed, unwired, or incomplete; `Planned` means an agreed target that is
 > not implemented. Windowed mode runs a real SDL window, input, and time; headless/offscreen keep
