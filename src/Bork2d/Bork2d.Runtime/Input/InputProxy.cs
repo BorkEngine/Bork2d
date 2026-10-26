@@ -1,7 +1,8 @@
 using System.Numerics;
-using Bork2d.Api;
+using Bork2d.Api.Input;
+using Bork2d.Runtime.Window;
 
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Input;
 
 /// <summary>
 /// The internal <see cref="IInput"/> implementation the runtime host attaches to a live

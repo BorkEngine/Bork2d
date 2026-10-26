@@ -1,8 +1,10 @@
 using System.Numerics;
 using Bork2d.Api;
+using Bork2d.Runtime.Input;
+using Bork2d.Runtime.Sdl;
 using Microsoft.Extensions.Logging;
 
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Window;
 
 /// <summary>
 /// The engine-owned windowed platform: one OS/window thread that owns SDL, the window, the event

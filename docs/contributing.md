@@ -30,7 +30,7 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **587 tests**: 578 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
+The suite is **588 tests**: 579 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
 are skipped unless the environment variable is set. The deterministic set includes the M3
 pack-format/writer tests, the path/VFS/browse/contract tests, the loader/threading and
 error-contract tests, the descriptor/sprite validation, `LoadSprite`, resource-cache, and
@@ -80,9 +80,11 @@ ticks, and one `Teardown`. The interactive `--windowed` run is the manual visibi
 ## 4. C# conventions
 
 File-scoped namespaces; nullable enabled; explicit accessibility; `var` only when the type is
-obvious; braces for control flow; one type per file; `_camelCase` private fields; `PascalCase`
-constants; `I`-prefixed interfaces; `Async` suffix and no `async void` outside handlers; guard
-clauses; no regions except generated code; no commented-out code; XML docs on public API.
+obvious; braces for control flow; one type per file; a file's namespace is the project namespace
+plus its folder path (`Bork2d.Assets/Loading/AssetService.cs` → `Bork2d.Assets.Loading`; IDE0130
+is an error, D-034); `_camelCase` private fields; `PascalCase` constants; `I`-prefixed interfaces;
+`Async` suffix and no `async void` outside handlers; guard clauses; no regions except generated
+code; no commented-out code; XML docs on public API.
 
 M3 closed the former XML-doc gap: `IAssets`, `AssetInfo`, `AssetException`, `AssetErrorKind`,
 `Sprite`, `Color`, `ClearKind`, and `Bork2dAppBuilder.WithoutAssets()` are documented. The rule
@@ -139,6 +141,7 @@ applies to every new public API; do not remove it.
       `BORK2D_RUN_WINDOW_TESTS=1` for window/runtime changes.
 - [ ] `dotnet format --verify-no-changes` and `scripts/check-docs.ps1` pass.
 - [ ] Dependency matrix respected; no unintended public types.
+- [ ] Files sit in the area folder and the namespace matches it (IDE0130).
 - [ ] No runtime reflection/TOML/dynamic code.
 - [ ] NativeAOT smoke publishes/runs when runtime-affecting, including
       `--windowed --ticks 120` for window/runtime changes.

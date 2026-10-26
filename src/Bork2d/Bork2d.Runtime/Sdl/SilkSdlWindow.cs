@@ -1,24 +1,25 @@
 using Silk.NET.SDL;
+using SilkNet = Silk.NET.SDL;
 
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Sdl;
 
 /// <summary>
 /// The production <see cref="ISdlWindow"/> over one native <c>SDL_Window</c>.
 /// </summary>
 /// <remarks>
-/// The window borrows the <see cref="Sdl"/> instance from its <see cref="SilkSdlApi"/>; the api must
+/// The window borrows the <see cref="Silk.NET.SDL.Sdl"/> instance from its <see cref="SilkSdlApi"/>; the api must
 /// outlive the window. <see cref="Dispose"/> destroys the native window and is idempotent; every
 /// other member throws <see cref="ObjectDisposedException"/> afterwards.
 /// </remarks>
 internal sealed unsafe class SilkSdlWindow : ISdlWindow
 {
-    private readonly Sdl _sdl;
-    private Window* _window;
+    private readonly SilkNet.Sdl _sdl;
+    private SilkNet.Window* _window;
 
     /// <summary>Initializes a new instance of the <see cref="SilkSdlWindow"/> class.</summary>
     /// <param name="sdl">The SDL instance that created the window.</param>
     /// <param name="window">The native window pointer.</param>
-    internal SilkSdlWindow(Sdl sdl, Window* window)
+    internal SilkSdlWindow(SilkNet.Sdl sdl, SilkNet.Window* window)
     {
         _sdl = sdl;
         _window = window;

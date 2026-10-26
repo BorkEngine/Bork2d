@@ -1,4 +1,4 @@
-using Bork2d.Common;
+using Bork2d.Common.Scene;
 
 namespace Bork2d.Assets;
 

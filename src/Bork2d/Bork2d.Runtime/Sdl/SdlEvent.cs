@@ -1,4 +1,6 @@
-namespace Bork2d.Runtime;
+using Bork2d.Api.Input;
+
+namespace Bork2d.Runtime.Sdl;
 
 /// <summary>
 /// One SDL event in the seam's neutral, blittable form.

@@ -1,7 +1,7 @@
 using System.Numerics;
-using Bork2d.Api;
+using Bork2d.Api.Input;
 
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Input;
 
 /// <summary>
 /// The immutable input state the tick thread reads for one tick.

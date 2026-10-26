@@ -44,7 +44,7 @@ items. The [decision log](decisions.md) records why.
 | Document | Audience | Answers |
 | --- | --- | --- |
 | [Architecture overview](architecture/overview.md) | everyone | Goals, invariants, modes, subsystem fit. |
-| [Projects and dependencies](architecture/projects.md) | contributors | Project graph, public/internal boundary, game layout, build. |
+| [Projects and dependencies](architecture/projects.md) | contributors | Project graph, public/internal boundary, source layout and namespaces, game layout, build. |
 | [Runtime lifecycle](architecture/runtime-lifecycle.md) | contributors | Builder, modes, startup, tick loop, pacing, shutdown, errors. |
 | [Scene ownership](architecture/scene-ownership.md) | contributors | Root-owned graph, membership, remove/re-add, read-only root. |
 | [Threading](architecture/threading.md) | contributors | Thread ownership, locks, snapshot ring, input, memory ordering. |
@@ -86,6 +86,7 @@ One fact has one owner. Update the owner and link to it; do not copy.
 | Scene lifetime and parenting | [Scene ownership](architecture/scene-ownership.md) |
 | Threads, locks, snapshots, handoff | [Threading](architecture/threading.md) |
 | Project graph and boundaries | [Projects](architecture/projects.md) |
+| Source layout and namespaces | [Projects §4](architecture/projects.md#4-source-layout-and-namespaces) |
 | Pack, assets, TOML bake, editor | [Assets and tooling](architecture/assets-and-tooling.md) |
 | Renderer | [Rendering](architecture/rendering.md) |
 | AOT constraints | [NativeAOT](architecture/nativeaot.md) |
@@ -102,6 +103,8 @@ One fact has one owner. Update the owner and link to it; do not copy.
   paths.
 - "Tick thread" means the thread running `IGame.Setup/Tick/Teardown`; the public API has no thread
   affinity.
+- Source layout is folder-per-area with the namespace equal to the project plus folder path; IDE0130
+  is an error ([Projects §4](architecture/projects.md#4-source-layout-and-namespaces)).
 - Status markers change with the code; the roadmap is the source of truth for milestone state.
 - `AGENTS.md` is process documentation only; milestone content lives in specs, roadmap, decisions,
   and the PR.
