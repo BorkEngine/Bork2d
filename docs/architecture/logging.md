@@ -1,11 +1,12 @@
 # Logging
 
-> **Status:** `Current` for M2. The builder creates an app-owned Microsoft.Extensions.Logging
-> factory, installs a plain-text ZLogger console provider by default, logs startup
-> mode/validation, and exposes the factory through `IEngine.LoggerFactory`. The windowed platform
-> logs startup/stop/commands/failures and the runtime host logs the loop stop with ticks and elapsed
-> time; there is no per-frame logging. Configuration is identical in all modes, and the default path
-> runs in the AOT smoke with zero trim/AOT warnings.
+> **Status:** `Current` for M2 (WP1–WP5; pending PR review). The builder creates an app-owned
+> Microsoft.Extensions.Logging factory, installs a plain-text ZLogger console provider by default,
+> logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`. The
+> windowed platform logs startup/stop/commands/failures and the runtime host logs the loop stop with
+> ticks and elapsed time; there is no per-frame logging. Configuration is identical in all modes,
+> and the default path runs in the AOT smoke (headless and `--windowed`) with zero trim/AOT
+> warnings.
 
 ## 1. Surface
 
@@ -139,7 +140,9 @@ The startup and loop-stop lines at 150% display scaling look like:
 ```
 
 A normal shutdown therefore ends with the loop-stop line followed by the platform-stop line; both
-are one-shot, Information, and carry no per-frame data.
+are one-shot, Information, and carry no per-frame data. The M2 `--windowed` AOT demo logs its
+setup/teardown/tick-limit summaries through the same default path; game input transitions are
+Information-level events (they occur on a transition, never once per frame).
 
 ## 6. NativeAOT
 

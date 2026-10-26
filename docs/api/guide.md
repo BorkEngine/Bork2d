@@ -1,8 +1,9 @@
 # API Guide
 
-> **Status:** the builder and host exist in `Bork2d.Runtime`. `Build()` validates and `Run()` runs
-> the uncapped windowed loop (window, input, time) or the one-tick headless/offscreen sequence.
-> Assets are M3 and the renderer is M8; `IAssets` methods still throw in M2. See the
+> **Status:** implemented M2 (WP1–WP5; pending PR review). The builder and host exist in
+> `Bork2d.Runtime`; `Build()` validates and `Run()` runs the uncapped windowed loop (window, input,
+> time) or the one-tick headless/offscreen sequence. Assets are M3 and the renderer is M8;
+> `IAssets` remains a throwing stub. See the
 > [API reference](reference.md#12-runtime-surface).
 
 ## 1. What you reference
@@ -72,6 +73,23 @@ the `ILoggingBuilder`, owns provider configuration, and the app disposes the fac
 `validation=passed`, and the layer type. Create game loggers from `engine.LoggerFactory` in
 `Setup`; the factory is not available in the game constructor. See
 [Logging](../architecture/logging.md).
+
+### Windowed AOT demo
+
+`Bork2d.AotSmoke` is the reference windowed host. With no arguments it keeps the M1 headless
+one-tick smoke; the demo is opt-in and NativeAOT-published:
+
+```powershell
+dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64 --nologo
+& src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed
+& src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed --ticks 120
+```
+
+The interactive demo creates a camera/transform/sprite tree, moves the transform with WASD or the
+arrow keys using `ITime.DeltaTime`, logs input transitions and text rather than every frame, and
+exits on Escape (`IEngine.Exit()`) or the window close button. `--ticks N` exits with code 0 after
+exactly `N` completed ticks and is the automated acceptance run; `--ticks` requires `--windowed`
+and `N >= 1`. Invalid or unknown arguments print usage and exit with code 2.
 
 ## 3. Write a game
 

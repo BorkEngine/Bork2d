@@ -1,10 +1,12 @@
 # Runtime Lifecycle
 
-> **Status:** the builder, its validation, the windowed `Bork2dApp.Run()` loop, the one-tick
-> headless/offscreen path, app `Dispose()`, the internal windowed platform (OS/window thread, window
-> commands, confirmed state), and the input/time handoff are `Current`. Windowed mode attaches real
-> `IWindow`/`IInput` proxies and advances `ITime`; headless/offscreen keep throwing stubs and a
-> `0` clock until M7. GPU work, pack loading, and renderer pacing are later milestones.
+> **Status:** implemented M2 (WP1–WP5; pending PR review). The builder, its validation, the
+> windowed `Bork2dApp.Run()` loop, the one-tick headless/offscreen path, app `Dispose()`, the
+> internal windowed platform (OS/window thread, window commands, confirmed state), and the
+> input/time handoff are `Current`. Windowed mode attaches real `IWindow`/`IInput` proxies and
+> advances `ITime`; headless/offscreen keep throwing stubs and a `0` clock until M7. GPU work, pack
+> loading, and renderer pacing are later milestones. The suite is 292 tests: 283 deterministic
+> tests in CI plus 9 opt-in real-window tests.
 
 ## 1. Public startup contract
 
@@ -229,8 +231,9 @@ internal to `Bork2d.Runtime` and has no public surface; the runtime host starts 
   builder starts fullscreen), and applies the builder title and initial framebuffer size. SDL
   accepts window points, so the platform measures the achieved framebuffer size and adjusts the
   point size once with the measured scale. It then publishes the first confirmed state and logs
-  the startup line. A startup failure throws `Bork2dException` with the SDL error text after the
-  thread has cleaned up and been joined.
+  the startup line, including the native version the loaded `SDL2.dll` reports (2.30.8 for the
+  pinned `Silk.NET.SDL` 2.23.0 package, whose label is 2.32.10). A startup failure throws
+  `Bork2dException` with the SDL error text after the thread has cleaned up and been joined.
 - **Commands and state.** `IWindow` setters validate, drop requests that repeat the last requested
   value, coalesce pending requests per property, enqueue into one lock-guarded MPSC queue, and wake
   the OS thread with one registered SDL user event. The OS thread drains the queue before waiting

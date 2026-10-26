@@ -1,15 +1,23 @@
 # Contributing
 
-> **Status:** current. The warning/style/format/AOT gates and the docs link check are active.
-> CI runs docs link check, build, tests, and format verification on PRs to `develop` and pushes to
-> `develop`; the NativeAOT publish/run smoke is a required local gate.
+> **Status:** current through M2 (WP1–WP5; pending PR review). The warning/style/format/AOT gates
+> and the docs link check are active. CI runs docs link check, build, tests, and format
+> verification on PRs to `develop` and pushes to `develop`; the NativeAOT publish/run smoke
+> (headless and windowed) is a required local gate.
 
 ## 1. Prerequisites
 
 - .NET SDK pinned by `global.json` (`11.0.100-rc.1`, target `net11.0`).
 - Windows for windowed/Vulkan work; headless builds/tests should stay cross-platform where
   practical.
-- Vulkan 1.3 GPU/driver for windowed/offscreen checks from M6; SDL2 natives from M2.
+- A desktop session for the windowed demo and the opt-in real-window tests.
+- SDL2: **no separate install**. `Bork2d.Runtime` pins `Silk.NET.SDL` 2.23.0, whose
+  `Ultz.Native.SDL` 2.32.10 dependency supplies `runtimes/win-x64/native/SDL2.dll`. The loaded
+  binary reports `SDL_GetVersion` 2.30.8, and `Bork2d.AotSmoke`'s publish output includes
+  `SDL2.dll` next to the executable. Deployment is therefore a normal `dotnet publish -r win-x64`;
+  a clean machine needs the Windows desktop session and whatever runtime the SDL2 build requires
+  (full clean-machine validation remains M10).
+- Vulkan 1.3 GPU/driver for windowed/offscreen checks from M6 (not needed in M2).
 - NativeAOT toolchain (MSVC) for the local publish gate.
 
 ## 2. Build, test, and local gates
@@ -22,12 +30,27 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-NativeAOT publish/run is required for runtime-affecting changes:
+The suite is **292 tests**: 283 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
+are skipped unless the environment variable is set. On a desktop session run them with:
+
+```powershell
+$env:BORK2D_RUN_WINDOW_TESTS = '1'
+dotnet test src/Bork2d/Bork2d.slnx -c Debug
+Remove-Item Env:BORK2D_RUN_WINDOW_TESTS
+```
+
+NativeAOT publish/run is required for runtime-affecting changes (both runs are local, never CI):
 
 ```powershell
 dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
-& src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe
+$smoke = 'src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe'
+& $smoke                                  # headless one-tick M1 smoke
+& $smoke --windowed --ticks 120           # windowed M2 gate: exit 0 after exactly 120 ticks
 ```
+
+The publish must report zero AOT/trim warnings and contain `SDL2.dll`; `--windowed` needs a desktop
+session. The windowed automated run asserts one `Setup`, exactly `N` ticks, and one `Teardown`; the
+interactive `--windowed` run is the manual visibility/input check.
 
 ## 3. Build, style, and warnings
 
@@ -48,9 +71,9 @@ obvious; braces for control flow; one type per file; `_camelCase` private fields
 constants; `I`-prefixed interfaces; `Async` suffix and no `async void` outside handlers; guard
 clauses; no regions except generated code; no commented-out code; XML docs on public API.
 
-Known gap: `IAssets`, `IWindow`, `IInput`, `ITime`, and the `Data.cs` types predate the XML-doc
-rule and are undocumented. Add docs when those contracts are implemented (M2/M3); do not remove
-the rule.
+Known gap: `IAssets` and the `Data.cs` types still predate the XML-doc rule. M2 documented
+`IWindow`, `IInput`, `ITime`, `KeyCode`, and `MouseButton`; add the remaining docs when the asset
+contracts are implemented (M3). Do not remove the rule.
 
 ## 5. Architecture boundaries
 
@@ -67,8 +90,11 @@ the rule.
 
 - Add unit tests with behavior changes; pack/format tests for asset changes; threading tests for
   handoff changes; GPU/visual tests for renderer changes.
-- The dependency test and docs link check run in CI. The AOT publish smoke is a required local
-  gate, not a CI job.
+- Real-window tests use `[WindowFact]`, are skipped without `BORK2D_RUN_WINDOW_TESTS=1`, share the
+  serialized `RealSdlWindow` collection, and may use only signals/bounded waits (no sleeps). Run
+  them locally before a window/runtime PR.
+- The dependency test and docs link check run in CI. The AOT publish smoke (headless and windowed)
+  is a required local gate, not a CI job.
 - GPU/validation checks need a Vulkan 1.3 runner from M8; headless/data tests must run without a
   GPU.
 - Do not merge with disabled tests, flaky retries without a tracking entry, or a lowered warning
@@ -87,11 +113,13 @@ the rule.
 ## 8. Pull-request checklist
 
 - [ ] `dotnet build` Debug and Release: zero warnings.
-- [ ] `dotnet test` passes.
+- [ ] `dotnet test` passes; the opt-in real-window tests pass locally with
+      `BORK2D_RUN_WINDOW_TESTS=1` for window/runtime changes.
 - [ ] `dotnet format --verify-no-changes` and `scripts/check-docs.ps1` pass.
 - [ ] Dependency matrix respected; no unintended public types.
 - [ ] No runtime reflection/TOML/dynamic code.
-- [ ] NativeAOT smoke publishes/runs when runtime-affecting.
+- [ ] NativeAOT smoke publishes/runs when runtime-affecting, including
+      `--windowed --ticks 120` for window/runtime changes.
 - [ ] Pack format/version updated if assets changed.
 - [ ] Owning docs/API/decision log updated; status markers honest.
 - [ ] No unjustified suppressions.

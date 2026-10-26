@@ -1,9 +1,10 @@
 # Architecture Overview
 
-> **Status:** M1 is merged into `develop` (2026-10-25). The builder, validation, one-tick host,
-> scene graph, logging, and AOT baseline are `Current`; window/input (M2), assets (M3/M4), the
-> editor (M5), Vulkan and frame handoff (M6/M7), and the sprite renderer (M8) are `Planned`.
-> Status detail is in [the roadmap](../roadmap.md).
+> **Status:** M2 (SDL windowed platform, WP1–WP5) is implemented on `m-2/common` and pending PR
+> review; M1 is merged into `develop` (2026-10-25). The builder, validation, windowed SDL host
+> (window/input/time/loop), one-tick headless/offscreen host, scene graph, logging, and AOT baseline
+> are `Current`; assets (M3/M4), the editor (M5), Vulkan and frame handoff (M6/M7), and the sprite
+> renderer (M8) are `Planned`. Status detail is in [the roadmap](../roadmap.md).
 
 ## 1. Purpose
 
@@ -81,21 +82,24 @@ Game code never references an engine project directly. Exact rules: [Projects](p
 ## 5. Runtime topology
 
 The engine invokes game callbacks on its tick thread, which may be any host thread; there is no
-process-main-thread affinity. M1 runs `Setup`, one `Tick`, and `Teardown` on the calling thread
-with no mode threads. The OS/window thread (M2), asset loader threads (M3/M4), and render thread
-(M6/M7) are `Planned`; they never touch each other's domain (SDL, Vulkan, or game objects).
+process-main-thread affinity. In M2, windowed mode owns one OS/window thread (SDL, window
+commands, event pump) and runs the game loop on the caller's tick thread; it creates no render
+thread and no Vulkan object. Headless/offscreen still run `Setup`, one `Tick`, and `Teardown` on
+the calling thread. Asset loader threads (M3/M4) and the render thread (M6/M7) are `Planned`; the
+threads never touch each other's domain (SDL, Vulkan, or game objects).
 
-| Mode | Tick | Render thread | SDL | Vulkan | Pacing |
-| --- | :-: | :-: | :-: | :-: | --- |
-| Windowed | yes | yes | yes | swapchain | bounded run-ahead; presentation/GPU rate |
-| Offscreen | yes | yes | no | offscreen target | bounded run-ahead; GPU rate |
-| Headless | yes | no | no | no | configured tick rate (default 60; 0 = uncapped) |
+| Mode | Tick | OS/window thread | Render thread | SDL | Vulkan | Pacing (M2) |
+| --- | :-: | :-: | :-: | :-: | :-: | --- |
+| Windowed | yes | yes | no (M6/M7) | yes | no (M6) | uncapped until M7 |
+| Offscreen | yes | no | no (M6/M7) | no | no (M6) | one tick (paced loop M7) |
+| Headless | yes | no | no | no | no | one tick (timer-paced M7) |
 
-All three modes are selected and validated in M1 and then run the same one-tick sequence; the
-mode runtimes in the table are `Planned`. In windowed/offscreen modes the tick publishes an
+All three modes are selected and validated by the builder. In M2 only windowed mode runs a real
+loop; the window is visible from `Run()` start and destroyed before `Run()` returns. Offscreen and
+headless keep the one-tick M1 sequence until M7. In the target design the tick publishes an
 immutable snapshot into a three-slot ring that the render thread consumes, and the tick may wait
-only when the ring is full. Headless has no ring or renderer and is timer-paced. The state
-machine is in [Threading and frame handoff](threading.md).
+only when the ring is full; headless has no ring and is timer-paced. The state machine is in
+[Threading and frame handoff](threading.md).
 
 ## 6. Invariants
 

@@ -1,6 +1,7 @@
 # M2 — SDL Windowed Platform (spec)
 
-> **Status:** decisions approved by the human owner (2026-10-26); implementation not started.
+> **Status:** implemented (M2 WP1–WP5 on `m-2/common`; pending PR review). Decisions approved by the
+> human owner on 2026-10-26; the approved reconciliations in §4.2 record the as-built details.
 > This spec owns **M2 scope and semantics**. The [roadmap](../roadmap.md#5-milestone-detail) owns
 > sequence and status, the [decision log](../decisions.md) owns accepted decisions, and
 > [AGENTS.md](../../AGENTS.md) owns the workflow.
@@ -92,7 +93,7 @@ re-litigate them; if the implementation cannot satisfy one, stop and report (AGE
 | **D-M2-03** | **Window visible at Run start.** The window is created visible before `Setup`; builder options are applied at creation. It is destroyed after `Teardown`, before `Run()` returns. |
 | **D-M2-04** | **Queued `IWindow` commands.** Setters enqueue a command and return without blocking; getters return the last confirmed state. Commands apply within one OS pump; getters may lag one pump. |
 | **D-M2-05** | **SDL lives in `Bork2d.Runtime`.** All SDL code is internal to the composition root; no new project, no dependency-matrix change. |
-| **D-M2-06** | **Dependency:** `Silk.NET.SDL` **2.23.0** pinned in `Bork2d.Runtime`, using the SDL2 **2.32.10** natives shipped by the package. WP1 verifies the native payload and AOT cleanliness. |
+| **D-M2-06** | **Dependency:** `Silk.NET.SDL` **2.23.0** pinned in `Bork2d.Runtime`. The package brings `Ultz.Native.SDL` **2.32.10** transitively for win-x64 `SDL2.dll`, but the loaded binary reports runtime `SDL_GetVersion` **2.30.8** (and the same file version); the package label is not the runtime version. WP1 verified the native payload and AOT cleanliness against the 2.30.8 binary. |
 | **D-M2-07** | **AOT smoke:** `Bork2d.AotSmoke` gains an opt-in `--windowed` demo. The default headless one-tick run and its assertions stay unchanged. Windowed AOT publish/run is a required **local** gate (never CI). |
 | **D-M2-08** | **Testability:** an internal SDL adapter seam with fakes drives deterministic unit tests. Real-window tests run only with `BORK2D_RUN_WINDOW_TESTS=1`. CI scope is unchanged (no SDL/desktop tests). |
 | **D-M2-09** | **Fullscreen:** borderless desktop fullscreen (`SDL_WINDOW_FULLSCREEN_DESKTOP`) on the primary monitor; leaving fullscreen restores the previous windowed bounds. No display/resolution/exclusive options. |
@@ -123,6 +124,19 @@ re-litigate them; if the implementation cannot satisfy one, stop and report (AGE
 | Minimize: pause ticks or presentation only | Ticks continue; no presentation exists until M6; `IsMinimized` exposed (D-M2-11). |
 | Expose the selected mode on `IEngine` | Not exposed (D-M2-12). |
 | DPI policy; `IWindow.Size` under scaling | Framebuffer pixels (D-M2-10). |
+
+### 4.2 As-built reconciliations approved during M2
+
+These were reviewed and approved by the human owner while implementing WP1–WP5. They refine, and
+do not reverse, the decisions in §4; the affected sections below are updated to match.
+
+| Item | As-built rule |
+| --- | --- |
+| SDL native version | `Silk.NET.SDL` **2.23.0** brings `Ultz.Native.SDL` **2.32.10**, whose win-x64 `SDL2.dll` reports runtime `SDL_GetVersion` **2.30.8**. M2 is implemented and verified against 2.30.8; do not document or claim 2.32.10 at runtime (D-M2-06, §11). |
+| DPI hints | The OS thread sets `SDL_WINDOWS_DPI_AWARENESS=permonitorv2` **and** `SDL_WINDOWS_DPI_SCALING=1` before `SDL_Init`. `WithSize`, `IWindow.Size`, and `IInput` mouse coordinates are framebuffer physical pixels; window points differ at non-100% DPI (§7.3, §8). |
+| `KeyCode` names | Readable word splitting supersedes the older "mechanical PascalCase" wording: `PageUp`, `CapsLock`, `LeftCtrl`, `AudioNext`, `KeypadMemStore`; 247 members plus `Unknown = 0`; top-row digits are `Digit1`…`Digit0`; `MouseButton` is `Left`/`Right`/`Middle`/`Back`/`Forward` (§5.4, §17). |
+| AOT suppression | NativeAOT publishes with Silk.NET's default resolver plus a narrow project-level `IL3000;IL3002` `NoWarn` in `Bork2d.AotSmoke` only. No other suppression is used (§11). |
+| Fatal-path exception | On an unrecoverable SDL error after startup the OS thread may destroy the window before `Teardown`; the proxies remain attached for best-effort access. Normal, `Exit`, and close paths destroy the window only after `Teardown` (D-M2-03 remains true there; §7.4, §7.5). |
 
 ## 5. Public contract
 
@@ -192,10 +206,14 @@ Interface unchanged. M2 wires it for the windowed loop (D-M2-16):
 
 ### 5.4 `KeyCode` and `MouseButton`
 
-- `KeyCode` has **one member per SDL physical scancode**, named after the SDL name without the
-  `SDL_SCANCODE_` prefix and converted to PascalCase (for example `SDL_SCANCODE_LEFT` becomes
-  `Left`, `SDL_SCANCODE_NONUSBACKSLASH` becomes `NonUsBackslash`, `SDL_SCANCODE_KP_0` becomes
-  `Keypad0`). Values equal the SDL scancode integers. `Unknown = 0` is included.
+- `KeyCode` has **one member per SDL physical scancode** (247 members including `Unknown = 0`),
+  named after the SDL name without the `SDL_SCANCODE_` prefix using readable word splitting, not
+  mechanical concatenation: `SDL_SCANCODE_PAGEUP` is `PageUp`, `SDL_SCANCODE_CAPSLOCK` is
+  `CapsLock`, `SDL_SCANCODE_LCTRL` is `LeftCtrl`, `SDL_SCANCODE_AUDIONEXT` is `AudioNext`, and
+  `SDL_SCANCODE_KP_MEMSTORE` is `KeypadMemStore`. `KP_` becomes `Keypad` (`SDL_SCANCODE_KP_0` is
+  `Keypad0`), `NONUS` becomes `NonUs` (`SDL_SCANCODE_NONUSBACKSLASH` is `NonUsBackslash`), and
+  top-row digits are `Digit1`…`Digit0` because C# identifiers cannot start with a digit. Values
+  equal the SDL scancode integers.
 - `MouseButton` = `Left`, `Right`, `Middle`, `Back`, `Forward`.
 - A test asserts every `KeyCode` value maps to exactly one SDL scancode and that names are unique,
   so an accidental SDL/binding update cannot silently mis-map input.
@@ -307,9 +325,11 @@ clock advance. This preserves the M1 AOT headless gate and all one-tick tests. M
 
 ### 7.3 Window creation (OS thread, before `Setup`)
 
-1. Set the DPI hint(s) needed for per-monitor awareness **before** `SDL_Init`
-   (`SDL_HINT_WINDOWS_DPI_AWARENESS=permonitorv2`, verified in WP2), then
-   `SDL_Init(SDL_INIT_VIDEO)` only (no audio/gamecontroller/haptic).
+1. Set the DPI hints needed for per-monitor awareness **before** `SDL_Init`
+   (`SDL_HINT_WINDOWS_DPI_AWARENESS=permonitorv2` and `SDL_HINT_WINDOWS_DPI_SCALING=1`, verified
+   in WP2), then `SDL_Init(SDL_INIT_VIDEO)` only (no audio/gamecontroller/haptic). With scaling
+   enabled, SDL reports window sizes and mouse positions in points while the framebuffer stays in
+   physical pixels.
 2. Create one visible window centered on the primary display (display 0) with:
    `SDL_WINDOW_VULKAN | SDL_WINDOW_ALLOW_HIGHDPI`, plus `SDL_WINDOW_RESIZABLE` when the builder
    allows it, plus `SDL_WINDOW_FULLSCREEN_DESKTOP` when `WithFullscreen(true)`.
@@ -333,6 +353,14 @@ Windowed `Run()` normal/exception path:
 4. Join the OS thread (bounded by actual SDL teardown, not a timeout-based sleep).
 5. Return/throw to the caller.
 
+**Accepted fatal-path exception.** On an unrecoverable SDL error after startup the OS thread stores
+the fatal `Bork2dException`, requests an error exit, and runs its cleanup immediately; it may
+therefore destroy the window before the tick thread reaches `Teardown`. The proxies remain attached
+until the host shuts the platform down, so `Teardown` can still attempt best-effort access (getters
+generally work; setters may be dropped). Normal, `Exit`, and close paths keep the window and input
+alive through `Teardown` and destroy the window only afterwards, so D-M2-03 is unchanged there (see
+D-033 and [Runtime lifecycle](../architecture/runtime-lifecycle.md#6-shutdown-and-error-propagation)).
+
 `Bork2dApp.Dispose()` (after `Run()` or before it) detaches the root's direct children and disposes
 the app-owned logger factory, unchanged. `Dispose()` during `Run()` throws (D-M2-18).
 
@@ -346,7 +374,7 @@ the app-owned logger factory, unchanged. `Dispose()` during `Run()` throws (D-M2
 | `Tick` throws | `Run()` | Platform shut down; `Teardown` attempted; original rethrown. |
 | Text handler throws | `Run()` | Treated as a `Tick` failure: no further text dispatch, loop stops, `Teardown` attempted, exception rethrown. |
 | `Tick` and `Teardown` both throw | `Run()` | `AggregateException` with both (M1 rule), after platform shutdown. |
-| Fatal platform error after startup | OS thread → `Run()` | Loop stops at the next boundary; `Teardown` attempted; `Bork2dException` rethrown (aggregated if `Teardown` also throws). |
+| Fatal platform error after startup | OS thread → `Run()` | Loop stops at the next boundary; `Teardown` attempted; `Bork2dException` rethrown (aggregated if `Teardown` also throws). The OS thread's cleanup may already have destroyed the window before `Teardown`; the proxies stay attached for best-effort access (accepted D-033 exception). |
 | `Exit()`/close during `Setup` | `Run()` | Finish `Setup`, zero ticks, `Teardown` once, normal return. |
 | `Exit()` during a tick | loop | Tick completes; loop stops; `Teardown`; normal return. |
 | `Dispose()` during `Run()` | `Dispose()` | `InvalidOperationException`; the loop is unaffected; caller must `Exit()`. |
@@ -382,7 +410,7 @@ adjusted if the observable contract above still holds.
 | Title | Builder title at creation; `IWindow.Title` updates queued and confirmed by getter. |
 | Initial size | `WithSize(width, height)` = framebuffer pixels; at non-100% DPI the window's point size differs (D-M2-10). `WithFullscreen(true)` ignores the initial size until the window leaves fullscreen. |
 | Resize | User resize allowed when `WithResizable(true)`; resize events update the confirmed framebuffer size and scale. Programmatic `Size` works even when not user-resizable. |
-| DPI | `SDL_WINDOW_ALLOW_HIGHDPI` + per-monitor awareness; scale = framebuffer px / window points; log at startup and on change. Mouse coordinates are converted from points to framebuffer pixels. |
+| DPI | `SDL_WINDOW_ALLOW_HIGHDPI` + per-monitor awareness and `SDL_WINDOWS_DPI_SCALING=1`; scale = framebuffer px / window points; log at startup and on change. Mouse coordinates are converted from points to framebuffer pixels. |
 | Fullscreen | Borderless desktop on display 0; enter/leave via `Fullscreen`; leaving restores the previous windowed bounds (SDL-managed; verify); framebuffer size follows the desktop; `Size` while fullscreen is ignored with a debug log. |
 | Minimize | Ticks continue; `IsMinimized` true; `Size` keeps the last non-zero framebuffer size; presentation is irrelevant until M6. |
 | Cursor | Visible by default; `CursorVisible=false` hides it; no capture/relative mode; no auto-hide in fullscreen. |
@@ -460,12 +488,20 @@ trim/AOT-clean.
 - `Bork2d.Runtime` gains a pinned `PackageReference` to `Silk.NET.SDL` **2.23.0** (D-M2-06). No
   other project references it; `Bork2d.Api` stays free of SDL types; the dependency matrix is
   unchanged (D-M2-05).
-- The package is expected to carry SDL **2.32.10** natives (for win-x64, `SDL2.dll`). WP1 verifies:
-  the publish output contains the native, the runtime logs the expected SDL version, and a smoke
-  `SDL_Init`/create/destroy works.
-- **Stop and report** if the package has no usable win-x64 native, if it needs a
-  self-managed SDL2 binary, or if it produces AOT/trim warnings that would need a suppression.
-  Do not add a fallback or a suppression without a human decision.
+- The package brings `Ultz.Native.SDL` **2.32.10** transitively; its win-x64 `SDL2.dll` is the
+  native that ships. The loaded binary reports `SDL_GetVersion` **2.30.8** and the same file
+  version, so M2 is implemented and verified against 2.30.8: the publish output contains the
+  native, the runtime logs `sdlVersion=2.30.8`, and `SDL_Init`/create/destroy works. Do not
+  describe the runtime as 2.32.10. WP1 verified the payload, and WP5 verified the windowed AOT run.
+- NativeAOT publishes with Silk.NET's default resolver (`Sdl.GetApi()`). That resolver probes
+  `Assembly.Location`, `Assembly.CodeBase`, and `DependencyContext`, which ILC reports as
+  `IL3000`/`IL3002` single-file warnings. The approved, narrow mitigation is a project-level
+  `NoWarn` for exactly those two codes in `Bork2d.AotSmoke`; no other suppression is used and
+  `SuppressTrimAnalysisWarnings` is not set. The SDL2 native ships from the package and is resolved
+  by the normal native-asset lookup, so the flagged fallback probes are not used. Remove the
+  suppression when Silk.NET stops probing those APIs.
+- **Stop and report** if the package ever loses its usable win-x64 native, needs a self-managed
+  SDL2 binary, or produces AOT/trim warnings beyond the recorded `IL3000`/`IL3002` codes.
 - AOT analyzers stay on for `Bork2d.Runtime`; no reflection/dynamic code is introduced.
 - Headless/offscreen must never call any SDL function: no `SDL_Init`, no SDL P/Invoke. A test
   asserts the internal platform was never initialized; the AOT headless run remains the proof.
@@ -509,6 +545,9 @@ package, no dynamic skip dependency). With the variable set, run:
 - SDL init/create/destroy; window is visible; title round-trip; framebuffer size `> 0`; scale
   logged; fullscreen enter/leave restores a windowed size; cursor toggle; `IsMinimized` false;
   `Run()` exits on a close event (`SDL_PushEvent` of `SDL_QUIT`/window close) and on `Exit()`.
+  The implemented suite also runs the real `Bork2dApp.Run()` twice: once with `Exit()` in the first
+  tick (one `Setup`/`Tick`/`Teardown`, `Run()` returns) and once with a pushed `SDL_QUIT` after
+  `Setup` signals (`reason=Close`). Both use bounded joins and signals, never sleeps.
 - Run them on a desktop session only. CI does not set the variable and does not need a display.
 
 ### 12.3 AOT and acceptance runs
@@ -545,11 +584,28 @@ pwsh scripts/check-docs.ps1
 Plus the AOT publish/run for runtime-affecting WPs, and `git diff --check`. CI remains
 build/test/format on PRs to `develop`; no windowed or AOT job is added.
 
+### 12.5 Acceptance evidence recorded by WP5
+
+Run on Windows 11, 150% display scaling, SDK `11.0.100-rc.1.26425.128`:
+
+| Gate | Result |
+| --- | --- |
+| `dotnet build ... -c Debug` / `-c Release` | Build succeeded, 0 warnings, 0 errors. |
+| `dotnet test ... -c Debug --no-build` | 292 total, 283 passed, 9 skipped (the `[WindowFact]` real-window tests skip without the env var). |
+| `BORK2D_RUN_WINDOW_TESTS=1 dotnet test ...` | 292 passed, 0 skipped, 0 failed; includes the two real-window `Run()` tests (game `Exit()` in the first tick and a pushed `SDL_QUIT`). |
+| `dotnet format ... --verify-no-changes --no-restore` | Clean. |
+| `pwsh scripts/check-docs.ps1` | Passed. |
+| AOT publish (`-c Release -r win-x64`) | 0 AOT/trim warnings; `SDL2.dll` is in the publish output. |
+| Headless AOT run (no args) | Exit 0 with the M1 assertions (`Setup/Tick/Teardown = 1/1/1`, root cleared, MessagePack shape). |
+| `--windowed --ticks 120` | Exit 0; `sdlVersion=2.30.8`, window points 853×480, framebuffer 1280×720, scale 1.5006; `Setup/Tick/Teardown = 1/120/1`. |
+| `--windowed --ticks 5000000` | Observed a live window (`MainWindowTitle = "Bork2d M2 Demo"`, `MainWindowHandle = 0x1913E4`) during the run; exit 0 after 5,000,000 ticks. |
+| Interactive `--windowed` | Injected `D` press/release moved the player to `(3.07, 0)`; injected Escape logged the transition and exited 0 with `reason=Exit`. |
+
 ## 13. Work packages
 
 The WPs are **sequential** (one wave each): they share `Bork2d.Runtime` internals and the same
 docs, so parallel work would overlap. Branch model and review/merge rules are in
-[AGENTS.md](../../AGENTS.md).
+[AGENTS.md](../../AGENTS.md). All five are implemented on `m-2/common`; M2 is pending PR review.
 
 | WP | Branch | Delivers | Depends |
 | --- | --- | --- | --- |
@@ -570,30 +626,31 @@ Each WP:
 
 ## 14. Acceptance checklist (milestone exit)
 
-- [ ] Windowed AOT-published demo opens a visible window, shows the builder title, and reports the
-      requested framebuffer size at 100% DPI (and correctly converts at 150% DPI).
-- [ ] Input works end-to-end: held state, one-tick edges, text, mouse position/delta/wheel, five
+- [x] Windowed AOT-published demo opens a visible window, shows the builder title, and reports the
+      requested framebuffer size at 100% DPI (and correctly converts at 150% DPI). Locally verified
+      at 150% (1280×720 framebuffer in an 853×480 window); 100% is the identity path.
+- [x] Input works end-to-end: held state, one-tick edges, text, mouse position/delta/wheel, five
       buttons; the demo prints/moves on input.
-- [ ] Focus loss synthesizes releases and clears wheel/text; focus regain re-seeds without press
+- [x] Focus loss synthesizes releases and clears wheel/text; focus regain re-seeds without press
       edges and reports zero delta.
-- [ ] Escape (game-handled) and the window close button both exit gracefully; `Run()` returns;
+- [x] Escape (game-handled) and the window close button both exit gracefully; `Run()` returns;
       `Teardown` ran once; window destroyed; OS thread joined; no hang or leak.
-- [ ] Borderless fullscreen enter/leave works; minimize keeps ticking and exposes
+- [x] Borderless fullscreen enter/leave works; minimize keeps ticking and exposes
       `IsMinimized`; `Size` semantics match §8.
-- [ ] `ITime` follows D-M2-16 in the windowed loop; one-tick modes still report `0`.
-- [ ] No Vulkan dependency, instance, device, surface, or render thread exists.
-- [ ] No `Thread.Sleep`, target rate, frame limiter, or `SpinWait` in the windowed/offscreen path.
-- [ ] Headless/offscreen are still one tick and never initialize SDL (test + AOT headless run).
-- [ ] `Dispose`-during-`Run` throws; post-shutdown members throw `ObjectDisposedException`;
+- [x] `ITime` follows D-M2-16 in the windowed loop; one-tick modes still report `0`.
+- [x] No Vulkan dependency, instance, device, surface, or render thread exists.
+- [x] No `Thread.Sleep`, target rate, frame limiter, or `SpinWait` in the windowed/offscreen path.
+- [x] Headless/offscreen are still one tick and never initialize SDL (test + AOT headless run).
+- [x] `Dispose`-during-`Run` throws; post-shutdown members throw `ObjectDisposedException`;
       `Exit()` after shutdown is a no-op.
-- [ ] All deterministic tests pass; opt-in window tests pass locally with the env var;
+- [x] All deterministic tests pass; opt-in window tests pass locally with the env var;
       `Debug`/`Release` have zero warnings; format and docs checks pass.
-- [ ] AOT publish has zero AOT/trim warnings; headless and windowed runs exit `0`; `SDL2.dll` is in
+- [x] AOT publish has zero AOT/trim warnings; headless and windowed runs exit `0`; `SDL2.dll` is in
       the publish output.
-- [ ] Public surface is exactly the M1 surface plus `IWindow.IsMinimized`, the full `KeyCode` set,
+- [x] Public surface is exactly the M1 surface plus `IWindow.IsMinimized`, the full `KeyCode` set,
       and the five `MouseButton` members; XML docs exist; no public types leaked from internal
       projects; dependency matrix unchanged.
-- [ ] Docs updated in the same milestone: reference, guide, lifecycle, threading, nativeaot,
+- [x] Docs updated in the same milestone: reference, guide, lifecycle, threading, nativeaot,
       logging, projects, README map, roadmap §9/status, decision log.
 
 ## 15. Documentation updates (same change)
@@ -645,15 +702,19 @@ are listed so review can reject any of them explicitly instead of discovering th
 3. `WithFullscreen(true)` ignores `WithSize` until the window leaves fullscreen.
 4. Window commands coalesce per property; getters may lag one pump (D-M2-04).
 5. Window commands issued during `Teardown` are best-effort before the window is destroyed.
-6. `KeyCode` naming is mechanical: strip `SDL_SCANCODE_`, PascalCase, with `KP_` mapped to
-   `Keypad` (`SDL_SCANCODE_KP_0` → `Keypad0`).
+6. `KeyCode` naming uses readable word splitting, not mechanical PascalCase: strip
+   `SDL_SCANCODE_`, split recognized words, map `KP_` to `Keypad`, `NONUS` to `NonUs`, and a
+   standalone top-row digit to `Digit` (`SDL_SCANCODE_PAGEUP` → `PageUp`, `SDL_SCANCODE_LCTRL` →
+   `LeftCtrl`, `SDL_SCANCODE_KP_0` → `Keypad0`, `SDL_SCANCODE_1` → `Digit1`). The enum has 247
+   members including `Unknown = 0`; a mapping test guards the set against the binding.
 
 ### Verification items (not decisions)
 
 The following are *verification items* for WP1/WP2, not decisions. If one fails, stop and report:
 
-1. The exact SDL version and native payload shipped by `Silk.NET.SDL` 2.23.0 (expected 2.32.10,
-   `SDL2.dll` for win-x64), and whether AOT publish copies it.
+1. The exact SDL version and native payload shipped by `Silk.NET.SDL` 2.23.0: the package carries
+   `Ultz.Native.SDL` 2.32.10 and a win-x64 `SDL2.dll`, and the loaded binary reports
+   `SDL_GetVersion` **2.30.8**. AOT publish copies the native. **Verified in WP1/WP5** (see §11).
 2. Whether `SDL_HINT_WINDOWS_DPI_AWARENESS=permonitorv2` is honored when the host already set DPI
    awareness, and the resulting framebuffer/window scale.
 3. Whether SDL video initialization and window creation work on the engine-created OS thread on

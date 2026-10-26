@@ -6,21 +6,24 @@ that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets sh
 **`assets.pck`**, and windowed, offscreen, and headless modes are the target design.
 
 > **Status: pre-alpha.** M0 is complete and M1 (foundation + NativeAOT baseline) is merged into
-> `develop` (2026-10-25, PR #1). The engine is not runnable as a game yet: there is no window,
-> renderer, pack, or asset system, and `Bork2dApp.Run()` performs one `Setup` → `Tick` → `Teardown`
-> smoke, then returns. See the [roadmap](docs/roadmap.md) and [M1 record](docs/specs/m1-foundation.md).
+> `develop` (2026-10-25, PR #1). M2 (SDL windowed platform) is implemented on `m-2/common`
+> (WP1–WP5) and pending PR review: windowed mode opens a real SDL window, reads keyboard/mouse
+> input, advances `ITime`, and runs an uncapped loop until `Exit`/close. There is still no renderer,
+> pack, or asset system, and headless/offscreen keep the one-tick `Setup` → `Tick` → `Teardown`
+> sequence. See the [roadmap](docs/roadmap.md), [M2 spec](docs/specs/m2-sdl-platform.md), and
+> [M1 record](docs/specs/m1-foundation.md).
 
 ## Projects
 
 | Project | Role |
 | --- | --- |
 | [`Bork2d.Api`](src/Bork2d/Bork2d.Api) | Public contracts and value types used by game code. |
-| [`Bork2d.Runtime`](src/Bork2d/Bork2d.Runtime) | Public builder/host; logging, validation, one-tick `Run`, modes. |
+| [`Bork2d.Runtime`](src/Bork2d/Bork2d.Runtime) | Public builder/host; logging, validation, SDL window/input/time, windowed loop, one-tick modes. |
 | [`Bork2d.Common`](src/Bork2d/Bork2d.Common) | Engine, root-owned unordered scene tree, transforms, time. |
 | [`Bork2d.Render`](src/Bork2d/Bork2d.Render) | Vulkan renderer; reference-wired and empty until M6/M8. |
 | [`Bork2d.Assets`](src/Bork2d/Bork2d.Assets) | Pack VFS, loading, descriptors, sprite assets, bake support; empty until M3/M4. |
-| [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite and dependency-matrix test (135 tests). |
-| [`Bork2d.AotSmoke`](src/Bork2d/Bork2d.AotSmoke) | NativeAOT one-tick smoke executable; local publish/run gate. |
+| [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite and dependency-matrix test (292 tests: 283 deterministic, 9 opt-in real-window). |
+| [`Bork2d.AotSmoke`](src/Bork2d/Bork2d.AotSmoke) | NativeAOT smoke executable: headless one-tick run plus `--windowed [--ticks N]` SDL demo; local publish/run gate. |
 | `Bork2d.Editor` | Planned Avalonia editor library/app (M5); JIT, not in the solution. |
 
 Game developers consume only `Bork2d.Api` and `Bork2d.Runtime`. A game solution adds
@@ -42,6 +45,15 @@ local gate, not a CI job:
 ```powershell
 dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
 & src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe
+& src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed --ticks 120
+```
+
+The windowed run needs a desktop session; `--windowed` without `--ticks` is interactive
+(Escape/close). The opt-in real-window tests use the same SDL2 native:
+
+```powershell
+$env:BORK2D_RUN_WINDOW_TESTS = '1'
+dotnet test src/Bork2d/Bork2d.slnx -c Debug
 ```
 
 See [Contributing](docs/contributing.md) for the full gate list.

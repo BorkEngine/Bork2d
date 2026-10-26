@@ -1,9 +1,11 @@
 # Bork2d Documentation
 
-> **Status:** **M0 complete; M1 merged into `develop` (2026-10-25, PR #1).** The repository contains
-> the M1 build/quality baseline, public contracts, root-owned scene tree, builder/one-tick host,
-> logging, and the NativeAOT smoke app. The window, assets, editor, and renderer are target designs
-> for later milestones. Check status markers before treating an API as implemented.
+> **Status:** **M0 complete; M1 merged into `develop` (2026-10-25, PR #1); M2 implemented on
+> `m-2/common` (WP1–WP5) and pending PR review.** The repository contains the M1 build/quality
+> baseline, public contracts, root-owned scene tree, builder, logging, the NativeAOT smoke app, and
+> the M2 SDL windowed host (window, input, time, uncapped loop). Assets, the editor, and the
+> renderer are target designs for later milestones. Check status markers before treating an API as
+> implemented.
 
 Bork2d is a focused 2D game engine for .NET: **Vulkan 1.3** rendering, **SDL2** windowing through
 **Silk.NET**, a NativeAOT runtime, and **`assets.pck`** assets addressed by canonical paths.
@@ -52,7 +54,7 @@ items. The [decision log](decisions.md) records why.
 | [API reference](api/reference.md) | game developers | Members, defaults, threading, status, errors. |
 | [Implementation roadmap](roadmap.md) | planner | M0–M10, exit criteria, risks, open decisions, progress. |
 | [M1 spec](specs/m1-foundation.md) | implementers | Historical M1 goal, decisions, and acceptance evidence. |
-| [M2 spec](specs/m2-sdl-platform.md) | implementers | Approved M2 SDL window/input decisions, semantics, work packages, acceptance. |
+| [M2 spec](specs/m2-sdl-platform.md) | implementers | Implemented M2 SDL window/input decisions, semantics, work packages, evidence, acceptance. |
 | [Contributing](contributing.md) | contributors | Build, warnings, style, format, docs check, PR checklist. |
 | [Decision log](decisions.md) | everyone | Accepted decisions and consequences. |
 
