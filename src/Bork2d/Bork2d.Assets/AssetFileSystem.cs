@@ -122,6 +122,12 @@ internal sealed class AssetFileSystem : IDisposable
     }
 
     /// <summary>
+    /// Gets the number of mounted packs in the current stack.
+    /// </summary>
+    /// <exception cref="ObjectDisposedException">The filesystem has been disposed.</exception>
+    internal int PackCount => GetSnapshot().Archives.Length;
+
+    /// <summary>
     /// Synchronously opens, validates, and mounts a pack above the current stack.
     /// </summary>
     /// <param name="packPath">
@@ -129,6 +135,7 @@ internal sealed class AssetFileSystem : IDisposable
     /// directory at the time of the call; absolute paths are accepted. The value is kept as the
     /// supplied pack identifier and is never normalized as an asset path.
     /// </param>
+    /// <returns>Mount details for the start/overlay log events.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="packPath"/> is null.</exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="packPath"/> is empty or whitespace, or is not a valid filesystem path.
@@ -137,7 +144,7 @@ internal sealed class AssetFileSystem : IDisposable
     /// The file cannot be opened or is not a valid v1 pack. The stack is unchanged.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The filesystem has been disposed.</exception>
-    internal void LoadPack(string packPath)
+    internal PackMountInfo LoadPack(string packPath)
     {
         _ = GetSnapshot();
         ArgumentNullException.ThrowIfNull(packPath);
@@ -163,6 +170,19 @@ internal sealed class AssetFileSystem : IDisposable
                 Snapshot next = CreateSnapshot(current, archive, packPath);
                 Volatile.Write(ref _snapshot, next);
             }
+
+            long storedBytes = 0;
+            foreach (PackEntry entry in archive.Entries)
+            {
+                storedBytes += entry.Length;
+            }
+
+            return new PackMountInfo(
+                packPath,
+                archive.DisplayPath,
+                PackFormat.CurrentVersion,
+                archive.Entries.Count,
+                storedBytes);
         }
         catch
         {

@@ -54,6 +54,9 @@ internal sealed class ResolvedAsset
     /// <summary>Gets the pack identifier as supplied when the pack was mounted.</summary>
     internal string PackPath { get; }
 
+    /// <summary>Gets the resolved filesystem path of the owning pack.</summary>
+    internal string ResolvedPackPath => _archive.DisplayPath;
+
     /// <summary>Opens a stream over the stored payload (still compressed when applicable).</summary>
     /// <returns>A bounded read-only stream over the stored bytes.</returns>
     internal Stream OpenStoredStream() => _archive.OpenStoredStream(_entry);

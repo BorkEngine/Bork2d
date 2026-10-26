@@ -150,8 +150,12 @@ builder records its settings for deterministic rebuilds; keep the format behind 
 - **M3 WP2 status:** the internal `AssetFileSystem` implements the immutable base/overlay stack,
   canonical path normalization, filesystem path resolution, `LoadPack` mounting, `Browse`/`Exists`
   lookup, and `AssetInfo` projection. Mounting parses outside the swap lock and publishes a new
-  snapshot atomically; a failed mount leaves the stack unchanged; there is no unload. The public
-  `IAssets` wiring, loader thread, and `AssetException` remain WP3/WP5.
+  snapshot atomically; a failed mount leaves the stack unchanged; there is no unload.
+- **M3 WP3 status:** the internal `AssetService` implements `LoadPack`/`Browse`/`Exists`
+  delegation, `LoadData`, `LoadAsset<T>`, and `LoadSprite` as a documented stub, with one loader
+  thread, an unbounded FIFO queue, enqueue-time entry resolution, cancellation/join at shutdown,
+  and the public `AssetException`/`AssetErrorKind` contract. Public runtime wiring is WP5;
+  descriptors/sprites are WP4.
 - `LoadPack` is thread-safe; mount during `Setup`/before the first tick. Mounting after a handle
   resolved does not change that handle; new lookups see the new pack.
 - `Browse(prefix)` returns a merged snapshot with shadowed entries hidden (`prefix` is canonical or
@@ -178,26 +182,58 @@ public readonly record struct AssetInfo(
 
 | Member | Status | Semantics |
 | --- | --- | --- |
-| `LoadAsset<T>` | `Partial` | Declaration and `IShapeable<T>` constraint are `Current` (WP2); the loader body is WP3. Deserializes a MessagePack asset with its compiled generated shape; no reflection fallback. Raw assets and missing paths fault. |
-| `LoadSprite` | `Partial` | Declaration is `Current`; the sprite pipeline is WP4. Resolves a sprite path immediately; missing returns `Sprite.Empty` and logs. |
-| `LoadData` | `Partial` | Declaration is `Current`; the loader body is WP3. Decompressed bytes for any asset kind. |
-| `LoadPack` | `Partial` | Internal VFS mount is `Current` (WP2); public service wiring is WP3/WP5. Mounts above the stack; later wins; no unload; bad pack throws `Bork2dException`. |
-| `Browse` | `Partial` | Internal merged snapshot is `Current` (WP2); public service wiring is WP3/WP5. Optional canonical prefix on a `/` segment boundary; sorted by path. |
-| `Exists` | `Partial` | Internal exact lookup is `Current` (WP2); public service wiring is WP3/WP5. |
+| `LoadAsset<T>` | `Partial` | Declaration and `IShapeable<T>` constraint are `Current` (WP2); the loader body is `Current` (WP3) in the internal service, and public runtime wiring is WP5. Deserializes a MessagePack asset with its compiled generated shape; no reflection fallback. Raw assets and missing paths fault. |
+| `LoadSprite` | `Partial` | Declaration is `Current`; the WP3 service is a documented stub (path validation + log + `Sprite.Empty`), and the sprite pipeline is WP4. |
+| `LoadData` | `Partial` | Declaration is `Current`; the loader body is `Current` (WP3) in the internal service, and public runtime wiring is WP5. Decompressed bytes for any asset kind. |
+| `LoadPack` | `Partial` | Internal VFS mount is `Current` (WP2); service delegation is `Current` (WP3); public runtime wiring is WP5. Mounts above the stack; later wins; no unload; bad pack throws `Bork2dException`. |
+| `Browse` | `Partial` | Internal merged snapshot is `Current` (WP2); service delegation is `Current` (WP3); public runtime wiring is WP5. Optional canonical prefix on a `/` segment boundary; sorted by path. |
+| `Exists` | `Partial` | Internal exact lookup is `Current` (WP2); service delegation is `Current` (WP3); public runtime wiring is WP5. |
 | `AssetInfo` | `Current` (M3 WP2) | Value type returned by `Browse`; header fields plus the supplied pack identifier. |
+| `AssetException`/`AssetErrorKind` | `Current` (M3 WP3) | Public error contract for lookup/decode/read/payload-validation failures; pack failures stay `Bork2dException`. |
 
 `IShapeable<T>` is `PolyType.IShapeable<T>`; `Bork2d.Api` references PolyType `1.4.1` for the
 constraint only and stays free of Nerdbank.MessagePack, Zstd, `System.IO.Hashing`, and file I/O
 (D-M3-22). All members are thread-safe. `LoadPack` is synchronous; loads complete asynchronously.
 Do not call `Browse` in `Tick`; handles are session-local, and v1 has no unload (load-and-keep).
-`AssetException`/`AssetErrorKind` and the runtime service arrive in WP3; the current
-`IEngine.Assets` stub throws `NotSupportedException` for every member.
+`IEngine.Assets` still returns the throwing `UnsupportedAssets` stub in this tree; WP5 wires the
+internal service into `Run()`/`Dispose()`.
 
 ## 7. Loading, readiness, and failure
 
-A sprite is renderable only when its sprite asset, texture descriptor, and raw payload are loaded and
-decompressed and the renderer has created the GPU page and bindless descriptor. Any missing stage
-emits no instance: no placeholder, checkerboard, or blocking wait.
+`Status: Loader Current (M3 WP3); sprite/descriptor readiness Planned (M3 WP4, GPU M8).`
+
+- **One loader thread.** The internal asset service owns one dedicated background thread per app
+  (started even for an empty VFS) and an **unbounded FIFO** request queue. There is no priority,
+  no parallelism, and no public cancellation token. The loader only reads, decompresses, and
+  deserializes; it never touches SDL, Vulkan, or game entities.
+- **Enqueue-time resolution.** `LoadData`/`LoadAsset<T>` validate the path and the disposed state
+  synchronously, resolve the winning pack entry against the current VFS snapshot, and then enqueue
+  the read. A later overlay mount does not change an in-flight request.
+- **Exact-size reads.** Packs are validated structurally at open; payload decompression is lazy
+  per read. `LoadData` decompresses to a declared-size buffer and returns a **fresh** `byte[]` per
+  call. `LoadAsset<T>` streams the decompressed payload through the compiled generated shape; the
+  stream is drained so a payload that decompresses to fewer or more bytes than its declared `Size`
+  is a decode failure. Neither path caches.
+- **Failures.** A missing path, a raw entry requested through `LoadAsset<T>`, a decode/size
+  failure, and an IO read failure fault the returned task with `AssetException`
+  (`NotFound`/`RawAsset`/`Decode`/`Io`/`InvalidData`). Pack open/parse/mount failures stay
+  `Bork2dException`. There is **no automatic retry** and no loose-file fallback (D-M3-18).
+- **Shutdown.** Stopping the service rejects new requests, cancels queued and in-flight load tasks
+  (they complete as canceled), joins the loader, closes the mounted packs, and marks the service
+  disposed. Shutdown is idempotent; secondary failures are logged, not thrown.
+- **Logging** uses the `Bork2d.Assets` category: start (`Pack`/`Empty` with the configured and
+  resolved path, version, entries, bytes), overlay mounted, load failure (path, kind, reason),
+  `LoadSprite` misses, load success at Debug, and stop (pending/canceled counts, mounted packs).
+  Nothing is logged per frame.
+- **No renderer in M3.** The loader never creates GPU resources; CPU sprite/descriptor metadata
+  and the sprite handle table are WP4, and GPU upload/draw is M8.
+
+A sprite is renderable only when its sprite asset, texture descriptor, and raw payload are loaded
+and decompressed and the renderer has created the GPU page and bindless descriptor. Any missing
+stage emits no instance: no placeholder, checkerboard, or blocking wait. In M3 (WP3) `LoadSprite`
+is a documented stub: a valid path, including a missing one, logs and returns `Sprite.Empty`; WP4
+adds path validation plus the idempotent handle and CPU sprite/descriptor load, and M8 adds the
+GPU/readiness stage.
 
 - `LoadSprite` returns immediately and is idempotent per path; a missing path returns `Sprite.Empty`
   and logs. A failed decode/upload logs and stays non-renderable; retry is not automatic in v1.
@@ -364,12 +400,23 @@ multi-project workspaces in v1.
 
 ## 14. Threading
 
-- Packs are opened and headers parsed at startup (asset service, any thread); path tables are
-  immutable unless a new pack is mounted, and `LoadPack` swaps the overlay stack atomically.
-- Loader threads decompress, deserialize, decode, and prepare CPU resources; they never touch Vulkan.
-- The render thread creates GPU texture pages and updates bindless descriptors, reading an immutable
-  resource table without per-sprite locks; GPU lifetime is retired after referencing frames complete.
-  Load-and-keep applies in v1. See [Threading](threading.md#6-asset-and-pack-coordination).
+`Status: loader Current (M3 WP3); renderer/resource-table integration Planned (M8).`
+
+- Packs are opened and headers parsed by the asset service (`Start`, on the `Run` caller thread);
+  path tables are immutable unless a new pack is mounted, and `LoadPack` swaps the overlay stack
+  atomically.
+- The service owns exactly **one** dedicated loader thread with an unbounded FIFO queue. Requests
+  resolve their winning pack entry at enqueue time; the loader thread decompresses and
+  deserializes, completes `TaskCompletionSource`-backed tasks with
+  `RunContinuationsAsynchronously`, and never touches SDL, Vulkan, or game entities. Task
+  continuations therefore never run inline on the loader.
+- At shutdown the service stops accepting requests, cancels queued and in-flight load tasks, joins
+  the loader at a safe point, and only then closes the mounted archives.
+- M3 has no GPU work: the loader never creates texture pages, and there is no public readiness or
+  resource-table API. The future renderer creates GPU texture pages and uploads on the render
+  thread, reading an immutable resource table without per-sprite locks; GPU lifetime is retired
+  after referencing frames complete. Load-and-keep applies in v1. See
+  [Threading](threading.md#6-asset-and-pack-coordination).
 
 `WithHeadless` supports packs, `LoadData`, `LoadAsset<T>`, `Browse`, and `Exists`; sprite handles
 resolve to CPU metadata, but no GPU page exists and nothing renders. `WithOffscreen` runs the normal
@@ -392,14 +439,15 @@ trusted local content: signing is out of scope and the parser is defensive again
 
 | Area | Status |
 | --- | --- |
-| `Bork2d.Assets` | `Partial` (M3 WP1–WP2): v1 pack reader/writer, structural validation, canonical paths, public `PackBuilder`/`PackCompressionMode`, and the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`; loader/descriptors are WP3–WP4 and runtime wiring is WP5 |
-| `assets.pck` reader/writer | `Partial` (M3 WP1): v1 format reader and writer implemented; the VFS, overlays, `Browse`/`Exists` are implemented internally (WP2) and wired publicly in WP3/WP5 |
-| Texture descriptors and raw RGBA8 payloads | `Planned` M3/M4 |
-| Sprite assets (UVs/scale/pivot/topology/indices) | `Planned` M3/M4; `Sprite` handle is `Current` |
+| `Bork2d.Assets` | `Partial` (M3 WP1–WP3): v1 pack reader/writer, structural validation, canonical paths, public `PackBuilder`/`PackCompressionMode`, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, and the internal loader service (one thread, FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, `AssetException`); descriptors are WP4 and runtime wiring is WP5 |
+| `assets.pck` reader/writer | `Partial` (M3 WP1): v1 format reader and writer implemented; the VFS, overlays, `Browse`/`Exists`, and the internal loader are implemented (WP2–WP3) and wired publicly in WP5 |
+| Texture descriptors and raw RGBA8 payloads | `Planned` M3 WP4/M4 |
+| Sprite assets (UVs/scale/pivot/topology/indices) | `Planned` M3 WP4/M4; `Sprite` handle is `Current`; `LoadSprite` is a WP3 stub returning `Sprite.Empty` |
 | TOML model, baker, pack builder, deterministic bake | `Planned` M4 |
-| Serialization policy | `Partial`: Nerdbank.MessagePack `1.4.95` pinned with generated-shape smoke in Common, tests, and AOT smoke; `Bork2d.Api` references PolyType `1.4.1` for the `IShapeable<T>` contract only |
-| `IAssets` load members | `Partial`: declarations, XML docs, and the `IShapeable<T>` constraint are `Current` (WP2); the runtime stub throws `NotSupportedException` until WP3/WP5 |
-| `IAssets.LoadPack`/`Browse`/`Exists`, `AssetInfo` | `Partial` (M3 WP2): `AssetInfo` and the internal VFS/lookup are `Current`; the public service wiring is WP3/WP5 |
+| Serialization policy | `Partial`: Nerdbank.MessagePack `1.4.95` pinned with generated-shape smoke in Common, tests, and AOT smoke; `Bork2d.Api` references PolyType `1.4.1` for the `IShapeable<T>` contract only; `LoadAsset<T>` deserialization passes the shape from `T.GetTypeShape()` (WP3) |
+| `IAssets` load members | `Partial`: declarations, XML docs, and the `IShapeable<T>` constraint are `Current` (WP2); the internal loader bodies are `Current` (WP3); `IEngine.Assets` still returns the throwing stub until WP5 |
+| `IAssets.LoadPack`/`Browse`/`Exists`, `AssetInfo` | `Partial` (M3 WP2–WP3): `AssetInfo`, the internal VFS/lookup, and service delegation are `Current`; public runtime wiring is WP5 |
+| `AssetException`/`AssetErrorKind` | `Current` (M3 WP3): public error contract; pack open/parse/mount failures remain `Bork2dException` |
 | `Bork2d.Editor` / `Project.Editor` | `Planned` M5; editor absent, host is a template folder |
 
 ## 17. Related documents

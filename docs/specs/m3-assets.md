@@ -5,10 +5,13 @@
 > surface) is implemented on `m-3/wp-1`; WP2 (D-M3-22 public contract correction, `AssetInfo`,
 > canonical-path/filesystem resolution, the internal base/overlay VFS, `LoadPack`, `Browse`/
 > `Exists`, atomic thread-safe mount, and the `IAssets`/`Data.cs` XML docs) is implemented on
-> `m-3/wp-2`; WP3–WP5 (loader/threading, descriptors/sprites, runtime/AOT integration, and final
-> docs/acceptance) are not implemented yet. The constrained `IAssets.LoadAsset<T>` signature and
-> the `Bork2d.Api` PolyType 1.4.1 reference landed with WP2. This spec owns M3 scope and
-> semantics. It supersedes conflicting statements in
+> `m-3/wp-2`; WP3 (the public `AssetException`/`AssetErrorKind` contract, one dedicated loader
+> thread with an unbounded FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, `LoadPack`/
+> `Browse`/`Exists` delegation, and the stub `LoadSprite`) is implemented on `m-3/wp-3`. WP4–WP5
+> (descriptors/sprites, runtime/AOT integration, and final docs/acceptance) are not implemented
+> yet. The constrained `IAssets.LoadAsset<T>` signature and the `Bork2d.Api` PolyType 1.4.1
+> reference landed with WP2. This spec owns M3 scope and semantics. It supersedes conflicting
+> statements in
 > [Assets and tooling](../architecture/assets-and-tooling.md) and the M3 rows of
 > [Roadmap §9](../roadmap.md#9-open-decisions) until those documents are reconciled by WP5.
 > [AGENTS.md](../../AGENTS.md) owns the workflow; the [decision log](../decisions.md) owns accepted

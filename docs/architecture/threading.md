@@ -259,14 +259,27 @@ thread never invokes a game callback.
 
 ## 6. Asset and pack coordination
 
-`Planned` for M3. Asset threads cross to the renderer through an immutable resource table:
-loader threads decompress, deserialize, decode, and prepare CPU resources but never touch
-Vulkan, and the renderer creates GPU texture pages and uploads on the render thread.
+`Current (M3 WP3)` for the loader; renderer/resource-table integration is `Planned` (M8).
 
-- A sprite is skipped until its sprite asset, texture descriptor, raw payload, and GPU page are
-  ready; GPU page lifetime is retired after frames that reference it complete. The virtual
-  filesystem overlay table is immutable except for an atomic swap when `LoadPack` mounts a new
-  pack; later packs shadow earlier ones and there is no unload in v1.
+- The internal asset service owns **one** dedicated loader thread per app and an unbounded FIFO
+  request queue. There is no priority, no parallelism, and no cancellation token in the public API.
+  The loader reads, decompresses, and deserializes only; it never touches SDL, Vulkan, or game
+  entities.
+- `LoadData`/`LoadAsset<T>` validate arguments synchronously, resolve the winning pack entry
+  against the current immutable VFS snapshot, and enqueue the read. A later `LoadPack` mount does
+  not change an in-flight request; new lookups see the new stack.
+- Requests complete through `TaskCompletionSource` with `RunContinuationsAsynchronously`, so no
+  request completes a continuation on the caller or loader thread. `LoadData` returns a fresh
+  `byte[]` and `LoadAsset<T>` a fresh deserialized instance per call; there is no data/asset cache.
+  The CPU sprite/descriptor cache and handle table belong to WP4.
+- Shutdown stops accepting requests, cancels queued and in-flight load tasks (they complete as
+  canceled), joins the loader at a safe point, and only then closes the mounted archives. After
+  shutdown every `IAssets` member throws `ObjectDisposedException`.
+- The virtual filesystem overlay table is immutable except for an atomic swap when `LoadPack`
+  mounts a new pack; later packs shadow earlier ones and there is no unload in v1.
+- M3 has no renderer work: the loader never creates GPU resources. In M8 the renderer will create
+  GPU texture pages and uploads on the render thread and read an immutable resource table without
+  per-sprite locks; GPU page lifetime is retired after the referencing frames complete.
 
 See [Assets and tooling](assets-and-tooling.md).
 
@@ -277,8 +290,9 @@ Thread-specific rules:
 
 - The render thread never waits on the tick thread; it waits on its own event, signalled by
   snapshot publication, control messages, and stop. It never outlives the Vulkan
-  instance/surface (windowed) or device (offscreen). The asset thread is cancellable and
-  joinable; in-flight loads are abandoned at shutdown.
+  instance/surface (windowed) or device (offscreen). The asset loader thread is cancellable and
+  joinable; queued and in-flight load tasks are canceled and the loader is joined at shutdown
+  (M3 WP3).
 - The windowed OS thread is stopped and joined before `Run()` returns or throws; the window is
   destroyed before SDL quits. Background errors are stored and rethrown on the `Run()` caller after
   cleanup (the M2 platform fatal path is `Current`; the render-thread path is `Planned`). The tick
@@ -312,8 +326,9 @@ Thread-specific rules:
    no surface/swapchain; fixed entity counts allocate nothing.
 
 `Bork2d.Tests` covers §2's scene rules, the M2 window/input/loop threading (fake SDL seam, bounded
-joins, no sleeps), and parts of 5 today; 1, 2, 4, and renderer pacing come with M7. The suite is
-292 tests: 283 deterministic tests in CI plus 9 opt-in real-window tests
+joins, no sleeps), the M3 WP3 asset loader (one thread, FIFO order, asynchronous completion,
+cancellation/join), and parts of 5 today; 1, 2, 4, and renderer pacing come with M7. The suite is
+486 tests: 477 deterministic tests in CI plus 9 opt-in real-window tests
 (`BORK2D_RUN_WINDOW_TESTS=1`).
 
 ## 10. Related documents
