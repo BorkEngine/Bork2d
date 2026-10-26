@@ -406,6 +406,7 @@ internal static class TexturePipeline
                 int trailerLength = ReadTrailer(stream, fileLength, trailer);
 
                 if (TextureSourceProbe.TryGetTruncationProblem(
+                        stream,
                         header.AsSpan(0, headerLength),
                         trailer[..trailerLength],
                         fileLength,

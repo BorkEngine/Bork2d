@@ -322,6 +322,48 @@ public sealed class TexturePipelineTests
     }
 
     [Fact]
+    public void JpegWithTrailingBytesAfterEndOfImageStillBakes()
+    {
+        using var project = TextureTestProject.Create();
+        byte[] complete = TextureImageFactory.TinyJpeg();
+        byte[] trailing = new byte[256];
+        project.WriteImage("textures/trailing.jpg", [.. complete, .. trailing]);
+
+        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+
+        Assert.Empty(result.Diagnostics);
+        BakedTexture texture = Assert.Single(result.Textures);
+        Assert.Equal(2u, texture.Descriptor.Width);
+        Assert.Equal(2u, texture.Descriptor.Height);
+        Assert.Equal(
+            new byte[]
+            {
+                220, 30, 30, 255,
+                220, 30, 30, 255,
+                220, 30, 30, 255,
+                220, 30, 30, 255,
+            },
+            texture.Payload);
+    }
+
+    [Fact]
+    public void JpegWithTrailingDataLargerThanOneScanChunkStillBakes()
+    {
+        using var project = TextureTestProject.Create();
+        byte[] complete = TextureImageFactory.TinyJpeg();
+        byte[] trailing = new byte[40000];
+        project.WriteImage("textures/padded.jpg", [.. complete, .. trailing]);
+
+        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+
+        Assert.Empty(result.Diagnostics);
+        BakedTexture texture = Assert.Single(result.Textures);
+        Assert.Equal(2u, texture.Descriptor.Width);
+        Assert.Equal(2u, texture.Descriptor.Height);
+        Assert.Equal(16, texture.Payload.Length);
+    }
+
+    [Fact]
     public void UnsupportedContentFailsWithASourceDiagnostic()
     {
         using var project = TextureTestProject.Create();

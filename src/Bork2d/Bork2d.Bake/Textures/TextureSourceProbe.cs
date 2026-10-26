@@ -18,8 +18,11 @@ namespace Bork2d.Bake.Textures;
 /// Truncation is detected only where the header makes the byte layout derivable: uncompressed
 /// BMP (BI_RGB, core or info header) and uncompressed TGA (image types 1, 2, 3). RLE, bitfield, and
 /// JPEG-compressed BMP as well as RLE TGA are left to the decoder because their compressed payload
-/// length cannot be derived from the header. JPEG is checked only for the end-of-image marker.
-/// No size policy cap is applied; this is corruption detection (D-M3-06 is unaffected).
+/// length cannot be derived from the header. A JPEG is truncated only when it contains no
+/// end-of-image (<c>FF D9</c>) marker after the image data: trailing padding, appended metadata, or
+/// concatenated data after the marker is allowed, so the marker is also searched backwards through
+/// the file when it is not the final two bytes. No size policy cap is applied; this is corruption
+/// detection (D-M3-06 is unaffected).
 /// </para>
 /// </remarks>
 internal static class TextureSourceProbe
@@ -132,26 +135,28 @@ internal static class TextureSourceProbe
     /// <summary>
     /// Finds a truncation problem for source formats whose byte layout is derivable from the header.
     /// </summary>
+    /// <param name="stream">A seekable stream over the source file, used only for the JPEG fallback scan.</param>
     /// <param name="header">The first bytes of the source file.</param>
     /// <param name="trailer">The last (up to two) bytes of the source file.</param>
     /// <param name="fileLength">The source file length in bytes.</param>
     /// <param name="detail">The truncation detail when a problem was found, otherwise empty.</param>
     /// <returns><see langword="true"/> when the file is shorter than its header requires.</returns>
     internal static bool TryGetTruncationProblem(
+        Stream stream,
         ReadOnlySpan<byte> header,
         ReadOnlySpan<byte> trailer,
         long fileLength,
         out string detail)
     {
+        ArgumentNullException.ThrowIfNull(stream);
+
         if (TryGetBmpTruncation(header, fileLength, out detail)
-            || TryGetTgaTruncation(header, fileLength, out detail)
-            || TryGetJpegTruncation(header, trailer, out detail))
+            || TryGetTgaTruncation(header, fileLength, out detail))
         {
             return true;
         }
 
-        detail = string.Empty;
-        return false;
+        return TryGetJpegTruncation(stream, header, trailer, fileLength, out detail);
     }
 
     private static bool TryReadPng(
@@ -363,24 +368,79 @@ internal static class TextureSourceProbe
     }
 
     private static bool TryGetJpegTruncation(
+        Stream stream,
         ReadOnlySpan<byte> header,
         ReadOnlySpan<byte> trailer,
+        long fileLength,
         out string detail)
     {
         detail = string.Empty;
 
-        if (header.Length < 3 || header[0] != 0xFF || header[1] != 0xD8 || header[2] != 0xFF)
+        if (!IsJpeg(header))
         {
             return false;
         }
 
-        if (trailer.Length >= 2 && trailer[0] == 0xFF && trailer[1] == 0xD9)
+        // A valid JPEG may carry trailing bytes (padding, appended metadata, concatenated data)
+        // after its end-of-image marker, so only a stream with no EOI marker at all is truncated.
+        if (IsEndOfImage(trailer) || ContainsEndOfImage(stream, fileLength))
         {
             return false;
         }
 
-        detail = "the JPEG stream does not end with an end-of-image (FF D9) marker";
+        detail = "the JPEG stream has no end-of-image (FF D9) marker after the image data";
         return true;
+    }
+
+    private static bool IsJpeg(ReadOnlySpan<byte> header)
+        => header.Length >= 3
+            && header[0] == 0xFF
+            && header[1] == 0xD8
+            && header[2] == 0xFF;
+
+    private static bool IsEndOfImage(ReadOnlySpan<byte> trailer)
+        => trailer.Length >= 2 && trailer[0] == 0xFF && trailer[1] == 0xD9;
+
+    private static bool ContainsEndOfImage(Stream stream, long fileLength)
+    {
+        const int chunkSize = 16 * 1024;
+        byte[] buffer = new byte[chunkSize];
+
+        long end = fileLength;
+        while (end > 0)
+        {
+            long start = Math.Max(0, end - chunkSize);
+            int count = (int)(end - start);
+            stream.Position = start;
+            int read = stream.ReadAtLeast(
+                buffer.AsSpan(0, count),
+                count,
+                throwOnEndOfStream: false);
+
+            for (int i = read - 1; i >= 1; i--)
+            {
+                if (buffer[i - 1] == 0xFF && buffer[i] == 0xD9)
+                {
+                    return true;
+                }
+            }
+
+            if (start == 0)
+            {
+                break;
+            }
+
+            // Overlap one byte so a marker split across two chunks is still found.
+            long nextEnd = start + 1;
+            if (nextEnd >= end)
+            {
+                break;
+            }
+
+            end = nextEnd;
+        }
+
+        return false;
     }
 
     private static uint ReadBigEndianUInt32(ReadOnlySpan<byte> buffer, int offset)
