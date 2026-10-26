@@ -382,6 +382,29 @@ justified, narrow suppression.
 - Adding a project reference or public type updates the dependency docs and dependency test in
   the same change.
 
+### API stability and pre-release changes
+
+Bork2d is **pre-release (pre-1.0)**. The public contract may break between milestones; API
+stability is not guaranteed before the v1 API freeze ([D-014](docs/decisions.md)). Pre-release
+status is **not** standing permission to change the API unilaterally.
+
+- **Approval required.** Any change to a public contract — members, signatures, namespaces,
+  defaults, units, semantics, exception contract, ownership, threading rules, or a breaking
+  behavior change — needs explicit human approval **before** editing. This applies the
+  **Human decision gate** at the top of this file to API work.
+- **Raise unsound or improvable APIs.** If an agent believes an existing API is unsound,
+  inconsistent, or materially improvable, it must stop and request approval. The request states
+  the current contract and why it is wrong or limiting; the proposed replacement; the affected
+  public surface and call sites; the docs, tests, samples, dependency, and AOT impact; and the
+  migration cost and risks.
+- **With approval, implement it.** Once approved, the agent is free — and expected — to make the
+  breaking change, including removing or renaming public members. The same change updates the API
+  guide, API reference, owning architecture docs, decision log (a new entry, with
+  `Superseded by …` where applicable), and tests.
+- **Approval scope is explicit.** Approval applies to the change or milestone the human names.
+  Do not infer broader permission from pre-release status or an earlier approval; re-ask when the
+  scope grows.
+
 ### Scene ownership and lifetime
 
 - Root-owned strong graph: `IEngine.Root` (`ISceneRoot`) owns children; no global camera/sprite
