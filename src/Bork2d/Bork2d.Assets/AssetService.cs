@@ -81,6 +81,21 @@ internal sealed class AssetService : IAssets, IDisposable
     internal Action<string>? RequestProcessingHook { get; set; }
 
     /// <summary>
+    /// Gets or sets a deterministic test hook invoked on the loader thread after a sprite resource
+    /// has been built and before it is published. Tests use it to order shutdown against the final
+    /// publication critical section without sleeps.
+    /// </summary>
+    /// <remarks>Production code never sets this property.</remarks>
+    internal Action<string>? SpriteResourcePublishHook { get; set; }
+
+    /// <summary>
+    /// Gets or sets a deterministic test hook invoked on the caller of <see cref="Stop"/> after the
+    /// service marks itself disposed. Tests use it to wait for shutdown ordering without sleeps.
+    /// </summary>
+    /// <remarks>Production code never sets this property.</remarks>
+    internal Action? ServiceDisposedHook { get; set; }
+
+    /// <summary>
     /// Gets the dedicated loader thread, or <see langword="null"/> before
     /// <see cref="Start"/> or after it has been joined.
     /// </summary>
@@ -128,7 +143,7 @@ internal sealed class AssetService : IAssets, IDisposable
     /// </summary>
     /// <param name="handle">The opaque sprite handle.</param>
     /// <returns>The completion task; it produces <see langword="true"/> on success.</returns>
-    internal Task GetSpriteCompletion(Sprite handle) => _resources.GetCompletion(handle);
+    internal Task<bool> GetSpriteCompletion(Sprite handle) => _resources.GetCompletion(handle);
 
     /// <summary>
     /// Opens and validates the base pack, starts the loader thread, and logs the start event.
@@ -213,6 +228,8 @@ internal sealed class AssetService : IAssets, IDisposable
             _inFlight = null;
             loader = _loaderThread;
         }
+
+        ServiceDisposedHook?.Invoke();
 
         int canceled = CancelRequests(queued, inFlight, _stopping.Token);
 
@@ -321,6 +338,7 @@ internal sealed class AssetService : IAssets, IDisposable
             var request = new SpriteLoadRequest(
                 canonicalPath,
                 entry.ResolvedPackPath,
+                handle,
                 () => LoadSpriteCore(canonicalPath, snapshot, handle));
             Enqueue(request);
         }
@@ -644,14 +662,14 @@ internal sealed class AssetService : IAssets, IDisposable
         try
         {
             RequestProcessingHook?.Invoke(request.CanonicalPath);
-            if (request.Completion.IsCanceled)
+            if (request.Completion.IsCanceled || request.IsDropped)
             {
                 return;
             }
 
             request.Execute();
 
-            if (request.Completion.IsCanceled)
+            if (request.Completion.IsCanceled || request.IsDropped)
             {
                 return;
             }
@@ -703,11 +721,10 @@ internal sealed class AssetService : IAssets, IDisposable
         AssetSnapshot snapshot,
         SpriteHandleEntry handle)
     {
+        SpriteResource resource;
         try
         {
-            SpriteResource resource = BuildSpriteResource(canonicalPath, snapshot);
-            _resources.PublishSprite(resource);
-            handle.Complete();
+            resource = BuildSpriteResource(canonicalPath, snapshot);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -715,6 +732,24 @@ internal sealed class AssetService : IAssets, IDisposable
             _resources.PublishSprite(SpriteResource.Failed(canonicalPath, failure.Message));
             handle.Fail();
             throw failure;
+        }
+
+        SpriteResourcePublishHook?.Invoke(canonicalPath);
+
+        // Order the valid publication and handle completion against Stop. Stop sets _disposed under
+        // the same lock; if shutdown won, drop the load instead of publishing a resource that the
+        // caller can never use. A load that publishes before Stop marks the service disposed is a
+        // pre-shutdown completion and remains valid.
+        lock (_lock)
+        {
+            if (_disposed)
+            {
+                handle.Drop();
+                return;
+            }
+
+            _resources.PublishSprite(resource);
+            handle.Complete();
         }
     }
 

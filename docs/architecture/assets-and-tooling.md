@@ -248,7 +248,10 @@ readiness/upload Planned (M8).`
 - **Shutdown.** Stopping the service rejects new requests, cancels queued and in-flight load tasks
   (they complete as canceled), joins the loader, closes the mounted packs, and marks the service
   disposed. Sprite loads have no caller task: their handles remain non-renderable and the loads are
-  dropped. Shutdown is idempotent; secondary failures are logged, not thrown.
+  dropped. Valid sprite publication and handle completion are ordered against shutdown under the
+  service lock: a load that observes shutdown before the final critical section is dropped without
+  publishing a valid resource, while a publication that completed before shutdown marked the service
+  disposed remains valid. Shutdown is idempotent; secondary failures are logged, not thrown.
 - **Logging** uses the `Bork2d.Assets` category: start (`Pack`/`Empty` with the configured and
   resolved path, version, entries, bytes), overlay mounted, load failure (path, kind, reason),
   `LoadSprite` misses, sprite load success at Debug (path, kind), descriptor cache hits at Debug,

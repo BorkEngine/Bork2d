@@ -14,6 +14,8 @@ internal sealed class SpriteHandleEntry
     private readonly TaskCompletionSource<bool> _completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    private volatile bool _dropped;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="SpriteHandleEntry"/> class.
     /// </summary>
@@ -33,14 +35,30 @@ internal sealed class SpriteHandleEntry
     internal string Path { get; }
 
     /// <summary>
-    /// Gets the internal completion task. It completes with <see langword="true"/> when the CPU
-    /// sprite resource is published and <see langword="false"/> when the load failed.
+    /// Gets a value indicating whether the load was dropped at shutdown instead of completing. A
+    /// dropped handle is never renderable and must not be reported as a successful load.
     /// </summary>
-    internal Task Completion => _completion.Task;
+    internal bool IsDropped => _dropped;
+
+    /// <summary>
+    /// Gets the internal completion task. It completes with <see langword="true"/> when the CPU
+    /// sprite resource is published and <see langword="false"/> when the load failed or was dropped.
+    /// </summary>
+    internal Task<bool> Completion => _completion.Task;
 
     /// <summary>Completes the load as successful.</summary>
     internal void Complete() => _completion.TrySetResult(true);
 
     /// <summary>Completes the load as failed without faulting the task.</summary>
     internal void Fail() => _completion.TrySetResult(false);
+
+    /// <summary>
+    /// Drops the load at shutdown without publishing a resource. The handle stays non-renderable and
+    /// its internal completion resolves with <see langword="false"/>.
+    /// </summary>
+    internal void Drop()
+    {
+        _dropped = true;
+        _completion.TrySetResult(false);
+    }
 }

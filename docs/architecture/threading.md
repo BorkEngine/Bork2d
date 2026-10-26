@@ -283,8 +283,11 @@ thread never invokes a game callback.
   API. A repeated `LoadSprite` returns the same handle and does not enqueue.
 - Shutdown stops accepting requests, cancels queued and in-flight load tasks (they complete as
   canceled), joins the loader at a safe point, and only then closes the mounted archives. Sprite
-  loads have no caller task; their handles stay non-renderable and the loads are dropped. After
-  shutdown every `IAssets` member throws `ObjectDisposedException`.
+  loads have no caller task; their handles stay non-renderable and the loads are dropped. A sprite
+  load checks the shutdown flag under the service lock before publishing a valid resource and
+  completing the handle, so a load that observes shutdown is dropped; a publication that completed
+  before the shutdown flag was set remains valid. After shutdown every `IAssets` member throws
+  `ObjectDisposedException`.
 - The virtual filesystem overlay table is immutable except for an atomic swap when `LoadPack`
   mounts a new pack; later packs shadow earlier ones and there is no unload in v1.
 - M3 has no renderer work: the loader never creates GPU resources. In M8 the renderer will create

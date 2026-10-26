@@ -139,7 +139,7 @@ internal sealed class AssetResourceTable
     /// <returns>The completion task; <see langword="true"/> on success, <see langword="false"/> on
     /// failure.</returns>
     /// <exception cref="ArgumentException">The handle is not a session-local sprite handle.</exception>
-    internal Task GetCompletion(Sprite handle)
+    internal Task<bool> GetCompletion(Sprite handle)
     {
         lock (_lock)
         {

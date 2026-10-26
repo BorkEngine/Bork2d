@@ -13,9 +13,9 @@ namespace Bork2d.Assets;
 /// </para>
 /// <para>
 /// A failed load is completed with a <see langword="false"/> result rather than a faulted task, so
-/// no unobserved exception is produced. Shutdown cancels a request that has not started; the
-/// handle's internal completion then stays pending, matching the M3 contract that sprite loads are
-/// dropped at shutdown and handles stay non-renderable.
+/// no unobserved exception is produced. Shutdown cancels a request that has not started; a load that
+/// observes shutdown before publishing is dropped through <see cref="SpriteHandleEntry.Drop"/> and
+/// stays non-renderable.
 /// </para>
 /// </remarks>
 internal sealed class SpriteLoadRequest : AssetRequest
@@ -23,6 +23,7 @@ internal sealed class SpriteLoadRequest : AssetRequest
     private readonly TaskCompletionSource<bool> _completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    private readonly SpriteHandleEntry _handle;
     private readonly Action _load;
 
     /// <summary>
@@ -30,15 +31,22 @@ internal sealed class SpriteLoadRequest : AssetRequest
     /// </summary>
     /// <param name="canonicalPath">The canonical sprite path the request was resolved for.</param>
     /// <param name="packPath">The resolved filesystem path of the pack that supplied the entry.</param>
+    /// <param name="handle">The handle allocated for the request.</param>
     /// <param name="load">The loader-thread body; it must not perform engine/GPU work.</param>
-    internal SpriteLoadRequest(string canonicalPath, string packPath, Action load)
+    internal SpriteLoadRequest(
+        string canonicalPath,
+        string packPath,
+        SpriteHandleEntry handle,
+        Action load)
     {
         ArgumentNullException.ThrowIfNull(canonicalPath);
         ArgumentNullException.ThrowIfNull(packPath);
+        ArgumentNullException.ThrowIfNull(handle);
         ArgumentNullException.ThrowIfNull(load);
 
         CanonicalPath = canonicalPath;
         PackPath = packPath;
+        _handle = handle;
         _load = load;
     }
 
@@ -50,6 +58,9 @@ internal sealed class SpriteLoadRequest : AssetRequest
 
     /// <inheritdoc/>
     internal override string Kind => "sprite";
+
+    /// <inheritdoc/>
+    internal override bool IsDropped => _handle.IsDropped;
 
     /// <inheritdoc/>
     internal override Task Completion => _completion.Task;

@@ -507,6 +507,47 @@ public sealed class AssetServiceLoadSpriteTests
         Assert.Equal(SpriteTestSupport.TexturePath, loaded.Texture);
     }
 
+    [Fact]
+    public async Task ShutdownDropsAnInFlightSpriteLoadInsteadOfPublishingIt()
+    {
+        using var directory = TempPackDirectory.CreateUnderTemp();
+        string packPath = SpriteTestSupport.WriteSpritePack(directory);
+
+        using var host = new AssetServiceHost(packPath);
+        using var publishEntered = new ManualResetEventSlim(initialState: false);
+        using var releasePublish = new ManualResetEventSlim(initialState: false);
+        using var disposed = new ManualResetEventSlim(initialState: false);
+        host.Service.SpriteResourcePublishHook = _ =>
+        {
+            publishEntered.Set();
+            releasePublish.Wait(TimeSpan.FromSeconds(10));
+        };
+        host.Service.ServiceDisposedHook = disposed.Set;
+        host.Start();
+
+        Sprite handle = host.Service.LoadSprite(SpriteTestSupport.SpritePath);
+        Assert.True(publishEntered.Wait(TimeSpan.FromSeconds(10)));
+
+        Task stop = Task.Run(host.Service.Stop);
+        Assert.True(disposed.Wait(TimeSpan.FromSeconds(10)));
+
+        releasePublish.Set();
+        await stop.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(host.Service.TryGetSpriteResource(handle, out SpriteResource? resource));
+        Assert.Null(resource);
+        Assert.True(
+            host.Service.TryGetSpriteHandle(SpriteTestSupport.SpritePath, out SpriteHandleEntry? entry));
+        Assert.True(entry.IsDropped);
+
+        bool succeeded = await host.Service.GetSpriteCompletion(handle).WaitAsync(
+            TimeSpan.FromSeconds(10));
+        Assert.False(succeeded);
+        Assert.DoesNotContain(
+            host.LogsAt(LogLevel.Debug),
+            log => log.Message.Contains("Asset loaded", StringComparison.Ordinal));
+    }
+
     private static int CountProcessed(List<string> processed)
     {
         lock (processed)

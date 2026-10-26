@@ -23,6 +23,12 @@ internal abstract class AssetRequest
     /// <summary>Gets the asset kind reported in the load-success log event.</summary>
     internal abstract string Kind { get; }
 
+    /// <summary>
+    /// Gets a value indicating whether the request was dropped at shutdown instead of completing.
+    /// A dropped sprite load leaves its handle non-renderable and must not log success.
+    /// </summary>
+    internal virtual bool IsDropped => false;
+
     /// <summary>Gets the task the caller observes.</summary>
     internal abstract Task Completion { get; }
 
