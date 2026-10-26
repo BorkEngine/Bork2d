@@ -12,5 +12,5 @@ internal static class AssemblyReferenceAnchor
 
     internal static Type CommonImplementation => typeof(Transform);
 
-    internal static Type AssetsImplementation => typeof(Bork2d.Assets.AssemblyReferenceAnchor);
+    internal static Type AssetsImplementation => typeof(Bork2d.Assets.PackBuilder);
 }

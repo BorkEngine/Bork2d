@@ -2,8 +2,11 @@
 
 > **Status:** the project graph is `Current` and enforced by the dependency test. M2 (WP1–WP5) is
 > merged into `develop` (2026-10-26, PR #2): `Bork2d.Runtime` now hosts the SDL window, input, time,
-> and the windowed loop. `Bork2d.Assets` and `Bork2d.Render` are reference-wired with no implementation
-> (`Planned`); `Bork2d.Editor` is `Planned` (M5). No project was added in M2.
+> and the windowed loop. M3 is in progress: `Bork2d.Assets` now implements the v1 pack
+> reader/writer and its public tooling surface (`PackBuilder`/`PackCompressionMode`) in WP1; the
+> VFS, loader, descriptors, and runtime wiring remain `Planned` (WP2–WP5). `Bork2d.Render` is still
+> reference-wired with no implementation (`Planned`); `Bork2d.Editor` is `Planned` (M5). No project
+> was added in M2 or WP1.
 
 ## 1. Current projects
 
@@ -15,10 +18,10 @@ All projects target `net11.0` and live in `src/Bork2d/`, listed in
 | `Bork2d.Api` | none (no project references) | `Partial` | Public contracts and value types. `AssetInfo` and the asset-browse members are M3. |
 | `Bork2d.Common` | `Bork2d.Api` | `Partial` | Root-owned unordered scene tree, transforms, time, layer validation, MessagePack generated-shape policy. Snapshot capture is M7. |
 | `Bork2d.Runtime` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render` | `Current` (M2) | Public builder/app, validation, windowed SDL host (window, input, time, uncapped loop) and one-tick headless/offscreen host, app-owned logging. GPU/rendering is M6/M8. |
-| `Bork2d.Assets` | `Bork2d.Api`, `Bork2d.Common` | `Empty` (wired) | Pack VFS, overlays, loaders, descriptors, sprite assets, bake support. |
+| `Bork2d.Assets` | `Bork2d.Api`, `Bork2d.Common` | `Partial` (M3 WP1) | v1 pack reader/writer, structural validation, Zstd/XXH3-64, canonical paths, public `PackBuilder`/`PackCompressionMode` tooling. Pack VFS, overlays, loaders, descriptors, sprites, and runtime wiring are WP2–WP5. |
 | `Bork2d.Render` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets` | `Empty` (wired) | Vulkan device, swapchain or offscreen targets, pipelines, bindless textures, draws, present. |
 | `Bork2d.AotSmoke` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Runtime` | `Current` | NativeAOT smoke executable: the default headless one-tick run plus the opt-in `--windowed [--ticks N]` SDL demo; the local publish/run gate. Not a game template project. |
-| `Bork2d.Tests` | all five engine projects plus `Bork2d.AotSmoke` | `Current` | 292 xUnit tests (283 deterministic in CI, 9 opt-in real-window tests), including the dependency matrix. The smoke reference copies the app next to the tests; the dependency test loads it by name to check its references. |
+| `Bork2d.Tests` | all five engine projects plus `Bork2d.AotSmoke` | `Current` | 382 xUnit tests (373 deterministic in CI, 9 opt-in real-window tests), including the pack-format/writer tests and the dependency surface. The smoke reference copies the app next to the tests; the dependency test loads it by name to check its references. |
 | `Bork2d.Editor` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets` (+ Avalonia) | `Planned` (M5) | Avalonia editor library/app; JIT. |
 
 `Bork2d.Runtime` references `Microsoft.Extensions.Logging` `11.0.0-rc.1.26425.128` and `ZLogger`
@@ -27,9 +30,15 @@ carries `Ultz.Native.SDL` `2.32.10`; the win-x64 `SDL2.dll` it ships reports `SD
 **2.30.8**, which is the runtime version M2 is verified against (the package label is not the
 runtime version). No SDL type leaves `Bork2d.Runtime`, `Bork2d.Api` stays SDL-free, and the
 project-reference matrix above is unchanged. `Bork2d.Common` references `Nerdbank.MessagePack`
-`1.4.95` (generated shapes only, no reflection resolver). `Bork2d.Api` uses
-`Microsoft.Extensions.Logging.Abstractions` from the .NET 11 shared framework and has no package
-reference. `Bork2d.AotSmoke` is the only executable and the only project that sets `PublishAot`;
+`1.4.95` (generated shapes only, no reflection resolver). `Bork2d.Assets` pins
+`Nerdbank.MessagePack` `1.4.95`, `PolyType` `1.4.1` (the public
+`PackBuilder.AddMessagePack<T>` shape constraint), and `System.IO.Hashing`
+`11.0.0-rc.1.26425.128` (`XxHash3`); Zstd is the .NET 11 built-in
+`System.IO.Compression` implementation, so there is no third-party codec package.
+`Bork2d.Api` uses `Microsoft.Extensions.Logging.Abstractions` from the .NET 11 shared framework
+and has no package reference today. D-M3-22 records that WP2 adds a PolyType `1.4.1` contract
+reference to `Bork2d.Api` for `IAssets.LoadAsset<T>`; that change is not in this tree yet.
+`Bork2d.AotSmoke` is the only executable and the only project that sets `PublishAot`;
 libraries do not publish independently.
 
 ## 2. Target dependency graph
@@ -74,18 +83,26 @@ otherwise.
 
 | Assembly | Public types |
 | --- | --- |
-| `Bork2d.Api` | `IEngine<TLayer>`, `IGame<TLayer>`, `ITime`, `IWindow`, `IInput`, `IAssets`, `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `Bork2dException`. `AssetInfo` is planned for M3. |
+| `Bork2d.Api` | `IEngine<TLayer>`, `IGame<TLayer>`, `ITime`, `IWindow`, `IInput`, `IAssets`, `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `Bork2dException`. `AssetInfo` and the PolyType-constrained `LoadAsset<T>` are target M3 contracts (WP2). |
 | `Bork2d.Runtime` | `Bork2dAppBuilder<TLayer>`, `Bork2dApp`. Nothing else; options, runtime state, and stubs stay internal. |
+| `Bork2d.Assets` | **Tooling only:** `PackBuilder`, `PackCompressionMode`. Every implementation type (pack reader/archive, header schema, paths, Zstd helpers) stays internal. Game code must not reference this assembly; it builds packs in tooling/tests and the runtime consumes them. |
 | `Bork2d.Editor` | `Bork2dEditorBuilder`, `Bork2dEditorApp`, and the public editor service types needed by `Project.Editor` (`Planned`, M5). |
 
 `ILoggerFactory` is a Microsoft.Extensions.Logging type exposed by `IEngine`; it is not a Bork2d
 public type. `Bork2d.Api` takes it from `Microsoft.Extensions.Logging.Abstractions` in the
 .NET 11 shared framework.
 
+`Bork2d.Assets`' tooling types are the one exception to the internal-project rule (D-001,
+D-M3-04): they exist for pack creation, not for gameplay. The dependency test asserts that the
+assembly exports exactly those two types. `Bork2d.AotSmoke` still references only
+`Api`/`Common`/`Runtime` in this WP; WP5 adds the `Assets` tooling reference for the AOT pack
+proof (D-M3-04).
+
 ### Internal assemblies
 
 `Bork2d.Common`, `Bork2d.Assets`, and `Bork2d.Render` are implementation details. Types are
-`internal` by default and exposed only to the assemblies that need them:
+`internal` by default and exposed only to the assemblies that need them. The only exception is the
+tooling-only public surface listed above:
 
 | Project | Internals visible to |
 | --- | --- |

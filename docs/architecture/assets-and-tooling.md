@@ -3,9 +3,11 @@
 > **Status:** target contract. The **M3 asset spec is approved (2026-10-26)**
 > ([M3 spec](../specs/m3-assets.md)); it supersedes this document's M3-specific statements (base-pack
 > timing, per-asset versioning, size caps, byte determinism, the public pack-tooling surface, and
-> the M3 `LoadSprite` scope) until WP5 reconciles this document. In the current tree `Bork2d.Assets`
-> is still empty; pack/VFS/descriptors are roadmap **M3**, TOML bake and the production bake
-> integration **M4**, and the editor **M5**. M1 ships `IAssets` stubs that throw
+> the M3 `LoadSprite` scope) until WP5 reconciles this document. In the current tree
+> `Bork2d.Assets` implements the v1 pack reader/writer and the public
+> `PackBuilder`/`PackCompressionMode` tooling surface (M3 WP1); the VFS, loader, descriptors,
+> sprites, and runtime wiring remain roadmap **M3** WP2–WP5, TOML bake and the production bake
+> integration **M4**, and the editor **M5**. `IAssets` still returns stubs that throw
 > `NotSupportedException`.
 
 ## 1. End-to-end model
@@ -382,8 +384,8 @@ trusted local content: signing is out of scope and the parser is defensive again
 
 | Area | Status |
 | --- | --- |
-| `Bork2d.Assets` | `Empty`: project scaffold (`AssemblyReferenceAnchor` only) |
-| `assets.pck` reader/writer, VFS, overlays, `Browse`/`Exists` | `Planned` M3 |
+| `Bork2d.Assets` | `Partial` (M3 WP1): v1 pack reader/writer, structural validation, canonical paths, and public `PackBuilder`/`PackCompressionMode`; VFS/loader/descriptors are WP2–WP5 |
+| `assets.pck` reader/writer | `Partial` (M3 WP1): v1 format reader and writer implemented; VFS, overlays, `Browse`/`Exists` are `Planned` WP2 |
 | Texture descriptors and raw RGBA8 payloads | `Planned` M3/M4 |
 | Sprite assets (UVs/scale/pivot/topology/indices) | `Planned` M3/M4; `Sprite` handle is `Current` |
 | TOML model, baker, pack builder, deterministic bake | `Planned` M4 |

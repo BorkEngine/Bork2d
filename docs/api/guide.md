@@ -1,9 +1,10 @@
 # API Guide
 
-> **Status:** implemented M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2). The builder and host exist in
+> **Status:** implemented M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2), plus the M3 WP1
+> tooling-only pack writer in `Bork2d.Assets`. The builder and host exist in
 > `Bork2d.Runtime`; `Build()` validates and `Run()` runs the uncapped windowed loop (window, input,
-> time) or the one-tick headless/offscreen sequence. Assets are M3 and the renderer is M8;
-> `IAssets` remains a throwing stub. See the
+> time) or the one-tick headless/offscreen sequence. Runtime asset loading is M3 WP2–WP5 and the
+> renderer is M8; `IAssets` remains a throwing stub. See the
 > [API reference](reference.md#12-runtime-surface).
 
 ## 1. What you reference
@@ -15,7 +16,9 @@
 | `Project.Editor` (M5) | `Bork2d.Editor` + `Project.Common` | Thin Avalonia editor host. |
 
 Do not reference `Bork2d.Render`, `Bork2d.Common`, or `Bork2d.Assets` from game code; they are
-implementation details ([Projects and dependencies](../architecture/projects.md)).
+implementation details ([Projects and dependencies](../architecture/projects.md)). **Tooling and
+tests** may reference `Bork2d.Assets` for the public `PackBuilder`/`PackCompressionMode` writer
+(§10); that surface is not part of the game contract.
 
 ## 2. Start the engine
 
@@ -318,9 +321,9 @@ public void Tick()
 
 ## 10. Assets
 
-`Status: target for M3.` In M2 `IEngine.Assets` returns an `UnsupportedAssets`; `LoadSprite`,
-`LoadAsset<T>`, and `LoadData` throw `NotSupportedException`. `Build()` validates only that the
-pack path is non-empty.
+`Status: target for M3 (runtime loading); the tooling pack writer is Current (WP1).` In M2
+`IEngine.Assets` returns an `UnsupportedAssets`; `LoadSprite`, `LoadAsset<T>`, and `LoadData` throw
+`NotSupportedException`. `Build()` validates only that the pack path is non-empty.
 
 ```csharp
 Sprite player = _engine.Assets.LoadSprite("sprites/player/idle");
@@ -332,11 +335,37 @@ byte[] raw = await _engine.Assets.LoadData("textures/raw/player");
   returns a handle immediately; the renderer skips it until its sprite asset, texture descriptor,
   raw payload, and GPU page are ready. Missing keys log and return `Sprite.Empty`.
 - Paths are canonical lowercase `/` keys without extensions. `LoadSprite` is idempotent per path;
-  handles are session-local and never serialized. `LoadAsset<T>` needs a Nerdbank generated shape
-  (NativeAOT). `LoadData` returns decompressed bytes for any asset kind.
+  handles are session-local and never serialized. `LoadAsset<T>` is constrained to
+  `where T : class, IShapeable<T>` (D-M3-22), so `T` carries a compiled Nerdbank/PolyType shape;
+  `LoadData` returns decompressed bytes for any asset kind.
 - `LoadPack`/`Browse`/`Exists` and `AssetInfo` are `Planned` for M3; there is no unload in v1. Do
   not block a tick on I/O or mutate scene state from a continuation. See
   [Assets and tooling](../architecture/assets-and-tooling.md).
+
+### Building a pack (tooling only)
+
+Runtime asset loading lands in WP2–WP5; the pack **writer** is available now from a tool, test, or
+editor host. Game code must not reference `Bork2d.Assets`.
+
+```csharp
+using Bork2d.Assets;
+
+var builder = new PackBuilder(PackCompressionMode.Release);
+builder.AddRaw("textures/raw/player", rgba8Bytes);
+builder.AddMessagePack("data/config", new GameConfig { /* [GenerateShape] type */ });
+builder.Write("assets.pck"); // overwrites; relative paths resolve against the current directory
+```
+
+- `PackCompressionMode.Debug` stores payloads uncompressed; `Release` uses maximum-quality Zstd
+  only when strictly smaller. The header is always Zstd with an XXH3-64 checksum; payloads have no
+  checksum. There is no byte-determinism guarantee.
+- `Build()` returns one `byte[]`; `Write(Stream)` streams and leaves the stream open. Builder calls
+  are repeatable and do not consume the builder.
+- Paths are normalized/validated with the same canonical rules as runtime lookups. Duplicate
+  paths, serialization failures, and write failures throw `Bork2dException`; null/invalid path
+  arguments throw `ArgumentNullException`/`ArgumentException`.
+- See the [pack tooling reference](reference.md#13-pack-tooling-bork2dassets-tooling-only) for the
+  full contract.
 
 ## 11. Lifetimes and threading
 
@@ -361,8 +390,9 @@ byte[] raw = await _engine.Assets.LoadData("textures/raw/player");
 ## 12. NativeAOT
 
 - Pass the game as an instance; no reflection construction.
-- Use `LoadAsset<T>` only for types with Nerdbank generated shapes; do not scan assemblies, use
-  `Type.GetType`, runtime TOML, or dynamic code.
+- Use `LoadAsset<T>` only with types that satisfy the `IShapeable<T>` constraint (a compiled
+  Nerdbank/PolyType shape); do not scan assemblies, use `Type.GetType`, runtime TOML, or dynamic
+  code.
 - TOML is source/editor format only; the pack contains MessagePack/raw assets. The editor is JIT
   and not shipped with the game.
 - The runtime libraries are `IsAotCompatible`; AOT publish/run is a required local gate.
