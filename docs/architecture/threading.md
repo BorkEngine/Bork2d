@@ -1,11 +1,11 @@
 # Threading and Frame Handoff
 
-> **Status:** the M1 scene graph implements the structural and per-object
-> `System.Threading.Lock` rules in §2 and the public API has no thread affinity. The M2 windowed
-> platform's OS/window thread, command queue, confirmed-state snapshot, event pump, input freeze,
-> and the runtime tick loop that drives them are `Current` (§5). The render thread, snapshot ring,
-> and frame handoff are `Planned` (M7), and asset loader threads are `Planned` (M3). The engine has
-> no debug-only tick-active, structural, or slot-state checks.
+> **Status:** implemented M2 (WP1–WP5; pending PR review). The M1 scene graph implements the
+> structural and per-object `System.Threading.Lock` rules in §2 and the public API has no thread
+> affinity. The M2 windowed platform's OS/window thread, command queue, confirmed-state snapshot,
+> event pump, input freeze, and the runtime tick loop that drives them are `Current` (§5). The
+> render thread, snapshot ring, and frame handoff are `Planned` (M7), and asset loader threads are
+> `Planned` (M3). The engine has no debug-only tick-active, structural, or slot-state checks.
 
 ## 1. Threads by mode
 
@@ -312,7 +312,9 @@ Thread-specific rules:
    no surface/swapchain; fixed entity counts allocate nothing.
 
 `Bork2d.Tests` covers §2's scene rules, the M2 window/input/loop threading (fake SDL seam, bounded
-joins, no sleeps), and parts of 5 today; 1, 2, 4, and renderer pacing come with M7.
+joins, no sleeps), and parts of 5 today; 1, 2, 4, and renderer pacing come with M7. The suite is
+292 tests: 283 deterministic tests in CI plus 9 opt-in real-window tests
+(`BORK2D_RUN_WINDOW_TESTS=1`).
 
 ## 10. Related documents
 

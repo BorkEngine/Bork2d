@@ -1,12 +1,11 @@
 # NativeAOT
 
-> **Status:** `Current` for the M1 baseline plus the M2 SDL dependency spike.
+> **Status:** `Current` through M2 (WP1–WP5; pending PR review).
 > `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`, and `Bork2d.Runtime` compile with
 > `IsAotCompatible` plus the trim and AOT analyzers, and `Bork2d.AotSmoke` publishes and runs with
-> zero AOT/trim warnings. The smoke exercises the default logging path and a Nerdbank.MessagePack
-> generated shape. The editor and build tools stay JIT; the SDL2 native and a throwaway windowed
-> AOT probe are verified (M2 WP1), the windowed runtime and its AOT demo are M2 WP5, and Vulkan AOT
-> validation is M6.
+> zero AOT/trim warnings. The smoke exercises the default logging path, a Nerdbank.MessagePack
+> generated shape, the unchanged headless one-tick run, and the windowed `--windowed [--ticks N]`
+> SDL demo. The editor and build tools stay JIT; Vulkan AOT validation is M6.
 
 ## 1. Scope
 
@@ -37,6 +36,8 @@
   <OutputType>Exe</OutputType>
   <PublishAot>true</PublishAot>
   <InvariantGlobalization>true</InvariantGlobalization>
+  <!-- Narrow Silk.NET resolver suppression; see §6. -->
+  <NoWarn>$(NoWarn);IL3000;IL3002</NoWarn>
 </PropertyGroup>
 ```
 
@@ -126,8 +127,9 @@ determinism and a possible future AOT editor, not a current AOT requirement.
   the adapter through the default resolver: with the suppression applied the publish reports no
   warnings (the same graph reports six `IL3000`/`IL3002` warnings when `NoWarn` is cleared); SDL
   video init, window create/destroy, and quit succeed on an engine-created (non-main) thread; and
-  `SDL2.dll` is present in the output. The windowed runtime, the `--windowed` AOT demo, and the
-  windowed local gate are M2 WP5.
+  `SDL2.dll` is present in the output. M2 WP5 verified the real windowed runtime and its AOT demo
+  (`--windowed --ticks 120`, and a 5,000,000-tick live-window run) with the same zero-warning
+  publish.
 - No runtime shader compilation: SPIR-V is built offline.
 - The headless server must not initialize SDL or Vulkan; `WithHeadless(...)` must not load or
   call the graphics/windowing paths.
@@ -139,13 +141,17 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
 
 1. `dotnet build` with AOT/trim analyzers and warnings-as-errors, Debug and Release.
 2. `dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64`
-   with zero AOT/trim warnings.
+   with zero AOT/trim warnings; `SDL2.dll` is copied next to the executable.
 3. Run the AOT-published headless smoke locally (no GPU): default logging, one
    `Setup`/`Tick`/`Teardown`, root cleared, generated-shape round trip, exit `0`.
-4. Run a windowed/offscreen AOT-published app on a GPU machine before release (M8+).
-5. A smoke test that no loaded asset type lacks a generated shape (M3/M4 adds the loader; M1
+4. Run the AOT-published windowed demo locally on a desktop session:
+   `Bork2d.AotSmoke.exe --windowed --ticks 120` must exit `0` after exactly 120 ticks with one
+   `Setup` and one `Teardown`; the interactive `--windowed` run observes the visible window and
+   exits on Escape/close.
+5. Run a windowed/offscreen AOT-published app on a GPU machine before release (M8+).
+6. A smoke test that no loaded asset type lacks a generated shape (M3/M4 adds the loader; M1
    covers the policy with `MessagePackShapeTests`).
-6. The AOT app logs through the default ZLogger/Microsoft.Extensions.Logging path without trim
+7. The AOT app logs through the default ZLogger/Microsoft.Extensions.Logging path without trim
    warnings; `IEngine.LoggerFactory` is usable.
 
 CI scope is exactly: pull requests targeting `develop` and pushes to `develop`; it restores,

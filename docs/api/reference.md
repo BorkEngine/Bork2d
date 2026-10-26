@@ -1,11 +1,11 @@
 # API Reference
 
-> **Status:** the M2 contract for the windowed host. `Current` means implemented in this tree and
-> covered by tests; `Partial` means the declaration exists but behavior is stubbed, unwired, or
-> incomplete; `Planned` means an agreed target that is not implemented. Windowed mode runs a real
-> SDL window, input, and time; headless/offscreen keep the one-tick M1 path. The asset pipeline is
-> M3 and renderer semantics are M8; see the [roadmap](../roadmap.md). Code under `src/Bork2d` is
-> authoritative.
+> **Status:** the implemented M2 contract for the windowed host (M2 WP1–WP5; pending PR review).
+> `Current` means implemented in this tree and covered by tests; `Partial` means the declaration
+> exists but behavior is stubbed, unwired, or incomplete; `Planned` means an agreed target that is
+> not implemented. Windowed mode runs a real SDL window, input, and time; headless/offscreen keep
+> the one-tick M1 path. The asset pipeline is M3 and renderer semantics are M8; see the
+> [roadmap](../roadmap.md). Code under `src/Bork2d` is authoritative.
 
 ## 1. Contract-wide rules
 
@@ -426,6 +426,11 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
   `Setup`, with no `Teardown`. A fatal platform error after startup stops the loop at the next
   boundary, attempts `Teardown`, and rethrows the fatal `Bork2dException`. Every windowed path
   destroys the window and joins the OS thread. A failed run detaches the root's direct children.
+- **Accepted fatal-path exception (D-033).** After an unrecoverable post-startup SDL error, the OS
+  thread runs its cleanup immediately and may destroy the window before the tick thread reaches
+  `Teardown`; the window/input proxies stay attached so `Teardown` can still attempt best-effort
+  access (getters generally work, setters may be dropped). Normal, `Exit`, and close paths keep the
+  window alive through `Teardown` and destroy it only afterwards.
 - `Dispose()` is idempotent and safe before or after `Run`; it detaches the root's direct children,
   detaches/marks the window and input proxies disposed, disposes the app-owned logging factory and
   providers, and never calls `IGame.Teardown`. During an active `Run()` it throws
@@ -446,7 +451,7 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 | Self/cycle parent; setting the root's own parent or a root local value | `InvalidOperationException`. |
 | SDL init / window creation / platform-thread startup failure | Windowed `Run()` throws `Bork2dException` containing `SDL_GetError()` before `Setup`; no `Teardown`; the window and OS thread were already cleaned up. |
 | Game callback exceptions | `Setup` propagates without `Teardown`; a `Tick` or text-handler failure still tears down and rethrows the original; `AggregateException` when `Tick` and `Teardown` both throw. The window and OS thread are cleaned up in every path. |
-| Fatal platform error after windowed startup | Loop stops at the next boundary; `Teardown` is attempted; the fatal `Bork2dException` is rethrown (`AggregateException` if `Teardown` also throws). |
+| Fatal platform error after windowed startup | Loop stops at the next boundary; `Teardown` is attempted; the fatal `Bork2dException` is rethrown (`AggregateException` if `Teardown` also throws). The OS thread's cleanup may already have destroyed the window before `Teardown`; the proxies stay attached for best-effort access (D-033). |
 | `Bork2dApp.Dispose()` during an active `Run()` | `InvalidOperationException` from any thread; the loop is unaffected. |
 | Second `Run()`, or `Run()` after `Dispose()` | `InvalidOperationException` / `ObjectDisposedException`. |
 | `IWindow`/`IInput` member after windowed shutdown | `ObjectDisposedException` (D-M2-17). Headless/offscreen `IWindow` members and the `IInput` getter throw `NotSupportedException`. |

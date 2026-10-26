@@ -1,8 +1,9 @@
 # Implementation Roadmap
 
-> **Status:** M0 complete; **M1 merged into `develop` (2026-10-25, PR #1)**. Next milestone: M2.
-> The sequence is dependency-ordered. A milestone is done when its exit criterion is demonstrated,
-> not merely when code is merged.
+> **Status:** M0 complete; **M1 merged into `develop` (2026-10-25, PR #1)**; **M2 (SDL windowed
+> platform) implemented (WP1–WP5), with the WP5 branch in review — not merged.** Next milestone after
+> M2: M3. The sequence is dependency-ordered. A milestone is done when its exit criterion is
+> demonstrated, not merely when code is merged.
 
 ## 1. How to read this roadmap
 
@@ -17,15 +18,15 @@
 | Area | State | Notes |
 | --- | --- | --- |
 | Build | Green | SDK `11.0.100-rc.1`, `net11.0`, zero warnings/errors in Debug and Release; `dotnet format` clean. |
-| `Bork2d.Api` | Current | Contracts for engine, game, time, window, input, assets, camera, sprite, transform, root, `ZIndex`, `Bork2dException`. Window/input/assets implementations are stubs. |
+| `Bork2d.Api` | Current | Contracts for engine, game, time, window, input, assets, camera, sprite, transform, root, `ZIndex`, `Bork2dException`, the full `KeyCode` scancode set, and five `MouseButton` members. Window/input are implemented for windowed mode; assets remain a stub (M3). |
 | `Bork2d.Common` | Partial | Root-owned unordered scene tree, transforms (degrees normalized), structural/per-object locks, time wrapper, layer validation, MessagePack shape policy. Snapshot structs are M7. |
-| `Bork2d.Runtime` | Partial | Builder, validation, app-owned logging, one-tick `Run`. Real window/loop is M2/M7. |
+| `Bork2d.Runtime` | Current (M2) | Builder, validation, app-owned logging, SDL windowed host (window/input/time, uncapped loop), one-tick headless/offscreen host, `Exit`/`Dispose`/post-shutdown contract. Renderer wiring is M6/M8. |
 | `Bork2d.Render` / `Bork2d.Assets` | Empty | References wired; no Vulkan, pack, VFS, descriptors, or sprite assets. |
 | `Bork2d.Editor` | Absent | Not in the solution (M5). |
-| `Bork2d.Tests` | Current | 135 xUnit tests: ownership/GC, remove/re-add, root read-only, cycles/re-parent, rotation, camera `ZIndex`, builder validation, logging, concurrency, dependency matrix. |
-| NativeAOT | M1 baseline | Libraries use `IsAotCompatible` + trim/AOT analyzers; `Bork2d.AotSmoke` publishes/runs locally with zero warnings. Local gate only. |
-| CI | Current | GitHub Actions on PRs to `develop` and pushes to `develop`: restore, format verify, build, test. No AOT job. |
-| Runnable engine | No | No window, renderer, pack, or asset system; `Run()` is a one-tick smoke. |
+| `Bork2d.Tests` | Current | 292 xUnit tests: 283 deterministic in CI (ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix, fake-SDL window/input/loop/time) plus 9 opt-in real-window tests. |
+| NativeAOT | M2 baseline | Libraries use `IsAotCompatible` + trim/AOT analyzers; `Bork2d.AotSmoke` publishes/runs locally with zero warnings, headless and `--windowed --ticks 120`. Local gate only. |
+| CI | Current | GitHub Actions on PRs to `develop` and pushes to `develop`: restore, format verify, build, test. No AOT or real-window job. |
+| Runnable engine | Partial (windowed shell) | A real window, input, and time with an uncapped tick loop; no renderer, pack, or asset system. |
 
 ## 3. Sequencing principles
 
@@ -74,16 +75,28 @@ gate, and AOT smoke. Evidence: 135 tests, Debug/Release zero warnings, format cl
 
 ### M2 — SDL windowed platform
 
+**Status:** implementation complete on `m-2/wp-5` (WP1–WP4 merged into `m-2/common`);
+**pending review — not merged.** Full record: [M2 spec](specs/m2-sdl-platform.md).
+
 Goal: a window that ticks, reads input, and exits cleanly; no Vulkan yet.
 
-- Add `Silk.NET.SDL` and the SDL2 native runtime; document distribution.
-- Create a Vulkan-capable, initially hidden window; event pumping; close/resize/fullscreen/cursor/
-  focus handling.
-- Input state: physical scancodes, mouse buttons/position/delta/wheel, text, edge accumulation.
-- Window-only `IWindow`/`IInput`; headless/offscreen access throws.
-- Wire `StopwatchTime`, `IEngine.Exit`, and the real `Run`/`Dispose` path; temporary uncapped loop
-  until M7.
-- Tests: input edge aggregation, focus loss, time clamping.
+- Add `Silk.NET.SDL` 2.23.0 and the SDL2 native runtime; document distribution and the 2.30.8
+  runtime version the shipped `SDL2.dll` reports.
+- Create a Vulkan-capable window that is visible at `Run()` start, with event pumping and
+  close/resize/fullscreen/cursor/focus handling.
+- Input: physical scancodes, five mouse buttons, position/delta/wheel, UTF-16 text, edge
+  accumulation, focus loss/regain.
+- Window-only `IWindow`/`IInput` and advanced `ITime`; headless/offscreen stay one-tick.
+- `IEngine.Exit`, `Dispose`, close, and post-shutdown contracts; uncapped loop until M7 supplies
+  backpressure.
+- Tests: 292 total (283 deterministic, 9 opt-in real-window), including the two real-window
+  `Run()` exit paths.
+
+Evidence: Debug/Release builds with zero warnings; 292 tests (283 in CI, 292 with
+`BORK2D_RUN_WINDOW_TESTS=1`); format/docs/`git diff --check` clean; AOT publish zero warnings with
+`SDL2.dll`; headless AOT run exit 0 with the M1 assertions; windowed AOT
+`--windowed --ticks 120` exit 0; a 5,000,000-tick run with an observed live window
+(`MainWindowTitle = "Bork2d M2 Demo"`) exit 0; interactive Escape/close and WASD movement verified.
 
 Exit: sample opens a window, shows a title, prints/moves on input, exits via close/Escape; edge
 semantics match the reference; no Vulkan device; no `Sleep`/target rate; clean shutdown.
@@ -260,13 +273,12 @@ unloading, public offscreen readback.
 
 ## 9. Open decisions
 
+The five M2 decisions (window visibility timing, fullscreen mode, minimize behavior, exposing the
+mode, and DPI/`IWindow.Size`) are resolved in the [M2 spec §4.1](specs/m2-sdl-platform.md#41-roadmap-open-decisions-resolved-by-this-spec)
+and the [decision log](decisions.md). Remaining open decisions:
+
 | Decision | Needed by | Default if unresolved |
 | --- | --- | --- |
-| Window shown before first frame or after first present | M2 | Hidden until first successful present. |
-| Fullscreen mode: exclusive, borderless, or configurable | M2 | Borderless; revisit in M10. |
-| Minimize: pause ticks or presentation only | M2 | Ticks continue; presentation is skipped. |
-| Expose the selected mode on `IEngine` | M2 | Not exposed; branch in host code. |
-| DPI policy; what `IWindow.Size` means under scaling | M2 | Physical framebuffer pixels. |
 | Zstd API shape in .NET 11 | M3 | Adapter behind pack reader/writer; format stays. |
 | Asset failure retry policy | M3 | No automatic retry in v1. |
 | Development loose-file overlay | M3 | Not supported; packs only. |
@@ -293,7 +305,7 @@ unloading, public offscreen readback.
 | --- | --- | --- |
 | M0 Documentation | Complete (2026-10-25) | Docs set, decision log, accepted ownership/pack/editor/pacing decisions. |
 | M1 Foundation/AOT | Merged (2026-10-25, PR #1) | 135 tests; Debug/Release zero warnings; format clean; AOT smoke publishes/runs locally; CI build/test/format on PRs to `develop` and `develop` pushes. [M1 spec](specs/m1-foundation.md). |
-| M2 SDL platform | Not started | — |
+| M2 SDL platform | In review (implementation complete on `m-2/wp-5`, WP1–WP4 merged; not merged) | 292 tests (283 in CI, 292 with `BORK2D_RUN_WINDOW_TESTS=1`); Debug/Release zero warnings; format/docs clean; AOT headless and `--windowed --ticks 120` exit 0 with `SDL2.dll`; live-window 5,000,000-tick run exit 0; Escape/close graceful. [M2 spec](specs/m2-sdl-platform.md#125-acceptance-evidence-recorded-by-wp5). |
 | M3 Assets/pack | Not started | — |
 | M4 Serialization/bake | Not started | — |
 | M5 Editor | Not started | — |
@@ -306,7 +318,7 @@ unloading, public offscreen readback.
 ## 11. Related documents
 
 - [Architecture overview](architecture/overview.md) — invariants.
-- [M1 spec](specs/m1-foundation.md) — historical record.
+- [M1 spec](specs/m1-foundation.md), [M2 spec](specs/m2-sdl-platform.md) — historical and current records.
 - [Decision log](decisions.md) — accepted decisions.
 - [Scene ownership](architecture/scene-ownership.md), [Threading](architecture/threading.md),
   [Runtime lifecycle](architecture/runtime-lifecycle.md).

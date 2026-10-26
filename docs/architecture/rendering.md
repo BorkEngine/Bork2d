@@ -1,8 +1,9 @@
 # Rendering
 
-> **Status:** target design. `Bork2d.Render` is empty: Vulkan bring-up is roadmap **M6**, frame
-> handoff **M7**, sprite rendering **M8**. Everything below is `Planned` unless
-> [Current status](#11-current-status) says otherwise.
+> **Status:** target design for the renderer. Window creation, input, time, and the windowed host
+> loop are `Current` in `Bork2d.Runtime` (M2); `Bork2d.Render` is still empty: Vulkan bring-up is
+> roadmap **M6**, frame handoff **M7**, sprite rendering **M8**. Everything below about pixels is
+> `Planned` unless [Current status](#11-current-status) says otherwise.
 ## 1. Scope
 
 The renderer turns one immutable [frame snapshot](threading.md#3-frame-snapshot) into pixels:
@@ -234,6 +235,7 @@ Provisional targets (validated in M8, not commitments):
 
 | Area | Status |
 | --- | --- |
+| SDL window creation, input, time, and the windowed loop | `Current` M2 (`Bork2d.Runtime`; no Vulkan, surface, or render thread) |
 | `Bork2d.Render` | `Empty`: project scaffold |
 | Vulkan instance/device/swapchain, offscreen targets, dynamic rendering | `Planned` M6 |
 | Snapshot consumption, frame handoff, bounded run-ahead | `Planned` M7 |
