@@ -120,13 +120,14 @@ Goal: load, overlay, browse, and describe packed assets without a renderer.
 - VFS: default `assets.pck`, `LoadPack`, later-wins overlays, no unload, merged `Browse`/`Exists`.
 - Compression: header always Zstd max; debug payloads uncompressed; release max Zstd only when
   smaller; no payload checksum; no byte-level determinism.
-- One asset loader thread, FIFO queue, immutable resource table, readiness/skipping; cancellation
-  and join at shutdown.
+- One asset loader thread, FIFO queue, internal CPU resource table (no public readiness API in
+  M3); cancellation and join at shutdown.
 - Texture descriptors + raw RGBA8 payloads; sprite asset schema (texture, UVs, pixels-per-unit
   scale, pivot, topology, optional `indices`; no vertices array). M3 loads sprite + descriptor,
   not the raw payload.
 - `IAssets.LoadData`/`Exists`/`Browse`/`LoadPack`; shape-generic `LoadAsset<T>` (M3 tests use
-  internal shapes; game types are M4); public tooling `PackBuilder` in `Bork2d.Assets`.
+  internal shapes; game types can satisfy the compiled `IShapeable<T>` constraint, with no M4
+  dependency); public tooling `PackBuilder` in `Bork2d.Assets`.
 - Headless tests: overlays, browse, corrupt header/checksum, missing pack, loader threads, AOT smoke.
 
 Exit: a pack with texture/sprite/data loads; overlays shadow correctly; corrupt and missing packs

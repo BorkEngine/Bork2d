@@ -103,7 +103,7 @@ M3 changes or removes these statements (all intentional, recorded in §4):
 | Provisional limits: 64 MiB header, 1M assets, 512-byte paths | **No policy caps.** Format field widths (`uint32` header lengths, `uint32` entry length/size, `uint64` offset), the file length, and .NET allocation limits are the only bounds. |
 | The pack writer is deterministic / byte-reproducible | **No byte determinism guarantee.** Entries are sorted by path for stable structure, but compressed bytes may vary. |
 | `LoadSprite` requires sprite + descriptor + payload + GPU page | M3 loads **sprite + descriptor** into CPU metadata; the raw payload is loaded on first texture use in M8. |
-| `LoadAsset<T>` is for "built-in MessagePack types" | The loader is shape-generic. M3 tests use engine-internal shapes; game types become usable in M4 when the game-side shape package setup lands. |
+| `LoadAsset<T>` is for "built-in MessagePack types" | The loader is shape-generic. M3 tests use engine-internal shapes; game types can satisfy `where T : class, IShapeable<T>` in M3 because the shape contract is on `IAssets.LoadAsset<T>` itself (D-M3-22); no game-side shape package setup is required. |
 | `Bork2d.AotSmoke` references only `Api`, `Common`, `Runtime` | Adds `Bork2d.Assets` to use the public pack writer and load a pack in the default run. |
 | `WithAssetsPack` is stored but never used | Opens the base pack at `Run()`; `WithoutAssets()` opts out. |
 | `IAssets.LoadPack`/`Browse`/`Exists`, `AssetInfo` are `Planned` | Implemented in M3. |
@@ -976,6 +976,9 @@ All commands were run from the workspace clone on 2026-10-26 (Windows 11, SDK
 
 The WPs are **sequential** (one wave each): they share `Bork2d.Assets`, the public contract, and the
 same docs. Branch model and review/merge rules are in [AGENTS.md](../../AGENTS.md).
+
+**All five work packages are implemented:** WP1–WP4 are merged into `m-3/common`, and WP5 is
+implemented on `m-3/wp-5` pending review (the M3 PR is not merged).
 
 | WP | Branch | Delivers | Depends |
 | --- | --- | --- | --- |
