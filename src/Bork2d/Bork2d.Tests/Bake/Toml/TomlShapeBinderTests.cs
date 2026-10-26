@@ -289,11 +289,13 @@ public sealed class TomlShapeBinderTests
         BakeReferenceSite pearIcon = result.References[5];
         Assert.Equal("data/pear", pearIcon.ReferencePath);
         Assert.False(pearIcon.IsData);
+        Assert.Equal(typeof(TextureDescriptor).FullName, pearIcon.TargetTypeName);
         AssertLocation(toml, "\"data/pear\"", pearIcon);
 
         BakeReferenceSite firstPayload = result.References[8];
         Assert.Equal("textures/raw/first", firstPayload.ReferencePath);
         Assert.True(firstPayload.IsData);
+        Assert.Null(firstPayload.TargetTypeName);
         AssertLocation(toml, "\"textures/raw/first\"", firstPayload);
 
         var value = (RefRoot)result.Value!;

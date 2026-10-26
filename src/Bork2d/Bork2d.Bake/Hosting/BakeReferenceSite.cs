@@ -11,6 +11,11 @@ namespace Bork2d.Bake.Hosting;
 /// </param>
 /// <param name="Line">The 1-based source line of the reference value, or <see langword="null"/>.</param>
 /// <param name="Column">The 1-based source column of the reference value, or <see langword="null"/>.</param>
+/// <param name="TargetTypeName">
+/// The full name of the referenced CLR type for an <c>AssetRef&lt;TAsset&gt;</c>, or
+/// <see langword="null"/> for a <c>DataRef</c> (which has no type contract). The reference validator
+/// compares it with the target entry's baked type name (M4 §9 rule 4).
+/// </param>
 /// <remarks>
 /// The location is captured while binding, so a reference diagnostic from the validation pass points
 /// at the value that produced the reference without a second document pass. The source file is the
@@ -21,4 +26,5 @@ internal readonly record struct BakeReferenceSite(
     string ReferencePath,
     bool IsData,
     int? Line = null,
-    int? Column = null);
+    int? Column = null,
+    string? TargetTypeName = null);

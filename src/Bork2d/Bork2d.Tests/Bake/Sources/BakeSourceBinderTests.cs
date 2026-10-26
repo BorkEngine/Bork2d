@@ -66,6 +66,7 @@ public sealed class BakeSourceBinderTests
         Assert.Equal("texture", texture.MemberPath);
         Assert.Equal("textures/player", texture.ReferencePath);
         Assert.False(texture.IsData);
+        Assert.Equal(typeof(TextureDescriptor).FullName, texture.TargetTypeName);
         Assert.Equal(6, texture.Line);
 
         BoundAsset sprite = assets.Single(asset => asset.AssetPath == "sprites/player");

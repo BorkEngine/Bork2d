@@ -500,6 +500,16 @@ internal static class TomlShapeBinder
         return name + "<" + string.Join(", ", type.GetGenericArguments().Select(FormatType)) + ">";
     }
 
+    private static string? GetReferenceTargetTypeName(Type type)
+    {
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(AssetRef<>))
+        {
+            return type.GetGenericArguments()[0].FullName;
+        }
+
+        return null;
+    }
+
     private static bool IsAssetReferenceType(Type type, out bool isData)
     {
         if (type == typeof(DataRef))
@@ -800,7 +810,12 @@ internal static class TomlShapeBinder
 
             if (IsAssetReferenceType(typeof(T), out bool isData) && surrogate is string path)
             {
-                context.AddReference(node.MemberPath, path, isData, node.Path);
+                context.AddReference(
+                    node.MemberPath,
+                    path,
+                    isData,
+                    node.Path,
+                    GetReferenceTargetTypeName(typeof(T)));
             }
 
             return value;

@@ -78,7 +78,16 @@ internal sealed class BakeBindContext
     /// <param name="referencePath">The canonical path as written in the source.</param>
     /// <param name="isData">Whether the reference targets a raw payload.</param>
     /// <param name="path">The TOML path of the reference value.</param>
-    internal void AddReference(string memberPath, string referencePath, bool isData, TomlPath path)
+    /// <param name="targetTypeName">
+    /// The referenced CLR type's full name for an <c>AssetRef&lt;T&gt;</c>, or <see langword="null"/>
+    /// for a <c>DataRef</c>.
+    /// </param>
+    internal void AddReference(
+        string memberPath,
+        string referencePath,
+        bool isData,
+        TomlPath path,
+        string? targetTypeName = null)
     {
         int? line = null;
         int? column = null;
@@ -88,7 +97,13 @@ internal sealed class BakeBindContext
             column = span.Start.Column + 1;
         }
 
-        _references.Add(new BakeReferenceSite(memberPath, referencePath, isData, line, column));
+        _references.Add(new BakeReferenceSite(
+            memberPath,
+            referencePath,
+            isData,
+            line,
+            column,
+            targetTypeName));
     }
 
     /// <summary>

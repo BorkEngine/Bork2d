@@ -68,6 +68,7 @@ public sealed class SpriteAssetBakeTests
         Assert.Equal("texture", site.MemberPath);
         Assert.Equal(TexturePath, site.ReferencePath);
         Assert.False(site.IsData);
+        Assert.Equal(typeof(TextureDescriptor).FullName, site.TargetTypeName);
         Assert.Equal(1, site.Line);
         Assert.Equal(11, site.Column);
 

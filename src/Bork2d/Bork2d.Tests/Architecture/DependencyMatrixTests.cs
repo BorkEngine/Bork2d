@@ -255,6 +255,43 @@ public sealed class DependencyMatrixTests
     }
 
     [Fact]
+    public void BakeFixtureReferencesOnlyApiAndNoTooling()
+    {
+        // The fixture stands in for a game's Project.Common: public data types and Bork2d.Api only.
+        // It must stay usable from the AOT proof and must never pull the bake tooling into a game.
+        AssertReferenceMatrix(typeof(Bork2d.BakeFixture.GameConfig).Assembly, "Bork2d.Api");
+
+        var references = typeof(Bork2d.BakeFixture.GameConfig).Assembly
+            .GetReferencedAssemblies()
+            .Select(reference => reference.Name ?? string.Empty)
+            .ToArray();
+
+        Assert.DoesNotContain(Tomlyn, references);
+        Assert.DoesNotContain(StbImageSharp, references);
+        Assert.DoesNotContain("Bork2d.Bake", references);
+        Assert.DoesNotContain("Bork2d.Bake.Cli", references);
+    }
+
+    [Fact]
+    public void BakeFixtureExposesOnlyItsRegisteredDataTypes()
+    {
+        var exported = typeof(Bork2d.BakeFixture.GameConfig).Assembly
+            .GetExportedTypes()
+            .Select(type => type.FullName ?? type.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "Bork2d.BakeFixture.GameConfig",
+                "Bork2d.BakeFixture.Stats",
+                "Bork2d.BakeFixture.StatsRoot",
+            },
+            exported);
+    }
+
+    [Fact]
     public void TestsMayReferenceEveryProject()
     {
         AssertReferenceMatrix(
@@ -264,6 +301,7 @@ public sealed class DependencyMatrixTests
             "Bork2d.Assets",
             "Bork2d.Bake",
             "Bork2d.Bake.Cli",
+            "Bork2d.BakeFixture",
             "Bork2d.Render",
             "Bork2d.Runtime");
     }

@@ -185,7 +185,7 @@ internal static class HostGenerator
             references.TryAdd(reference.AssemblyName, reference.Path);
         }
 
-        references.TryAdd("Project.Common", commonPath);
+        references.TryAdd(resolver.CommonAssemblyName, commonPath);
 
         string commonDirectory = Path.GetDirectoryName(commonPath) ?? AppContext.BaseDirectory;
         string toolingDirectory = AppContext.BaseDirectory;
