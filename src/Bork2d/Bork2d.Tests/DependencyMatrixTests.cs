@@ -113,6 +113,8 @@ public sealed class DependencyMatrixTests
         Assert.DoesNotContain(type, assembly.GetExportedTypes());
         Assert.False(typeof(Bork2d.Assets.ResolvedAsset).IsPublic);
         Assert.DoesNotContain(typeof(Bork2d.Assets.ResolvedAsset), assembly.GetExportedTypes());
+        Assert.False(typeof(Bork2d.Assets.AssetService).IsPublic);
+        Assert.DoesNotContain(typeof(Bork2d.Assets.AssetService), assembly.GetExportedTypes());
     }
 
     [Fact]
