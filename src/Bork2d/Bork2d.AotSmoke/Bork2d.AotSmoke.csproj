@@ -18,6 +18,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Bork2d.Api\Bork2d.Api.csproj" />
+        <ProjectReference Include="..\Bork2d.Assets\Bork2d.Assets.csproj" />
         <ProjectReference Include="..\Bork2d.Common\Bork2d.Common.csproj" />
         <ProjectReference Include="..\Bork2d.Runtime\Bork2d.Runtime.csproj" />
     </ItemGroup>
