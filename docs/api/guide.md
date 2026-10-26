@@ -322,14 +322,15 @@ public void Tick()
 
 ## 10. Assets
 
-`Status: Partial (M3 WP3).` The public contract, the internal path/VFS/browse stack, and the
-internal loader service are implemented: one dedicated loader thread, an unbounded FIFO queue,
-`LoadData`/`LoadAsset<T>` with fresh results per call, cancellation/join at shutdown, and the
-`AssetException`/`AssetErrorKind` failure contract. `IEngine.Assets` still returns the throwing
-`UnsupportedAssets` stub in this tree, so game code sees `NotSupportedException` until WP5 wires
-the service into `Run()`/`Dispose()`. `LoadSprite` remains a WP3 stub: it validates the path,
-logs a miss, and returns `Sprite.Empty`; the sprite/descriptor CPU pipeline is WP4. The examples
-below compile against the contract and describe the runtime behavior.
+`Status: Partial (M3 WP4).` The public contract, the internal path/VFS/browse stack, the internal
+loader service, and the sprite CPU pipeline are implemented: one dedicated loader thread, an
+unbounded FIFO queue, `LoadData`/`LoadAsset<T>` with fresh results per call, `LoadSprite` with an
+idempotent session-local handle and an asynchronous sprite + descriptor load, cancellation/join at
+shutdown, and the `AssetException`/`AssetErrorKind` failure contract. The raw sprite payload is not
+read in M3 and there is no public readiness query. `IEngine.Assets` still returns the throwing
+`UnsupportedAssets` stub in this tree, so game code sees `NotSupportedException` until WP5 wires the
+service into `Run()`/`Dispose()`. The examples below compile against the contract and describe the
+runtime behavior.
 
 ```csharp
 using PolyType;
@@ -407,19 +408,24 @@ Sprite player = _engine.Assets.LoadSprite("sprites/player/idle");
 - **`AssetInfo`.** Reports `Path`, `IsRaw`, `IsCompressed`, `Length`, `Size`, and `PackPath` from
   the header without decompressing. `PackPath` is the supplied pack identifier, not the resolved
   absolute path.
-- **Sprites.** `LoadSprite` is a WP3 stub: it validates the path, logs a miss, and returns
-  `Sprite.Empty`. A present path also returns no handle yet; WP4 adds the idempotent session-local
-  handle and the CPU sprite/descriptor metadata load (the raw payload stays unread in M3). Handles
-  are never serialized, and M3 has no readiness query.
+- **Sprites.** `LoadSprite` validates the path synchronously and returns a session-local `Sprite`
+  handle immediately. A cached path returns the same handle, including while the load is pending and
+  after it fails; a missing path logs and returns `Sprite.Empty` without caching a handle. The
+  handle is not a readiness signal: the sprite asset and its texture descriptor load on the loader
+  thread, and there is **no public readiness query** in M3 (M8 resolves readiness at draw time). The
+  raw texture payload is **not** read or decompressed in M3. A load or validation failure logs and
+  leaves the handle non-renderable; it does not throw to the caller, retry, or produce a
+  placeholder. Descriptor/sprite types stay internal; `LoadAsset<T>` with those internal shapes is
+  test-only and validates against the enqueue-time pack snapshot.
 - **Lifetime.** All members are thread-safe. Stopping the service (WP5 wires this into `Run`)
   cancels pending load tasks and joins the loader. After that, members throw
   `ObjectDisposedException`; the `IEngine.Assets` getter itself never throws.
 
 ### Building a pack (tooling only)
 
-The pack **writer** is available now from a tool, test, or editor host. The internal runtime
-loader is WP3 and WP5 wires it into the app; the sprite pipeline is WP4. Game code must not
-reference `Bork2d.Assets`.
+The pack **writer** is available now from a tool, test, or editor host. The internal runtime loader
+(including the sprite CPU pipeline) is implemented in `Bork2d.Assets`; WP5 wires it into the app.
+Game code must not reference `Bork2d.Assets`.
 
 ```csharp
 using Bork2d.Assets;

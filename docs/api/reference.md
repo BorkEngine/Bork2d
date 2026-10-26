@@ -232,16 +232,17 @@ the clock, dispatches text, then calls `Tick`. In headless/offscreen there is no
 
 ## 7. `IAssets`
 
-`Status: Partial (M3 WP3).` The public contract is `Current`: the six members, XML docs, the
+`Status: Partial (M3 WP4).` The public contract is `Current`: the six members, XML docs, the
 `IShapeable<T>` constraint, and `AssetInfo`. Canonical paths, filesystem resolution, the internal
 base/overlay VFS, atomic `LoadPack` mounting, and `Browse`/`Exists` lookup are implemented in
-`Bork2d.Assets` (WP2). The internal `AssetService` (WP3) now implements the real load bodies: one
-dedicated loader thread, an unbounded FIFO queue, enqueue-time pack-entry resolution,
-cancellation/join at shutdown, `LoadData`, `LoadAsset<T>`, `LoadPack`/`Browse`/`Exists`
-delegation, and `AssetException`/`AssetErrorKind` failures. `LoadSprite` is a documented WP3 stub:
-it validates the path, logs a missing path, and returns `Sprite.Empty`; the sprite/descriptor
-pipeline is WP4. `IEngine.Assets` still returns an `UnsupportedAssets` stub in this tree, so game
-code sees `NotSupportedException` until WP5 wires the service.
+`Bork2d.Assets` (WP2). The internal `AssetService` (WP3) implements the read bodies: one dedicated
+loader thread, an unbounded FIFO queue, enqueue-time pack-entry resolution, cancellation/join at
+shutdown, `LoadData`, `LoadAsset<T>`, `LoadPack`/`Browse`/`Exists` delegation, and
+`AssetException`/`AssetErrorKind` failures. WP4 adds the `LoadSprite` CPU pipeline: an idempotent
+session-local handle plus sprite + descriptor load on the loader thread, with a per-texture
+descriptor cache and a per-sprite resource cache. The raw payload is never read in M3 and there is
+no public readiness API. `IEngine.Assets` still returns an `UnsupportedAssets` stub in this tree, so
+game code sees `NotSupportedException` until WP5 wires the service.
 
 ```csharp
 public interface IAssets
@@ -261,8 +262,8 @@ reflection-shape fallback.
 
 | Member | Contract |
 | --- | --- |
-| `LoadAsset<T>(string)` | Loads a MessagePack asset using the compiled shape on `T`. A fresh instance per call. Raw entries fault with `AssetException(RawAsset)`; missing paths fault with `NotFound`; decode failures fault with `Decode`. Use `LoadData` for raw bytes. Implemented by the internal service (WP3). |
-| `LoadSprite(string)` | Resolves a canonical path synchronously to a session-local handle. WP3 stub: a missing path logs and returns `Sprite.Empty`; a present path logs and also returns no handle yet. The sprite/descriptor CPU pipeline and idempotent handles are WP4. |
+| `LoadAsset<T>(string)` | Loads a MessagePack asset using the compiled shape on `T`. A fresh instance per call. Raw entries fault with `AssetException(RawAsset)`; missing paths fault with `NotFound`; decode failures fault with `Decode`. A deserialized internal `TextureDescriptor`/`SpriteAsset` is validated against the enqueue-time snapshot and faults `InvalidData` when invalid (including a missing texture descriptor/payload for a sprite). Use `LoadData` for raw bytes. Implemented by the internal service (WP3/WP4). |
+| `LoadSprite(string)` | Normalizes/validates the path and returns a session-local handle immediately. A cached path returns the same handle, including while pending and after failure. A missing path logs and returns `Sprite.Empty` without caching a handle. A present path allocates a handle, enqueues a sprite + texture-descriptor CPU load on the existing loader thread, and does not read the raw payload. Failures log and leave the handle non-renderable; there is no public readiness query and no retry. Implemented by the internal service (WP4). |
 | `LoadData(string)` | Decompressed bytes for any asset kind, as a fresh `byte[]` per call. Missing → `AssetException(NotFound)`; a declared size above `Array.MaxLength` → `AssetException(InvalidData)`. Implemented by the internal service (WP3). |
 | `LoadPack(string)` | Synchronously opens, validates, and mounts a pack above the current stack. Later mounts shadow earlier paths; no unload. A bad/missing pack throws `Bork2dException` with the resolved path and leaves the stack unchanged. Thread-safe and atomic. |
 | `Browse(string? prefix = null)` | Materialized snapshot of visible entries, one per canonical path, shadowed paths hidden. `null` means all; a non-null prefix is normalized and matched on a `/` segment boundary; results are sorted by `Path` ordinal. Empty VFS → empty list. An empty prefix is invalid. |
@@ -286,6 +287,12 @@ reflection-shape fallback.
   loose-file fallback, or automatic retry in v1. After the internal service is stopped (WP3) every
   member throws `ObjectDisposedException` synchronously; the `IEngine.Assets` getter itself never
   throws (WP5 wires it).
+- **Internal descriptor/sprite validation (WP4).** `TextureDescriptor` and `SpriteAsset` stay
+  internal; tests exercise them through `LoadAsset<T>`. A valid descriptor/sprite returns a fresh
+  deserialized instance; invalid data faults `InvalidData` naming the path/reason; missing/raw
+  top-level entries keep the WP3 `NotFound`/`RawAsset` behavior. These reads are independent of the
+  `LoadSprite` caches. `LoadSprite` publishes only internal CPU resources and never exposes a
+  readiness or descriptor API.
 
 `AssetInfo` is the value type returned by `Browse`:
 
@@ -589,9 +596,10 @@ builder.Write("assets.pck");   // overwrites; relative to the current directory
 - The builder is not thread-safe. `Build()`/`Write()` may be repeated, and entries may be added
   after a build.
 - Runtime path/VFS/browse internals are implemented in `Bork2d.Assets` (WP2); the internal loader
-  service (one thread, FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join) is WP3; public
-  `IEngine.Assets` wiring is WP5, and descriptor/sprite assets are WP4. This section documents the
-  writer only.
+  service (one thread, FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join) is WP3; the internal
+  texture-descriptor/sprite models, `LoadSprite` CPU pipeline, and resource caches are WP4. Public
+  `IEngine.Assets` wiring is WP5. This section documents the writer only; no descriptor/sprite type
+  is public.
 
 ## 14. Errors and exceptions
 

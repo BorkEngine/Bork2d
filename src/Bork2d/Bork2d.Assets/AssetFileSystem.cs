@@ -30,7 +30,7 @@ namespace Bork2d.Assets;
 internal sealed class AssetFileSystem : IDisposable
 {
     private readonly Lock _mountLock = new();
-    private Snapshot? _snapshot = Snapshot.Empty;
+    private AssetSnapshot? _snapshot = AssetSnapshot.Empty;
     private bool _disposed;
 
     /// <summary>
@@ -50,7 +50,7 @@ internal sealed class AssetFileSystem : IDisposable
     /// <exception cref="ObjectDisposedException">The filesystem has been disposed.</exception>
     internal bool Exists(string assetPath)
     {
-        Snapshot snapshot = GetSnapshot();
+        AssetSnapshot snapshot = CaptureSnapshot();
         string canonicalPath = AssetPath.Normalize(assetPath);
         return snapshot.Entries.ContainsKey(canonicalPath);
     }
@@ -70,7 +70,7 @@ internal sealed class AssetFileSystem : IDisposable
     /// <exception cref="ObjectDisposedException">The filesystem has been disposed.</exception>
     internal IReadOnlyList<AssetInfo> Browse(string? prefix = null)
     {
-        Snapshot snapshot = GetSnapshot();
+        AssetSnapshot snapshot = CaptureSnapshot();
         string? canonicalPrefix = prefix is null ? null : AssetPath.Normalize(prefix);
         string prefixWithSeparator = canonicalPrefix is null ? string.Empty : canonicalPrefix + "/";
 
@@ -117,15 +117,14 @@ internal sealed class AssetFileSystem : IDisposable
         [NotNullWhen(true)] out ResolvedAsset? entry)
     {
         ArgumentNullException.ThrowIfNull(canonicalPath);
-        Snapshot snapshot = GetSnapshot();
-        return snapshot.Entries.TryGetValue(canonicalPath, out entry);
+        return CaptureSnapshot().TryGetEntry(canonicalPath, out entry);
     }
 
     /// <summary>
     /// Gets the number of mounted packs in the current stack.
     /// </summary>
     /// <exception cref="ObjectDisposedException">The filesystem has been disposed.</exception>
-    internal int PackCount => GetSnapshot().Archives.Length;
+    internal int PackCount => CaptureSnapshot().Archives.Length;
 
     /// <summary>
     /// Synchronously opens, validates, and mounts a pack above the current stack.
@@ -146,7 +145,7 @@ internal sealed class AssetFileSystem : IDisposable
     /// <exception cref="ObjectDisposedException">The filesystem has been disposed.</exception>
     internal PackMountInfo LoadPack(string packPath)
     {
-        _ = GetSnapshot();
+        _ = CaptureSnapshot();
         ArgumentNullException.ThrowIfNull(packPath);
         if (string.IsNullOrWhiteSpace(packPath))
         {
@@ -165,9 +164,9 @@ internal sealed class AssetFileSystem : IDisposable
                     throw new ObjectDisposedException(nameof(AssetFileSystem));
                 }
 
-                Snapshot current = Volatile.Read(ref _snapshot)
+                AssetSnapshot current = Volatile.Read(ref _snapshot)
                     ?? throw new ObjectDisposedException(nameof(AssetFileSystem));
-                Snapshot next = CreateSnapshot(current, archive, packPath);
+                AssetSnapshot next = CreateSnapshot(current, archive, packPath);
                 Volatile.Write(ref _snapshot, next);
             }
 
@@ -194,7 +193,7 @@ internal sealed class AssetFileSystem : IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
-        Snapshot? snapshot;
+        AssetSnapshot? snapshot;
         lock (_mountLock)
         {
             if (_disposed)
@@ -218,8 +217,8 @@ internal sealed class AssetFileSystem : IDisposable
         }
     }
 
-    private static Snapshot CreateSnapshot(
-        Snapshot current,
+    private static AssetSnapshot CreateSnapshot(
+        AssetSnapshot current,
         PackArchive archive,
         string packPath)
     {
@@ -243,36 +242,23 @@ internal sealed class AssetFileSystem : IDisposable
                 packEntry);
         }
 
-        return new Snapshot(archives, entries);
+        return new AssetSnapshot(archives, entries);
     }
 
-    private Snapshot GetSnapshot()
+    /// <summary>
+    /// Captures the current immutable snapshot. Requests call this once at enqueue time and resolve
+    /// every entry for that request against it.
+    /// </summary>
+    /// <returns>The current snapshot.</returns>
+    /// <exception cref="ObjectDisposedException">The filesystem has been disposed.</exception>
+    internal AssetSnapshot CaptureSnapshot()
     {
-        Snapshot? snapshot = Volatile.Read(ref _snapshot);
+        AssetSnapshot? snapshot = Volatile.Read(ref _snapshot);
         if (snapshot is null)
         {
             throw new ObjectDisposedException(nameof(AssetFileSystem));
         }
 
         return snapshot;
-    }
-
-    private sealed class Snapshot
-    {
-        internal static readonly Snapshot Empty = new(
-            [],
-            new Dictionary<string, ResolvedAsset>(StringComparer.Ordinal));
-
-        internal Snapshot(
-            PackArchive[] archives,
-            Dictionary<string, ResolvedAsset> entries)
-        {
-            Archives = archives;
-            Entries = entries;
-        }
-
-        internal PackArchive[] Archives { get; }
-
-        internal Dictionary<string, ResolvedAsset> Entries { get; }
     }
 }

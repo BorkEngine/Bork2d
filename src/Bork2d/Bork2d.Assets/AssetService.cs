@@ -38,6 +38,7 @@ internal sealed class AssetService : IAssets, IDisposable
 
     private readonly Lock _lock = new();
     private readonly AssetFileSystem _fileSystem = new();
+    private readonly AssetResourceTable _resources = new();
     private readonly Queue<AssetRequest> _queue = new();
     private readonly SemaphoreSlim _signal = new(0);
     private readonly CancellationTokenSource _stopping = new();
@@ -80,10 +81,72 @@ internal sealed class AssetService : IAssets, IDisposable
     internal Action<string>? RequestProcessingHook { get; set; }
 
     /// <summary>
+    /// Gets or sets a deterministic test hook invoked on the loader thread after a sprite resource
+    /// has been built and before it is published. Tests use it to order shutdown against the final
+    /// publication critical section without sleeps.
+    /// </summary>
+    /// <remarks>Production code never sets this property.</remarks>
+    internal Action<string>? SpriteResourcePublishHook { get; set; }
+
+    /// <summary>
+    /// Gets or sets a deterministic test hook invoked on the caller of <see cref="Stop"/> after the
+    /// service marks itself disposed. Tests use it to wait for shutdown ordering without sleeps.
+    /// </summary>
+    /// <remarks>Production code never sets this property.</remarks>
+    internal Action? ServiceDisposedHook { get; set; }
+
+    /// <summary>
     /// Gets the dedicated loader thread, or <see langword="null"/> before
     /// <see cref="Start"/> or after it has been joined.
     /// </summary>
     internal Thread? LoaderThread => Volatile.Read(ref _loaderThread);
+
+    /// <summary>Gets the number of cached sprite handles (internal test access only).</summary>
+    internal int SpriteHandleCount => _resources.SpriteHandleCount;
+
+    /// <summary>Gets the number of cached texture resources, including failures.</summary>
+    internal int TextureResourceCount => _resources.TextureResourceCount;
+
+    /// <summary>Gets the number of cached sprite resources, including failures.</summary>
+    internal int SpriteResourceCount => _resources.SpriteResourceCount;
+
+    /// <summary>Looks up the internal CPU sprite resource for a handle (test access only).</summary>
+    /// <param name="handle">The opaque sprite handle.</param>
+    /// <param name="resource">The resource, including a failed resource, or <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> when the handle's sprite path has a cached resource.</returns>
+    internal bool TryGetSpriteResource(
+        Sprite handle,
+        [NotNullWhen(true)] out SpriteResource? resource)
+        => _resources.TryGetSpriteResource(handle, out resource);
+
+    /// <summary>Looks up the internal CPU texture resource for a path (test access only).</summary>
+    /// <param name="texturePath">The canonical texture descriptor path.</param>
+    /// <param name="resource">The resource, including a failed resource, or <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> when the path has a cached resource.</returns>
+    internal bool TryGetTextureResource(
+        string texturePath,
+        [NotNullWhen(true)] out TextureResource? resource)
+        => _resources.TryGetTextureResource(texturePath, out resource);
+
+    /// <summary>Looks up the cached handle entry for a canonical sprite path (test access only).</summary>
+    /// <param name="canonicalPath">The canonical sprite path.</param>
+    /// <param name="entry">The cached handle entry, or <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> when a handle is cached for the path.</returns>
+    internal bool TryGetSpriteHandle(
+        string canonicalPath,
+        [NotNullWhen(true)] out SpriteHandleEntry? entry)
+        => _resources.TryGetHandle(canonicalPath, out entry);
+
+    /// <summary>
+    /// Gets the internal sprite-load completion signal for a handle (test access only). It is never
+    /// exposed through the public API; M3 has no public readiness query.
+    /// </summary>
+    /// <param name="handle">The opaque sprite handle.</param>
+    /// <returns>
+    /// The completion task; it produces <see langword="true"/> on success, <see langword="false"/>
+    /// on failure, and stays pending when a load is dropped at shutdown.
+    /// </returns>
+    internal Task<bool> GetSpriteCompletion(Sprite handle) => _resources.GetCompletion(handle);
 
     /// <summary>
     /// Opens and validates the base pack, starts the loader thread, and logs the start event.
@@ -169,6 +232,8 @@ internal sealed class AssetService : IAssets, IDisposable
             loader = _loaderThread;
         }
 
+        ServiceDisposedHook?.Invoke();
+
         int canceled = CancelRequests(queued, inFlight, _stopping.Token);
 
         try
@@ -230,7 +295,8 @@ internal sealed class AssetService : IAssets, IDisposable
         string canonicalPath = AssetPath.Normalize(assetPath);
         ThrowIfDisposed();
 
-        if (!_fileSystem.TryGetEntry(canonicalPath, out ResolvedAsset? entry))
+        AssetSnapshot snapshot = _fileSystem.CaptureSnapshot();
+        if (!snapshot.TryGetEntry(canonicalPath, out ResolvedAsset? entry))
         {
             return Faulted<T>(AssetFailures.NotFound(canonicalPath));
         }
@@ -244,7 +310,7 @@ internal sealed class AssetService : IAssets, IDisposable
             canonicalPath,
             entry.ResolvedPackPath,
             MessagePackKind,
-            () => DeserializeAsset<T>(entry));
+            () => DeserializeAndValidate<T>(entry, snapshot, canonicalPath));
         Enqueue(request);
         return request.TypedCompletion;
     }
@@ -255,7 +321,13 @@ internal sealed class AssetService : IAssets, IDisposable
         string canonicalPath = AssetPath.Normalize(assetPath);
         ThrowIfDisposed();
 
-        if (!_fileSystem.TryGetEntry(canonicalPath, out _))
+        if (_resources.TryGetHandle(canonicalPath, out SpriteHandleEntry? cachedHandle))
+        {
+            return cachedHandle.Handle;
+        }
+
+        AssetSnapshot snapshot = _fileSystem.CaptureSnapshot();
+        if (!snapshot.TryGetEntry(canonicalPath, out ResolvedAsset? entry))
         {
             _logger.LogInformation(
                 "Sprite asset '{AssetPath}' was not found; returning Sprite.Empty.",
@@ -263,13 +335,18 @@ internal sealed class AssetService : IAssets, IDisposable
             return Sprite.Empty;
         }
 
-        // The sprite/descriptor resource pipeline and the opaque handle table are WP4. Until then a
-        // present path is a documented stub: it logs and returns no handle rather than pretending
-        // to have loaded metadata that does not exist yet.
-        _logger.LogDebug(
-            "Sprite asset '{AssetPath}' resolved; the sprite/descriptor pipeline arrives with WP4.",
-            canonicalPath);
-        return Sprite.Empty;
+        SpriteHandleEntry handle = _resources.GetOrAddHandle(canonicalPath, out bool created);
+        if (created)
+        {
+            var request = new SpriteLoadRequest(
+                canonicalPath,
+                entry.ResolvedPackPath,
+                handle,
+                () => LoadSpriteCore(canonicalPath, snapshot, handle));
+            Enqueue(request);
+        }
+
+        return handle.Handle;
     }
 
     /// <inheritdoc/>
@@ -278,7 +355,8 @@ internal sealed class AssetService : IAssets, IDisposable
         string canonicalPath = AssetPath.Normalize(assetPath);
         ThrowIfDisposed();
 
-        if (!_fileSystem.TryGetEntry(canonicalPath, out ResolvedAsset? entry))
+        AssetSnapshot snapshot = _fileSystem.CaptureSnapshot();
+        if (!snapshot.TryGetEntry(canonicalPath, out ResolvedAsset? entry))
         {
             return Faulted<byte[]>(AssetFailures.NotFound(canonicalPath));
         }
@@ -367,70 +445,127 @@ internal sealed class AssetService : IAssets, IDisposable
         DisposeResources();
     }
 
-    private static void DrainToEnd(Stream stream, string canonicalPath, string packPath)
+    private static T DeserializeAndValidate<T>(
+        ResolvedAsset entry,
+        AssetSnapshot snapshot,
+        string canonicalPath)
+        where T : class, IShapeable<T>
     {
-        Span<byte> buffer = stackalloc byte[256];
-        while (true)
-        {
-            int read;
-            try
-            {
-                read = stream.Read(buffer);
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                throw AssetFailures.Map(canonicalPath, packPath, exception);
-            }
+        T value = AssetDeserializer.Deserialize<T>(entry);
 
-            if (read == 0)
+        if (value is TextureDescriptor descriptor)
+        {
+            string? reason = AssetValidation.ValidateTexture(descriptor, snapshot, out _);
+            if (reason is not null)
             {
-                return;
+                throw AssetFailures.InvalidData(canonicalPath, reason);
             }
+        }
+        else if (value is SpriteAsset sprite)
+        {
+            ValidateSpriteForLoadAsset(sprite, snapshot, canonicalPath);
+        }
+
+        return value;
+    }
+
+    private static void ValidateSpriteForLoadAsset(
+        SpriteAsset sprite,
+        AssetSnapshot snapshot,
+        string canonicalPath)
+    {
+        string? reason = AssetValidation.ValidateSprite(sprite);
+        if (reason is not null)
+        {
+            throw AssetFailures.InvalidData(canonicalPath, reason);
+        }
+
+        string texturePath = sprite.Texture!;
+        if (!snapshot.TryGetEntry(texturePath, out ResolvedAsset? descriptorEntry))
+        {
+            throw AssetFailures.InvalidData(
+                canonicalPath,
+                $"the texture descriptor '{texturePath}' is not present in the captured snapshot");
+        }
+
+        if (descriptorEntry.IsRaw)
+        {
+            throw AssetFailures.InvalidData(
+                canonicalPath,
+                $"the texture descriptor '{texturePath}' is raw data; a texture descriptor must be "
+                    + "MessagePack");
+        }
+
+        TextureDescriptor descriptor;
+        try
+        {
+            descriptor = AssetDeserializer.Deserialize<TextureDescriptor>(descriptorEntry);
+        }
+        catch (AssetException exception) when (exception.Kind == AssetErrorKind.Decode)
+        {
+            throw AssetFailures.InvalidData(
+                canonicalPath,
+                $"the texture descriptor '{texturePath}' could not be decoded: {exception.Message}");
+        }
+
+        reason = AssetValidation.ValidateTexture(descriptor, snapshot, out _);
+        if (reason is not null)
+        {
+            throw AssetFailures.InvalidData(
+                canonicalPath,
+                $"the texture descriptor '{texturePath}' is invalid: {reason}");
         }
     }
 
-    private static T DeserializeAsset<T>(ResolvedAsset entry)
-        where T : class, IShapeable<T>
-    {
-        using Stream stream = entry.OpenDecompressedStream();
+    private static AssetException ToAssetException(
+        Exception exception,
+        string canonicalPath,
+        string packPath)
+        => exception as AssetException
+            ?? (AssetException)AssetFailures.Map(canonicalPath, packPath, exception);
 
-        T? value;
+    private static TextureResource LoadTextureResource(
+        string texturePath,
+        AssetSnapshot snapshot)
+    {
+        ResolvedAsset? entry = null;
         try
         {
-            value = PackSerialization.DeserializeAsset<T>(stream);
+            if (!snapshot.TryGetEntry(texturePath, out entry))
+            {
+                throw AssetFailures.InvalidData(
+                    texturePath,
+                    "the texture descriptor is not present in the captured snapshot");
+            }
+
+            if (entry.IsRaw)
+            {
+                throw AssetFailures.InvalidData(
+                    texturePath,
+                    "the texture descriptor is raw data; a texture descriptor must be MessagePack");
+            }
+
+            TextureDescriptor descriptor = AssetDeserializer.Deserialize<TextureDescriptor>(entry);
+            string? reason = AssetValidation.ValidateTexture(
+                descriptor,
+                snapshot,
+                out ResolvedAsset? payload);
+            if (reason is not null)
+            {
+                throw AssetFailures.InvalidData(texturePath, reason);
+            }
+
+            return TextureResource.Ready(texturePath, descriptor, payload!);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Exception mapped = AssetFailures.Map(
-                entry.Path,
-                entry.ResolvedPackPath,
-                exception);
-            if (mapped is AssetException { Kind: AssetErrorKind.Decode } decoded)
-            {
-                throw new AssetException(
-                    AssetErrorKind.Decode,
-                    entry.Path,
-                    $"Failed to deserialize asset '{entry.Path}' as {TypeName<T>()}: "
-                        + decoded.Message,
-                    exception);
-            }
-
-            throw;
+            AssetException failure = ToAssetException(
+                exception,
+                texturePath,
+                entry?.ResolvedPackPath ?? texturePath);
+            return TextureResource.Failed(texturePath, failure);
         }
-
-        // The generated-shape deserializer may stop at the end of the MessagePack object without
-        // consuming the rest of the declared payload. Draining verifies the exact declared Size: a
-        // short payload throws and trailing decompressed bytes past the declared Size throw.
-        DrainToEnd(stream, entry.Path, entry.ResolvedPackPath);
-
-        return value
-            ?? throw new AssetException(
-                AssetErrorKind.Decode,
-                entry.Path,
-                $"Asset '{entry.Path}' deserialized to null as {TypeName<T>()}.");
     }
-
-    private static string TypeName<T>() => typeof(T).FullName ?? typeof(T).Name;
 
     private static int CancelRequests(
         AssetRequest[] queued,
@@ -530,14 +665,14 @@ internal sealed class AssetService : IAssets, IDisposable
         try
         {
             RequestProcessingHook?.Invoke(request.CanonicalPath);
-            if (request.Completion.IsCanceled)
+            if (request.Completion.IsCanceled || request.IsDropped)
             {
                 return;
             }
 
             request.Execute();
 
-            if (request.Completion.IsCanceled)
+            if (request.Completion.IsCanceled || request.IsDropped)
             {
                 return;
             }
@@ -582,6 +717,99 @@ internal sealed class AssetService : IAssets, IDisposable
         }
 
         CancelRequests(remaining, inFlight: null, cancellationToken: _stopping.Token);
+    }
+
+    private void LoadSpriteCore(
+        string canonicalPath,
+        AssetSnapshot snapshot,
+        SpriteHandleEntry handle)
+    {
+        SpriteResource resource;
+        try
+        {
+            resource = BuildSpriteResource(canonicalPath, snapshot);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            AssetException failure = ToAssetException(exception, canonicalPath, canonicalPath);
+            _resources.PublishSprite(SpriteResource.Failed(canonicalPath, failure.Message));
+            handle.Fail();
+            throw failure;
+        }
+
+        SpriteResourcePublishHook?.Invoke(canonicalPath);
+
+        // Order the valid publication and handle completion against Stop. Stop sets _disposed under
+        // the same lock; if shutdown won, drop the load instead of publishing a resource that the
+        // caller can never use. A load that publishes before Stop marks the service disposed is a
+        // pre-shutdown completion and remains valid.
+        lock (_lock)
+        {
+            if (_disposed)
+            {
+                handle.Drop();
+                return;
+            }
+
+            _resources.PublishSprite(resource);
+            handle.Complete();
+        }
+    }
+
+    private SpriteResource BuildSpriteResource(string canonicalPath, AssetSnapshot snapshot)
+    {
+        if (!snapshot.TryGetEntry(canonicalPath, out ResolvedAsset? spriteEntry))
+        {
+            throw AssetFailures.InvalidData(
+                canonicalPath,
+                "the sprite asset is not present in the captured snapshot");
+        }
+
+        if (spriteEntry.IsRaw)
+        {
+            throw AssetFailures.InvalidData(
+                canonicalPath,
+                "the sprite asset is raw data; a sprite asset must be MessagePack");
+        }
+
+        SpriteAsset sprite = AssetDeserializer.Deserialize<SpriteAsset>(spriteEntry);
+        string? reason = AssetValidation.ValidateSprite(sprite);
+        if (reason is not null)
+        {
+            throw AssetFailures.InvalidData(canonicalPath, reason);
+        }
+
+        string texturePath = sprite.Texture!;
+        TextureResource texture = GetOrLoadTextureResource(texturePath, snapshot);
+        if (!texture.IsValid)
+        {
+            AssetException error = texture.Error!;
+            throw new AssetException(
+                error.Kind,
+                canonicalPath,
+                $"the texture descriptor '{texturePath}' is invalid: {error.Message}",
+                error);
+        }
+
+        return SpriteResource.Ready(canonicalPath, sprite, texture);
+    }
+
+    private TextureResource GetOrLoadTextureResource(
+        string texturePath,
+        AssetSnapshot snapshot)
+    {
+        if (_resources.TryGetTextureResource(texturePath, out TextureResource? cached))
+        {
+            _logger.LogDebug(
+                "Texture descriptor cache hit: path {TexturePath}, valid {IsValid}.",
+                texturePath,
+                cached.IsValid);
+            return cached;
+        }
+
+        TextureResource resource = LoadTextureResource(texturePath, snapshot);
+        _resources.PublishTexture(resource);
+        return resource;
     }
 
     private Task<T> Faulted<T>(AssetException exception)

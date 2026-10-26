@@ -259,26 +259,39 @@ thread never invokes a game callback.
 
 ## 6. Asset and pack coordination
 
-`Current (M3 WP3)` for the loader; renderer/resource-table integration is `Planned` (M8).
+`Current (M3 WP3–WP4)` for the loader and the CPU resource table; renderer/GPU integration is
+`Planned` (M8).
 
 - The internal asset service owns **one** dedicated loader thread per app and an unbounded FIFO
   request queue. There is no priority, no parallelism, and no cancellation token in the public API.
-  The loader reads, decompresses, and deserializes only; it never touches SDL, Vulkan, or game
-  entities.
-- `LoadData`/`LoadAsset<T>` validate arguments synchronously, resolve the winning pack entry
-  against the current immutable VFS snapshot, and enqueue the read. A later `LoadPack` mount does
-  not change an in-flight request; new lookups see the new stack.
+  The loader reads, decompresses, deserializes, and validates only; it never touches SDL, Vulkan, or
+  game entities.
+- `LoadData`/`LoadAsset<T>`/`LoadSprite` validate arguments synchronously, capture the current
+  immutable VFS snapshot, and resolve every entry for the request against that snapshot. A later
+  `LoadPack` mount does not change an in-flight request; new lookups see the new stack. `LoadSprite`
+  uses its snapshot on the loader thread for the sprite entry, its descriptor, and the descriptor's
+  payload.
 - Requests complete through `TaskCompletionSource` with `RunContinuationsAsynchronously`, so no
   request completes a continuation on the caller or loader thread. `LoadData` returns a fresh
   `byte[]` and `LoadAsset<T>` a fresh deserialized instance per call; there is no data/asset cache.
-  The CPU sprite/descriptor cache and handle table belong to WP4.
+- **CPU resource table (WP4).** The loader thread is the only writer of texture-descriptor and
+  sprite resources. A published resource is immutable; the table holds one descriptor resource per
+  texture path and one sprite resource per sprite path, including cached failures, with no weak
+  references and no unload. Handle allocation and lookup happen on the calling thread; reads take a
+  short `System.Threading.Lock` and no lock is held across a load, an await, or a blocking wait.
+  `LoadData`/`LoadAsset<T>` never consult the table, and there is no public readiness or resource
+  API. A repeated `LoadSprite` returns the same handle and does not enqueue.
 - Shutdown stops accepting requests, cancels queued and in-flight load tasks (they complete as
-  canceled), joins the loader at a safe point, and only then closes the mounted archives. After
-  shutdown every `IAssets` member throws `ObjectDisposedException`.
+  canceled), joins the loader at a safe point, and only then closes the mounted archives. Sprite
+  loads have no caller task; their handles stay non-renderable and the loads are dropped. A sprite
+  load checks the shutdown flag under the service lock before publishing a valid resource and
+  completing the handle, so a load that observes shutdown is dropped; a publication that completed
+  before the shutdown flag was set remains valid. After shutdown every `IAssets` member throws
+  `ObjectDisposedException`.
 - The virtual filesystem overlay table is immutable except for an atomic swap when `LoadPack`
   mounts a new pack; later packs shadow earlier ones and there is no unload in v1.
 - M3 has no renderer work: the loader never creates GPU resources. In M8 the renderer will create
-  GPU texture pages and uploads on the render thread and read an immutable resource table without
+  GPU texture pages and uploads on the render thread and read the immutable CPU resources without
   per-sprite locks; GPU page lifetime is retired after the referencing frames complete.
 
 See [Assets and tooling](assets-and-tooling.md).
@@ -292,7 +305,7 @@ Thread-specific rules:
   snapshot publication, control messages, and stop. It never outlives the Vulkan
   instance/surface (windowed) or device (offscreen). The asset loader thread is cancellable and
   joinable; queued and in-flight load tasks are canceled and the loader is joined at shutdown
-  (M3 WP3).
+  (M3 WP3); sprite loads are dropped and their handles stay non-renderable (M3 WP4).
 - The windowed OS thread is stopped and joined before `Run()` returns or throws; the window is
   destroyed before SDL quits. Background errors are stored and rethrown on the `Run()` caller after
   cleanup (the M2 platform fatal path is `Current`; the render-thread path is `Planned`). The tick
