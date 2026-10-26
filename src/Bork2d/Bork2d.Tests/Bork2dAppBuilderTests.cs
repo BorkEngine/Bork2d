@@ -280,6 +280,8 @@ public sealed class Bork2dAppBuilderTests
         Assert.Null(options.Game);
         Assert.Equal(0, options.GameSetCount);
         Assert.Equal("assets.pck", options.AssetsPackPath);
+        Assert.False(options.AssetsPackSelected);
+        Assert.False(options.WithoutAssetsSelected);
         Assert.Null(options.ConfigureLogging);
         Assert.False(string.IsNullOrWhiteSpace(options.Title));
         Assert.Equal(1280, options.Width);
@@ -368,6 +370,99 @@ public sealed class Bork2dAppBuilderTests
         Assert.Equal(
             ["Bork2d.Runtime.Bork2dApp", "Bork2d.Runtime.Bork2dAppBuilder`1"],
             exported);
+    }
+
+    [Fact]
+    public void WithoutAssetsIsStoredAndIdempotent()
+    {
+        var options = new Bork2dAppBuilder<GameLayer>()
+            .WithoutAssets()
+            .WithoutAssets()
+            .Options;
+
+        Assert.True(options.WithoutAssetsSelected);
+        Assert.False(options.AssetsPackSelected);
+        Assert.Equal("assets.pck", options.AssetsPackPath);
+    }
+
+    [Fact]
+    public void WithAssetsPackAndWithoutAssetsFailBuild()
+    {
+        var builder = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(new TestGame<GameLayer>())
+            .WithAssetsPack("custom.pck")
+            .WithoutAssets();
+
+        var exception = Assert.Throws<Bork2dException>(() => builder.Build());
+
+        Assert.Contains("mutually exclusive", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithoutAssetsThenWithAssetsPackFailsBuild()
+    {
+        var builder = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(new TestGame<GameLayer>())
+            .WithoutAssets()
+            .WithAssetsPack("custom.pck");
+
+        Assert.Throws<Bork2dException>(() => builder.Build());
+    }
+
+    [Fact]
+    public void WithoutAssetsBuildsWithoutADefaultPackFile()
+    {
+        string defaultPackPath = Path.Combine(Environment.CurrentDirectory, "assets.pck");
+        bool existedBefore = File.Exists(defaultPackPath);
+
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(new TestGame<GameLayer>())
+            .WithoutAssets()
+            .Build();
+
+        Assert.False(
+            !existedBefore && File.Exists(defaultPackPath),
+            "Build must not create the default assets pack.");
+    }
+
+    [Fact]
+    public void BuildDoesNotTouchTheFileSystemWithAMissingPackPath()
+    {
+        string missingPath = Path.Combine(
+            Path.GetTempPath(),
+            $"bork2d-missing-{Guid.NewGuid():N}",
+            "assets.pck");
+
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(new TestGame<GameLayer>())
+            .WithAssetsPack(missingPath)
+            .Build();
+
+        Assert.False(File.Exists(missingPath));
+        Assert.False(Directory.Exists(Path.GetDirectoryName(missingPath)!));
+    }
+
+    [Fact]
+    public void BuildsWithoutAssetsInEveryMode()
+    {
+        using var headless = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(new TestGame<GameLayer>())
+            .WithHeadless()
+            .WithoutAssets()
+            .Build();
+        using var offscreen = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(new TestGame<GameLayer>())
+            .WithOffscreen(320, 200)
+            .WithoutAssets()
+            .Build();
+        using var windowed = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(new TestGame<GameLayer>())
+            .WithoutAssets()
+            .Build();
+
+        Assert.NotNull(headless);
+        Assert.NotNull(offscreen);
+        Assert.NotNull(windowed);
     }
 
     private static void AssertInvalidLayer<TLayer>()

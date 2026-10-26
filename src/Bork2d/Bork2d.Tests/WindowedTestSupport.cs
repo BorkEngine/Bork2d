@@ -25,7 +25,8 @@ internal static class WindowedTestSupport
         => new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithTitle("Loop test")
-            .WithSdlApiFactory(() => sdl);
+            .WithSdlApiFactory(() => sdl)
+            .WithoutAssets();
 
     /// <summary>Blocks until the OS thread has applied a synchronizing title change.</summary>
     /// <param name="game">The game whose <c>Setup</c> captured the engine.</param>

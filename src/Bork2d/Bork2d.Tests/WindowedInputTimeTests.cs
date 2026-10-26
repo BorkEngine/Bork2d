@@ -175,7 +175,7 @@ public sealed class WindowedInputTimeTests
             delta = engine.Time.DeltaTime;
         };
 
-        var builder = new Bork2dAppBuilder<GameLayer>().WithGame(game);
+        var builder = new Bork2dAppBuilder<GameLayer>().WithGame(game).WithoutAssets();
         if (offscreen)
         {
             builder.WithOffscreen(320, 200);

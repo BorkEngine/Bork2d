@@ -15,6 +15,7 @@ public sealed class Bork2dAppTests
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .Build();
 
         app.Run();
@@ -31,6 +32,7 @@ public sealed class Bork2dAppTests
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .Build();
 
         var thread = new Thread(app.Run);
@@ -49,6 +51,7 @@ public sealed class Bork2dAppTests
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .Build();
         app.Run();
 
@@ -65,6 +68,7 @@ public sealed class Bork2dAppTests
         var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .Build();
         app.Dispose();
 
@@ -75,9 +79,9 @@ public sealed class Bork2dAppTests
     }
 
     [Fact]
-    public void DisposeBeforeRunIsSafe()
+    public void DisposeBeforeRunIsSafeAndDisposesTheUnstartedAssetService()
     {
-        var game = new TestGame<GameLayer>();
+        var game = new ScriptedGame<GameLayer>();
         var app = new Bork2dAppBuilder<GameLayer>().WithGame(game).Build();
 
         app.Dispose();
@@ -92,6 +96,7 @@ public sealed class Bork2dAppTests
         var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .Build();
         app.Run();
 
@@ -112,6 +117,7 @@ public sealed class Bork2dAppTests
         var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .Build();
 
         app.Run();
@@ -143,6 +149,7 @@ public sealed class Bork2dAppTests
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .Build();
 
         var thrown = Assert.Throws<InvalidOperationException>(() => app.Run());
@@ -171,6 +178,7 @@ public sealed class Bork2dAppTests
         var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .Build();
 
         var thrown = Assert.Throws<InvalidOperationException>(() => app.Run());
@@ -198,6 +206,7 @@ public sealed class Bork2dAppTests
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .Build();
 
         var thrown = Assert.Throws<InvalidOperationException>(() => app.Run());
@@ -209,12 +218,37 @@ public sealed class Bork2dAppTests
     }
 
     [Fact]
-    public void EngineWindowInputAndAssetsAreUnsupportedStubs()
+    public void EngineWindowInputAndEmptyAssetFileSystemBehaveAsDocumented()
     {
         var game = new ScriptedGame<GameLayer>();
+        IReadOnlyList<AssetInfo>? browse = null;
+        bool? exists = null;
+        Sprite sprite = default;
+        Task<byte[]>? dataTask = null;
+        Task<PackTestData>? assetTask = null;
+        Exception? loadPackError = null;
+        game.OnSetup = engine =>
+        {
+            browse = engine.Assets.Browse();
+            exists = engine.Assets.Exists("data/missing");
+            sprite = engine.Assets.LoadSprite("sprites/missing");
+            dataTask = engine.Assets.LoadData("data/missing");
+            assetTask = engine.Assets.LoadAsset<PackTestData>("data/config");
+
+            try
+            {
+                engine.Assets.LoadPack("overlays/missing.pck");
+            }
+            catch (Exception exception)
+            {
+                loadPackError = exception;
+            }
+        };
+
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .Build();
 
         app.Run();
@@ -222,6 +256,7 @@ public sealed class Bork2dAppTests
         var engine = game.Engine
             ?? throw new InvalidOperationException("Setup did not capture the engine.");
 
+        // Window and input keep their M2 stubs in headless mode.
         Assert.Throws<NotSupportedException>(() => { _ = engine.Window.Title; });
         Assert.Throws<NotSupportedException>(() => { engine.Window.Title = "title"; });
         Assert.Throws<NotSupportedException>(() => { _ = engine.Window.Size; });
@@ -232,12 +267,29 @@ public sealed class Bork2dAppTests
         Assert.Throws<NotSupportedException>(() => { engine.Window.CursorVisible = false; });
         Assert.Throws<NotSupportedException>(() => { _ = engine.Window.IsMinimized; });
         Assert.Throws<NotSupportedException>(() => { _ = engine.Input; });
-        Assert.Throws<NotSupportedException>(() => { _ = engine.Assets.LoadSprite("sprite.png"); });
-        Assert.Throws<NotSupportedException>(() => { _ = engine.Assets.LoadData("data.bin"); });
-        Assert.Throws<NotSupportedException>(() => { _ = engine.Assets.LoadAsset<PackTestData>("asset.bin"); });
-        Assert.Throws<NotSupportedException>(() => { engine.Assets.LoadPack("overlay.pck"); });
-        Assert.Throws<NotSupportedException>(() => { _ = engine.Assets.Browse(); });
-        Assert.Throws<NotSupportedException>(() => { _ = engine.Assets.Exists("data/bin"); });
+
+        // The real asset service is empty but present (D-M3-14).
+        Assert.Empty(browse!);
+        Assert.False(exists!.Value);
+        Assert.Equal(Sprite.Empty, sprite);
+
+        var notFoundData = Assert.Throws<AssetException>(() => dataTask!.GetAwaiter().GetResult());
+        Assert.Equal(AssetErrorKind.NotFound, notFoundData.Kind);
+        Assert.Equal("data/missing", notFoundData.AssetPath);
+
+        var notFoundAsset = Assert.Throws<AssetException>(() => assetTask!.GetAwaiter().GetResult());
+        Assert.Equal(AssetErrorKind.NotFound, notFoundAsset.Kind);
+        Assert.Equal("data/config", notFoundAsset.AssetPath);
+
+        Assert.IsType<Bork2dException>(loadPackError);
+
+        // The run stopped the service: reports throw, the getter does not (D-M3-14).
+        Assert.NotNull(engine.Assets);
+        Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.Browse(); });
+        Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.Exists("data/missing"); });
+        Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.LoadSprite("sprites/missing"); });
+        Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.LoadData("data/missing"); });
+        Assert.Throws<ObjectDisposedException>(() => { engine.Assets.LoadPack("overlays/missing.pck"); });
     }
 
     [Fact]
@@ -248,6 +300,7 @@ public sealed class Bork2dAppTests
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .WithSdlApiFactory(() =>
             {
                 invoked = true;
@@ -272,6 +325,7 @@ public sealed class Bork2dAppTests
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .WithLogging(_ => configured = true)
             .Build();
 
@@ -288,15 +342,24 @@ public sealed class Bork2dAppTests
         var window = new WindowProxy();
         var input = new InputProxy();
         var time = new StopwatchTime(0.25);
-        var engine = new Engine<GameLayer>(time, window, new FakeAssets(), input);
         var loggerFactory = new FakeLoggerFactory();
+        var assetService = new Bork2d.Assets.AssetService(basePackPath: null, loggerFactory);
+        var engine = new Engine<GameLayer>(time, window, assetService, input);
         var options = new Bork2dAppOptions<GameLayer>
         {
             Game = game,
             GameSetCount = 1,
         };
         var app = new Bork2dApp(
-            new AppRuntime<GameLayer>(engine, game, time, loggerFactory, options, window, input));
+            new AppRuntime<GameLayer>(
+                engine,
+                game,
+                time,
+                loggerFactory,
+                assetService,
+                options,
+                window,
+                input));
 
         app.Dispose();
         app.Dispose();
@@ -306,5 +369,10 @@ public sealed class Bork2dAppTests
         Assert.Equal(0, game.TeardownCount);
         Assert.Throws<ObjectDisposedException>(() => { _ = window.Title; });
         Assert.Throws<ObjectDisposedException>(() => { _ = input.IsKeyDown(KeyCode.A); });
+
+        // The unstarted service was disposed, never started: no loader thread, members throw.
+        Assert.Null(assetService.LoaderThread);
+        Assert.Throws<ObjectDisposedException>(() => { _ = assetService.Browse(); });
+        Assert.Throws<ObjectDisposedException>(() => { _ = assetService.Exists("data/missing"); });
     }
 }

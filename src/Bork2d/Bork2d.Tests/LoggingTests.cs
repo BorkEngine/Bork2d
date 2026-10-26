@@ -106,6 +106,7 @@ public sealed class LoggingTests
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .WithLogging(logging => logging.AddProvider(provider))
             .Build();
 
@@ -151,6 +152,7 @@ public sealed class LoggingTests
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .WithLogging(logging => logging.AddProvider(provider))
             .Build();
         app.Run();
@@ -174,6 +176,7 @@ public sealed class LoggingTests
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .Build();
         app.Run();
 
@@ -193,6 +196,7 @@ public sealed class LoggingTests
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .Build();
 
         app.Run();
@@ -235,6 +239,7 @@ public sealed class LoggingTests
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .WithLogging(_ => { })
             .Build();
         app.Run();
@@ -255,6 +260,7 @@ public sealed class LoggingTests
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
+            .WithoutAssets()
             .Build();
         app.Run();
 
