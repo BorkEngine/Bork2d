@@ -83,18 +83,24 @@ reflection-based construction, which also allows constructor injection. See the
   shapes**; no reflection resolver is configured.
 - M1 pins `Nerdbank.MessagePack` `1.4.95` in `Bork2d.Common`. An internal `[GenerateShape]` smoke
   type and round-trip helper prove the generated-shape path; `Bork2d.AotSmoke` sees them through
-  the intentional `InternalsVisibleTo`. The v1 pack header/entry shapes are `Current` (M3 WP1);
-  descriptor/sprite shapes are WP4.
+  the intentional `InternalsVisibleTo`. The v1 pack header/entry shapes are `Current` (M3 WP1); the
+  internal `TextureDescriptor` and `SpriteAsset` shapes are `Current` (M3 WP4). Descriptors and
+  sprites use property-name keys (not `[Key]`), an integer `SpriteTopology`, no per-asset version,
+  and Nerdbank's generated `System.Numerics.Vector2` shape (a map with `X`/`Y`); there is no
+  `vertices` field.
 - `LoadAsset<T>` is declared as `Task<T> LoadAsset<T>(string assetPath) where T : class,
   IShapeable<T>` (D-M3-22). `T` must carry a compiled generated shape (for example `[GenerateShape]`
   on the root type), so a missing shape is a **compile-time** error. There is no unconstrained call,
   reflection-shape fallback, runtime "missing shape" fault, or `NBMsgPack051` suppression. Pack
   header/entry classes, texture descriptors, sprite assets, and custom game data all use generated
   shapes; TOML exists only in `Project.Common` and the JIT baker/editor.
-- The M3 WP3 loader body deserializes with the shape from `T.GetTypeShape()` passed explicitly to
-  the serializer, so the reflection-shape provider is never consulted. The loader thread performs
-  file I/O, Zstd decompression, exact-size checking, and generated-shape deserialization only; it
-  never touches SDL, Vulkan, or dynamic code. The AOT smoke pack/load/browse proof is WP5.
+- The M3 WP3/WP4 loader body deserializes with the shape from `T.GetTypeShape()` passed explicitly
+  to the serializer, so the reflection-shape provider is never consulted. The internal sprite
+  pipeline also deserializes `SpriteAsset`/`TextureDescriptor` with their generated shapes and
+  validates them with ordinary C# checks (`typeof`/pattern matching, no reflection); it publishes
+  CPU resources only. The loader thread performs file I/O, Zstd decompression, exact-size checking,
+  generated-shape deserialization, and metadata validation only; it never touches SDL, Vulkan, or
+  dynamic code. The AOT smoke pack/load/browse proof is WP5.
 - `Bork2d.Api` references PolyType `1.4.1` for the `IShapeable<T>` constraint only. It stays free
   of Nerdbank.MessagePack, Zstd/`System.IO.Compression`, `System.IO.Hashing`, and file I/O, so the
   public contract does not pull the pack implementation into game code. `Bork2d.Assets` keeps its
