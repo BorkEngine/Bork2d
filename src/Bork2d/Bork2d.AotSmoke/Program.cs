@@ -1,4 +1,6 @@
-using Bork2d.Common;
+using Bork2d.AotSmoke.Demo;
+using Bork2d.AotSmoke.Smoke;
+using Bork2d.Common.Serialization;
 using Bork2d.Runtime;
 
 namespace Bork2d.AotSmoke;
@@ -9,7 +11,7 @@ namespace Bork2d.AotSmoke;
 /// <remarks>
 /// <para>
 /// The default (no arguments) run proves the M1 scene path and the M3 asset path: it builds a small
-/// temporary pack with the public <see cref="Bork2d.Assets.PackBuilder"/>, runs a one-tick headless
+/// temporary pack with the public <see cref="Bork2d.Assets.Pack.PackBuilder"/>, runs a one-tick headless
 /// app against it with default logging, creates a parented transform/camera/sprite, loads a raw and
 /// a generated-shape MessagePack asset, browses/exists, checks root cleanup, and deletes the pack
 /// after the app has disposed. It never loads SDL.

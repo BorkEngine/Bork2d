@@ -1,4 +1,4 @@
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Sdl;
 
 /// <summary>
 /// The SDL library version reported by <c>SDL_GetVersion</c>.

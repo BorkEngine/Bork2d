@@ -5,13 +5,12 @@ windowing through **Silk.NET**, with gameplay on a tick thread and rendering on 
 that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets ship in
 **`assets.pck`**, and windowed, offscreen, and headless modes are the target design.
 
-> **Status: pre-alpha.** M0 is complete and M1 (foundation + NativeAOT baseline) is merged into
-> `develop` (2026-10-25, PR #1), and M2 (SDL windowed platform) is merged into `develop`
-> (2026-10-26, PR #2): windowed mode opens a real SDL window, reads keyboard/mouse input, advances
-> `ITime`, and runs an uncapped loop until `Exit`/close. There is still no renderer, pack, or asset
-> system, and headless/offscreen keep the one-tick `Setup` → `Tick` → `Teardown` sequence. See the
-> [roadmap](docs/roadmap.md), [M2 spec](docs/specs/m2-sdl-platform.md), and
-> [M1 record](docs/specs/m1-foundation.md).
+> **Status: pre-alpha.** M0 is complete; M1 (foundation + NativeAOT baseline), M2 (SDL windowed
+> platform), and M3 (assets: pack, VFS, descriptors) are merged into `develop` (2026-10-26, PR #4).
+> Windowed mode opens a real SDL window and runs an uncapped loop; the runtime loads and browses
+> `assets.pck` through the app-scoped asset service. There is still no renderer (M8), and
+> headless/offscreen keep the one-tick `Setup` → `Tick` → `Teardown` sequence. See the
+> [roadmap](docs/roadmap.md) and the [M3 spec](docs/specs/m3-assets.md).
 
 ## Projects
 
@@ -21,13 +20,15 @@ that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets sh
 | [`Bork2d.Runtime`](src/Bork2d/Bork2d.Runtime) | Public builder/host; logging, validation, SDL window/input/time, windowed loop, one-tick modes. |
 | [`Bork2d.Common`](src/Bork2d/Bork2d.Common) | Engine, root-owned unordered scene tree, transforms, time. |
 | [`Bork2d.Render`](src/Bork2d/Bork2d.Render) | Vulkan renderer; reference-wired and empty until M6/M8. |
-| [`Bork2d.Assets`](src/Bork2d/Bork2d.Assets) | Pack VFS, loading, descriptors, sprite assets, bake support; empty until M3/M4. |
-| [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite and dependency-matrix test (292 tests: 283 deterministic, 9 opt-in real-window). |
+| [`Bork2d.Assets`](src/Bork2d/Bork2d.Assets) | Pack reader/writer, VFS, loader, descriptors, sprite assets; public tooling is `Bork2d.Assets.Pack`. |
+| [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite and dependency-matrix test (588 tests: 579 deterministic, 9 opt-in real-window). |
 | [`Bork2d.AotSmoke`](src/Bork2d/Bork2d.AotSmoke) | NativeAOT smoke executable: headless one-tick run plus `--windowed [--ticks N]` SDL demo; local publish/run gate. |
 | `Bork2d.Editor` | Planned Avalonia editor library/app (M5); JIT, not in the solution. |
 
-Game developers consume only `Bork2d.Api` and `Bork2d.Runtime`. A game solution adds
-`Project.Common`, `Project.Desktop`, and `Project.Editor`; those templates are M9.
+Game developers consume only `Bork2d.Api` and `Bork2d.Runtime`. `Bork2d.Api` is grouped by area
+(`Bork2d.Api.Scene`, `.Rendering`, `.Input`, `.Platform`, `.Assets`); the tooling pack writer lives
+in `Bork2d.Assets.Pack`. A game solution adds `Project.Common`, `Project.Desktop`, and
+`Project.Editor`; those templates are M9.
 
 ## Build
 

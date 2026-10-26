@@ -61,9 +61,9 @@ from the top-left, and an integer `ZIndex` sorts higher later. Sprite asset geom
 
 ### 1.4 Public surface and NativeAOT
 
-`Bork2d.Api` declares the interfaces in §2–§10 plus the value types `Sprite`, `Color`,
-`ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, and `Bork2dException`, and the error pair
-`AssetException`/`AssetErrorKind`; `ILoggerFactory` is a
+`Bork2d.Api` declares the interfaces in §2–§10 across the area namespaces in §1.5, plus the value
+types `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, and `Bork2dException`,
+and the error pair `AssetException`/`AssetErrorKind`; `ILoggerFactory` is a
 Microsoft.Extensions.Logging type exposed by `IEngine` (not defined in `Bork2d.Api`). The runtime
 is NativeAOT- and trim-safe: no reflection, assembly scanning, runtime TOML, or dynamic code;
 `LoadAsset<T>` requires a [PolyType](https://github.com/AArnott/PolyType) `IShapeable<T>` shape
@@ -72,8 +72,25 @@ references PolyType `1.4.1` for that constraint only (D-M3-22); it does not refe
 Nerdbank.MessagePack, `System.IO.Hashing`, Zstd, or file I/O. See
 [NativeAOT](../architecture/nativeaot.md).
 
-The only other public surface is the tooling-only pack writer in `Bork2d.Assets` (§13). Game code
-still references only `Bork2d.Api` and `Bork2d.Runtime`.
+The only other public surface is the tooling-only pack writer in `Bork2d.Assets.Pack` (§13). Game
+code still references only `Bork2d.Api` and `Bork2d.Runtime`.
+
+### 1.5 Namespaces
+
+The public contract is split by area; `IEngine`, `IGame`, and `Bork2dException` stay in the root
+namespace. Add the using for each area you touch (D-034).
+
+| Namespace | Types |
+| --- | --- |
+| `Bork2d.Api` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
+| `Bork2d.Api.Assets` | `IAssets`, `AssetInfo`, `AssetException`, `AssetErrorKind` |
+| `Bork2d.Api.Scene` | `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
+| `Bork2d.Api.Rendering` | `Sprite`, `Color`, `ClearKind` |
+| `Bork2d.Api.Input` | `IInput`, `KeyCode`, `MouseButton` |
+| `Bork2d.Api.Platform` | `IWindow`, `ITime` |
+
+The tooling-only pack writer is in `Bork2d.Assets.Pack` (§13); it is not part of the game
+contract.
 
 ## 2. `IEngine<TLayer>`
 
@@ -583,14 +600,14 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
   last values readable, and `IEngine.Exit()` is a no-op. `Run` returns `void`; failure is reported
   by exceptions.
 
-## 13. Pack tooling (`Bork2d.Assets`, tooling only)
+## 13. Pack tooling (`Bork2d.Assets.Pack`, tooling only)
 
-`Status: Current (M3).` `Bork2d.Assets` exposes exactly two public types for writing v1
+`Status: Current (M3).` `Bork2d.Assets.Pack` exposes exactly two public types for writing v1
 `assets.pck` files. This is a **tooling surface**: game code still references only `Bork2d.Api` and
 `Bork2d.Runtime`, and the runtime never exposes these types.
 
 ```csharp
-using Bork2d.Assets;
+using Bork2d.Assets.Pack;
 
 var builder = new PackBuilder(PackCompressionMode.Release);
 builder.AddRaw("textures/raw/player", rgba8Bytes);

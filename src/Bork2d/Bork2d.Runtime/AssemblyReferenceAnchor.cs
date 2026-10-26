@@ -1,3 +1,4 @@
+
 namespace Bork2d.Runtime;
 
 // Temporary build anchor: keeps the declared project references in the compiled assembly
@@ -8,9 +9,9 @@ internal static class AssemblyReferenceAnchor
 {
     internal static Type ApiContract => typeof(Bork2d.Api.IEngine<>);
 
-    internal static Type CommonImplementation => typeof(Bork2d.Common.Transform);
+    internal static Type CommonImplementation => typeof(Bork2d.Common.Scene.Transform);
 
-    internal static Type AssetsImplementation => typeof(Bork2d.Assets.PackBuilder);
+    internal static Type AssetsImplementation => typeof(Bork2d.Assets.Pack.PackBuilder);
 
     internal static Type RenderImplementation => typeof(Bork2d.Render.AssemblyReferenceAnchor);
 }

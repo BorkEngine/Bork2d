@@ -1,4 +1,4 @@
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Sdl;
 
 /// <summary>
 /// The SDL window flags the Bork2d platform uses.

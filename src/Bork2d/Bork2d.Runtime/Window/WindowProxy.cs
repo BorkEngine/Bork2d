@@ -1,8 +1,8 @@
 using System.Numerics;
-using Bork2d.Api;
+using Bork2d.Api.Platform;
 using Microsoft.Extensions.Logging;
 
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Window;
 
 /// <summary>
 /// The internal <see cref="IWindow"/> implementation the runtime host attaches to a live

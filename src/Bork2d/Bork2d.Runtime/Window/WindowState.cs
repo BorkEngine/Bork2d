@@ -1,4 +1,6 @@
-namespace Bork2d.Runtime;
+using Bork2d.Runtime.Sdl;
+
+namespace Bork2d.Runtime.Window;
 
 /// <summary>
 /// The immutable confirmed window state published by the OS/window thread.

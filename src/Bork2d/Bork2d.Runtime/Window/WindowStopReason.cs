@@ -1,4 +1,4 @@
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Window;
 
 /// <summary>
 /// Why the windowed platform stopped its event pump.

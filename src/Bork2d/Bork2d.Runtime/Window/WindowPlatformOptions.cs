@@ -1,6 +1,4 @@
-using Bork2d.Api;
-
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Window;
 
 /// <summary>
 /// The builder-derived options the windowed platform needs to create its window.

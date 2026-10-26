@@ -8,7 +8,7 @@
 
 | ID | Status | Decision |
 | --- | --- | --- |
-| D-001 | Accepted | Game code references only `Bork2d.Api` and `Bork2d.Runtime`; `Common`, `Assets`, and `Render` stay internal behind `InternalsVisibleTo`. `Bork2d.Assets` is public for the M3 pack-tooling surface only (`PackBuilder`, `PackCompressionMode`); `Editor` is a separate JIT tool surface. |
+| D-001 | Accepted | Game code references only `Bork2d.Api` and `Bork2d.Runtime`; `Common`, `Assets`, and `Render` stay internal behind `InternalsVisibleTo`. `Bork2d.Assets` is public for the M3 pack-tooling surface only (`PackBuilder`, `PackCompressionMode`, now in `Bork2d.Assets.Pack` — D-034); `Editor` is a separate JIT tool surface. |
 | D-002 | Accepted | A tick thread owns callbacks, time, and snapshot publication; a render thread owns Vulkan in windowed/offscreen; asset loaders are background threads. The public API has no main-thread affinity. |
 | D-003 | Accepted | Three snapshot slots (`Free → Writing → Ready → Rendering → Free`); the tick runs ahead while slots are free and waits only when the ring is full. Newest `Ready` wins; no target tick rate or `Sleep` in windowed/offscreen. |
 | D-004 | Accepted | Variable timestep: `DeltaTime` is wall-clock between tick starts, clamped by `MaxDeltaTime` (default 0.25 s). No accumulator or render interpolation; headless is timer-paced. |
@@ -41,6 +41,7 @@
 | D-031 | Accepted | `Silk.NET.SDL` 2.23.0 is pinned; its `Ultz.Native.SDL` 2.32.10 dependency ships win-x64 `SDL2.dll`, whose runtime `SDL_GetVersion` is 2.30.8. NativeAOT uses Silk.NET's default resolver with a narrow `IL3000;IL3002` suppression in `Bork2d.AotSmoke` only; the `--windowed [--ticks N]` demo is the windowed gate. |
 | D-032 | Accepted | M2 time/exit/lifetime: first tick `Time = DeltaTime = 0`, then raw monotonic `Time` and clamped `DeltaTime`; `Exit()` stops before the next freeze; `Dispose()` during `Run()` throws; after shutdown `IWindow`/`IInput` throw `ObjectDisposedException`, `ITime` stays readable, and `Exit()` is a no-op. |
 | D-033 | Accepted | Accepted fatal-platform-error exception to D-028: after an unrecoverable post-startup SDL error the OS thread may destroy the window before `Teardown`; the proxies remain attached for best-effort access. Normal, `Exit`, and close paths destroy the window only after `Teardown`. |
+| D-034 | Accepted | Source layout is folder-per-area and the namespace is derived from the project plus the folder path (IDE0130 enforced). Public contracts are split into `Bork2d.Api.Assets`, `.Scene`, `.Rendering`, `.Input`, and `.Platform`, with `IEngine`/`IGame`/`Bork2dException` staying in `Bork2d.Api`; the tooling pack writer is `Bork2d.Assets.Pack`. Breaking namespace change accepted under D-014; behavior unchanged. |
 
 ## M3 asset decisions (approved 2026-10-26)
 
@@ -52,7 +53,7 @@ These entries record the accepted decisions only.
 | D-M3-01 | Accepted | The base pack opens in `Run()` before the window platform and `Setup`; `Build()` stays filesystem-free. Missing/malformed base pack → `Bork2dException` before any window/`Setup`/`Teardown`. |
 | D-M3-02 | Accepted | A base pack is required unless `Bork2dAppBuilder.WithoutAssets()` is used; `WithoutAssets` starts an empty VFS and still permits `LoadPack` overlays. `WithAssetsPack` + `WithoutAssets` is a `Build()` error. |
 | D-M3-03 | Accepted | `WithAssetsPack`/`LoadPack` filesystem paths resolve against the process current directory; absolute paths are accepted. |
-| D-M3-04 | Accepted | `Bork2d.Assets` is public for tooling only (`PackBuilder`, `PackCompressionMode`); game code still references only `Api`/`Runtime`. `Bork2d.AotSmoke` references `Bork2d.Assets` for the AOT pack proof. |
+| D-M3-04 | Accepted | `Bork2d.Assets` is public for tooling only (`PackBuilder`, `PackCompressionMode` in `Bork2d.Assets.Pack` — D-034); game code still references only `Api`/`Runtime`. `Bork2d.AotSmoke` references `Bork2d.Assets` for the AOT pack proof. |
 | D-M3-05 | Accepted | Pack v1 uses integer-keyed `PackHeader`/`PackEntry`, `uint32` entry `Length`/`Size`, `uint64` `Offset`, and no per-asset schema version. |
 | D-M3-06 | Accepted | No policy size caps. Bounds come from field widths, the pack file length, range/overlap checks, and .NET allocation limits; `LoadData` is bounded by `Array.MaxLength`, and `LoadAsset<T>` streams. |
 | D-M3-07 | Accepted | Header always maximum-quality Zstd; debug payloads uncompressed; release payloads maximum-quality Zstd only when strictly smaller; no payload checksum. |
@@ -78,7 +79,8 @@ These entries record the accepted decisions only.
 
 - **Decision:** Only `Bork2d.Api` and `Bork2d.Runtime` are supported for game code.
   `Common`/`Assets`/`Render` are internal; `Runtime` is the composition root. The one exception is
-  the M3 public pack-tooling surface in `Bork2d.Assets` (`PackBuilder`, `PackCompressionMode`),
+  the M3 public pack-tooling surface in `Bork2d.Assets` (`Bork2d.Assets.Pack.PackBuilder`,
+  `PackCompressionMode`),
   which is for tooling and not part of the game contract.
 - **Consequences:** Small game contract; internals can change. A public type in an internal project
   is a bug unless intentionally re-exported or part of the documented tooling surface.
@@ -223,7 +225,7 @@ These entries record the accepted decisions only.
 - **Consequences:** A mapping test fails if the binding and the enum drift. Numeric values are
   unstable and never serialized. Physical scancodes are layout positions, not characters; text
   comes only from `OnTextTyped`. No focus/visibility/DPI-scale members are added.
-- **Docs:** [API reference](api/reference.md#11-value-types), [KeyCode](../src/Bork2d/Bork2d.Api/KeyCode.cs)
+- **Docs:** [API reference](api/reference.md#11-value-types), [KeyCode](../src/Bork2d/Bork2d.Api/Input/KeyCode.cs)
 
 ### D-031 `Silk.NET.SDL` pin, native version, AOT resolver, and the windowed demo
 
@@ -274,6 +276,25 @@ These entries record the accepted decisions only.
   define the renderer/vsync equivalent rather than assuming M2's timing.
 - **Docs:** [Runtime lifecycle](architecture/runtime-lifecycle.md#6-shutdown-and-error-propagation),
   [Threading](architecture/threading.md#51-window-thread-command-queue-and-confirmed-state-m2-internal)
+
+### D-034 Folder-per-area namespaces and the split public contract
+
+- **Decision:** Every project groups files by area (`Assets/`, `Scene/`, `Pack/`, `Vfs/`, `Loading/`,
+  …); a file's namespace is the project namespace plus the folder path, enforced by IDE0130.
+  `Bork2d.Api` is split into `Bork2d.Api.Assets` (`IAssets`, `AssetInfo`, `AssetException`,
+  `AssetErrorKind`), `Bork2d.Api.Scene` (`ISceneRoot`, `ITransform`, `ICamera`, `ISpriteRender`),
+  `Bork2d.Api.Rendering` (`Sprite`, `Color`, `ClearKind`), `Bork2d.Api.Input` (`IInput`, `KeyCode`,
+  `MouseButton`), and `Bork2d.Api.Platform` (`IWindow`, `ITime`); `IEngine`, `IGame`, and
+  `Bork2dException` stay in `Bork2d.Api`. `Data.cs` is split into `Sprite.cs`, `Color.cs`, and
+  `ClearKind.cs`. The public pack tooling (`PackBuilder`, `PackCompressionMode`) moves to
+  `Bork2d.Assets.Pack`.
+- **Consequences:** Game code adds the relevant namespace usings; fully-qualified names and the
+  dependency test change. This is a source- and binary-breaking namespace change accepted under
+  D-014, with no behavior, unit, or semantic change. The `Bork2d.Assets` export set is unchanged in
+  count and remains tooling-only.
+- **Docs:** [Projects and dependencies](architecture/projects.md#4-source-layout-and-namespaces),
+  [API reference](api/reference.md#15-namespaces),
+  [Contributing](contributing.md#4-c-conventions)
 
 ## Superseding a decision
 

@@ -1,7 +1,7 @@
 # Assets, Bake, and Editor Tooling
 
 > **Status:** M3 is implemented and merged into `develop` (2026-10-26, PR #4). `Bork2d.Assets` provides the v1
-> pack reader/writer and the public `PackBuilder`/`PackCompressionMode` tooling surface, canonical
+> pack reader/writer and the public `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode` tooling surface, canonical
 > paths, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, one loader thread with
 > `LoadData`/`LoadAsset<T>`, the internal texture-descriptor/sprite models with validation and the
 > CPU `LoadSprite` pipeline, and the app-scoped service wired into `Run()`/`Dispose()`. The
@@ -472,9 +472,9 @@ multi-project workspaces in v1.
   TOML, `Activator.CreateInstance`, or dynamic code in pack/asset loading.
 - Zstd is the .NET 11 built-in implementation, so no extra native codec is needed; pack paths and
   asset keys are data, not types. `WithGame(instance)` avoids reflection-based game construction.
-- The public tooling surface is `PackBuilder`/`PackCompressionMode` in `Bork2d.Assets`;
-  `Bork2d.AotSmoke` references `Bork2d.Assets` to build and load a temporary pack in the default
-  AOT run (D-M3-04, D-M3-19).
+- The public tooling surface is `PackBuilder`/`PackCompressionMode` in `Bork2d.Assets.Pack`
+  (D-034); `Bork2d.AotSmoke` references `Bork2d.Assets` to build and load a temporary pack in the
+  default AOT run (D-M3-04, D-M3-19).
 - Runtime projects set `IsAotCompatible` with trim/AOT analyzers; only the AOT smoke app sets
   `PublishAot`. AOT publish/run is a required local gate, not a CI job.
 
@@ -538,7 +538,7 @@ that in exchange for no arbitrary caps, and fails cleanly rather than reading ou
 
 | Area | Status |
 | --- | --- |
-| `Bork2d.Assets` | `Current` (M3): v1 pack reader/writer, structural validation, canonical paths, public `PackBuilder`/`PackCompressionMode`, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, the app-scoped service (one thread, FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, `AssetException`), and the internal texture-descriptor/sprite models, validation, `LoadSprite` CPU pipeline, handle table, and resource cache |
+| `Bork2d.Assets` | `Current` (M3): v1 pack reader/writer, structural validation, canonical paths, public `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, the app-scoped service (one thread, FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, `AssetException`), and the internal texture-descriptor/sprite models, validation, `LoadSprite` CPU pipeline, handle table, and resource cache |
 | `assets.pck` reader/writer | `Current` (M3): v1 format reader and writer; the VFS, overlays, `Browse`/`Exists`, and the loader are wired through `IEngine.Assets` |
 | Texture descriptors and raw RGBA8 payloads | `Current` (M3): internal `TextureDescriptor` model, M3 validation, and CPU descriptor resources; the raw payload is metadata only. Payload read/upload and KTX2 are M8/M6 |
 | Sprite assets (UVs/scale/pivot/topology/indices) | `Current` (M3): internal `SpriteAsset` model, M3 validation, CPU sprite resources, and the idempotent session-local handle; `LoadSprite` resolves sprite + descriptor without reading the payload. Drawing is M8 |

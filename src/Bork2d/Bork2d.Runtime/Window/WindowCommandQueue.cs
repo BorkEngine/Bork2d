@@ -1,4 +1,4 @@
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Window;
 
 /// <summary>
 /// The kind of a queued <see cref="IWindow"/> command.

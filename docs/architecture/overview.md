@@ -109,7 +109,7 @@ only when the ring is full; headless has no ring and is timer-paced. The state m
 These rules bind the implementation and every future change. Violating one is an architecture
 bug, not a style preference.
 
-1. **Only `Bork2d.Api` and `Bork2d.Runtime` are public surfaces for game code**; internal projects may change or disappear between releases. The one exception is the **tooling-only** pack writer (`PackBuilder`/`PackCompressionMode`) in `Bork2d.Assets` (D-001, D-M3-04).
+1. **Only `Bork2d.Api` and `Bork2d.Runtime` are public surfaces for game code**; internal projects may change or disappear between releases. The one exception is the **tooling-only** pack writer (`PackBuilder`/`PackCompressionMode`) in `Bork2d.Assets.Pack` (D-001, D-M3-04, D-034). The public contracts are grouped by area namespace (`Bork2d.Api.Scene`, `.Rendering`, `.Input`, `.Platform`, `.Assets`); see [Projects §4](projects.md#4-source-layout-and-namespaces).
 2. **`Bork2d.Api` contains no GPU, OS, or renderer types**; it uses BCL types, `Microsoft.Extensions.Logging.Abstractions` for `ILoggerFactory`, and `PolyType` 1.4.1 for the `IShapeable<T>` shape constraint only (D-M3-22), with no other third party.
 3. **Scene mutation is tick-scoped and quiescent at capture**: mutation happens only during `Setup`/`Tick`/`Teardown`, workers join before `Tick` returns, structural and per-object access use `System.Threading.Lock` (composite updates still need game synchronization), and the tree is unordered.
 4. **Snapshots are immutable after publication**: the render thread never reads a live entity, mutates snapshot memory, or blocks the tick on a specific frame.

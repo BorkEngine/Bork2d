@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Sdl;
 
 /// <summary>
 /// Decodes the UTF-8 text carried by an <c>SDL_TEXTINPUT</c> event.

@@ -17,8 +17,12 @@
 
 Do not reference `Bork2d.Render`, `Bork2d.Common`, or `Bork2d.Assets` from game code; they are
 implementation details ([Projects and dependencies](../architecture/projects.md)). **Tooling and
-tests** may reference `Bork2d.Assets` for the public `PackBuilder`/`PackCompressionMode` writer
-(§10); that surface is not part of the game contract.
+tests** may reference `Bork2d.Assets` for the public `Bork2d.Assets.Pack.PackBuilder`/
+`PackCompressionMode` writer (§10); that surface is not part of the game contract.
+
+`Bork2d.Api` is split by area: engine/game in `Bork2d.Api`, scene types in `Bork2d.Api.Scene`,
+render value types in `Bork2d.Api.Rendering`, input in `Bork2d.Api.Input`, window/time in
+`Bork2d.Api.Platform`, and assets in `Bork2d.Api.Assets` ([reference §1.5](reference.md#15-namespaces)).
 
 ## 2. Start the engine
 
@@ -101,6 +105,8 @@ and `N >= 1`. Invalid or unknown arguments print usage and exit with code 2.
 ```csharp
 using System.Numerics;
 using Bork2d.Api;
+using Bork2d.Api.Rendering;
+using Bork2d.Api.Scene;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -429,12 +435,12 @@ Sprite player = _engine.Assets.LoadSprite("sprites/player/idle");
 
 ### Building a pack (tooling only)
 
-The pack **writer** is the public tooling surface in `Bork2d.Assets`; tools, tests, and later the
-editor use it to produce the runtime packs the app loads. Game code must not reference
+The pack **writer** is the public tooling surface in `Bork2d.Assets.Pack`; tools, tests, and later
+the editor use it to produce the runtime packs the app loads. Game code must not reference
 `Bork2d.Assets`.
 
 ```csharp
-using Bork2d.Assets;
+using Bork2d.Assets.Pack;
 
 var builder = new PackBuilder(PackCompressionMode.Release);
 builder.AddRaw("textures/raw/player", rgba8Bytes);
@@ -450,8 +456,8 @@ builder.Write("assets.pck"); // overwrites; relative paths resolve against the c
 - Paths are normalized/validated with the same canonical rules as runtime lookups. Duplicate
   paths, serialization failures, and write failures throw `Bork2dException`; null/invalid path
   arguments throw `ArgumentNullException`/`ArgumentException`.
-- See the [pack tooling reference](reference.md#13-pack-tooling-bork2dassets-tooling-only) for the
-  full contract.
+- See the [pack tooling reference](reference.md#13-pack-tooling-bork2dassetspack-tooling-only) for
+  the full contract.
 
 ## 11. Lifetimes and threading
 

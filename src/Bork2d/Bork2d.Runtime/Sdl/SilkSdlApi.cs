@@ -2,8 +2,9 @@ using System.Runtime.InteropServices;
 using Bork2d.Api;
 using Silk.NET.Core.Loader;
 using Silk.NET.SDL;
+using SilkNet = Silk.NET.SDL;
 
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Sdl;
 
 /// <summary>
 /// The production <see cref="ISdlApi"/> over Silk.NET's generated SDL bindings.
@@ -12,7 +13,7 @@ namespace Bork2d.Runtime;
 /// <para>
 /// Create one instance on the OS thread that will own the window, set hints, call
 /// <see cref="InitializeVideo"/>, use the windows, destroy them, and dispose the instance to quit
-/// SDL and free its native handle. Each instance owns its own <see cref="Sdl"/> instance, so a
+/// SDL and free its native handle. Each instance owns its own <see cref="Silk.NET.SDL.Sdl"/> instance, so a
 /// later app in the same process creates a new one.
 /// </para>
 /// <para>
@@ -26,7 +27,7 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
     /// <summary><c>SDL_INIT_VIDEO</c>; video only, never audio, game controller, or haptics.</summary>
     private const uint SdlInitVideo = 0x0000_0020;
 
-    private readonly Sdl _sdl;
+    private readonly SilkNet.Sdl _sdl;
     private bool _videoInitialized;
     private bool _disposed;
 
@@ -106,8 +107,8 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
 
         var window = _sdl.CreateWindow(
             title,
-            Sdl.WindowposCentered,
-            Sdl.WindowposCentered,
+            SilkNet.Sdl.WindowposCentered,
+            SilkNet.Sdl.WindowposCentered,
             width,
             height,
             (uint)flags);
@@ -234,7 +235,7 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
     /// <summary>Quits SDL, frees the native handle, and rejects further use.</summary>
     /// <remarks>
     /// Every window created by this api must be destroyed first. The call is idempotent: only the
-    /// first disposal quits SDL and disposes the <see cref="Sdl"/> instance and its native context.
+    /// first disposal quits SDL and disposes the <see cref="Silk.NET.SDL.Sdl"/> instance and its native context.
     /// </remarks>
     public void Dispose()
     {
@@ -248,11 +249,11 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
         _disposed = true;
     }
 
-    private static Sdl CreateSdl()
+    private static SilkNet.Sdl CreateSdl()
     {
         try
         {
-            return Sdl.GetApi();
+            return SilkNet.Sdl.GetApi();
         }
         catch (Exception exception)
             when (exception is DllNotFoundException or EntryPointNotFoundException

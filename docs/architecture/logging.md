@@ -7,7 +7,7 @@
 > with ticks and elapsed time, and the asset service logs start/overlay/error/stop events; there is
 > no per-frame or per-asset-per-tick logging. Configuration is identical in all modes, and the
 > default path runs in the AOT smoke (headless with a pack and `--windowed`) with zero trim/AOT
-> warnings. The suite is 587 tests (578 deterministic plus 9 opt-in real-window tests).
+> warnings. The suite is 588 tests (579 deterministic plus 9 opt-in real-window tests).
 
 ## 1. Surface
 

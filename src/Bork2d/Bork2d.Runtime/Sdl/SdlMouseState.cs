@@ -1,4 +1,4 @@
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Sdl;
 
 /// <summary>
 /// The SDL global mouse state: position in window points and the pressed-button mask.

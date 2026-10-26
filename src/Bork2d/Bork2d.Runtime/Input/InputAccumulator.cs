@@ -1,7 +1,7 @@
 using System.Numerics;
-using Bork2d.Api;
+using Bork2d.Runtime.Sdl;
 
-namespace Bork2d.Runtime;
+namespace Bork2d.Runtime.Input;
 
 /// <summary>
 /// The event-fed input state the OS/window thread writes and the tick thread freezes once per tick.

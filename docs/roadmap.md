@@ -22,10 +22,10 @@
 | `Bork2d.Api` | Current | Contracts for engine, game, time, window, input, assets, camera, sprite, transform, root, `ZIndex`, `Bork2dException`, `AssetInfo`, `AssetException`/`AssetErrorKind`, the full `KeyCode` scancode set, and five `MouseButton` members. Window/input are implemented for windowed mode; assets are implemented in M3. |
 | `Bork2d.Common` | Partial | Root-owned unordered scene tree, transforms (degrees normalized), structural/per-object locks, time wrapper, layer validation, MessagePack shape policy. Snapshot structs are M7. |
 | `Bork2d.Runtime` | Current (M3) | Builder, validation, app-owned logging, SDL windowed host (window/input/time, uncapped loop), one-tick headless/offscreen host, `Exit`/`Dispose`/post-shutdown contract, and the app-scoped asset-service lifecycle. Renderer wiring is M6/M8. |
-| `Bork2d.Assets` | Current (M3) | v1 pack reader/writer, public `PackBuilder`/`PackCompressionMode`, canonical paths, base/overlay VFS, one loader thread with `LoadData`/`LoadAsset<T>`/`LoadSprite` CPU metadata, and the CPU resource table. |
+| `Bork2d.Assets` | Current (M3) | v1 pack reader/writer, public `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`, canonical paths, base/overlay VFS, one loader thread with `LoadData`/`LoadAsset<T>`/`LoadSprite` CPU metadata, and the CPU resource table. |
 | `Bork2d.Render` | Empty | Reference-wired; no Vulkan implementation (M6/M8). |
 | `Bork2d.Editor` | Absent | Not in the solution (M5). |
-| `Bork2d.Tests` | Current | 587 xUnit tests: 578 deterministic in CI (ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix, fake-SDL window/input/loop/time, pack/VFS/loader/descriptor/sprite, runtime asset lifecycle) plus 9 opt-in real-window tests. |
+| `Bork2d.Tests` | Current | 588 xUnit tests: 579 deterministic in CI (ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix, fake-SDL window/input/loop/time, pack/VFS/loader/descriptor/sprite, runtime asset lifecycle) plus 9 opt-in real-window tests. |
 | NativeAOT | M3 baseline | Libraries use `IsAotCompatible` + trim/AOT analyzers; `Bork2d.AotSmoke` publishes/runs locally with zero warnings, headless with a temporary pack and `--windowed --ticks 120`. Local gate only. |
 | CI | Current | GitHub Actions on PRs to `develop` and pushes to `develop`: restore, format verify, build, test. No AOT or real-window job. |
 | Runnable engine | Partial (windowed shell + assets) | A real window, input, time, and an uncapped tick loop plus the pack/VFS/loader/CPU descriptor pipeline; no renderer yet. |
@@ -127,7 +127,7 @@ Goal: load, overlay, browse, and describe packed assets without a renderer.
   not the raw payload.
 - `IAssets.LoadData`/`Exists`/`Browse`/`LoadPack`; shape-generic `LoadAsset<T>` (M3 tests use
   internal shapes; game types can satisfy the compiled `IShapeable<T>` constraint, with no M4
-  dependency); public tooling `PackBuilder` in `Bork2d.Assets`.
+  dependency); public tooling `Bork2d.Assets.Pack.PackBuilder` in `Bork2d.Assets`.
 - Headless tests: overlays, browse, corrupt header/checksum, missing pack, loader threads, AOT smoke.
 
 Exit: a pack with texture/sprite/data loads; overlays shadow correctly; corrupt and missing packs

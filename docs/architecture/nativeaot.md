@@ -105,8 +105,8 @@ reflection-based construction, which also allows constructor injection. See the
   generated-shape MessagePack asset) as the runtime proof.
 - `Bork2d.Api` references PolyType `1.4.1` for the `IShapeable<T>` constraint only. It stays free
   of Nerdbank.MessagePack, Zstd/`System.IO.Compression`, `System.IO.Hashing`, and file I/O, so the
-  public contract does not pull the pack implementation into game code. `Bork2d.Assets` exposes
-  only the tooling surface (`PackBuilder`, `PackCompressionMode`) publicly and keeps its
+  public contract does not pull the pack implementation into game code. `Bork2d.Assets.Pack`
+  exposes only the tooling surface (`PackBuilder`, `PackCompressionMode`) publicly and keeps its
   PolyType/Nerdbank/Hashing pins for the pack and tooling.
 - Zstd is the .NET 11 built-in codec; the pack header checksum uses the `System.IO.Hashing`
   package's `XxHash3`.
@@ -192,7 +192,7 @@ publish/run gate above is mandatory locally.
 
 ## 9. Related documents
 
-- [Projects and dependencies](projects.md#5-build-packaging-and-versioning) — project graph and
+- [Projects and dependencies](projects.md#6-build-packaging-and-versioning) — project graph and
   build settings.
 - [Assets and tooling](assets-and-tooling.md) — pack format, descriptors, sprites, bake.
 - [Logging](logging.md) — ZLogger/MEL AOT notes.
