@@ -142,7 +142,10 @@ internal sealed class AssetService : IAssets, IDisposable
     /// exposed through the public API; M3 has no public readiness query.
     /// </summary>
     /// <param name="handle">The opaque sprite handle.</param>
-    /// <returns>The completion task; it produces <see langword="true"/> on success.</returns>
+    /// <returns>
+    /// The completion task; it produces <see langword="true"/> on success, <see langword="false"/>
+    /// on failure, and stays pending when a load is dropped at shutdown.
+    /// </returns>
     internal Task<bool> GetSpriteCompletion(Sprite handle) => _resources.GetCompletion(handle);
 
     /// <summary>

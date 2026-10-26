@@ -42,7 +42,8 @@ internal sealed class SpriteHandleEntry
 
     /// <summary>
     /// Gets the internal completion task. It completes with <see langword="true"/> when the CPU
-    /// sprite resource is published and <see langword="false"/> when the load failed or was dropped.
+    /// sprite resource is published and <see langword="false"/> when the load failed. A load dropped
+    /// at shutdown never completes.
     /// </summary>
     internal Task<bool> Completion => _completion.Task;
 
@@ -54,11 +55,7 @@ internal sealed class SpriteHandleEntry
 
     /// <summary>
     /// Drops the load at shutdown without publishing a resource. The handle stays non-renderable and
-    /// its internal completion resolves with <see langword="false"/>.
+    /// its internal completion stays pending, matching the dropped-load contract.
     /// </summary>
-    internal void Drop()
-    {
-        _dropped = true;
-        _completion.TrySetResult(false);
-    }
+    internal void Drop() => _dropped = true;
 }

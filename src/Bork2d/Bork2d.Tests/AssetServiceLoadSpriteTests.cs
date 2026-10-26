@@ -540,9 +540,9 @@ public sealed class AssetServiceLoadSpriteTests
             host.Service.TryGetSpriteHandle(SpriteTestSupport.SpritePath, out SpriteHandleEntry? entry));
         Assert.True(entry.IsDropped);
 
-        bool succeeded = await host.Service.GetSpriteCompletion(handle).WaitAsync(
-            TimeSpan.FromSeconds(10));
-        Assert.False(succeeded);
+        Task<bool> completion = host.Service.GetSpriteCompletion(handle);
+        Assert.False(completion.IsCompleted);
+        Assert.False(completion.IsCompletedSuccessfully);
         Assert.DoesNotContain(
             host.LogsAt(LogLevel.Debug),
             log => log.Message.Contains("Asset loaded", StringComparison.Ordinal));
