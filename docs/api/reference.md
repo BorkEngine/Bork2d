@@ -329,13 +329,15 @@ startup failure (see roadmap).
 | `Color` | Clear the camera viewport to `ClearColor`. |
 
 `KeyCode` maps the physical SDL scancode set: one member per named SDL scancode (247 members,
-including `Unknown = 0`), named after the SDL name without the `SDL_SCANCODE_` prefix and converted
-to PascalCase (`SDL_SCANCODE_LEFT` → `Left`, `SDL_SCANCODE_NONUSBACKSLASH` → `NonUsBackslash`,
-`SDL_SCANCODE_KP_0` → `Keypad0`, top-row digits → `Digit1`…`Digit0`). Values equal the SDL scancode
-integers. `MouseButton` is exactly `Left`, `Right`, `Middle`, `Back` (X1), and `Forward` (X2), with
-values equal to SDL's one-based button index (`Left = 1`, `Middle = 2`, `Right = 3`, `X1 = 4`,
-`X2 = 5`). Numeric values of both enums are unstable, so do not serialize them; an undefined value
-is a safe query that returns `false`. Text uses `OnTextTyped`.
+including `Unknown = 0`), named after the SDL name without the `SDL_SCANCODE_` prefix and split into
+readable PascalCase words (`SDL_SCANCODE_PAGEUP` → `PageUp`, `SDL_SCANCODE_CAPSLOCK` → `CapsLock`,
+`SDL_SCANCODE_PRINTSCREEN` → `PrintScreen`, `SDL_SCANCODE_AUDIOFASTFORWARD` → `AudioFastForward`).
+`KP_` becomes `Keypad` (`SDL_SCANCODE_KP_0` → `Keypad0`), `NONUS` becomes `NonUs`
+(`SDL_SCANCODE_NONUSBACKSLASH` → `NonUsBackslash`), and top-row digits become `Digit1`…`Digit0`.
+Values equal the SDL scancode integers. `MouseButton` is exactly `Left`, `Right`, `Middle`, `Back`
+(X1), and `Forward` (X2), with values equal to SDL's one-based button index (`Left = 1`,
+`Middle = 2`, `Right = 3`, `X1 = 4`, `X2 = 5`). Numeric values of both enums are unstable, so do not
+serialize them; an undefined value is a safe query that returns `false`. Text uses `OnTextTyped`.
 
 ## 12. Runtime surface
 

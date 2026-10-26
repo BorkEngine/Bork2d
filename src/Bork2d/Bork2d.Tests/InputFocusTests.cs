@@ -55,7 +55,7 @@ public sealed class InputFocusTests
         harness.Freeze();
 
         harness.Sdl.SetKey((int)KeyCode.A, isDown: true);
-        harness.Sdl.SetKey((int)KeyCode.Lshift, isDown: true);
+        harness.Sdl.SetKey((int)KeyCode.LeftShift, isDown: true);
         harness.Sdl.SetKey(511, isDown: true);
         harness.Sdl.MouseState = new SdlMouseState(
             100,
@@ -67,8 +67,8 @@ public sealed class InputFocusTests
 
         Assert.True(harness.Input.IsKeyDown(KeyCode.A));
         Assert.False(harness.Input.IsKeyPressed(KeyCode.A));
-        Assert.True(harness.Input.IsKeyDown(KeyCode.Lshift));
-        Assert.False(harness.Input.IsKeyPressed(KeyCode.Lshift));
+        Assert.True(harness.Input.IsKeyDown(KeyCode.LeftShift));
+        Assert.False(harness.Input.IsKeyPressed(KeyCode.LeftShift));
         Assert.False(harness.Input.IsKeyDown((KeyCode)511));
 
         Assert.True(harness.Input.IsMouseDown(MouseButton.Left));

@@ -123,16 +123,16 @@ public sealed class InputEdgeTests
     {
         using var harness = InputTestHarness.Start();
 
-        harness.Send(SdlEvent.Key(SdlEventType.KeyDown, (int)KeyCode.Lshift));
+        harness.Send(SdlEvent.Key(SdlEventType.KeyDown, (int)KeyCode.LeftShift));
         harness.Freeze();
-        Assert.True(harness.Input.IsKeyDown(KeyCode.Lshift));
+        Assert.True(harness.Input.IsKeyDown(KeyCode.LeftShift));
 
         for (var tick = 0; tick < 3; tick++)
         {
             harness.Freeze();
-            Assert.True(harness.Input.IsKeyDown(KeyCode.Lshift));
-            Assert.False(harness.Input.IsKeyPressed(KeyCode.Lshift));
-            Assert.False(harness.Input.IsKeyReleased(KeyCode.Lshift));
+            Assert.True(harness.Input.IsKeyDown(KeyCode.LeftShift));
+            Assert.False(harness.Input.IsKeyPressed(KeyCode.LeftShift));
+            Assert.False(harness.Input.IsKeyReleased(KeyCode.LeftShift));
         }
     }
 

@@ -4,12 +4,23 @@ namespace Bork2d.Api;
 /// <remarks>
 /// <para>
 /// There is one member per named SDL2 scancode, named after the SDL name without the
-/// <c>SDL_SCANCODE_</c> prefix: underscores start a new word and each word is Pascal-cased.
-/// <c>KP</c> becomes <c>Keypad</c> (<c>SDL_SCANCODE_KP_0</c> is <see cref="Keypad0"/>),
-/// <c>NONUS</c> becomes <c>NonUs</c> (<c>SDL_SCANCODE_NONUSBACKSLASH</c> is
-/// <see cref="NonUsBackslash"/>), and a standalone number key becomes <c>Digit</c> plus the
-/// digit (<c>SDL_SCANCODE_1</c> is <see cref="Digit1"/>, <c>SDL_SCANCODE_0</c> is
-/// <see cref="Digit0"/>) because C# identifiers cannot start with a digit.
+/// <c>SDL_SCANCODE_</c> prefix. Underscores separate words, and a recognized SDL word list splits
+/// concatenated all-caps compounds before Pascal-casing; for example <c>SDL_SCANCODE_PAGEUP</c> is
+/// <see cref="PageUp"/>, <c>SDL_SCANCODE_CAPSLOCK</c> is <see cref="CapsLock"/>,
+/// <c>SDL_SCANCODE_NUMLOCKCLEAR</c> is <see cref="NumLockClear"/>, <c>SDL_SCANCODE_PRINTSCREEN</c>
+/// is <see cref="PrintScreen"/>, <c>SDL_SCANCODE_AUDIOFASTFORWARD</c> is
+/// <see cref="AudioFastForward"/>, and <c>SDL_SCANCODE_KBDILLUMTOGGLE</c> is
+/// <see cref="KbdIllumToggle"/>. A token that is not recognized as a compound stays one
+/// Pascal-cased word (<c>SDL_SCANCODE_BACKSPACE</c> is <see cref="Backspace"/>).
+/// </para>
+/// <para>
+/// Special cases: <c>KP_</c> becomes <c>Keypad</c> (<c>SDL_SCANCODE_KP_0</c> is
+/// <see cref="Keypad0"/>); the left/right modifier prefixes become <c>Left</c>/<c>Right</c>
+/// (<c>SDL_SCANCODE_LCTRL</c> is <see cref="LeftCtrl"/>, <c>SDL_SCANCODE_RALT</c> is
+/// <see cref="RightAlt"/>); <c>NONUS</c> becomes <c>NonUs</c>
+/// (<c>SDL_SCANCODE_NONUSBACKSLASH</c> is <see cref="NonUsBackslash"/>); and a standalone number
+/// key becomes <c>Digit</c> plus the digit (<c>SDL_SCANCODE_1</c> is <see cref="Digit1"/>,
+/// <c>SDL_SCANCODE_0</c> is <see cref="Digit0"/>) because C# identifiers cannot start with a digit.
 /// </para>
 /// <para>
 /// The member list mirrors the named scancodes published by <c>Silk.NET.SDL.Scancode</c> (its
@@ -18,11 +29,11 @@ namespace Bork2d.Api;
 /// </para>
 /// <para>
 /// This is a physical layout position, not a character or a logical key name; keyboard layout
-/// changes do not change it. Use <see cref="IInput.OnTextTyped"/> for text. The numeric
-/// values equal the SDL scancode integers, but they are unstable across builds and must never
-/// be serialized or persisted; compare members instead. A value that is not a member of this
-/// enum is an undefined query: the <see cref="IInput"/> query methods return
-/// <see langword="false"/> for it and never throw.
+/// changes do not change it. Use <see cref="IInput.OnTextTyped"/> for text. The numeric values
+/// equal the SDL scancode integers, but they are unstable across builds and must never be
+/// serialized or persisted; compare members instead. A value that is not a member of this enum is
+/// an undefined query: the <see cref="IInput"/> query methods return <see langword="false"/> for
+/// it and never throw.
 /// </para>
 /// </remarks>
 public enum KeyCode
@@ -72,8 +83,8 @@ public enum KeyCode
     Space = 44,
     Minus = 45,
     Equals = 46,
-    Leftbracket = 47,
-    Rightbracket = 48,
+    LeftBracket = 47,
+    RightBracket = 48,
     Backslash = 49,
     NonUsHash = 50,
     Semicolon = 51,
@@ -82,7 +93,7 @@ public enum KeyCode
     Comma = 54,
     Period = 55,
     Slash = 56,
-    Capslock = 57,
+    CapsLock = 57,
     F1 = 58,
     F2 = 59,
     F3 = 60,
@@ -95,20 +106,20 @@ public enum KeyCode
     F10 = 67,
     F11 = 68,
     F12 = 69,
-    Printscreen = 70,
-    Scrolllock = 71,
+    PrintScreen = 70,
+    ScrollLock = 71,
     Pause = 72,
     Insert = 73,
     Home = 74,
-    Pageup = 75,
+    PageUp = 75,
     Delete = 76,
     End = 77,
-    Pagedown = 78,
+    PageDown = 78,
     Right = 79,
     Left = 80,
     Down = 81,
     Up = 82,
-    Numlockclear = 83,
+    NumLockClear = 83,
     KeypadDivide = 84,
     KeypadMultiply = 85,
     KeypadMinus = 86,
@@ -153,10 +164,10 @@ public enum KeyCode
     Paste = 125,
     Find = 126,
     Mute = 127,
-    Volumeup = 128,
-    Volumedown = 129,
+    VolumeUp = 128,
+    VolumeDown = 129,
     KeypadComma = 133,
-    KeypadEqualsas400 = 134,
+    KeypadEqualsAs400 = 134,
     International1 = 135,
     International2 = 136,
     International3 = 137,
@@ -175,8 +186,8 @@ public enum KeyCode
     Lang7 = 150,
     Lang8 = 151,
     Lang9 = 152,
-    Alterase = 153,
-    Sysreq = 154,
+    AltErase = 153,
+    SysReq = 154,
     Cancel = 155,
     Clear = 156,
     Prior = 157,
@@ -184,19 +195,19 @@ public enum KeyCode
     Separator = 159,
     Out = 160,
     Oper = 161,
-    Clearagain = 162,
+    ClearAgain = 162,
     Crsel = 163,
     Exsel = 164,
     Keypad00 = 176,
     Keypad000 = 177,
-    Thousandsseparator = 178,
-    Decimalseparator = 179,
-    Currencyunit = 180,
-    Currencysubunit = 181,
-    KeypadLeftparen = 182,
-    KeypadRightparen = 183,
-    KeypadLeftbrace = 184,
-    KeypadRightbrace = 185,
+    ThousandsSeparator = 178,
+    DecimalSeparator = 179,
+    CurrencyUnit = 180,
+    CurrencySubunit = 181,
+    KeypadLeftParen = 182,
+    KeypadRightParen = 183,
+    KeypadLeftBrace = 184,
+    KeypadRightBrace = 185,
     KeypadTab = 186,
     KeypadBackspace = 187,
     KeypadA = 188,
@@ -211,43 +222,43 @@ public enum KeyCode
     KeypadLess = 197,
     KeypadGreater = 198,
     KeypadAmpersand = 199,
-    KeypadDblampersand = 200,
-    KeypadVerticalbar = 201,
-    KeypadDblverticalbar = 202,
+    KeypadDblAmpersand = 200,
+    KeypadVerticalBar = 201,
+    KeypadDblVerticalBar = 202,
     KeypadColon = 203,
     KeypadHash = 204,
     KeypadSpace = 205,
     KeypadAt = 206,
     KeypadExclam = 207,
-    KeypadMemstore = 208,
-    KeypadMemrecall = 209,
-    KeypadMemclear = 210,
-    KeypadMemadd = 211,
-    KeypadMemsubtract = 212,
-    KeypadMemmultiply = 213,
-    KeypadMemdivide = 214,
-    KeypadPlusminus = 215,
+    KeypadMemStore = 208,
+    KeypadMemRecall = 209,
+    KeypadMemClear = 210,
+    KeypadMemAdd = 211,
+    KeypadMemSubtract = 212,
+    KeypadMemMultiply = 213,
+    KeypadMemDivide = 214,
+    KeypadPlusMinus = 215,
     KeypadClear = 216,
-    KeypadClearentry = 217,
+    KeypadClearEntry = 217,
     KeypadBinary = 218,
     KeypadOctal = 219,
     KeypadDecimal = 220,
     KeypadHexadecimal = 221,
-    Lctrl = 224,
-    Lshift = 225,
-    Lalt = 226,
-    Lgui = 227,
-    Rctrl = 228,
-    Rshift = 229,
-    Ralt = 230,
-    Rgui = 231,
+    LeftCtrl = 224,
+    LeftShift = 225,
+    LeftAlt = 226,
+    LeftGui = 227,
+    RightCtrl = 228,
+    RightShift = 229,
+    RightAlt = 230,
+    RightGui = 231,
     Mode = 257,
-    Audionext = 258,
-    Audioprev = 259,
-    Audiostop = 260,
-    Audioplay = 261,
-    Audiomute = 262,
-    Mediaselect = 263,
+    AudioNext = 258,
+    AudioPrev = 259,
+    AudioStop = 260,
+    AudioPlay = 261,
+    AudioMute = 262,
+    MediaSelect = 263,
     Www = 264,
     Mail = 265,
     Calculator = 266,
@@ -259,20 +270,20 @@ public enum KeyCode
     AcStop = 272,
     AcRefresh = 273,
     AcBookmarks = 274,
-    Brightnessdown = 275,
-    Brightnessup = 276,
-    Displayswitch = 277,
-    Kbdillumtoggle = 278,
-    Kbdillumdown = 279,
-    Kbdillumup = 280,
+    BrightnessDown = 275,
+    BrightnessUp = 276,
+    DisplaySwitch = 277,
+    KbdIllumToggle = 278,
+    KbdIllumDown = 279,
+    KbdIllumUp = 280,
     Eject = 281,
     Sleep = 282,
     App1 = 283,
     App2 = 284,
-    Audiorewind = 285,
-    Audiofastforward = 286,
-    Softleft = 287,
-    Softright = 288,
+    AudioRewind = 285,
+    AudioFastForward = 286,
+    SoftLeft = 287,
+    SoftRight = 288,
     Call = 289,
-    Endcall = 290,
+    EndCall = 290,
 }
