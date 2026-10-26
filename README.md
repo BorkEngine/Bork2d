@@ -6,8 +6,9 @@ that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets sh
 **`assets.pck`**, and windowed, offscreen, and headless modes are the target design.
 
 > **Status: pre-alpha.** M0 is complete and M1 (foundation + NativeAOT baseline) is merged into
-> `develop` (2026-10-25, PR #1). M2 (SDL windowed platform) is implemented (WP1–WP5; the WP5 branch
-> is pending review): windowed mode opens a real SDL window, reads keyboard/mouse input, advances
+> `develop` (2026-10-25, PR #1). M2 (SDL windowed platform) is implemented on `m-2/common`
+> (WP1–WP5) and the final PR is pending review: windowed mode opens a real SDL window, reads
+> keyboard/mouse input, advances
 > `ITime`, and runs an uncapped loop until `Exit`/close. There is still no renderer, pack, or asset
 > system, and headless/offscreen keep the one-tick `Setup` → `Tick` → `Teardown` sequence. See the
 > [roadmap](docs/roadmap.md), [M2 spec](docs/specs/m2-sdl-platform.md), and
