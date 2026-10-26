@@ -1013,7 +1013,7 @@ Each WP:
 | [`docs/architecture/logging.md`](../architecture/logging.md) | `Bork2d.Assets` start/overlay/error/stop events; no per-frame. |
 | [`docs/architecture/projects.md`](../architecture/projects.md) | `Bork2d.Assets` public tooling surface; AotSmoke → Assets; package pins; dependency matrix/test. |
 | [`docs/architecture/overview.md`](../architecture/overview.md) | Asset pipeline status; no per-asset version/limits wording; public tooling exception. |
-| [`docs/decisions.md`](../decisions.md) | New accepted entries for D-M3-01…D-M3-20; update D-001 (Assets public tooling exception), D-010 (uint32 sizes, no per-asset version, no policy caps), D-019 (M3 descriptor/sprite scope), and the retry/loose/KTX2 resolutions. |
+| [`docs/decisions.md`](../decisions.md) | D-M3-01…D-M3-20 and the D-001 (Assets public tooling exception), D-010 (uint32 sizes, no per-asset version, no policy caps), and D-019 (M3 descriptor/sprite scope) updates recorded with the approval. |
 | [`docs/contributing.md`](../contributing.md) | Asset/pack test commands; AOT smoke with assets; no committed pack fixtures; dependency rules. |
 | [`docs/roadmap.md`](../roadmap.md) | M3 status/evidence; §9 M3 rows resolved (Zstd, retry, loose files, limits, KTX2); progress log when merged. |
 | [`docs/README.md`](../README.md) | Add this spec to the documentation map; status markers. |
