@@ -6,4 +6,10 @@
         <EnableAotAnalyzer>true</EnableAotAnalyzer>
     </PropertyGroup>
 
+    <ItemGroup>
+        <!-- The IShapeable<T> constraint on IAssets.LoadAsset<T> is the only PolyType contract
+             surface in Bork2d.Api. No Nerdbank.MessagePack, Zstd, or file I/O belongs here. -->
+        <PackageReference Include="PolyType" Version="1.4.1" />
+    </ItemGroup>
+
 </Project>

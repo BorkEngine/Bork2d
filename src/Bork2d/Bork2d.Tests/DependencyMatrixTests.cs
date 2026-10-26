@@ -7,6 +7,8 @@ public sealed class DependencyMatrixTests
 {
     private const string LoggingAbstractions = "Microsoft.Extensions.Logging.Abstractions";
     private const string MessagePack = "Nerdbank.MessagePack";
+    private const string PolyType = "PolyType";
+    private const string Hashing = "System.IO.Hashing";
 
     private static readonly string[] _forbiddenApiReferencePrefixes =
     [
@@ -14,6 +16,8 @@ public sealed class DependencyMatrixTests
         "Vulkan",
         "Avalonia",
         "ZLogger",
+        "Nerdbank.MessagePack",
+        "System.IO.Hashing",
     ];
 
     [Fact]
@@ -29,9 +33,24 @@ public sealed class DependencyMatrixTests
                 IsForbiddenApiReference(reference.Name),
                 $"Bork2d.Api must not reference '{reference.Name}'.");
             Assert.True(
-                IsFrameworkReference(reference.Name) || reference.Name == LoggingAbstractions,
-                $"Bork2d.Api may only reference the BCL and {LoggingAbstractions}, not '{reference.Name}'.");
+                IsFrameworkReference(reference.Name)
+                    || reference.Name is LoggingAbstractions or PolyType,
+                $"Bork2d.Api may only reference the BCL, {LoggingAbstractions}, and {PolyType}, "
+                    + $"not '{reference.Name}'.");
         }
+    }
+
+    [Fact]
+    public void ApiReferencesPolyTypeOnlyForTheShapeContract()
+    {
+        var references = typeof(Bork2d.Api.IAssets).Assembly
+            .GetReferencedAssemblies()
+            .Select(reference => reference.Name)
+            .ToArray();
+
+        Assert.Contains(PolyType, references);
+        Assert.DoesNotContain(MessagePack, references);
+        Assert.DoesNotContain(Hashing, references);
     }
 
     [Fact]
@@ -82,6 +101,18 @@ public sealed class DependencyMatrixTests
                 "Bork2d.Assets.PackCompressionMode",
             },
             exported);
+    }
+
+    [Fact]
+    public void AssetFileSystemStaysInternal()
+    {
+        var assembly = typeof(Bork2d.Assets.PackBuilder).Assembly;
+        var type = typeof(Bork2d.Assets.AssetFileSystem);
+
+        Assert.False(type.IsPublic);
+        Assert.DoesNotContain(type, assembly.GetExportedTypes());
+        Assert.False(typeof(Bork2d.Assets.ResolvedAsset).IsPublic);
+        Assert.DoesNotContain(typeof(Bork2d.Assets.ResolvedAsset), assembly.GetExportedTypes());
     }
 
     [Fact]

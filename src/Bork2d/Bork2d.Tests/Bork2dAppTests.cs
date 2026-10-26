@@ -234,7 +234,10 @@ public sealed class Bork2dAppTests
         Assert.Throws<NotSupportedException>(() => { _ = engine.Input; });
         Assert.Throws<NotSupportedException>(() => { _ = engine.Assets.LoadSprite("sprite.png"); });
         Assert.Throws<NotSupportedException>(() => { _ = engine.Assets.LoadData("data.bin"); });
-        Assert.Throws<NotSupportedException>(() => { _ = engine.Assets.LoadAsset<object>("asset.bin"); });
+        Assert.Throws<NotSupportedException>(() => { _ = engine.Assets.LoadAsset<PackTestData>("asset.bin"); });
+        Assert.Throws<NotSupportedException>(() => { engine.Assets.LoadPack("overlay.pck"); });
+        Assert.Throws<NotSupportedException>(() => { _ = engine.Assets.Browse(); });
+        Assert.Throws<NotSupportedException>(() => { _ = engine.Assets.Exists("data/bin"); });
     }
 
     [Fact]
