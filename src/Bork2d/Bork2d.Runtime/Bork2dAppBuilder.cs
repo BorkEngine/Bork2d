@@ -1,4 +1,5 @@
 using Bork2d.Api;
+using Bork2d.Assets;
 using Bork2d.Common;
 using Microsoft.Extensions.Logging;
 
@@ -47,8 +48,18 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <summary>
     /// Sets the base assets pack path.
     /// </summary>
-    /// <param name="path">A non-empty pack path. The file is not required to exist in M1.</param>
+    /// <param name="path">
+    /// A non-empty pack path. It is a filesystem path, not a canonical asset path; relative paths
+    /// resolve against the process current directory when <c>Run</c> opens the pack, and absolute
+    /// paths are accepted.
+    /// </param>
     /// <returns>This builder, for fluent chaining.</returns>
+    /// <remarks>
+    /// The pack is not opened by <see cref="Build"/>: a missing or malformed base pack throws
+    /// <see cref="Bork2dException"/> from <c>Run</c> before the window, platform, <c>Setup</c>, and
+    /// <c>Teardown</c>. The default is <c>"assets.pck"</c>. Mutually exclusive with
+    /// <see cref="WithoutAssets"/>.
+    /// </remarks>
     /// <exception cref="ArgumentException"><paramref name="path"/> is empty or whitespace.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is <see langword="null"/>.</exception>
     public Bork2dAppBuilder<TLayer> WithAssetsPack(string path)
@@ -60,6 +71,33 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
         }
 
         _options.AssetsPackPath = path;
+        _options.AssetsPackSelected = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Opts out of the base assets pack: the app starts with an empty virtual filesystem.
+    /// </summary>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <remarks>
+    /// <para>
+    /// No base pack is required or opened. <see cref="IAssets.Browse"/> returns an empty list,
+    /// <see cref="IAssets.Exists"/> is <see langword="false"/>,
+    /// <see cref="IAssets.LoadData"/> and <see cref="IAssets.LoadAsset{T}"/> fault with an
+    /// <c>AssetException</c> whose kind is <c>NotFound</c>, and <see cref="IAssets.LoadSprite"/>
+    /// returns <see cref="Sprite.Empty"/>. The asset service, including its one loader thread,
+    /// still starts, so <see cref="IAssets.LoadPack"/> can mount overlays on top of the empty
+    /// filesystem later (for example during <c>Setup</c>).
+    /// </para>
+    /// <para>
+    /// Available in windowed, offscreen, and headless modes. It is mutually exclusive with
+    /// <see cref="WithAssetsPack"/>: if both are called, <see cref="Build"/> throws
+    /// <see cref="Bork2dException"/>. Calling it more than once is idempotent.
+    /// </para>
+    /// </remarks>
+    public Bork2dAppBuilder<TLayer> WithoutAssets()
+    {
+        _options.WithoutAssetsSelected = true;
         return this;
     }
 
@@ -227,8 +265,15 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <remarks>
     /// <para>
     /// Validation runs first, then the app-owned logger factory is created, the startup
-    /// mode/validation message is logged, and the internal engine, clock, and runtime are created.
-    /// The factory is disposed if creation fails after it was built.
+    /// mode/validation message is logged, and the internal engine, clock, an <b>unstarted</b> asset
+    /// service, and the runtime are created. The factory and the asset service are disposed if
+    /// creation fails after they were built.
+    /// </para>
+    /// <para>
+    /// <see cref="Build"/> stays filesystem-free: it does not resolve a pack path, open a file,
+    /// parse a pack, or start the asset loader thread. The base pack (or the
+    /// <see cref="WithoutAssets"/> empty filesystem) is opened by <c>Run</c> before the window and
+    /// <c>Setup</c>.
     /// </para>
     /// <para>
     /// Windowed apps are created with unattached internal window/input proxies; headless and
@@ -242,6 +287,7 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
         var game = Validate();
 
         ILoggerFactory loggerFactory = Bork2dLogging.CreateLoggerFactory(_options.ConfigureLogging);
+        AssetService? assetService = null;
         try
         {
             var logger = loggerFactory.CreateLogger(Bork2dLogging.RuntimeCategory);
@@ -269,10 +315,16 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
                 input = null;
             }
 
+            // Unstarted: the constructor allocates the in-memory filesystem only. The base pack is
+            // opened by Run() before the window and Setup (D-M3-01).
+            assetService = new AssetService(
+                _options.WithoutAssetsSelected ? null : _options.AssetsPackPath,
+                loggerFactory);
+
             var engine = new Engine<TLayer>(
                 time,
                 window,
-                new UnsupportedAssets(),
+                assetService,
                 input,
                 loggerFactory);
 
@@ -281,6 +333,7 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
                 game,
                 time,
                 loggerFactory,
+                assetService,
                 _options,
                 windowProxy,
                 inputProxy);
@@ -288,6 +341,7 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
         }
         catch
         {
+            assetService?.Dispose();
             if (loggerFactory is IDisposable disposable)
             {
                 disposable.Dispose();
@@ -361,6 +415,13 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
         if (string.IsNullOrWhiteSpace(_options.AssetsPackPath))
         {
             throw new Bork2dException("The assets pack path must be non-empty.");
+        }
+
+        if (_options.AssetsPackSelected && _options.WithoutAssetsSelected)
+        {
+            throw new Bork2dException(
+                "WithAssetsPack and WithoutAssets are mutually exclusive. Select a base pack or the "
+                + "empty asset filesystem, not both.");
         }
 
         if (string.IsNullOrWhiteSpace(_options.Title))

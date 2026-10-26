@@ -1,11 +1,14 @@
 # Threading and Frame Handoff
 
-> **Status:** implemented M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2). The M1 scene graph implements the
-> structural and per-object `System.Threading.Lock` rules in §2 and the public API has no thread
-> affinity. The M2 windowed platform's OS/window thread, command queue, confirmed-state snapshot,
-> event pump, input freeze, and the runtime tick loop that drives them are `Current` (§5). The
-> render thread, snapshot ring, and frame handoff are `Planned` (M7), and asset loader threads are
-> `Planned` (M3). The engine has no debug-only tick-active, structural, or slot-state checks.
+> **Status:** implemented through M3 (the M3 PR is pending human review). The M1 scene graph
+> implements the structural and per-object `System.Threading.Lock` rules in §2 and the public API
+> has no thread affinity. The M2 windowed platform's OS/window thread, command queue,
+> confirmed-state snapshot, event pump, input freeze, and the runtime tick loop that drives them are
+> `Current` (§5). The M3 asset service's one loader thread, FIFO queue, asynchronous completion,
+> cancellation/join, and immutable CPU resource table are `Current` (§6). The render thread,
+> snapshot ring, and frame handoff are `Planned` (M7). The engine has no debug-only tick-active,
+> structural, or slot-state checks. The suite is 587 tests: 578 deterministic plus 9 opt-in
+> real-window tests.
 
 ## 1. Threads by mode
 
@@ -14,7 +17,7 @@
 | **Tick** | yes | yes | yes | Windowed loop, time, `IGame.Setup/Tick/Teardown`, input freeze/text dispatch, tick scope, scene/asset requests, snapshot capture (M7), shutdown. May be any host thread. |
 | **OS/window** | yes | no | no | SDL video/events and window operations; public `IWindow` calls are marshaled here. |
 | **Render** | yes | yes | no | Vulkan device, swapchain or offscreen targets, uploads, sprite resolution, sorting, instance building, draws, fences, present. |
-| **Asset loader(s)** | yes | yes | yes | Pack parsing, decompression, MessagePack/descriptor/sprite decoding, immutable resource table, upload requests. |
+| **Asset loader** | yes | yes | yes | One per app: pack reads, decompression, MessagePack/descriptor/sprite decoding, immutable CPU resource table. It never touches SDL, Vulkan, or game entities. |
 | **Game workers** | yes | yes | yes | Game-spawned threads on distinct entities; the game joins them before `Tick` returns. |
 
 In the target design the engine owns the asset threads and, in windowed/offscreen modes, the
@@ -48,7 +51,7 @@ The guarantees are deliberately precise:
   builder do not require the process main thread. `IGame` callbacks run on the engine tick
   thread; `IWindow` operations are marshaled to the OS/window thread (M2, current);
   `IInput`/`ITime` reads are snapshots.
-- **Asset requests are thread-safe and non-blocking** (`Planned`, M3): completion is
+- **Asset requests are thread-safe and non-blocking** (`Current`, M3): completion is
   asynchronous, so a caller cannot assume a sprite is ready. Workers may create cameras/sprites,
   request assets, mutate entities they own, read `ITime` snapshots, and hand data back through
   game-owned queues; they must join before `Tick` returns.
@@ -161,7 +164,7 @@ older `Ready` snapshots are dropped and the newest is shown.
 below, and detaches them after the platform shuts down. Headless/offscreen create no platform, so
 `IEngine.Input` throws `NotSupportedException` from the getter.
 
-### 5.1 Window thread, command queue, and confirmed state (M2 WP2, internal)
+### 5.1 Window thread, command queue, and confirmed state (M2, internal)
 
 `Current (internal).` The windowed platform owns one OS/window thread; it is the only thread that
 calls SDL. The tick thread never calls SDL and never waits for a window command.
@@ -194,7 +197,7 @@ calls SDL. The tick thread never calls SDL and never waits for a window command.
   callback, or the event wait, and the command-queue and input locks are never held together. Each
   lock protects a short critical section only.
 
-### 5.2 Input freeze and handoff (M2 WP3)
+### 5.2 Input freeze and handoff (M2)
 
 `Status: Current (internal).` The OS/window thread accumulates events into `InputAccumulator`;
 the tick thread freezes it once per tick into one of two preallocated `InputSnapshot` instances and
@@ -259,13 +262,17 @@ thread never invokes a game callback.
 
 ## 6. Asset and pack coordination
 
-`Current (M3 WP3–WP4)` for the loader and the CPU resource table; renderer/GPU integration is
-`Planned` (M8).
+`Current (M3)` for the loader and the CPU resource table; renderer/GPU integration is `Planned`
+(M8).
 
 - The internal asset service owns **one** dedicated loader thread per app and an unbounded FIFO
   request queue. There is no priority, no parallelism, and no cancellation token in the public API.
   The loader reads, decompresses, deserializes, and validates only; it never touches SDL, Vulkan, or
   game entities.
+- The runtime starts the service at `Run()` before the platform and `Setup` (opening the base pack
+  or the empty `WithoutAssets()` filesystem) and stops it after `Teardown` and platform shutdown on
+  every path. `Bork2dApp.Dispose()` disposes an unstarted or stopped service; `Dispose()` during a
+  run still throws.
 - `LoadData`/`LoadAsset<T>`/`LoadSprite` validate arguments synchronously, capture the current
   immutable VFS snapshot, and resolve every entry for the request against that snapshot. A later
   `LoadPack` mount does not change an in-flight request; new lookups see the new stack. `LoadSprite`
@@ -274,7 +281,7 @@ thread never invokes a game callback.
 - Requests complete through `TaskCompletionSource` with `RunContinuationsAsynchronously`, so no
   request completes a continuation on the caller or loader thread. `LoadData` returns a fresh
   `byte[]` and `LoadAsset<T>` a fresh deserialized instance per call; there is no data/asset cache.
-- **CPU resource table (WP4).** The loader thread is the only writer of texture-descriptor and
+- **CPU resource table.** The loader thread is the only writer of texture-descriptor and
   sprite resources. A published resource is immutable; the table holds one descriptor resource per
   texture path and one sprite resource per sprite path, including cached failures, with no weak
   references and no unload. Handle allocation and lookup happen on the calling thread; reads take a
@@ -305,7 +312,7 @@ Thread-specific rules:
   snapshot publication, control messages, and stop. It never outlives the Vulkan
   instance/surface (windowed) or device (offscreen). The asset loader thread is cancellable and
   joinable; queued and in-flight load tasks are canceled and the loader is joined at shutdown
-  (M3 WP3); sprite loads are dropped and their handles stay non-renderable (M3 WP4).
+  (M3); sprite loads are dropped and their handles stay non-renderable.
 - The windowed OS thread is stopped and joined before `Run()` returns or throws; the window is
   destroyed before SDL quits. Background errors are stored and rethrown on the `Run()` caller after
   cleanup (the M2 platform fatal path is `Current`; the render-thread path is `Planned`). The tick
@@ -339,9 +346,9 @@ Thread-specific rules:
    no surface/swapchain; fixed entity counts allocate nothing.
 
 `Bork2d.Tests` covers §2's scene rules, the M2 window/input/loop threading (fake SDL seam, bounded
-joins, no sleeps), the M3 WP3 asset loader (one thread, FIFO order, asynchronous completion,
-cancellation/join), and parts of 5 today; 1, 2, 4, and renderer pacing come with M7. The suite is
-486 tests: 477 deterministic tests in CI plus 9 opt-in real-window tests
+joins, no sleeps), the M3 asset loader (one thread, FIFO order, asynchronous completion,
+cancellation/join, resource-table ordering), and parts of 5 today; 1, 2, 4, and renderer pacing
+come with M7. The suite is 587 tests: 578 deterministic tests in CI plus 9 opt-in real-window tests
 (`BORK2D_RUN_WINDOW_TESTS=1`).
 
 ## 10. Related documents

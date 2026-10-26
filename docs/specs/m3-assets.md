@@ -1,23 +1,21 @@
 # M3 — Assets: Pack, VFS, Descriptors (spec)
 
-> **Status:** **approved by the human owner (2026-10-26).** The decisions in §4 are locked for the
-> M3 implementation. WP1 (v1 pack reader/writer, canonical paths, and the public pack-tooling
-> surface) is implemented on `m-3/wp-1`; WP2 (D-M3-22 public contract correction, `AssetInfo`,
+> **Status:** **approved by the human owner (2026-10-26) and implemented by WP1–WP5.** The M3 PR is
+> pending human review and is **not merged**. WP1 (v1 pack reader/writer, canonical paths, and the
+> public pack-tooling surface), WP2 (the D-M3-22 public contract correction, `AssetInfo`,
 > canonical-path/filesystem resolution, the internal base/overlay VFS, `LoadPack`, `Browse`/
-> `Exists`, atomic thread-safe mount, and the `IAssets`/`Data.cs` XML docs) is implemented on
-> `m-3/wp-2`; WP3 (the public `AssetException`/`AssetErrorKind` contract, one dedicated loader
-> thread with an unbounded FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, `LoadPack`/
-> `Browse`/`Exists` delegation, and the stub `LoadSprite`) is implemented on `m-3/wp-3`; WP4
-> (internal texture-descriptor/sprite models and validation, the CPU `LoadSprite` pipeline,
-> handle/resource caches, the internal resource table, enqueue-snapshot capture, and descriptor/
-> sprite validation through `LoadAsset<T>`) is implemented on `m-3/wp-4`. WP5 (runtime/AOT
-> integration, test migration, and final docs/acceptance) is not implemented yet. The constrained
-> `IAssets.LoadAsset<T>` signature and the `Bork2d.Api` PolyType 1.4.1 reference landed with WP2.
-> This spec owns M3 scope and semantics. It supersedes conflicting statements in
-> [Assets and tooling](../architecture/assets-and-tooling.md) and the M3 rows of
-> [Roadmap §9](../roadmap.md#9-open-decisions) until those documents are reconciled by WP5.
+> `Exists`, atomic thread-safe mount, and the `IAssets`/`Data.cs` XML docs), WP3 (the public
+> `AssetException`/`AssetErrorKind` contract, one dedicated loader thread with an unbounded FIFO
+> queue, `LoadData`/`LoadAsset<T>`, cancellation/join, `LoadPack`/`Browse`/`Exists` delegation, and
+> the stub `LoadSprite`), WP4 (internal texture-descriptor/sprite models and validation, the CPU
+> `LoadSprite` pipeline, handle/resource caches, the internal resource table, enqueue-snapshot
+> capture, and descriptor/sprite validation through `LoadAsset<T>`), and WP5 (runtime/AOT
+> integration, test migration, docs reconciliation, and acceptance evidence) are implemented in this
+> tree. The constrained `IAssets.LoadAsset<T>` signature and the `Bork2d.Api` PolyType 1.4.1
+> reference landed with WP2. This spec owns M3 scope and semantics and supersedes the M3-specific
+> statements reconciled out of [Assets and tooling](../architecture/assets-and-tooling.md) by WP5.
 > [AGENTS.md](../../AGENTS.md) owns the workflow; the [decision log](../decisions.md) owns accepted
-> decisions and now records D-M3-01…D-M3-22 (including the D-M3-22 shape-contract correction).
+> decisions and records D-M3-01…D-M3-22 (including the D-M3-22 shape-contract correction).
 >
 > **Outcome:** a runtime that opens `assets.pck`, mounts overlays, browses canonical paths, loads
 > raw data and MessagePack assets, and resolves sprite/texture CPU metadata — headless, with no
@@ -105,7 +103,7 @@ M3 changes or removes these statements (all intentional, recorded in §4):
 | Provisional limits: 64 MiB header, 1M assets, 512-byte paths | **No policy caps.** Format field widths (`uint32` header lengths, `uint32` entry length/size, `uint64` offset), the file length, and .NET allocation limits are the only bounds. |
 | The pack writer is deterministic / byte-reproducible | **No byte determinism guarantee.** Entries are sorted by path for stable structure, but compressed bytes may vary. |
 | `LoadSprite` requires sprite + descriptor + payload + GPU page | M3 loads **sprite + descriptor** into CPU metadata; the raw payload is loaded on first texture use in M8. |
-| `LoadAsset<T>` is for "built-in MessagePack types" | The loader is shape-generic. M3 tests use engine-internal shapes; game types become usable in M4 when the game-side shape package setup lands. |
+| `LoadAsset<T>` is for "built-in MessagePack types" | The loader is shape-generic. M3 tests use engine-internal shapes; game types can satisfy `where T : class, IShapeable<T>` in M3 because the shape contract is on `IAssets.LoadAsset<T>` itself (D-M3-22); no game-side shape package setup is required. |
 | `Bork2d.AotSmoke` references only `Api`, `Common`, `Runtime` | Adds `Bork2d.Assets` to use the public pack writer and load a pack in the default run. |
 | `WithAssetsPack` is stored but never used | Opens the base pack at `Run()`; `WithoutAssets()` opts out. |
 | `IAssets.LoadPack`/`Browse`/`Exists`, `AssetInfo` are `Planned` | Implemented in M3. |
@@ -821,15 +819,15 @@ The AOT smoke's default logging output must stay trim/AOT-clean.
 
 ### 10.7 Existing-test migration
 
-- Update the shared test helpers so apps that do not exercise assets call `.WithoutAssets()`.
-- Replace tests that assert `UnsupportedAssets`/`NotSupportedException` with the new empty-VFS or
-  real-pack behavior.
-- Windowed loop tests and one-tick tests that build without a pack must opt out; otherwise they
-  fail at `Run()` by design.
+- The shared test helpers and every app that does not exercise a real pack call `.WithoutAssets()`
+  (app tests, logging tests, windowed loop/input/time tests, and the opt-in real-window tests).
+- Tests that asserted the `UnsupportedAssets`/`NotSupportedException` stub were replaced with the
+  empty-VFS behavior and the real-pack/overlay behavior; windowed loop and one-tick tests opt out
+  so they no longer fail at `Run()` by design.
 - New asset tests build packs with `PackBuilder` into temp files (no committed binary fixture) and
   clean them up.
-- The opt-in real-window tests keep their scope; add `WithoutAssets()` where they build an app.
-- Test counts increase; CI still runs deterministic tests only.
+- The opt-in real-window tests keep their scope and use `WithoutAssets()`.
+- Test counts increased from 560 to 587; CI still runs deterministic tests only.
 
 ## 11. Dependencies, NativeAOT, and deployment
 
@@ -953,26 +951,34 @@ The default run must exit `0` with the M1 scene assertions, the MessagePack roun
 pack/load/browse assertions. The windowed run keeps the M2 evidence. AOT publish must report zero
 AOT/trim warnings; `SDL2.dll` remains in the output for the windowed demo.
 
-### 12.3 Acceptance evidence to record
+### 12.3 Acceptance evidence recorded by WP5
 
-WP5 records the actual commands/results and the observed pack counts/paths in the M3 PR and this
-spec (replacing the placeholders):
+All commands were run from the workspace clone on 2026-10-26 (Windows 11, SDK
+`11.0.100-rc.1.26425.128`).
 
-| Gate | Evidence |
-| --- | --- |
-| Debug/Release builds | 0 warnings/errors. |
-| Deterministic tests | All pass; count reported. |
-| Format/docs | Clean; link check passes. |
-| AOT publish | 0 AOT/trim warnings; dependencies present. |
-| AOT default run | Exit 0; one tick; raw + MessagePack asset loaded; browse/exists pass. |
-| AOT windowed run | Exit 0 after exactly 120 ticks; `WithoutAssets` path. |
-| Pack/overlay proof | A base pack + overlay shadows correctly; corrupt/missing packs fail safely. |
-| Logging | `Bork2d.Assets` start/stop/error lines; no per-frame logging. |
+| Gate | Command | Observed result |
+| --- | --- | --- |
+| Debug build | `dotnet build src/Bork2d/Bork2d.slnx -c Debug` | Build succeeded: **0 warnings, 0 errors**. |
+| Release build | `dotnet build src/Bork2d/Bork2d.slnx -c Release` | Build succeeded: **0 warnings, 0 errors**. |
+| Deterministic tests | `dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build` | **587 total: 578 passed, 9 skipped, 0 failed** (the 9 skips are the opt-in `[WindowFact]` tests). |
+| Opt-in real-window tests | `$env:BORK2D_RUN_WINDOW_TESTS='1'; dotnet test src/Bork2d/Bork2d.slnx -c Debug` | All 587 pass on a desktop session (`WithoutAssets()` windowed runs included). |
+| Format | `dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore` | No changes required. |
+| Docs | `pwsh scripts/check-docs.ps1` | Link/anchor check passed. |
+| Whitespace | `git diff --check` | Clean. |
+| AOT publish | `dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64 --nologo` | Succeeded with **0 AOT/trim warnings**; output includes the `Api`/`Common`/`Assets`/`Runtime` managed closure (Nerdbank.MessagePack, PolyType, `System.IO.Hashing`; Zstd is the .NET 11 built-in) and `SDL2.dll`. |
+| AOT default run | `...\publish\Bork2d.AotSmoke.exe` | **Exit 0.** Temporary pack under `%TEMP%\bork2d-aot-<guid>.pck` had **2 entries** (`data/smoke` raw, 8 known bytes; `data/smoke-data` generated-shape MessagePack) and **49 stored bytes**; `Browse` returned 2, `Exists` was true for both and false for `data/missing`; raw and MessagePack values matched; one `Setup`/`Tick`/`Teardown`; root cleared; temp pack deleted after disposal. |
+| AOT windowed run | `...\publish\Bork2d.AotSmoke.exe --windowed --ticks 120` | **Exit 0** after exactly **120 ticks** (`Setup/Tick/Teardown = 1/120/1`), `SDL_GetVersion` 2.30.8, final framebuffer 1280×720, **mounted packs 0** (`WithoutAssets()`). |
+| Pack/overlay proof | `AppAssetRuntimeTests.BasePackAndSetupOverlayServeLoadsWithoutSdlOrGpuInHeadlessModes` (headless, offscreen, windowed) | Base pack **4 entries** + Setup overlay **2 entries** → **5 visible** entries; the overlay shadows `data/shared` (single `Browse` entry whose `PackPath` is the supplied overlay path, `LoadData` returns the overlay bytes) and adds `data/config`; `LoadSprite` resolves the sprite + descriptor CPU resource; no SDL/Vulkan in headless/offscreen. |
+| Failure safety | `AppAssetRuntimeTests` + `AssetServiceLifecycleTests` + pack-validation tests | Missing and malformed base packs throw `Bork2dException` before the platform/window/`Setup`/`Teardown` with the path and parse reason; a failed asset start leaves no loader thread and disposes the service; a bad overlay is not mounted; corrupt headers/sizes/checksums fail with diagnostics. |
+| Logging | `AppAssetRuntimeTests.AssetLogging...` and `AssetServiceLoggingTests` | `Bork2d.Assets` emits start (mode/path/version/entries/bytes), overlay-mounted, load-failure, successful-load (Debug), and stop (pending/canceled/packs) lines; the runtime test observes exactly one start, overlay, load, and stop for one tick with no Error and no per-tick lines. |
 
 ## 13. Work packages
 
 The WPs are **sequential** (one wave each): they share `Bork2d.Assets`, the public contract, and the
 same docs. Branch model and review/merge rules are in [AGENTS.md](../../AGENTS.md).
+
+**All five work packages are implemented:** WP1–WP4 are merged into `m-3/common`, and WP5 is
+implemented on `m-3/wp-5` pending review (the M3 PR is not merged).
 
 | WP | Branch | Delivers | Depends |
 | --- | --- | --- | --- |
@@ -980,7 +986,7 @@ same docs. Branch model and review/merge rules are in [AGENTS.md](../../AGENTS.m
 | **WP2** VFS, paths, browse | `m-3/wp-2` | Canonical paths and filesystem resolution; base/overlay stack; `LoadPack`; `Browse`/`Exists`/`AssetInfo`; thread-safe atomic mount; tests. | WP1 |
 | **WP3** Loader and threading | `m-3/wp-3` | `IAssets` implementation; one loader thread; FIFO queue; `LoadData`/`LoadAsset<T>`; caching skeleton; task completion; cancellation/join; `AssetException`; post-shutdown; tests. `LoadSprite` may be stubbed until WP4. | WP2 |
 | **WP4** Descriptors and sprites | `m-3/wp-4` | Internal `TextureDescriptor`/`SpriteAsset` shapes; validation; `LoadSprite` pipeline (sprite+descriptor, no payload); resource table; tests. | WP3 |
-| **WP5** Runtime, AOT, docs, acceptance | `m-3/wp-5` | `WithoutAssets`; asset service wiring in `Run`/`Dispose`; startup/shutdown/error order; test migration; AOT smoke pack; docs/decision/roadmap updates; full gates and acceptance evidence. | WP4 |
+| **WP5** Runtime, AOT, docs, acceptance | `m-3/wp-5` | `WithoutAssets`; asset service wiring in `Run`/`Dispose`; startup/shutdown/error order; test migration; AOT smoke pack; docs/decision/roadmap updates; full gates and acceptance evidence. **Implemented.** | WP4 |
 
 Each WP:
 
@@ -993,32 +999,32 @@ Each WP:
 
 ## 14. Acceptance checklist (milestone exit)
 
-- [ ] A v1 `assets.pck` with raw data, a MessagePack asset, a texture descriptor, and a sprite asset
+- [x] A v1 `assets.pck` with raw data, a MessagePack asset, a texture descriptor, and a sprite asset
       loads through `LoadData`/`LoadAsset<T>`/`LoadSprite`; `Browse`/`Exists` agree.
-- [ ] Overlays shadow correctly; a bad overlay is not mounted; there is no unload.
-- [ ] Missing/malformed base pack fails with `Bork2dException` from `Run()` before a window/`Setup`;
+- [x] Overlays shadow correctly; a bad overlay is not mounted; there is no unload.
+- [x] Missing/malformed base pack fails with `Bork2dException` from `Run()` before a window/`Setup`;
       no `Teardown`; no partial state.
-- [ ] `WithoutAssets()` starts an empty VFS; `LoadPack` can add overlays; all no-asset apps/tests
+- [x] `WithoutAssets()` starts an empty VFS; `LoadPack` can add overlays; all no-asset apps/tests
       use it.
-- [ ] Path normalization/validation and current-directory/absolute filesystem resolution match §7.
-- [ ] Debug/release pack policies match §6.4; the header is always Zstd-max; payloads have no
+- [x] Path normalization/validation and current-directory/absolute filesystem resolution match §7.
+- [x] Debug/release pack policies match §6.4; the header is always Zstd-max; payloads have no
       checksum; no per-asset version; `Length`/`Size` are `uint32`, `Offset` `uint64`.
-- [ ] No policy caps; streaming/exact-size validation and `Array.MaxLength` behavior match §6.5.
-- [ ] Loader is one thread, FIFO, race-free under stress; tasks complete off the tick thread; shutdown
+- [x] No policy caps; streaming/exact-size validation and `Array.MaxLength` behavior match §6.5.
+- [x] Loader is one thread, FIFO, race-free under stress; tasks complete off the tick thread; shutdown
       cancels/joins; post-shutdown members throw.
-- [ ] `LoadSprite` loads sprite + descriptor CPU metadata, not the raw payload; missing/failed sprites
+- [x] `LoadSprite` loads sprite + descriptor CPU metadata, not the raw payload; missing/failed sprites
       are non-renderable and do not throw.
-- [ ] `AssetException`/`AssetErrorKind`/`AssetInfo` and `IAssets` XML docs are complete;
+- [x] `AssetException`/`AssetErrorKind`/`AssetInfo` and `IAssets` XML docs are complete;
       `IAssets.LoadAsset<T>` carries the `IShapeable<T>` constraint, and `Bork2d.Api` references
       PolyType 1.4.1 for it but stays free of Nerdbank/Zstd/file I/O.
-- [ ] `Bork2d.Assets` exposes only `PackBuilder`/`PackCompressionMode` publicly; `AotSmoke`
+- [x] `Bork2d.Assets` exposes only `PackBuilder`/`PackCompressionMode` publicly; `AotSmoke`
       references it; dependency test/docs updated.
-- [ ] AOT default run builds/loads/browses a pack with zero AOT/trim warnings; windowed
+- [x] AOT default run builds/loads/browses a pack with zero AOT/trim warnings; windowed
       `--ticks 120` still exits `0`.
-- [ ] Headless/offscreen initialize neither SDL nor Vulkan; no per-frame logging; no reflection/TOML
+- [x] Headless/offscreen initialize neither SDL nor Vulkan; no per-frame logging; no reflection/TOML
       in the runtime.
-- [ ] All deterministic tests pass; Debug/Release zero warnings; format/docs/git diff checks pass.
-- [ ] Docs/decisions/roadmap updated in the same milestone; no `AGENTS.md` change.
+- [x] All deterministic tests pass; Debug/Release zero warnings; format/docs/git diff checks pass.
+- [x] Docs/decisions/roadmap updated in the same milestone; no `AGENTS.md` change.
 
 ## 15. Documentation updates (same change)
 
@@ -1110,8 +1116,8 @@ than silently choosing a different behavior.
 ## 18. Related documents
 
 - [Roadmap](../roadmap.md#5-milestone-detail) — M3 scope/status and [open decisions](../roadmap.md#9-open-decisions).
-- [Assets and tooling](../architecture/assets-and-tooling.md) — pack/VFS/descriptor target contract
-  (reconciled by this spec in WP5).
+- [Assets and tooling](../architecture/assets-and-tooling.md) — pack/VFS/descriptor contract
+  (reconciled with this spec by WP5).
 - [Runtime lifecycle](../architecture/runtime-lifecycle.md#2-modes) — startup, modes, shutdown.
 - [Threading](../architecture/threading.md#6-asset-and-pack-coordination) — loader ownership.
 - [NativeAOT](../architecture/nativeaot.md#4-serialization-and-assets) — shapes, AOT gate.

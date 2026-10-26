@@ -53,9 +53,21 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     IInput Input { get; }
 
     /// <summary>
-    /// Gets the asset service. Thread-safe requests; completion is asynchronous. In M1 the
-    /// returned stub's methods throw <see cref="NotSupportedException"/>.
+    /// Gets the app-scoped asset service. Thread-safe requests; completion is asynchronous.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The getter never throws. It returns the real service in every mode: the base pack mounted at
+    /// <c>Run</c>, or an empty virtual filesystem when the app was built with
+    /// <c>Bork2dAppBuilder.WithoutAssets()</c>. That mode still starts the single loader thread and
+    /// allows <see cref="IAssets.LoadPack"/> overlays.
+    /// </para>
+    /// <para>
+    /// After <c>Run()</c> returns or throws, or after the app is disposed, every <see cref="IAssets"/>
+    /// member throws <see cref="ObjectDisposedException"/>; this getter keeps returning the disposed
+    /// service and does not throw by itself (D-M3-14).
+    /// </para>
+    /// </remarks>
     IAssets Assets { get; }
 
     /// <summary>

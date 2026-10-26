@@ -174,10 +174,16 @@ public sealed class DependencyMatrixTests
     public void AotSmokeReferencesOnlyTheRuntimeSurfaceItUses()
     {
         // Tests references Bork2d.AotSmoke as a project so its assembly is copied next to the
-        // test assembly. No test type uses it, so it is loaded by name here.
+        // test assembly. No test type uses it, so it is loaded by name here. Assets is referenced
+        // for the public pack-tooling surface used by the default AOT pack proof (D-M3-04/D-M3-19).
         var assembly = Assembly.Load("Bork2d.AotSmoke");
 
-        AssertReferenceMatrix(assembly, "Bork2d.Api", "Bork2d.Common", "Bork2d.Runtime");
+        AssertReferenceMatrix(
+            assembly,
+            "Bork2d.Api",
+            "Bork2d.Assets",
+            "Bork2d.Common",
+            "Bork2d.Runtime");
     }
 
     private static void AssertReferenceMatrix(Assembly assembly, params string[] expectedReferences)
