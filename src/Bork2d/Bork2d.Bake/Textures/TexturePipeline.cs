@@ -13,7 +13,8 @@ namespace Bork2d.Bake.Textures;
 /// <para>
 /// Discovery walks the textures directory in ordinal order, skips reparse points, accepts
 /// case-insensitive <c>.png</c>/<c>.jpg</c>/<c>.jpeg</c>/<c>.bmp</c>/<c>.tga</c> sources, ignores
-/// non-asset files, and associates optional <c>&lt;source file&gt;.toml</c> sidecars. Canonical
+/// non-asset files, and associates optional <c>&lt;source file&gt;.toml</c> sidecars by canonical
+/// asset path (so casing and the accepted source extension do not break the association). Canonical
 /// paths come from <see cref="BakeSourcePath"/> (the single path grammar): the descriptor path is
 /// <c>textures/&lt;suffix&gt;</c> and the raw payload path is <c>textures/raw/&lt;suffix&gt;</c>.
 /// </para>
@@ -78,7 +79,8 @@ internal static class TexturePipeline
         }
 
         var sources = new List<TextureSourceEntry>();
-        var sourcesByPath = new Dictionary<string, TextureSourceEntry>(StringComparer.Ordinal);
+        var sourcesByAssetPath = new Dictionary<string, TextureSourceEntry>(StringComparer.Ordinal);
+        var sourcePaths = new HashSet<string>(StringComparer.Ordinal);
         var sidecars = new List<string>();
 
         foreach (string file in BakeSourcePath.EnumerateFilesSorted(texturesRoot))
@@ -90,11 +92,11 @@ internal static class TexturePipeline
             }
             else if (_textureExtensions.Contains(extension))
             {
-                AddSource(project, file, sources, sourcesByPath, diagnostics);
+                AddSource(project, file, sources, sourcesByAssetPath, sourcePaths, diagnostics);
             }
         }
 
-        AttachSidecars(project, sidecars, sourcesByPath, diagnostics);
+        AttachSidecars(project, sidecars, sourcesByAssetPath, sourcePaths, diagnostics);
         MarkCollisions(sources, diagnostics);
 
         var textures = new List<BakedTexture>();
@@ -120,7 +122,8 @@ internal static class TexturePipeline
         ProjectDescriptor project,
         string sourcePath,
         List<TextureSourceEntry> sources,
-        Dictionary<string, TextureSourceEntry> sourcesByPath,
+        Dictionary<string, TextureSourceEntry> sourcesByAssetPath,
+        HashSet<string> sourcePaths,
         BakeDiagnostics diagnostics)
     {
         if (!BakeSourcePath.TryMakeRelative(
@@ -129,19 +132,31 @@ internal static class TexturePipeline
                 out string relativePath,
                 out string? reason))
         {
-            string absoluteDisplay = sourcePath;
             diagnostics.Add(
                 BakeSeverity.Error,
                 TextureDiagnosticCodes.TextureSourcePath,
-                $"Texture source '{absoluteDisplay}' is not under the assets root: {reason}.",
-                absoluteDisplay);
+                $"Texture source '{sourcePath}' is not under the assets root: {reason}.",
+                sourcePath);
             return;
         }
 
         string displayPath = DisplayPath(project, sourcePath);
         var entry = new TextureSourceEntry(sourcePath, relativePath, displayPath);
         sources.Add(entry);
-        sourcesByPath[sourcePath] = entry;
+        sourcePaths.Add(sourcePath);
+
+        bool hasCanonicalPath = BakeSourcePath.TryToAssetPath(
+            relativePath,
+            BakeSourceKind.TextureSource,
+            out string assetPath,
+            out reason);
+
+        if (hasCanonicalPath)
+        {
+            // Sidecars attach by canonical asset path, so a differently-cased stem or a different
+            // accepted extension still resolves to the same texture, exactly like collisions do.
+            sourcesByAssetPath[assetPath] = entry;
+        }
 
         if (relativePath.StartsWith(RawPathPrefix, StringComparison.OrdinalIgnoreCase))
         {
@@ -154,11 +169,7 @@ internal static class TexturePipeline
             return;
         }
 
-        if (!BakeSourcePath.TryToAssetPath(
-                relativePath,
-                BakeSourceKind.TextureSource,
-                out string assetPath,
-                out reason))
+        if (!hasCanonicalPath)
         {
             diagnostics.Add(
                 BakeSeverity.Error,
@@ -185,17 +196,40 @@ internal static class TexturePipeline
     private static void AttachSidecars(
         ProjectDescriptor project,
         List<string> sidecars,
-        Dictionary<string, TextureSourceEntry> sourcesByPath,
+        Dictionary<string, TextureSourceEntry> sourcesByAssetPath,
+        HashSet<string> sourcePaths,
         BakeDiagnostics diagnostics)
     {
         foreach (string sidecarPath in sidecars)
         {
             string displayPath = DisplayPath(project, sidecarPath);
-            string candidate = sidecarPath[..^TomlSuffix.Length];
+            TextureSourceEntry? entry = null;
 
-            if (sourcesByPath.TryGetValue(candidate, out TextureSourceEntry? entry))
+            if (BakeSourcePath.TryMakeRelative(
+                    project.AssetsRoot,
+                    sidecarPath,
+                    out string relativePath,
+                    out _)
+                && BakeSourcePath.TryToAssetPath(
+                    relativePath,
+                    BakeSourceKind.TextureSidecar,
+                    out string assetPath,
+                    out _))
+            {
+                sourcesByAssetPath.TryGetValue(assetPath, out entry);
+            }
+
+            if (entry is not null)
             {
                 entry.SidecarPath ??= sidecarPath;
+                continue;
+            }
+
+            string candidate = sidecarPath[..^TomlSuffix.Length];
+            if (sourcePaths.Contains(candidate))
+            {
+                // The source exists but its path is not canonical-safe; its own BK4002 is the
+                // error, so the sidecar must not add an orphaned-sidecar diagnostic.
                 continue;
             }
 

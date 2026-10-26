@@ -187,6 +187,61 @@ internal static class TextureImageFactory
     }
 
     /// <summary>
+    /// Creates a BITMAPCOREHEADER (DIB size 12) BMP header only: the 14-byte file header plus the
+    /// 12-byte core header, with no pixel data or color table.
+    /// </summary>
+    /// <param name="width">The declared 16-bit width.</param>
+    /// <param name="height">The declared 16-bit height.</param>
+    /// <returns>The 26-byte truncated BMP bytes.</returns>
+    internal static byte[] HeaderOnlyBmpCore(ushort width, ushort height)
+    {
+        var bmp = new byte[26];
+        bmp[0] = (byte)'B';
+        bmp[1] = (byte)'M';
+        WriteInt32LittleEndian(bmp.AsSpan(2, 4), 30);
+        WriteInt32LittleEndian(bmp.AsSpan(10, 4), 26);
+        WriteInt32LittleEndian(bmp.AsSpan(14, 4), 12);
+        bmp[18] = (byte)(width & 0xFF);
+        bmp[19] = (byte)(width >> 8);
+        bmp[20] = (byte)(height & 0xFF);
+        bmp[21] = (byte)(height >> 8);
+        bmp[22] = 1;
+        bmp[24] = 24;
+        return bmp;
+    }
+
+    /// <summary>
+    /// Creates a complete 24-bit BITMAPCOREHEADER BMP with the declared dimensions and black
+    /// pixels.
+    /// </summary>
+    /// <param name="width">The image width.</param>
+    /// <param name="height">The image height.</param>
+    /// <returns>The BMP bytes.</returns>
+    internal static byte[] CoreBmp(ushort width = 1, ushort height = 1)
+    {
+        const int fileHeaderSize = 14;
+        const int coreHeaderSize = 12;
+        const int pixelOffset = fileHeaderSize + coreHeaderSize;
+        int rowBytes = width * 3;
+        int paddedRowBytes = (rowBytes + 3) / 4 * 4;
+        int pixelBytes = paddedRowBytes * height;
+
+        var bmp = new byte[pixelOffset + pixelBytes];
+        bmp[0] = (byte)'B';
+        bmp[1] = (byte)'M';
+        WriteInt32LittleEndian(bmp.AsSpan(2, 4), bmp.Length);
+        WriteInt32LittleEndian(bmp.AsSpan(10, 4), pixelOffset);
+        WriteInt32LittleEndian(bmp.AsSpan(14, 4), coreHeaderSize);
+        bmp[18] = (byte)(width & 0xFF);
+        bmp[19] = (byte)(width >> 8);
+        bmp[20] = (byte)(height & 0xFF);
+        bmp[21] = (byte)(height >> 8);
+        bmp[22] = 1;
+        bmp[24] = 24;
+        return bmp;
+    }
+
+    /// <summary>
     /// Creates a TGA header only (no pixel data) with the declared dimensions.
     /// </summary>
     /// <param name="width">The declared width.</param>

@@ -25,6 +25,7 @@ internal static class TextureSourceProbe
     private const int PngBitDepth16 = 16;
     private const int BmpWidthOffset = 18;
     private const int BmpHeightOffset = 22;
+    private const int BmpCoreHeightOffset = 20;
     private const int BmpDibHeaderSizeOffset = 14;
     private const int BmpCoreDibHeaderSize = 12;
     private const int BmpInfoDibHeaderSize = 40;
@@ -152,8 +153,10 @@ internal static class TextureSourceProbe
 
         if (dibHeaderSize == BmpCoreDibHeaderSize && header.Length >= 22)
         {
+            // BITMAPCOREHEADER: width and height are 16-bit fields at 18 and 20; offset 22 is the
+            // planes field, not the height.
             width = ReadUInt16LittleEndian(header, BmpWidthOffset);
-            height = ReadUInt16LittleEndian(header, BmpHeightOffset);
+            height = ReadUInt16LittleEndian(header, BmpCoreHeightOffset);
             return true;
         }
 

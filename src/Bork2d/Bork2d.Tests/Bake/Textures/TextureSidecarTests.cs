@@ -137,6 +137,59 @@ public sealed class TextureSidecarTests
     }
 
     [Fact]
+    public void SidecarAssociationIgnoresStemAndExtensionCasing()
+    {
+        using var project = TextureTestProject.Create();
+        project.WriteImage("textures/Player.png", TextureImageFactory.RgbaPng());
+        project.WriteText(
+            "textures/PLAYER.PNG.toml",
+            "filter = \"nearest\"\nwrap = \"repeat\"\n");
+
+        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+
+        Assert.Empty(result.Diagnostics);
+        BakedTexture texture = Assert.Single(result.Textures);
+        Assert.Equal("textures/player", texture.AssetPath);
+        Assert.Equal("nearest", texture.Descriptor.Filter);
+        Assert.Equal("repeat", texture.Descriptor.Wrap);
+        Assert.Equal(
+            project.FullPath("textures/PLAYER.PNG.toml"),
+            texture.Settings.SidecarPath);
+        Assert.Equal(
+            new TextureSourceSpan("Assets/textures/PLAYER.PNG.toml", 1, 10),
+            texture.Settings.FilterSpan);
+    }
+
+    [Fact]
+    public void SidecarExtensionMayDifferWhenTheCanonicalPathMatches()
+    {
+        using var project = TextureTestProject.Create();
+        project.WriteImage("textures/tile.png", TextureImageFactory.RgbaPng());
+        project.WriteText("textures/tile.jpeg.toml", "filter = \"nearest\"\n");
+
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+
+        Assert.Equal("nearest", texture.Descriptor.Filter);
+        Assert.Equal("textures/tile", texture.AssetPath);
+    }
+
+    [Fact]
+    public void SidecarWhoseCanonicalCandidateHasNoSourceIsAnError()
+    {
+        using var project = TextureTestProject.Create();
+        project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
+        project.WriteText("textures/GHOST.PNG.toml", "filter = \"nearest\"\n");
+
+        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+
+        BakedTexture texture = Assert.Single(result.Textures);
+        Assert.Equal("textures/player", texture.AssetPath);
+        BakeDiagnostic error = Assert.Single(result.Diagnostics);
+        Assert.Equal(TextureDiagnosticCodes.TextureSidecarWithoutSource, error.Code);
+        Assert.Equal("Assets/textures/GHOST.PNG.toml", error.FilePath);
+    }
+
+    [Fact]
     public void UnknownSidecarKeyIsAnErrorWithTheKeySpan()
     {
         using var project = TextureTestProject.Create();

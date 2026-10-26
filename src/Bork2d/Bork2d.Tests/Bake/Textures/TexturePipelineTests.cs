@@ -320,6 +320,54 @@ public sealed class TexturePipelineTests
     }
 
     [Fact]
+    public void BitmapCoreHeaderBmpDecodesWithTheStbDecoder()
+    {
+        using var project = TextureTestProject.Create();
+        project.WriteImage("textures/core.bmp", TextureImageFactory.CoreBmp());
+
+        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+
+        Assert.Empty(result.Diagnostics);
+        BakedTexture texture = Assert.Single(result.Textures);
+        Assert.Equal(1u, texture.Descriptor.Width);
+        Assert.Equal(1u, texture.Descriptor.Height);
+        Assert.Equal(new byte[] { 0, 0, 0, 255 }, texture.Payload);
+    }
+
+    [Fact]
+    public void BitmapCoreHeaderReadsTheHeightFromTheCoreHeader()
+    {
+        // 65535x1 is a valid core-header BMP. Reading the height from offset 22 (the planes field)
+        // yields 0x00180001, which the probe would reject as oversized before this 196 KB image
+        // could be decoded.
+        using var project = TextureTestProject.Create();
+        project.WriteImage(
+            "textures/wide.bmp",
+            TextureImageFactory.CoreBmp(65535, 1));
+
+        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+
+        Assert.Empty(result.Diagnostics);
+        BakedTexture texture = Assert.Single(result.Textures);
+        Assert.Equal(65535u, texture.Descriptor.Width);
+        Assert.Equal(1u, texture.Descriptor.Height);
+        Assert.Equal(65535 * 4, texture.Payload.Length);
+    }
+
+    [Fact]
+    public void ZeroBitmapCoreHeaderHeightIsRejected()
+    {
+        using var project = TextureTestProject.Create();
+        project.WriteImage(
+            "textures/odd.bmp",
+            TextureImageFactory.HeaderOnlyBmpCore(1, 0));
+
+        BakeDiagnostic error = Assert.Single(TexturePipeline.Import(project.Descriptor).Diagnostics);
+
+        Assert.Equal(TextureDiagnosticCodes.TextureDimensions, error.Code);
+    }
+
+    [Fact]
     public void OversizedTgaHeaderDimensionsAreRejected()
     {
         using var project = TextureTestProject.Create();
