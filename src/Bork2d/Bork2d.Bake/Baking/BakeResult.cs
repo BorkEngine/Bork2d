@@ -8,8 +8,10 @@ namespace Bork2d.Bake.Baking;
 /// </summary>
 /// <remarks>
 /// A <see cref="BakeStatus.Success"/> result with <see cref="PackWritten"/> false is a
-/// <c>--check</c>/<c>validate</c> run. The pack path is still reported when it is known, so the caller
-/// can show the target that would be written. A failed result never has entries or a written pack.
+/// <c>--check</c>/<c>validate</c> run. A <see cref="BakeStatus.UpToDate"/> result means the
+/// incremental manifest matched: no bake ran, the existing pack is current, and the counts are the
+/// recorded ones. The pack path is reported when it is known, so the caller can show the target that
+/// was (or would be) written. A failed result never has entries or a written pack.
 /// </remarks>
 internal sealed class BakeResult
 {

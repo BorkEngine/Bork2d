@@ -71,7 +71,7 @@ internal sealed class BakeHostLoadContext : AssemblyLoadContext
             return LoadHostFile(name);
         }
 
-        if (IsShared(name))
+        if (IsToolingAssembly(name))
         {
             return ResolveShared(name);
         }
@@ -85,8 +85,20 @@ internal sealed class BakeHostLoadContext : AssemblyLoadContext
         return ResolveShared(name);
     }
 
-    private static bool IsShared(string name)
+    /// <summary>
+    /// Tests whether an assembly name belongs to the tooling (and therefore always resolves from the
+    /// default context).
+    /// </summary>
+    /// <param name="name">The simple assembly name.</param>
+    /// <returns><see langword="true"/> for an engine/tooling or tooling-package assembly.</returns>
+    /// <remarks>
+    /// The incremental bake reuses this rule to identify the game-side assembly closure next to the
+    /// host (everything that is not tooling), so the two boundaries cannot drift.
+    /// </remarks>
+    internal static bool IsToolingAssembly(string name)
     {
+        ArgumentNullException.ThrowIfNull(name);
+
         if (_sharedAssemblyNames.Contains(name))
         {
             return true;

@@ -8,6 +8,9 @@ internal enum BakeStatus
     /// <summary>Validation succeeded; a pack was written unless the run was a check.</summary>
     Success,
 
+    /// <summary>The incremental manifest matched and the existing pack is current (CLI exit 0).</summary>
+    UpToDate,
+
     /// <summary>The descriptor or generated host configuration is invalid (CLI exit 2).</summary>
     ConfigurationError,
 

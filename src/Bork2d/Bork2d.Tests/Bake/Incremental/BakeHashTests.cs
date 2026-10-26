@@ -81,8 +81,12 @@ public sealed class BakeHashTests
             ],
             "COMMON",
             "HOST",
-            "Release",
-            "OUTPUT");
+            "release",
+            "OUTPUT.pck",
+            "OUTPUTHASH",
+            3,
+            1,
+            2);
 
         Assert.Equal(
             new[] { "data/a.toml", "data/b.toml", "sprites/z.toml" },
@@ -93,8 +97,12 @@ public sealed class BakeHashTests
         Assert.Equal("DESCRIPTOR", manifest.DescriptorHash);
         Assert.Equal("COMMON", manifest.CommonAssemblyHash);
         Assert.Equal("HOST", manifest.HostHash);
-        Assert.Equal("Release", manifest.Mode);
-        Assert.Equal("OUTPUT", manifest.OutputHash);
+        Assert.Equal("release", manifest.Mode);
+        Assert.Equal("OUTPUT.pck", manifest.OutputPath);
+        Assert.Equal("OUTPUTHASH", manifest.OutputHash);
+        Assert.Equal(3, manifest.AssetCount);
+        Assert.Equal(1, manifest.TextureCount);
+        Assert.Equal(2, manifest.ReferenceCount);
     }
 
     [Fact]
@@ -107,8 +115,12 @@ public sealed class BakeHashTests
             [],
             "C",
             "H",
-            "Debug",
-            "O"));
+            "debug",
+            "O",
+            "OH",
+            0,
+            0,
+            0));
         Assert.Throws<ArgumentNullException>(() => new BakeIncrementalManifest(
             1,
             "1.0.0",
@@ -116,7 +128,24 @@ public sealed class BakeHashTests
             null!,
             "C",
             "H",
-            "Debug",
-            "O"));
+            "debug",
+            "O",
+            "OH",
+            0,
+            0,
+            0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BakeIncrementalManifest(
+            1,
+            "1.0.0",
+            "D",
+            [],
+            "C",
+            "H",
+            "debug",
+            "O",
+            "OH",
+            -1,
+            0,
+            0));
     }
 }

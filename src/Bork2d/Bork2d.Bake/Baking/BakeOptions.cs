@@ -6,9 +6,8 @@ namespace Bork2d.Bake.Baking;
 /// <remarks>
 /// CLI paths are already resolved against the process current directory by the caller. The output
 /// path is optional: when it is <see langword="null"/> the descriptor's <c>[bake].pack</c> is the
-/// target. <see cref="Check"/> validates everything and writes nothing. <see cref="Force"/> is parsed
-/// and carried for the WP5 incremental manifest; in WP4 it is a documented no-op because there is no
-/// skip to bypass yet.
+/// target. <see cref="Check"/> validates everything and writes nothing, and never skips the bake.
+/// <see cref="Force"/> bypasses the incremental manifest skip so a full bake always runs.
 /// </remarks>
 internal sealed class BakeOptions
 {
@@ -56,8 +55,8 @@ internal sealed class BakeOptions
     internal bool Check { get; }
 
     /// <summary>
-    /// Gets a value indicating whether <c>--force</c> was passed. WP4 has no incremental manifest, so
-    /// the value is carried and documented as a no-op until WP5.
+    /// Gets a value indicating whether <c>--force</c> was passed, which bypasses the incremental
+    /// manifest skip and always runs a full bake.
     /// </summary>
     internal bool Force { get; }
 }

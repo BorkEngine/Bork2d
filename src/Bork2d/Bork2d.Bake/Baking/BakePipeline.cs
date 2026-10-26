@@ -24,8 +24,8 @@ namespace Bork2d.Bake.Baking;
 /// deterministic sorter. <c>--check</c> stops after validation and writes nothing.
 /// </para>
 /// <para>
-/// The incremental manifest, skip/force behavior, and MSBuild integration belong to WP5; the pipeline
-/// always runs a full bake in WP4.
+/// The incremental manifest, skip/force behavior, and MSBuild integration are layered on top by
+/// <c>BakeIncrementalPlanner</c> (WP5); the pipeline itself always runs a full bake.
 /// </para>
 /// </remarks>
 internal static class BakePipeline

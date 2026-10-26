@@ -65,25 +65,47 @@ public sealed class BakeCliTests
     }
 
     [Fact]
-    public void ForceIsParsedAndDocumentedAsANoOp()
+    public void ASecondBakeIsUpToDateAndForceRebakes()
     {
         using var directory = TempBakeDirectory.Create();
+        string packPath = directory.FullPath("assets.pck");
 
-        Result result = Run(
+        Result first = Run(
             "bake",
             "--project",
             _fixture.DescriptorPath,
             "--host",
             _fixture.HostAssemblyPath,
             "--output",
-            directory.FullPath("assets.pck"),
-            "--force");
+            packPath);
+        Assert.Equal(CliApplication.SuccessExitCode, first.ExitCode);
+        Assert.Contains("baked '", first.Output, StringComparison.Ordinal);
+        byte[] packBytes = File.ReadAllBytes(packPath);
 
-        Assert.Equal(CliApplication.SuccessExitCode, result.ExitCode);
-        Assert.Contains(
-            "no effect until the incremental manifest",
-            result.Output,
-            StringComparison.Ordinal);
+        Result second = Run(
+            "bake",
+            "--project",
+            _fixture.DescriptorPath,
+            "--host",
+            _fixture.HostAssemblyPath,
+            "--output",
+            packPath);
+        Assert.Equal(CliApplication.SuccessExitCode, second.ExitCode);
+        Assert.Contains("up to date", second.Output, StringComparison.Ordinal);
+        Assert.Equal(packBytes, File.ReadAllBytes(packPath));
+
+        Result forced = Run(
+            "bake",
+            "--project",
+            _fixture.DescriptorPath,
+            "--host",
+            _fixture.HostAssemblyPath,
+            "--output",
+            packPath,
+            "--force");
+        Assert.Equal(CliApplication.SuccessExitCode, forced.ExitCode);
+        Assert.Contains("baked '", forced.Output, StringComparison.Ordinal);
+        Assert.Equal(packBytes, File.ReadAllBytes(packPath));
     }
 
     [Fact]
