@@ -222,6 +222,7 @@ public sealed class DependencyMatrixTests
             "Bork2d.Common",
             "Bork2d.Assets");
     }
+
     [Fact]
     public void RuntimeReferencesOnlyTheImplementationLayers()
     {
