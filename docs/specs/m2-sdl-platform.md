@@ -1,7 +1,7 @@
 # M2 — SDL Windowed Platform (spec)
 
-> **Status:** implemented (M2 WP1–WP5 on `m-2/common`; pending PR review). Decisions approved by the
-> human owner on 2026-10-26; the approved reconciliations in §4.2 record the as-built details.
+> **Status:** implemented (WP1–WP5; the WP5 branch is pending review/merge). Decisions approved by
+> the human owner on 2026-10-26; the approved reconciliations in §4.2 record the as-built details.
 > This spec owns **M2 scope and semantics**. The [roadmap](../roadmap.md#5-milestone-detail) owns
 > sequence and status, the [decision log](../decisions.md) owns accepted decisions, and
 > [AGENTS.md](../../AGENTS.md) owns the workflow.
@@ -605,7 +605,7 @@ Run on Windows 11, 150% display scaling, SDK `11.0.100-rc.1.26425.128`:
 
 The WPs are **sequential** (one wave each): they share `Bork2d.Runtime` internals and the same
 docs, so parallel work would overlap. Branch model and review/merge rules are in
-[AGENTS.md](../../AGENTS.md). All five are implemented on `m-2/common`; M2 is pending PR review.
+[AGENTS.md](../../AGENTS.md). All five are implemented; the WP5 branch is pending review/merge.
 
 | WP | Branch | Delivers | Depends |
 | --- | --- | --- | --- |

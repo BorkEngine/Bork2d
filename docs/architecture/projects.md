@@ -1,9 +1,9 @@
 # Projects and Dependencies
 
 > **Status:** the project graph is `Current` and enforced by the dependency test. M2 (WP1–WP5) is
-> implemented on `m-2/common` and pending PR review: `Bork2d.Runtime` now hosts the SDL window,
-> input, time, and the windowed loop. `Bork2d.Assets` and `Bork2d.Render` are reference-wired with
-> no implementation (`Planned`); `Bork2d.Editor` is `Planned` (M5). No project was added in M2.
+> implemented and pending PR review: `Bork2d.Runtime` now hosts the SDL window, input, time, and the
+> windowed loop. `Bork2d.Assets` and `Bork2d.Render` are reference-wired with no implementation
+> (`Planned`); `Bork2d.Editor` is `Planned` (M5). No project was added in M2.
 
 ## 1. Current projects
 

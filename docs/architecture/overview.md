@@ -1,7 +1,7 @@
 # Architecture Overview
 
-> **Status:** M2 (SDL windowed platform, WP1–WP5) is implemented on `m-2/common` and pending PR
-> review; M1 is merged into `develop` (2026-10-25). The builder, validation, windowed SDL host
+> **Status:** M2 (SDL windowed platform, WP1–WP5) is implemented and pending PR review; M1 is merged
+> into `develop` (2026-10-25). The builder, validation, windowed SDL host
 > (window/input/time/loop), one-tick headless/offscreen host, scene graph, logging, and AOT baseline
 > are `Current`; assets (M3/M4), the editor (M5), Vulkan and frame handoff (M6/M7), and the sprite
 > renderer (M8) are `Planned`. Status detail is in [the roadmap](../roadmap.md).

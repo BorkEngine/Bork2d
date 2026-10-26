@@ -1,7 +1,7 @@
 # Implementation Roadmap
 
 > **Status:** M0 complete; **M1 merged into `develop` (2026-10-25, PR #1)**; **M2 (SDL windowed
-> platform) implemented on `m-2/common` (WP1–WP5) and in review — not merged.** Next milestone after
+> platform) implemented (WP1–WP5), with the WP5 branch in review — not merged.** Next milestone after
 > M2: M3. The sequence is dependency-ordered. A milestone is done when its exit criterion is
 > demonstrated, not merely when code is merged.
 
@@ -75,8 +75,8 @@ gate, and AOT smoke. Evidence: 135 tests, Debug/Release zero warnings, format cl
 
 ### M2 — SDL windowed platform
 
-**Status:** implemented on `m-2/common` (WP1–WP5); **pending PR review — not merged.** Full record:
-[M2 spec](specs/m2-sdl-platform.md).
+**Status:** implementation complete on `m-2/wp-5` (WP1–WP4 merged into `m-2/common`);
+**pending review — not merged.** Full record: [M2 spec](specs/m2-sdl-platform.md).
 
 Goal: a window that ticks, reads input, and exits cleanly; no Vulkan yet.
 
@@ -305,7 +305,7 @@ and the [decision log](decisions.md). Remaining open decisions:
 | --- | --- | --- |
 | M0 Documentation | Complete (2026-10-25) | Docs set, decision log, accepted ownership/pack/editor/pacing decisions. |
 | M1 Foundation/AOT | Merged (2026-10-25, PR #1) | 135 tests; Debug/Release zero warnings; format clean; AOT smoke publishes/runs locally; CI build/test/format on PRs to `develop` and `develop` pushes. [M1 spec](specs/m1-foundation.md). |
-| M2 SDL platform | In review (implementation complete on `m-2/common`, WP1–WP5; not merged) | 292 tests (283 in CI, 292 with `BORK2D_RUN_WINDOW_TESTS=1`); Debug/Release zero warnings; format/docs clean; AOT headless and `--windowed --ticks 120` exit 0 with `SDL2.dll`; live-window 5,000,000-tick run exit 0; Escape/close graceful. [M2 spec](specs/m2-sdl-platform.md#125-acceptance-evidence-recorded-by-wp5). |
+| M2 SDL platform | In review (implementation complete on `m-2/wp-5`, WP1–WP4 merged; not merged) | 292 tests (283 in CI, 292 with `BORK2D_RUN_WINDOW_TESTS=1`); Debug/Release zero warnings; format/docs clean; AOT headless and `--windowed --ticks 120` exit 0 with `SDL2.dll`; live-window 5,000,000-tick run exit 0; Escape/close graceful. [M2 spec](specs/m2-sdl-platform.md#125-acceptance-evidence-recorded-by-wp5). |
 | M3 Assets/pack | Not started | — |
 | M4 Serialization/bake | Not started | — |
 | M5 Editor | Not started | — |
