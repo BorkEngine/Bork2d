@@ -744,12 +744,29 @@ internal static class ProjectDescriptorParser
             }
             else
             {
-                mappings.Add(new ProjectTypeMapping(prefix, typeName));
+                (int? prefixLine, int? prefixColumn) = GetValueLocation(
+                    syntax,
+                    entryPath.Child("prefix"));
+                (int? typeLine, int? typeColumn) = GetValueLocation(
+                    syntax,
+                    entryPath.Child("type"));
+                mappings.Add(new ProjectTypeMapping(prefix, typeName)
+                {
+                    PrefixLine = prefixLine,
+                    PrefixColumn = prefixColumn,
+                    TypeLine = typeLine,
+                    TypeColumn = typeColumn,
+                });
             }
         }
 
         return valid;
     }
+
+    private static (int? Line, int? Column) GetValueLocation(TomlSyntaxIndex syntax, TomlPath path)
+        => syntax.TryGetValueSpan(path, out SourceSpan span)
+            ? (span.Start.Line + 1, span.Start.Column + 1)
+            : (null, null);
 
     private static bool TryReadPath(
         BakeDiagnostics diagnostics,

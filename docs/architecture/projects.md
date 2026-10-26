@@ -2,17 +2,21 @@
 
 > **Status:** the project graph is `Current` and enforced by the dependency test. M1, M2, and M3
 > are implemented and merged into `develop` (2026-10-26, PR #4), and the post-M3 asset-reference
-> refactor (D-035) is merged (PR #6). M4 WP1 adds the JIT bake tooling foundation: `Bork2d.Bake`
-> (descriptor, diagnostics, path safety, host/incremental contracts, hashing; internal with
-> `InternalsVisibleTo` to the host/CLI/editor/tests) and `Bork2d.Bake.Cli` (`--help`,
-> `--version`, `validate`; internal `Program`/`CliApplication`). The bake pipeline beyond the
-> descriptor is WP2–WP5. `Bork2d.Runtime` hosts the SDL window, input, time, the windowed loop, and
-> the app-scoped asset service. `Bork2d.Assets` provides the v1 pack reader/writer, its public
-> tooling surface (`Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`), canonical paths, the
-> internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, the loader service (one dedicated
-> thread, unbounded FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, startup/stop logging),
-> and generic pack-time reference validation. `Bork2d.Api` exposes `AssetInfo`, the
-> shape-only `LoadAsset<T>` (D-M4-11), `AssetException`/`AssetErrorKind`, the public
+> refactor (D-035) is merged (PR #6). M4 WP1 added the JIT bake tooling foundation and M4 WP2 adds
+> generated-host and custom-data support: `Bork2d.Bake` now contains the descriptor, diagnostics,
+> path safety, host/incremental contracts, XXH3 hashing, a `MetadataLoadContext`-based host generator,
+> the non-collectible host loader, source discovery/binding, and the generic shape-driven Tomlyn DOM
+> binder (internal, with `InternalsVisibleTo` to the host/CLI/editor/tests); `Bork2d.Bake.Cli`
+> exposes `--help`, `--version`, `generate-host`, and `validate` with or without `--host` (internal
+> `Program`/`CliApplication`). Textures (WP3), reference validation/pack orchestration (WP4), and
+> incremental/MSBuild/AOT integration (WP5/WP6) are not implemented. `Bork2d.Runtime` hosts the SDL
+> window, input, time, the windowed loop, and the app-scoped asset service. `Bork2d.Assets` provides
+> the v1 pack reader/writer, its public tooling surface
+> (`Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`), canonical paths, the internal
+> base/overlay VFS with `LoadPack`/`Browse`/`Exists`, the loader service (one dedicated thread,
+> unbounded FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, startup/stop logging), and
+> generic pack-time reference validation. `Bork2d.Api` exposes `AssetInfo`, the shape-only
+> `LoadAsset<T>` (D-M4-11), `AssetException`/`AssetErrorKind`, the public
 > `SpriteAsset`/`TextureDescriptor`/`AssetRef<T>`/`DataRef` asset model, and the `ColorMarshaler`
 > serialization infrastructure (D-M4-12). `Bork2d.AotSmoke` references `Bork2d.Assets` for the AOT
 > pack proof. `Bork2d.Render` is still reference-wired with no implementation (`Planned`);
@@ -29,11 +33,11 @@ All projects target `net11.0` and live in `src/Bork2d/`, listed in
 | `Bork2d.Common` | `Bork2d.Api` | `Partial` | Root-owned unordered scene tree, transforms, time, layer validation, MessagePack generated-shape policy. Snapshot capture is M7. |
 | `Bork2d.Runtime` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render` | `Current` (M3) | Public builder/app, validation, windowed SDL host (window, input, time, uncapped loop), one-tick headless/offscreen host, app-owned logging, and the app-scoped asset-service lifecycle. GPU/rendering is M6/M8. |
 | `Bork2d.Assets` | `Bork2d.Api`, `Bork2d.Common` | `Current` (M3/D-035) | v1 pack reader/writer, structural validation, Zstd/XXH3-64, canonical paths, public `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, the app-scoped service (one thread, FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, `AssetException` failures), and generic pack-time reference validation. Grants `Bork2d.Bake` internal access to the canonical path grammar. |
-| `Bork2d.Bake` | `Bork2d.Api`, `Bork2d.Assets` (+ Tomlyn, StbImageSharp, `System.IO.Hashing`) | `Partial` (M4 WP1) | JIT bake library, internal by default: project-descriptor model/parser, diagnostics, path/traversal safety, host and incremental contracts, XXH3-128 hashing, and the shared canonical path grammar reuse. No `Bork2d.Common` reference (Q-20); host generation, TOML binding, textures, references, and pack orchestration are WP2–WP5. |
-| `Bork2d.Bake.Cli` | `Bork2d.Bake` | `Partial` (M4 WP1) | JIT console (`OutputType=Exe`, `AssemblyName=Bork2d.Bake.Cli`, `IsPackable=false`), internal `Program`/`CliApplication`: `--help`, `--version`, and descriptor-only `validate`. `generate-host`/`bake` are WP2/WP4. |
+| `Bork2d.Bake` | `Bork2d.Api`, `Bork2d.Assets` (+ Tomlyn, PolyType, `System.Reflection.MetadataLoadContext`, StbImageSharp, `System.IO.Hashing`) | `Partial` (M4 WP2) | JIT bake library, internal by default: project-descriptor model/parser, diagnostics, path/traversal safety, host and incremental contracts, XXH3-128 hashing, the shared canonical path grammar reuse, `Project.Common` metadata resolution (Q-04), the generated-host project/manifest writer, the non-collectible host loader with shared type identity, source discovery/binding, and the generic shape-driven Tomlyn DOM binder (Q-07). No `Bork2d.Common` reference (Q-20); textures, reference validation, pack orchestration, and incremental/MSBuild integration are WP3–WP5. |
+| `Bork2d.Bake.Cli` | `Bork2d.Bake` | `Partial` (M4 WP2) | JIT console (`OutputType=Exe`, `AssemblyName=Bork2d.Bake.Cli`, `IsPackable=false`), internal `Program`/`CliApplication`: `--help`, `--version`, `generate-host`, and `validate` (descriptor-only or with `--host` source binding). `bake` is WP4. |
 | `Bork2d.Render` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets` | `Empty` (wired) | Vulkan device, swapchain or offscreen targets, pipelines, bindless textures, draws, present. |
 | `Bork2d.AotSmoke` | `Bork2d.Api`, `Bork2d.Assets`, `Bork2d.Common`, `Bork2d.Runtime` | `Current` | NativeAOT smoke executable: the default headless one-tick run with a temporary pack, plus the opt-in `--windowed [--ticks N]` SDL demo; the local publish/run gate. Not a game template project and it never references bake tooling. |
-| `Bork2d.Tests` | every solution engine project (`Api`, `Common`, `Assets`, `Render`, `Runtime`, `Bake`, `Bake.Cli`) plus `Bork2d.AotSmoke` | `Current` | 625 deterministic xUnit tests plus 10 opt-in/conditional tests (9 real-window and 1 reparse-point capability), including pack-format/writer, VFS/path/browse, loader/threading, generic reference validation, asset-reference/pack-build contracts, asset error contract, runtime asset lifecycle/error-matrix, D-M4-11 struct roots, D-M4-12 color marshaling, descriptor/diagnostic/path/hash/CLI foundations, and dependency-surface tests. The smoke reference copies the app next to the tests; the dependency test loads it by name to check its references. |
+| `Bork2d.Tests` | every solution engine project (`Api`, `Common`, `Assets`, `Render`, `Runtime`, `Bake`, `Bake.Cli`) plus `Bork2d.AotSmoke` | `Current` | 712 deterministic xUnit tests plus 10 opt-in/conditional tests (9 real-window and 1 reparse-point capability), including pack-format/writer, VFS/path/browse, loader/threading, generic reference validation, asset-reference/pack-build contracts, asset error contract, runtime asset lifecycle/error-matrix, D-M4-11 struct roots, D-M4-12 color marshaling, descriptor/diagnostic/path/hash/CLI foundations, the generated-host generator/loader/ALC identity, the generic shape-driven TOML binder matrix (leaves, structs, collections, attributes, spans, enum/date/numeric rules), source discovery/binding, `SpriteAsset` as data with a pack round-trip, and dependency-surface tests. The smoke reference copies the app next to the tests; the dependency test loads it by name to check its references. |
 | `Bork2d.Editor` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Bake` (+ Avalonia) | `Planned` (M5) | Avalonia editor library/app; JIT; reuses the bake library (D-M4-01). |
 
 `Bork2d.Runtime` references `Microsoft.Extensions.Logging` `11.0.0-rc.1.26425.128` and `ZLogger`
@@ -53,10 +57,15 @@ constraint (D-M3-22, relaxed by D-M4-11). That contract reference is the only pa
 `Bork2d.Api`; it stays free of Nerdbank.MessagePack, `System.IO.Hashing`, Zstd, and file I/O.
 `Bork2d.Assets` also takes `ILoggerFactory`/`ILogger` from the shared-framework logging
 abstractions for the `Bork2d.Assets` category; it adds no logging package reference.
-`Bork2d.Bake` is JIT tooling and pins `Tomlyn` `2.10.1` (descriptor/source TOML), `StbImageSharp`
-`2.30.16` (texture decode, used by WP3), and `System.IO.Hashing`
+`Bork2d.Bake` is JIT tooling and pins `Tomlyn` `2.10.1` (descriptor/source TOML), `PolyType` `1.4.1`
+(direct: the binder walks compiled shape metadata), `System.Reflection.MetadataLoadContext`
+`11.0.0-rc.1.26425.128` (build-time `Project.Common` metadata without loading game assemblies),
+`StbImageSharp` `2.30.16` (texture decode, used by WP3), and `System.IO.Hashing`
 `11.0.0-rc.1.26425.128` (`XxHash128`); it references `Bork2d.Api`/`Bork2d.Assets` and never
-`Bork2d.Common` (Q-20). `Bork2d.Bake.Cli` references only `Bork2d.Bake`, is an `Exe`, and is not
+`Bork2d.Common` (Q-20). The generated `Bork2d.BakeHost` project is not a solution project and has no
+`PackageReference`: it references the exact assemblies by absolute `HintPath` (`Project.Common`, the
+Q-04 closure, `Bork2d.Api`/`Assets`/`Bake`, Tomlyn, PolyType, Nerdbank.MessagePack, and
+`System.IO.Hashing`). `Bork2d.Bake.Cli` references only `Bork2d.Bake`, is an `Exe`, and is not
 packable. `Bork2d.AotSmoke` is the only project that sets `PublishAot`; libraries do not publish
 independently, and no runtime project references the bake tooling or its packages.
 
@@ -97,7 +106,8 @@ Rules behind the matrix:
   `Bork2d.Assets.Pack` tooling surface (`PackBuilder`) to build and load the AOT pack proof; it must not
   pull `Render` types or any bake tooling in.
 - `Bake` is JIT tooling: it references `Api` and `Assets` only (no `Common`, Q-20) plus Tomlyn,
-  StbImageSharp, and `System.IO.Hashing`; it must not reference `Runtime`, `Render`, or `Editor`.
+  PolyType, `System.Reflection.MetadataLoadContext`, StbImageSharp, and `System.IO.Hashing`; it must
+  not reference `Runtime`, `Render`, or `Editor`.
   Its public surface is empty; `InternalsVisibleTo` grants the host, CLI, editor, and tests access.
 - `Bake.Cli` references only `Bake`; it is the JIT console front end and its public surface is empty.
 - `Editor` is independent of the renderer: it edits source data, slices textures, and previews
@@ -170,10 +180,10 @@ namespace; the public startup/tooling types stay there where the table notes it.
 | `Bork2d.Api` | `Assets/` → `.Assets`; `Scene/` → `.Scene`; `Rendering/` → `.Rendering`; `Input/` → `.Input`; `Platform/` → `.Platform` | `IEngine`, `IGame`, `Bork2dException` |
 | `Bork2d.Common` | `Scene/`, `Time/`, `Serialization/` | none |
 | `Bork2d.Assets` | `Pack/` (public tooling, the v1 pack reader/writer, and reference validation), `Vfs/`, `Loading/` | `CommonReferenceAnchor` |
-| `Bork2d.Bake` | `Diagnostics/`, `Project/`, `Paths/`, `Toml/`, `Hosting/`, `Incremental/` | `AssemblyReferenceAnchor` |
+| `Bork2d.Bake` | `Diagnostics/`, `Project/`, `Paths/`, `Toml/`, `Hosting/`, `Sources/`, `Incremental/` | `AssemblyReferenceAnchor` |
 | `Bork2d.Bake.Cli` | — | `Program`, `CliApplication` |
 | `Bork2d.Runtime` | `Hosting/`, `Input/`, `Sdl/`, `Window/` | `Bork2dApp`, `Bork2dAppBuilder`, `AssemblyReferenceAnchor` |
-| `Bork2d.Tests` | `Architecture/`, `Scene/`, `Runtime/`, `Assets/{Pack,Vfs,Service,Sprites}/`, `Bake/{Cli,Diagnostics,Hosting,Incremental,Paths,Project}/`, `Platform/{Sdl,Window}/`, `Input/`, `TestDoubles/`, `TestSupport/` | none |
+| `Bork2d.Tests` | `Architecture/`, `Scene/`, `Runtime/`, `Assets/{Pack,Vfs,Service,Sprites}/`, `Bake/{Cli,Diagnostics,Hosting,Incremental,Paths,Project,Toml,Sources}/`, `Platform/{Sdl,Window}/`, `Input/`, `TestDoubles/`, `TestSupport/` | none |
 | `Bork2d.AotSmoke` | `Smoke/`, `Demo/` | `Program`, `DemoArguments` |
 | `Bork2d.Render` | — | `AssemblyReferenceAnchor` (renderer folders arrive with M6/M8) |
 
