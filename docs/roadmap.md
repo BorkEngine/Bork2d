@@ -25,7 +25,7 @@
 | `Bork2d.Assets` | Current (M3) | v1 pack reader/writer, public `PackBuilder`/`PackCompressionMode`, canonical paths, base/overlay VFS, one loader thread with `LoadData`/`LoadAsset<T>`/`LoadSprite` CPU metadata, and the CPU resource table. |
 | `Bork2d.Render` | Empty | Reference-wired; no Vulkan implementation (M6/M8). |
 | `Bork2d.Editor` | Absent | Not in the solution (M5). |
-| `Bork2d.Tests` | Current | 586 xUnit tests: 577 deterministic in CI (ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix, fake-SDL window/input/loop/time, pack/VFS/loader/descriptor/sprite, runtime asset lifecycle) plus 9 opt-in real-window tests. |
+| `Bork2d.Tests` | Current | 587 xUnit tests: 578 deterministic in CI (ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix, fake-SDL window/input/loop/time, pack/VFS/loader/descriptor/sprite, runtime asset lifecycle) plus 9 opt-in real-window tests. |
 | NativeAOT | M3 baseline | Libraries use `IsAotCompatible` + trim/AOT analyzers; `Bork2d.AotSmoke` publishes/runs locally with zero warnings, headless with a temporary pack and `--windowed --ticks 120`. Local gate only. |
 | CI | Current | GitHub Actions on PRs to `develop` and pushes to `develop`: restore, format verify, build, test. No AOT or real-window job. |
 | Runnable engine | Partial (windowed shell + assets) | A real window, input, time, and an uncapped tick loop plus the pack/VFS/loader/CPU descriptor pipeline; no renderer yet. |
@@ -132,7 +132,7 @@ Goal: load, overlay, browse, and describe packed assets without a renderer.
 Exit: a pack with texture/sprite/data loads; overlays shadow correctly; corrupt and missing packs
 fail safely; loader is race-free under stress; AOT headless can load/browse without reflection/GPU.
 
-**Evidence (WP5):** Debug/Release builds with zero warnings/errors; 586 tests (577 deterministic +
+**Evidence (WP5):** Debug/Release builds with zero warnings/errors; 587 tests (578 deterministic +
 9 opt-in real-window) pass; `dotnet format`/docs/`git diff --check` clean; NativeAOT publish has
 zero AOT/trim warnings with `SDL2.dll` present; the AOT default run exits `0` after building,
 browsing, and loading a 2-entry temporary pack (one raw asset, one generated-shape MessagePack
@@ -329,7 +329,7 @@ bounds); RGBA8 + sRGB only. Remaining open decisions:
 | M0 Documentation | Complete (2026-10-25) | Docs set, decision log, accepted ownership/pack/editor/pacing decisions. |
 | M1 Foundation/AOT | Merged (2026-10-25, PR #1) | 135 tests; Debug/Release zero warnings; format clean; AOT smoke publishes/runs locally; CI build/test/format on PRs to `develop` and `develop` pushes. [M1 spec](specs/m1-foundation.md). |
 | M2 SDL platform | Merged (2026-10-26, PR #2) | 292 tests (283 in CI, 292 with `BORK2D_RUN_WINDOW_TESTS=1`); Debug/Release zero warnings; format/docs clean; AOT headless and `--windowed --ticks 120` exit 0 with `SDL2.dll`; live-window 5,000,000-tick run exit 0; Escape/close graceful. [M2 spec](specs/m2-sdl-platform.md#125-acceptance-evidence-recorded-by-wp5). |
-| M3 Assets/pack | Implementation complete; PR pending human review (not merged) | 586 tests (577 deterministic + 9 opt-in real-window); Debug/Release zero warnings; format/docs clean; AOT publish zero AOT/trim warnings with `SDL2.dll`; default AOT run exit 0 loading a 2-entry temporary pack (raw + generated-shape MessagePack) and one tick; `--windowed --ticks 120` exit 0 with `WithoutAssets()`; crash-free pack/overlay failure matrix. [M3 spec](specs/m3-assets.md#123-acceptance-evidence-recorded-by-wp5). |
+| M3 Assets/pack | Implementation complete; PR pending human review (not merged) | 587 tests (578 deterministic + 9 opt-in real-window); Debug/Release zero warnings; format/docs clean; AOT publish zero AOT/trim warnings with `SDL2.dll`; default AOT run exit 0 loading a 2-entry temporary pack (raw + generated-shape MessagePack) and one tick; `--windowed --ticks 120` exit 0 with `WithoutAssets()`; crash-free pack/overlay failure matrix. [M3 spec](specs/m3-assets.md#123-acceptance-evidence-recorded-by-wp5). |
 | M4 Serialization/bake | Not started | — |
 | M5 Editor | Not started | — |
 | M6 Vulkan bring-up | Not started | — |

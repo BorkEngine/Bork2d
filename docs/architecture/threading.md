@@ -7,7 +7,7 @@
 > `Current` (§5). The M3 asset service's one loader thread, FIFO queue, asynchronous completion,
 > cancellation/join, and immutable CPU resource table are `Current` (§6). The render thread,
 > snapshot ring, and frame handoff are `Planned` (M7). The engine has no debug-only tick-active,
-> structural, or slot-state checks. The suite is 586 tests: 577 deterministic plus 9 opt-in
+> structural, or slot-state checks. The suite is 587 tests: 578 deterministic plus 9 opt-in
 > real-window tests.
 
 ## 1. Threads by mode
@@ -348,7 +348,7 @@ Thread-specific rules:
 `Bork2d.Tests` covers §2's scene rules, the M2 window/input/loop threading (fake SDL seam, bounded
 joins, no sleeps), the M3 asset loader (one thread, FIFO order, asynchronous completion,
 cancellation/join, resource-table ordering), and parts of 5 today; 1, 2, 4, and renderer pacing
-come with M7. The suite is 586 tests: 577 deterministic tests in CI plus 9 opt-in real-window tests
+come with M7. The suite is 587 tests: 578 deterministic tests in CI plus 9 opt-in real-window tests
 (`BORK2D_RUN_WINDOW_TESTS=1`).
 
 ## 10. Related documents

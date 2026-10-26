@@ -827,7 +827,7 @@ The AOT smoke's default logging output must stay trim/AOT-clean.
 - New asset tests build packs with `PackBuilder` into temp files (no committed binary fixture) and
   clean them up.
 - The opt-in real-window tests keep their scope and use `WithoutAssets()`.
-- Test counts increased from 560 to 586; CI still runs deterministic tests only.
+- Test counts increased from 560 to 587; CI still runs deterministic tests only.
 
 ## 11. Dependencies, NativeAOT, and deployment
 
@@ -960,8 +960,8 @@ All commands were run from the workspace clone on 2026-10-26 (Windows 11, SDK
 | --- | --- | --- |
 | Debug build | `dotnet build src/Bork2d/Bork2d.slnx -c Debug` | Build succeeded: **0 warnings, 0 errors**. |
 | Release build | `dotnet build src/Bork2d/Bork2d.slnx -c Release` | Build succeeded: **0 warnings, 0 errors**. |
-| Deterministic tests | `dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build` | **586 total: 577 passed, 9 skipped, 0 failed** (the 9 skips are the opt-in `[WindowFact]` tests). |
-| Opt-in real-window tests | `$env:BORK2D_RUN_WINDOW_TESTS='1'; dotnet test src/Bork2d/Bork2d.slnx -c Debug` | All 586 pass on a desktop session (`WithoutAssets()` windowed runs included). |
+| Deterministic tests | `dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build` | **587 total: 578 passed, 9 skipped, 0 failed** (the 9 skips are the opt-in `[WindowFact]` tests). |
+| Opt-in real-window tests | `$env:BORK2D_RUN_WINDOW_TESTS='1'; dotnet test src/Bork2d/Bork2d.slnx -c Debug` | All 587 pass on a desktop session (`WithoutAssets()` windowed runs included). |
 | Format | `dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore` | No changes required. |
 | Docs | `pwsh scripts/check-docs.ps1` | Link/anchor check passed. |
 | Whitespace | `git diff --check` | Clean. |

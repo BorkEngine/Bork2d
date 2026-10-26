@@ -161,6 +161,9 @@ public sealed class AppAssetRuntimeTests
         game.OnSetup = engine =>
         {
             service = Assert.IsType<AssetService>(engine.Assets);
+
+            // An empty VFS still starts the one loader thread (D-M3-02/§17.11).
+            Assert.NotNull(service.LoaderThread);
             browse = engine.Assets.Browse();
             exists = engine.Assets.Exists("data/missing");
             sprite = engine.Assets.LoadSprite("sprites/missing");
@@ -352,6 +355,43 @@ public sealed class AppAssetRuntimeTests
         {
             Assert.Empty(sdl.Calls);
         }
+    }
+
+    [Fact]
+    public void TeardownCanStillUseAssetsBeforeTheServiceStops()
+    {
+        using var directory = TempPackDirectory.CreateUnderTemp();
+        string basePath = directory.WritePack(
+            "base.pck",
+            builder => builder.AddRaw("data/base", [4, 5, 6]));
+        var game = new ScriptedGame<GameLayer>();
+        byte[]? teardownBytes = null;
+        AssetService? service = null;
+        game.OnSetup = engine => service = Assert.IsType<AssetService>(engine.Assets);
+        game.OnTeardown = () =>
+        {
+            var engine = game.Engine
+                ?? throw new InvalidOperationException("Setup did not capture the engine.");
+            teardownBytes = engine.Assets.LoadData("data/base")
+                .WaitAsync(_loadTimeout)
+                .GetAwaiter()
+                .GetResult();
+        };
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .WithAssetsPack(basePath)
+            .Build();
+
+        AppTestSupport.RunToCompletion(app);
+
+        Assert.Equal(new byte[] { 4, 5, 6 }, teardownBytes);
+        Assert.Equal(1, game.TeardownCount);
+
+        // Teardown ran while the service was still live; Run stopped it afterwards.
+        Assert.NotNull(service);
+        Assert.Null(service!.LoaderThread);
+        Assert.Throws<ObjectDisposedException>(() => { _ = service.LoadData("data/base"); });
     }
 
     [Fact]

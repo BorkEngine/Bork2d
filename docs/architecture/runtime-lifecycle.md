@@ -7,7 +7,7 @@
 > `IWindow`/`IInput` proxies and advances `ITime`; headless/offscreen keep throwing stubs and a `0`
 > clock until M7. The base asset pack (or the `WithoutAssets()` empty filesystem) opens before the
 > window and `Setup` and closes after `Teardown`. GPU work and renderer pacing are later
-> milestones. The suite is 586 tests: 577 deterministic tests in CI plus 9 opt-in real-window
+> milestones. The suite is 587 tests: 578 deterministic tests in CI plus 9 opt-in real-window
 > tests.
 
 ## 1. Public startup contract

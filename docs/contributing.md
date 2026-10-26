@@ -30,7 +30,7 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **586 tests**: 577 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
+The suite is **587 tests**: 578 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
 are skipped unless the environment variable is set. The deterministic set includes the M3
 pack-format/writer tests, the path/VFS/browse/contract tests, the loader/threading and
 error-contract tests, the descriptor/sprite validation, `LoadSprite`, resource-cache, and
