@@ -61,9 +61,27 @@ public sealed class DependencyMatrixTests
     public void AssetsReferencesOnlyApiAndCommon()
     {
         AssertReferenceMatrix(
-            typeof(Bork2d.Assets.AssemblyReferenceAnchor).Assembly,
+            typeof(Bork2d.Assets.PackBuilder).Assembly,
             "Bork2d.Api",
             "Bork2d.Common");
+    }
+
+    [Fact]
+    public void AssetsExposesOnlyThePackToolingSurface()
+    {
+        var exported = typeof(Bork2d.Assets.PackBuilder).Assembly
+            .GetExportedTypes()
+            .Select(type => type.FullName ?? type.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "Bork2d.Assets.PackBuilder",
+                "Bork2d.Assets.PackCompressionMode",
+            },
+            exported);
     }
 
     [Fact]
