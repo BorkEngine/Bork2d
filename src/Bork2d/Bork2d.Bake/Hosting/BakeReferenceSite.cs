@@ -9,7 +9,16 @@ namespace Bork2d.Bake.Hosting;
 /// <see langword="true"/> for a <c>DataRef</c> (raw target); <see langword="false"/> for an
 /// <c>AssetRef&lt;T&gt;</c> (MessagePack target).
 /// </param>
+/// <param name="Line">The 1-based source line of the reference value, or <see langword="null"/>.</param>
+/// <param name="Column">The 1-based source column of the reference value, or <see langword="null"/>.</param>
+/// <remarks>
+/// The location is captured while binding, so a reference diagnostic from the validation pass points
+/// at the value that produced the reference without a second document pass. The source file is the
+/// bound asset's source path.
+/// </remarks>
 internal readonly record struct BakeReferenceSite(
     string MemberPath,
     string ReferencePath,
-    bool IsData);
+    bool IsData,
+    int? Line = null,
+    int? Column = null);

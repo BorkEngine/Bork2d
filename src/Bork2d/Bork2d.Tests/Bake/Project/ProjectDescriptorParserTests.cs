@@ -74,10 +74,14 @@ public sealed class ProjectDescriptorParserTests
         Assert.Equal(
             new[]
             {
-                new ProjectTypeMapping("data", "MyGame.Data.GameConfig"),
-                new ProjectTypeMapping("sprites", "Bork2d.Api.Assets.SpriteAsset"),
+                ("data", "MyGame.Data.GameConfig"),
+                ("sprites", "Bork2d.Api.Assets.SpriteAsset"),
             },
-            descriptor.Types);
+            descriptor.Types.Select(mapping => (mapping.Prefix, mapping.TypeName)));
+        Assert.Equal(17, descriptor.Types[0].TypeLine);
+        Assert.Equal(8, descriptor.Types[0].TypeColumn);
+        Assert.Equal(16, descriptor.Types[0].PrefixLine);
+        Assert.Equal(10, descriptor.Types[0].PrefixColumn);
     }
 
     [Fact]

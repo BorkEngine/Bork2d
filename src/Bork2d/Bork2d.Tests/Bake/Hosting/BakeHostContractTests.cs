@@ -36,7 +36,7 @@ public sealed class BakeHostContractTests
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(new[] { "AddToPack", "Bind" }, methods);
+        Assert.Equal(new[] { "AddToPack", "Bind", "ValidateShapes" }, methods);
         Assert.Equal(
             "Types",
             Assert.Single(typeof(IBakeManifest).GetProperties()).Name);

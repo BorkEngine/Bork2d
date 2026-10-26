@@ -1,6 +1,8 @@
 using System.Reflection;
 using Bork2d.Bake.Diagnostics;
+using Bork2d.Bake.Hosting;
 using Bork2d.Bake.Project;
+using Bork2d.Bake.Sources;
 
 namespace Bork2d.Bake.Cli;
 
@@ -9,14 +11,16 @@ namespace Bork2d.Bake.Cli;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Commands write diagnostics to <c>stderr</c> in the MSBuild-canonical form and the human summary
-/// to <c>stdout</c>. Exit codes are <c>0</c> success, <c>1</c> aggregated source diagnostics,
-/// <c>2</c> usage or descriptor configuration errors, and <c>3</c> an unexpected internal failure.
+/// Commands write diagnostics to <c>stderr</c> in the MSBuild-canonical form and the human summary to
+/// <c>stdout</c>. Exit codes are <c>0</c> success/up to date, <c>1</c> aggregated source diagnostics,
+/// <c>2</c> usage, descriptor, type-registration, or host-load configuration errors, and <c>3</c> an
+/// unexpected internal failure.
 /// </para>
 /// <para>
-/// WP1 implements <c>--help</c>, <c>--version</c>, and <c>validate</c> only. <c>validate</c> checks
-/// the descriptor; source binding and reference validation arrive with WP2/WP4. The dispatch is
-/// structured so those commands slot in without changing the exit-code contract.
+/// <c>generate-host</c> writes the generated host project and manifest. <c>validate</c> checks the
+/// descriptor; with <c>--host</c> it also loads the host, checks that the host manifest matches the
+/// descriptor, and binds every mapped source. <c>validate</c> never validates references against the
+/// baked set and never writes a pack; <c>bake</c> stays a later work package.
 /// </para>
 /// </remarks>
 internal static class CliApplication
@@ -68,6 +72,9 @@ internal static class CliApplication
                     output.WriteLine($"{ProgramName} {ToolVersion}");
                     return SuccessExitCode;
 
+                case "generate-host":
+                    return RunGenerateHost(args.AsSpan(1), output, error);
+
                 case "validate":
                     return RunValidate(args.AsSpan(1), output, error);
 
@@ -86,9 +93,179 @@ internal static class CliApplication
         }
     }
 
-    private static int RunValidate(ReadOnlySpan<string> args, TextWriter output, TextWriter error)
+    private static int RunGenerateHost(
+        ReadOnlySpan<string> args,
+        TextWriter output,
+        TextWriter error)
     {
         string? projectPath = null;
+        string? commonPath = null;
+        string? outputDirectory = null;
+        string configuration = "Debug";
+        bool force = false;
+        bool verbose = false;
+        bool quiet = false;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--project":
+                    if (i + 1 >= args.Length)
+                    {
+                        return UsageError(error, "generate-host requires a value after --project.");
+                    }
+
+                    if (projectPath is not null)
+                    {
+                        return UsageError(error, "generate-host accepts --project only once.");
+                    }
+
+                    projectPath = args[++i];
+                    break;
+
+                case "--common":
+                    if (i + 1 >= args.Length)
+                    {
+                        return UsageError(error, "generate-host requires a value after --common.");
+                    }
+
+                    if (commonPath is not null)
+                    {
+                        return UsageError(error, "generate-host accepts --common only once.");
+                    }
+
+                    commonPath = args[++i];
+                    break;
+
+                case "--output":
+                    if (i + 1 >= args.Length)
+                    {
+                        return UsageError(error, "generate-host requires a value after --output.");
+                    }
+
+                    if (outputDirectory is not null)
+                    {
+                        return UsageError(error, "generate-host accepts --output only once.");
+                    }
+
+                    outputDirectory = args[++i];
+                    break;
+
+                case "--configuration":
+                    if (i + 1 >= args.Length)
+                    {
+                        return UsageError(error, "generate-host requires a value after --configuration.");
+                    }
+
+                    configuration = args[++i];
+                    if (!HostGenerationOptions.IsSupportedConfiguration(configuration))
+                    {
+                        return UsageError(
+                            error,
+                            $"--configuration must be 'Debug' or 'Release'; got '{configuration}'.");
+                    }
+
+                    break;
+
+                case "--force":
+                    force = true;
+                    break;
+
+                case "--verbose":
+                    verbose = true;
+                    break;
+
+                case "--quiet":
+                    quiet = true;
+                    break;
+
+                default:
+                    return UsageError(error, $"generate-host does not accept '{args[i]}'.");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(projectPath))
+        {
+            return UsageError(error, "generate-host requires --project <bork2d.project.toml>.");
+        }
+
+        if (string.IsNullOrWhiteSpace(commonPath))
+        {
+            return UsageError(error, "generate-host requires --common <Project.Common.dll>.");
+        }
+
+        if (string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            return UsageError(error, "generate-host requires --output <directory>.");
+        }
+
+        if (verbose && quiet)
+        {
+            return UsageError(error, "--verbose and --quiet are mutually exclusive.");
+        }
+
+        if (!TryResolveCliPath(projectPath, "--project", error, out string resolvedProject)
+            || !TryResolveCliPath(commonPath, "--common", error, out string resolvedCommon)
+            || !TryResolveCliPath(outputDirectory, "--output", error, out string resolvedOutput))
+        {
+            return UsageExitCode;
+        }
+
+        var diagnostics = new BakeDiagnostics();
+        var options = new HostGenerationOptions(
+            resolvedProject,
+            resolvedCommon,
+            resolvedOutput,
+            configuration,
+            force);
+
+        HostGenerationResult? result = HostGenerator.Generate(options, diagnostics);
+        if (result is null || diagnostics.HasErrors)
+        {
+            WriteDiagnostics(error, diagnostics);
+            if (!quiet)
+            {
+                output.WriteLine(
+                    $"{ProgramName}: bake host generation failed "
+                        + $"({CountErrors(diagnostics)} error(s)).");
+            }
+
+            return UsageExitCode;
+        }
+
+        if (!quiet)
+        {
+            string state = result.Changed ? "generated" : "up to date:";
+            output.WriteLine(
+                $"{ProgramName}: {state} '{result.ProjectPath}' "
+                    + $"({result.Types.Count} mapped type(s), {result.References.Count} "
+                    + "assembly reference(s)).");
+        }
+
+        if (verbose)
+        {
+            foreach (BakeMappedType mapping in result.Types)
+            {
+                output.WriteLine($"  {mapping.SourcePrefix} -> {mapping.TypeName}");
+            }
+
+            foreach (BakeHostReference reference in result.References)
+            {
+                output.WriteLine($"  reference {reference.AssemblyName}: {reference.Path}");
+            }
+        }
+
+        return SuccessExitCode;
+    }
+
+    private static int RunValidate(
+        ReadOnlySpan<string> args,
+        TextWriter output,
+        TextWriter error)
+    {
+        string? projectPath = null;
+        string? hostPath = null;
         bool verbose = false;
         bool quiet = false;
 
@@ -108,6 +285,20 @@ internal static class CliApplication
                     }
 
                     projectPath = args[++i];
+                    break;
+
+                case "--host":
+                    if (i + 1 >= args.Length)
+                    {
+                        return UsageError(error, "validate requires a value after --host.");
+                    }
+
+                    if (hostPath is not null)
+                    {
+                        return UsageError(error, "validate accepts --host only once.");
+                    }
+
+                    hostPath = args[++i];
                     break;
 
                 case "--verbose":
@@ -149,26 +340,138 @@ internal static class CliApplication
             return UsageExitCode;
         }
 
-        // WP2 adds source discovery/binding here: source diagnostics are aggregated and map to
-        // DiagnosticsExitCode, while descriptor configuration errors stay UsageExitCode.
+        if (string.IsNullOrWhiteSpace(hostPath))
+        {
+            if (!quiet)
+            {
+                output.WriteLine(
+                    $"{ProgramName}: '{descriptor.DescriptorPath}' is valid: assets root "
+                        + $"'{descriptor.AssetsRoot}', pack '{descriptor.PackPath}', host "
+                        + $"'{descriptor.HostPath}', {descriptor.Types.Count} type mapping(s).");
+            }
+
+            if (verbose)
+            {
+                foreach (ProjectTypeMapping mapping in descriptor.Types)
+                {
+                    output.WriteLine($"  {mapping.Prefix} -> {mapping.TypeName}");
+                }
+            }
+
+            return SuccessExitCode;
+        }
+
+        if (!TryResolveCliPath(hostPath, "--host", error, out string resolvedHost))
+        {
+            return UsageExitCode;
+        }
+
+        return ValidateWithHost(
+            descriptor,
+            resolvedHost,
+            verbose,
+            quiet,
+            output,
+            error,
+            diagnostics);
+    }
+
+    private static int ValidateWithHost(
+        ProjectDescriptor descriptor,
+        string hostPath,
+        bool verbose,
+        bool quiet,
+        TextWriter output,
+        TextWriter error,
+        BakeDiagnostics diagnostics)
+    {
+        BakeHostHandle? handle = BakeHostLoader.TryLoad(hostPath, diagnostics);
+        if (handle is null)
+        {
+            WriteDiagnostics(error, diagnostics);
+            if (!quiet)
+            {
+                output.WriteLine(
+                    $"{ProgramName}: could not load the bake host '{hostPath}' "
+                        + $"({CountErrors(diagnostics)} error(s)).");
+            }
+
+            return UsageExitCode;
+        }
+
+        if (!BakeHostManifestValidator.Validate(descriptor, handle.Manifest, diagnostics)
+            || diagnostics.HasErrors)
+        {
+            WriteDiagnostics(error, diagnostics);
+            if (!quiet)
+            {
+                output.WriteLine(
+                    $"{ProgramName}: the bake host '{hostPath}' does not match the project "
+                        + "descriptor; regenerate the host.");
+            }
+
+            return UsageExitCode;
+        }
+
+        IReadOnlyList<BoundAsset> assets = BakeSourceBinder.BindAll(
+            descriptor,
+            handle.Manifest,
+            diagnostics);
+
+        if (diagnostics.HasErrors)
+        {
+            WriteDiagnostics(error, diagnostics);
+            if (!quiet)
+            {
+                output.WriteLine(
+                    $"{ProgramName}: '{descriptor.DescriptorPath}' has "
+                        + $"{CountErrors(diagnostics)} source error(s).");
+            }
+
+            return DiagnosticsExitCode;
+        }
+
+        int referenceCount = assets.Sum(asset => asset.References.Count);
         if (!quiet)
         {
             output.WriteLine(
-                $"{ProgramName}: '{descriptor.DescriptorPath}' is valid: assets root "
-                    + $"'{descriptor.AssetsRoot}', pack '{descriptor.PackPath}', host "
-                    + $"'{descriptor.HostPath}', {descriptor.Types.Count} type mapping(s).");
+                $"{ProgramName}: '{descriptor.DescriptorPath}' is valid: "
+                    + $"{assets.Count} asset(s) bound, {referenceCount} reference site(s). "
+                    + "References are not validated and no pack is written by validate.");
         }
 
         if (verbose)
         {
-            foreach (ProjectTypeMapping mapping in descriptor.Types)
+            foreach (BoundAsset asset in assets)
             {
                 output.WriteLine(
-                    $"  {mapping.Prefix} -> {mapping.TypeName}");
+                    $"  {asset.AssetPath} -> {asset.TypeName} "
+                        + $"({asset.References.Count} reference(s), '{asset.SourcePath}')");
             }
         }
 
         return SuccessExitCode;
+    }
+
+    private static bool TryResolveCliPath(
+        string value,
+        string optionName,
+        TextWriter error,
+        out string fullPath)
+    {
+        try
+        {
+            fullPath = Path.GetFullPath(value);
+            return true;
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException
+            or PathTooLongException)
+        {
+            error.WriteLine($"{ProgramName}: {optionName} '{value}' is not a valid path: {exception.Message}");
+            WriteUsage(error);
+            fullPath = string.Empty;
+            return false;
+        }
     }
 
     private static int UsageError(TextWriter error, string message)
@@ -206,8 +509,17 @@ internal static class CliApplication
         writer.WriteLine("  --help       show this help");
         writer.WriteLine("  --version    show the tool version");
         writer.WriteLine(
-            $"  validate --project <bork2d.project.toml> [--verbose|--quiet]");
-        writer.WriteLine("               validate the project descriptor without reading sources");
+            "  generate-host --project <bork2d.project.toml> --common <Project.Common.dll> "
+                + "--output <dir>");
+        writer.WriteLine("                [--configuration Debug|Release] [--force] "
+            + "[--verbose|--quiet]");
+        writer.WriteLine(
+            "               write the generated bake host project and manifest");
+        writer.WriteLine(
+            "  validate --project <bork2d.project.toml> [--host <BakeHost.dll>] "
+                + "[--verbose|--quiet]");
+        writer.WriteLine(
+            "               validate the descriptor; with --host, bind every mapped source");
         writer.WriteLine(
             "exit codes: 0 success, 1 source diagnostics, 2 usage/descriptor error, 3 internal error");
     }
