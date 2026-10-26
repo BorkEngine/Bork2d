@@ -1,8 +1,9 @@
 # Refactor — Generic asset references (no special sprite path)
 
-> **Status:** approved by the human owner (2026-10-26) and implemented in this tree. The original
-> M3 spec remains the historical record for the pack/VFS/loader milestone; this spec records the
-> post-M3 public asset-model refactor and supersedes the M3 statements it names.
+> **Status:** approved by the human owner (2026-10-26), implemented in this tree, and open for review
+> as PR #6. The original M3 spec remains the historical record for the pack/VFS/loader milestone;
+> this spec records the post-M3 public asset-model refactor and supersedes the M3 statements it
+> names.
 
 ## 1. Goal
 
