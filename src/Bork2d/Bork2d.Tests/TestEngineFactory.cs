@@ -4,6 +4,6 @@ namespace Bork2d.Tests;
 
 internal static class TestEngineFactory
 {
-    internal static Engine<GameLayer, TestGame<GameLayer>> Create()
-        => new(new TestGame<GameLayer>(), new FakeTime(), new FakeWindow(), new FakeAssets());
+    internal static Engine<GameLayer> Create()
+        => new(new FakeTime(), new FakeWindow(), new FakeAssets());
 }

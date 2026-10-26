@@ -8,7 +8,9 @@ namespace Bork2d.Runtime;
 /// </summary>
 /// <remarks>
 /// Every member throws <see cref="NotSupportedException"/>. Headless and offscreen apps keep this
-/// stub in every mode; the real windowed window is attached by the runtime host in M2 WP4.
+/// stub. A windowed app gets the internal proxy attached by the runtime host during
+/// <c>Bork2dApp.Run()</c>; after that run the proxy's members throw
+/// <see cref="ObjectDisposedException"/> instead.
 /// </remarks>
 internal sealed class UnsupportedWindow : IWindow
 {

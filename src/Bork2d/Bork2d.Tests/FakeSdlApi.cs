@@ -56,6 +56,21 @@ internal sealed class FakeSdlApi : ISdlApi
     /// <summary>Gets the managed thread id that called <see cref="CreateWindow"/>.</summary>
     internal int CreateWindowThreadId { get; private set; }
 
+    /// <summary>Gets the managed thread id that disposed the adapter.</summary>
+    internal int DisposeThreadId { get; private set; }
+
+    /// <summary>
+    /// Gets or sets a callback invoked after a seam call is recorded, outside the call-log lock.
+    /// </summary>
+    /// <remarks>
+    /// Tests use this to wait deterministically until the OS thread has applied a window command
+    /// (for example a title change ordered after an input event) instead of polling or sleeping.
+    /// </remarks>
+    internal Action<string>? CallRecorded { get; set; }
+
+    /// <summary>Gets or sets a message that makes the event poll/wait fail with a fatal SDL error.</summary>
+    internal string? EventPollFailure { get; set; }
+
     /// <summary>Gets or sets the version reported by <see cref="Version"/>.</summary>
     public SdlVersion Version { get; set; } = new(2, 30, 8);
 
@@ -177,6 +192,7 @@ internal sealed class FakeSdlApi : ISdlApi
     public bool TryPollEvent(out SdlEvent sdlEvent)
     {
         ThrowIfDisposed();
+        ThrowIfEventPollFails();
         lock (_gate)
         {
             return _events.TryDequeue(out sdlEvent);
@@ -187,6 +203,7 @@ internal sealed class FakeSdlApi : ISdlApi
     public bool TryWaitEvent(out SdlEvent sdlEvent)
     {
         ThrowIfDisposed();
+        ThrowIfEventPollFails();
         while (true)
         {
             _eventAvailable.Wait();
@@ -280,6 +297,7 @@ internal sealed class FakeSdlApi : ISdlApi
             return;
         }
 
+        DisposeThreadId = Environment.CurrentManagedThreadId;
         Quit();
         lock (_gate)
         {
@@ -310,6 +328,9 @@ internal sealed class FakeSdlApi : ISdlApi
         {
             _calls.Add(call);
         }
+
+        // Invoked outside the lock: the callback may block until another thread observes it.
+        CallRecorded?.Invoke(call);
     }
 
     /// <summary>Sets one keyboard scancode in the SDL keyboard state.</summary>
@@ -321,5 +342,13 @@ internal sealed class FakeSdlApi : ISdlApi
     private void ThrowIfDisposed()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+    }
+
+    private void ThrowIfEventPollFails()
+    {
+        if (EventPollFailure is { } message)
+        {
+            throw new Bork2dException(message);
+        }
     }
 }

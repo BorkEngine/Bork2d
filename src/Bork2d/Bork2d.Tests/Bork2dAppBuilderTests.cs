@@ -289,6 +289,7 @@ public sealed class Bork2dAppBuilderTests
         Assert.True(options.VSync);
         Assert.Equal(60, options.HeadlessTicksPerSecond);
         Assert.Equal(0.25, options.MaxDeltaTime);
+        Assert.Null(options.SdlApiFactory);
         Assert.Equal(Bork2dWindowOptionFlags.None, options.WindowOptionsSet);
     }
 

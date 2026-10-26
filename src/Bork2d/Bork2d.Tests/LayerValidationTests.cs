@@ -60,8 +60,7 @@ public sealed class LayerValidationTests
     {
         var exception = Assert.Throws<Bork2dException>(() =>
         {
-            _ = new Engine<CompositeLayers, TestGame<CompositeLayers>>(
-                new TestGame<CompositeLayers>(),
+            _ = new Engine<CompositeLayers>(
                 new FakeTime(),
                 new FakeWindow(),
                 new FakeAssets());

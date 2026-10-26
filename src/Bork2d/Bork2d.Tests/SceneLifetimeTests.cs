@@ -195,14 +195,14 @@ public sealed class SceneLifetimeTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference CreateUnparentedTransform(Engine<GameLayer, TestGame<GameLayer>> engine)
+    private static WeakReference CreateUnparentedTransform(Engine<GameLayer> engine)
     {
         var transform = engine.CreateTransform();
         return new WeakReference(transform);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference CreateUnparentedCamera(Engine<GameLayer, TestGame<GameLayer>> engine)
+    private static WeakReference CreateUnparentedCamera(Engine<GameLayer> engine)
     {
         var camera = engine.CreateCamera(engine.Root);
         camera.Parent = null;
@@ -210,7 +210,7 @@ public sealed class SceneLifetimeTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference CreateUnparentedSprite(Engine<GameLayer, TestGame<GameLayer>> engine)
+    private static WeakReference CreateUnparentedSprite(Engine<GameLayer> engine)
     {
         var sprite = engine.CreateSpriteRender(engine.Root);
         sprite.Parent = null;
@@ -218,21 +218,21 @@ public sealed class SceneLifetimeTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference CreateRootedCamera(Engine<GameLayer, TestGame<GameLayer>> engine)
+    private static WeakReference CreateRootedCamera(Engine<GameLayer> engine)
     {
         var camera = engine.CreateCamera(engine.Root);
         return new WeakReference(camera);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference CreateRootedSprite(Engine<GameLayer, TestGame<GameLayer>> engine)
+    private static WeakReference CreateRootedSprite(Engine<GameLayer> engine)
     {
         var sprite = engine.CreateSpriteRender(engine.Root);
         return new WeakReference(sprite);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference CreateDetachedCamera(Engine<GameLayer, TestGame<GameLayer>> engine)
+    private static WeakReference CreateDetachedCamera(Engine<GameLayer> engine)
     {
         var camera = engine.CreateCamera(engine.Root);
         camera.Parent = null;
@@ -240,7 +240,7 @@ public sealed class SceneLifetimeTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference CreateDetachedSprite(Engine<GameLayer, TestGame<GameLayer>> engine)
+    private static WeakReference CreateDetachedSprite(Engine<GameLayer> engine)
     {
         var sprite = engine.CreateSpriteRender(engine.Root);
         sprite.Parent = null;

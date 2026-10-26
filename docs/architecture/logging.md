@@ -1,9 +1,11 @@
 # Logging
 
-> **Status:** `Current` for M1. The builder creates an app-owned Microsoft.Extensions.Logging
+> **Status:** `Current` for M2. The builder creates an app-owned Microsoft.Extensions.Logging
 > factory, installs a plain-text ZLogger console provider by default, logs startup
-> mode/validation, and exposes the factory through `IEngine.LoggerFactory`. Configuration is
-> identical in all modes, and the default path runs in the AOT smoke with zero trim/AOT warnings.
+> mode/validation, and exposes the factory through `IEngine.LoggerFactory`. The windowed platform
+> logs startup/stop/commands/failures and the runtime host logs the loop stop with ticks and elapsed
+> time; there is no per-frame logging. Configuration is identical in all modes, and the default path
+> runs in the AOT smoke with zero trim/AOT warnings.
 
 ## 1. Surface
 
@@ -112,11 +114,12 @@ Bork2d starting: mode={Mode}, validation=passed, layers={LayerType}
 `Mode` is the selected `Bork2dAppMode`; `LayerType` is the game layer enum's full name. The
 message uses parameters, not interpolation; never log per sprite or per frame in hot paths.
 
-### 5.1 Windowed platform (M2 WP2)
+### 5.1 Windowed platform (M2)
 
 The internal windowed platform logs from `Bork2d.Runtime`. One startup line and one stop line are
-emitted per window; window commands and state transitions are Debug, and SDL failures are Error.
-There is no per-frame, per-key, or per-mouse-move logging.
+emitted per window, and the runtime host emits one loop-stop line with the tick count; window
+commands and state transitions are Debug, and SDL failures are Error. There is no per-frame,
+per-key, or per-mouse-move logging.
 
 | Event | Level | Fields |
 | --- | --- | --- |
@@ -125,13 +128,18 @@ There is no per-frame, per-key, or per-mouse-move logging.
 | Focus gained/lost, minimized/restored/maximized, DPI scale changed | Debug | the new state, plus points/framebuffer for a scale change. |
 | `IWindow.Size` ignored while fullscreen, or deferred while minimized | Debug | the requested framebuffer size. |
 | SDL failure (startup or after startup) | Error | the SDL operation and the `SDL_GetError` text; the exception also carries the failure. |
-| Windowed platform stopped | Information | `reason` (`Exit`/`Close`/`Error`), `finalFramebuffer`. Tick count and elapsed seconds are added by the runtime host (M2 WP4). |
+| Windowed loop stopped (runtime host) | Information | `reason` (`Exit`/`Close`/`Error`), `ticks` (completed ticks), `elapsedSeconds` (Setup through Teardown, rounded to milliseconds), `finalFramebuffer` (pixels). |
+| Windowed platform stopped | Information | `reason` (`Exit`/`Close`/`Error`), `finalFramebuffer` pixels. |
 
-Example of the startup line at 150% display scaling:
+The startup and loop-stop lines at 150% display scaling look like:
 
 ```text
 2026-10-26 01:40:39.981 [Information] Bork2d.Runtime: Bork2d windowed platform started: mode=Windowed, sdlVersion=2.30.8, videoDriver=windows, windowPoints=853x480, framebufferPixels=1280x720, scale=1.5006, fullscreen=False, resizable=True, vsync=True
+2026-10-26 01:40:47.412 [Information] Bork2d.Runtime: Bork2d windowed loop stopped: reason=Exit, ticks=120, elapsedSeconds=2.031, finalFramebuffer=1280x720
 ```
+
+A normal shutdown therefore ends with the loop-stop line followed by the platform-stop line; both
+are one-shot, Information, and carry no per-frame data.
 
 ## 6. NativeAOT
 

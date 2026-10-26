@@ -1,10 +1,11 @@
 # API Reference
 
-> **Status:** the M1 contract. `Current` means implemented in this tree and covered by tests;
-> `Partial` means the declaration exists but behavior is stubbed, unwired, or incomplete;
-> `Planned` means an agreed target that is not implemented. Window and input are M2, the asset
-> pipeline is M3, and renderer semantics are M8; see the [roadmap](../roadmap.md). Code under
-> `src/Bork2d` is authoritative.
+> **Status:** the M2 contract for the windowed host. `Current` means implemented in this tree and
+> covered by tests; `Partial` means the declaration exists but behavior is stubbed, unwired, or
+> incomplete; `Planned` means an agreed target that is not implemented. Windowed mode runs a real
+> SDL window, input, and time; headless/offscreen keep the one-tick M1 path. The asset pipeline is
+> M3 and renderer semantics are M8; see the [roadmap](../roadmap.md). Code under `src/Bork2d` is
+> authoritative.
 
 ## 1. Contract-wide rules
 
@@ -17,8 +18,9 @@ scene state afterwards.
 | Surface | Calling thread | Serialization |
 | --- | --- | --- |
 | Scene graph (`IEngine`, `ITransform`, `ICamera`, `ISpriteRender`) | Any thread | One engine-owned structural `System.Threading.Lock`; per-object `Lock` for local properties. |
-| `IEngine.Exit`, `ITime` reads | Any thread | Flag / snapshot values. |
-| `IInput`, `IWindow` (M2) | Any thread | Input is a tick-start snapshot; window operations are marshaled to the OS/window thread. |
+| `IEngine.Exit`, `ITime` reads | Any thread | Three-state exit token / locked snapshot values. |
+| `IInput` | Any thread | Tick-start frozen snapshot; the windowed loop publishes it once per tick. |
+| `IWindow` | Any thread | Setters enqueue a command for the OS/window thread; getters read the last confirmed immutable snapshot. |
 | `IAssets` (M3) | Any thread | Thread-safe requests; asynchronous completion. |
 | `IGame` callbacks | Engine tick thread | Invoked by the host; never concurrent. |
 | Builder, `Build`, `Run`, `Dispose`, `LoggerFactory` | Any thread | No main-thread requirement; MEL factories/loggers are thread-safe. |
@@ -28,9 +30,11 @@ scene state afterwards.
 - Concurrent composite updates to one object are the game's synchronization responsibility.
 - Frame snapshots are captured after `Tick` (M7); workers must not write scene state afterwards.
 
-M1 mode behavior: `IWindow`/`IAssets` return throwing stubs and `IInput` throws from the getter in
-**every** mode, while `ITime` stays `0`. Target: `IWindow`/`IInput` are windowed-only; `IAssets`
-works in all modes (§2, §5–§7).
+Mode behavior in M2: **windowed** (the default) creates one visible SDL window on an engine-owned
+OS/window thread, runs an uncapped `Tick` loop until `Exit()`/close/fatal error, makes
+`IWindow`/`IInput` real, and advances `ITime`. **Headless** and **offscreen** create no SDL window,
+thread, or input, keep the one-tick `Setup` → `Tick` → `Teardown` path, return a throwing
+`IWindow` stub, throw `NotSupportedException` from the `IInput` getter, and keep `ITime` at `0`.
 
 ### 1.2 Units and conventions
 
@@ -44,10 +48,10 @@ from the top-left, and an integer `ZIndex` sorts higher later. Sprite asset geom
 | Option / object | Default |
 | --- | --- |
 | Mode / title / validation | Windowed / entry assembly name, else `Bork2d` / on in Debug, off in Release. |
-| Window | 1280x720 physical pixels; resizable `true`, fullscreen `false`, VSync `true`. |
-| Assets pack | The relative string `"assets.pck"`; not resolved next to the executable in M1. |
-| Max delta | `0.25` s safety clamp, not a pacing delay. |
-| Headless / logging | `60` ticks/s (`0` = uncapped) / ZLogger console, local time ms, no colors or file sink; minimum Debug (Debug) or Information (Release). |
+| Window | Visible at `Run()` start; 1280x720 framebuffer pixels; resizable `true`, fullscreen `false`, cursor visible `true`, minimized `false`, VSync `true` (stored). |
+| Assets pack | The relative string `"assets.pck"`; not resolved next to the executable in M2. |
+| Max delta | `0.25` s gameplay clamp in windowed mode, not a pacing delay. |
+| Headless / logging | `60` ticks/s stored (`0` = uncapped; one tick in M2) / ZLogger console, local time ms, no colors or file sink; minimum Debug (Debug) or Information (Release). |
 | Camera | `Size = 10` (half-height), `Viewport = (0,0,1,1)`, `CullingMask` = all declared flags, `Clear = Color`, `ClearColor = Black`, `ZIndex = 0`. |
 | Sprite renderable | `Sprite.Empty`, `Layer = 0` (**invalid**; skipped by the future renderer), `Tint = White`, `ZIndex = 0`. |
 
@@ -86,13 +90,13 @@ not a concrete transform type.
 
 | Member | Status | Semantics |
 | --- | --- | --- |
-| `Time` | `Partial` | Monotonic time/delta; the M1 app never advances it, so values stay `0` (M2). |
-| `Window` | `Partial` | Returns an `UnsupportedWindow` in every mode; **the property access itself does not throw**, but every member throws `NotSupportedException` (M2). |
-| `Input` | `Partial` | The getter itself throws `NotSupportedException` (M2). |
+| `Time` | `Current` (M2) | Monotonic time/delta snapshot. Windowed mode advances it once per tick (first tick both `0`); headless/offscreen never advance it, so both stay `0`. |
+| `Window` | `Current` (M2) | The property access never throws. Windowed mode returns the internal proxy attached for the duration of `Run()`; headless/offscreen return an `UnsupportedWindow` whose **members** throw `NotSupportedException`. After a windowed run, retained references throw `ObjectDisposedException` from their members. |
+| `Input` | `Current` (M2) | Windowed mode returns the internal input proxy; the getter itself never throws there. Headless/offscreen have no input, so the getter itself throws `NotSupportedException`. After a windowed run, retained references throw `ObjectDisposedException` from their members. |
 | `Assets` | `Partial` | Returns `UnsupportedAssets`; `LoadAsset<T>`, `LoadSprite`, and `LoadData` throw `NotSupportedException` (M3). |
 | `LoggerFactory` / `Root` | `Current` | App-owned MEL/ZLogger factory (non-null; create per-category loggers; disposed by `Bork2dApp.Dispose()`) / read-only root of the strong scene graph. |
 | `CreateTransform` / `CreateCamera` / `CreateSpriteRender` | `Current` | Create a node under `parent`; the two renderable creators require a parent (`null` throws `ArgumentNullException`). A new node keeps default local values and starts at the parent's origin. |
-| `Exit()` | `Partial` | Sets a flag; no M1 loop consumes it (M2/M7). |
+| `Exit()` | `Current` (M2) | Windowed: the current tick finishes and the loop stops before the next freeze. A request during `Setup` skips every tick but still tears down once. Headless/offscreen ignore it (one tick). A no-op after the run or disposal. |
 
 - The engine does not own the loop; `Bork2d.Runtime` does, and `IEngine` has no public
   `Run`/`Update`/`Draw`. `TLayer` must be an `int`-backed `[Flags]` enum with 1–32 named
@@ -116,22 +120,31 @@ out of `Bork2dApp.Run()` after cleanup (§12). There is no `Run`/`Update`/`Draw`
 
 ## 4. `ITime`
 
-`Status: Partial.` `ITime` declares `double DeltaTime { get; }` and `double Time { get; }`.
-`StopwatchTime` exists, but the M1 app never calls `NewFrame` and never clamps, so both values
-stay `0` for the one-tick run.
+`Status: Current (M2, windowed).` `ITime` declares `double DeltaTime { get; }` and
+`double Time { get; }`. The windowed host advances it once per tick, before text dispatch and
+`Tick`; headless/offscreen run one tick and never advance it.
 
-- Target (M2): monotonic `Stopwatch` seconds; the first tick's `DeltaTime` is `0`; `DeltaTime` is
-  clamped by `MaxDeltaTime` and not paused on focus loss. Snapshot reads are safe from any thread.
-- Variable timestep with no accumulator, fixed step, or render interpolation; `TickCount` is not
-  in v1. Windowed/offscreen pace against the renderer with no `Sleep`/deadline; headless is
-  timer-paced to `ticksPerSecond` (default 60, `0` = uncapped; M7).
+| Property | Semantics |
+| --- | --- |
+| `Time` | `0` on the first windowed tick; afterwards the raw monotonic `Stopwatch` seconds since that tick, never clamped. `0` in the one-tick modes. |
+| `DeltaTime` | Exactly `0` on the first tick; afterwards the raw interval between tick starts, clamped to `MaxDeltaTime`. `0` in the one-tick modes. |
+| `MaxDeltaTime` | Builder value (`0.25` s default) validated by `Build()`; a gameplay clamp, not a pacing delay. |
+
+- No `TickCount`, fixed timestep, accumulator, or render interpolation. Windowed/offscreen begin
+  with no pacing wait at all (M7 adds frame-handoff backpressure); headless pacing is M7.
+- The clock is never wall-clock time and does not pause on focus loss or minimization; games can
+  pause themselves.
+- Reads are thread-safe locked snapshots, so a `double` can never be observed torn. `ITime` keeps
+  its last values readable after `Run()` returns or the app is disposed.
 
 ## 5. `IWindow`
 
-`Status: Partial (M2).` The interface and its semantics are `Current`; the windowed implementation
-exists internally as an OS/window-thread platform, and M2 WP4 attaches its proxy to the engine. In
-this tree `IEngine.Window` still returns an `UnsupportedWindow` in every mode, and every member of
-that stub throws `NotSupportedException`.
+`Status: Current (M2, windowed).` In windowed mode `IEngine.Window` returns the internal proxy
+attached to the live OS/window-thread platform for the duration of `Run()`; the window is created
+visible before `Setup` and destroyed after `Teardown`. In headless/offscreen it returns the
+existing `UnsupportedWindow`, and every member (including `IsMinimized`) throws
+`NotSupportedException`. After a windowed run, retained references' members throw
+`ObjectDisposedException` (D-M2-17); the `IEngine.Window` getter itself never throws.
 
 ```csharp
 public interface IWindow
@@ -158,20 +171,21 @@ public interface IWindow
   may lag one pump (D-M2-04).
 - In **headless/offscreen** the returned stub's members (including `IsMinimized`) throw
   `NotSupportedException`. After windowed shutdown, retained `IWindow` references throw
-  `ObjectDisposedException` (D-M2-17).
+  `ObjectDisposedException` (D-M2-17). Commands issued during `Teardown` are best-effort: the
+  window is destroyed immediately afterwards.
 - Defaults: builder title, 1280x720 framebuffer pixels, resizable `true`, fullscreen `false`,
-  cursor visible. Window position, monitor selection, icons, minimum/maximum size, and
-  `IsFocused`/`IsVisible`/DPI-scale members are not part of M2.
+  cursor visible, not minimized. Window position, monitor selection, icons, minimum/maximum size,
+  and `IsFocused`/`IsVisible`/DPI-scale members are not part of M2.
 - Errors: `Title = null` throws `ArgumentNullException`; a non-positive, NaN, or infinite `Size`
   component throws `ArgumentOutOfRangeException`; both are thrown by the setter before queueing.
 
 
 ## 6. `IInput`
 
-`Status: Partial (M2).` The semantics below are `Current` for the windowed platform: the
-OS-thread accumulator, one-tick edges, focus handoff, text queue, and tick-freeze snapshot exist in
-`Bork2d.Runtime`. M2 WP4 attaches the internal proxy to the engine and runs the freeze/dispatch
-loop, so in this tree `IEngine.Input` still throws `NotSupportedException` in every mode.
+`Status: Current (M2, windowed).` The OS-thread accumulator, one-tick edges, focus handoff, text
+queue, and tick-freeze snapshot are wired by the windowed host: each tick freezes input, advances
+the clock, dispatches text, then calls `Tick`. In headless/offscreen there is no input at all, so
+`IEngine.Input` throws `NotSupportedException` from the getter.
 
 | Member | Semantics |
 | --- | --- |
@@ -185,7 +199,9 @@ loop, so in this tree `IEngine.Input` still throws `NotSupportedException` in ev
 
 - Windowed only. In headless/offscreen the `IEngine.Input` getter itself throws
   `NotSupportedException`; after windowed shutdown the returned object's members throw
-  `ObjectDisposedException`.
+  `ObjectDisposedException`. The input proxy is available from `Setup` (empty snapshot) through
+  `Teardown` (most recent snapshot).
+- The loop is uncapped: reads are taken once per tick, and there is no per-frame input logging.
 - Input is frozen at tick start and reads are stable for the whole `Tick`; events that arrive during
   `Tick` belong to the next freeze. Reads during `Setup` return a fully empty snapshot (all queries
   `false`, zero position/delta/wheel), so keys held during `Setup` produce press edges at the first
@@ -209,7 +225,7 @@ loop, so in this tree `IEngine.Input` still throws `NotSupportedException` in ev
 
 `Status: Partial.` Asset behavior is `Planned` for M3. `public interface IAssets` declares
 `Task<T> LoadAsset<T>(string) where T : class`, `Sprite LoadSprite(string)`, and
-`Task<byte[]> LoadData(string)`. In M1 `IEngine.Assets` returns an `UnsupportedAssets`; all three
+`Task<byte[]> LoadData(string)`. In M2 `IEngine.Assets` returns an `UnsupportedAssets`; all three
 methods throw `NotSupportedException`.
 
 `Planned for M3:` `LoadPack(string packPath)`, `Browse(string? prefix = null)`,
@@ -226,14 +242,14 @@ Target rules (M3):
 - `LoadAsset<T>` loads a MessagePack asset with a Nerdbank generated shape and throws for raw
   assets; use `LoadData` for arbitrary bytes.
 - The default pack is the relative string `"assets.pck"`. `Build()` validates only that the path
-  is non-empty and never touches the filesystem in M1. A missing or malformed base pack throws
+  is non-empty and never touches the filesystem in M2. A missing or malformed base pack throws
   `Bork2dException` at startup (no empty-filesystem fallback).
 - No public pack/asset unload in v1; mount packs during `Setup`/before loading. Missing/failed
   assets log; the retry policy is decided in M3 (see roadmap).
 
 ## 8. `ICamera<TLayer>`
 
-`Status: Partial.` M1 properties store values; renderer semantics are `Planned` (M8): no
+`Status: Partial.` M2 properties store values; renderer semantics are `Planned` (M8): no
 clamping, zero-size skip, positive-`Size` check, or diagnostic yet. Target semantics (M8):
 
 | Member | Semantics |
@@ -253,7 +269,7 @@ clamping, zero-size skip, positive-`Size` check, or diagnostic yet. Target seman
 
 ## 9. `ISpriteRender<TLayer>`
 
-`Status: Partial.` M1 properties store values; renderer semantics are `Planned` (M8): no
+`Status: Partial.` M2 properties store values; renderer semantics are `Planned` (M8): no
 validation or diagnostic runs yet. Target semantics (M8):
 
 | Member | Semantics |
@@ -341,8 +357,9 @@ serialize them; an undefined value is a safe query that returns `false`. Text us
 
 ## 12. Runtime surface
 
-`Status: Current (M1 skeleton).` The builder, one-tick app, validation, app-owned logging, and M1
-stubs exist; real loop modes are M2/M3/M7.
+`Status: Current (M2).` The builder, windowed loop and one-tick app, validation, app-owned logging,
+window/input proxies, and time are implemented. GPU rendering, pack loading, and renderer-paced
+pacing remain later milestones.
 
 ### `Bork2dAppBuilder<TLayer>`
 
@@ -371,36 +388,53 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 - Modes are windowed (default), `WithHeadless(ticksPerSecond)`, or `WithOffscreen(w, h)`. The
   windowless modes are mutually exclusive; window-only options (`WithTitle`, `WithSize`,
   `WithResizable`, `WithFullscreen`, `WithVSync`) are rejected in them. `WithHeadless` defaults
-  to 60 and `0` means uncapped; M1 stores and validates the rate, pacing is M7.
+  to 60 and `0` means uncapped; in M2 the rate is stored and validated but the mode still runs one
+  tick (pacing is M7).
 - `WithLogging(Action<ILoggingBuilder>)` runs once at `Build` after the minimum level is applied;
   it owns provider configuration, otherwise a pretty ZLogger console provider is installed. The
   app disposes the factory ([Logging](../architecture/logging.md)).
 - `WithAssetsPack` accepts a non-empty path; the default is the relative string `"assets.pck"`,
-  and the file need not exist in M1. `WithMaxDeltaTime` is a safety clamp, not a pacing delay;
-  `WithValidation` is stored for M2+ GPU validation (M1 has no GPU).
+  and the file need not exist in M2. `WithMaxDeltaTime` is a safety clamp for windowed
+  `ITime.DeltaTime`, not a pacing delay; `WithValidation` is stored for M6 GPU validation (M2 has
+  no GPU).
 - `Build()` validates: game present exactly once; windowless modes mutually exclusive; `TLayer`
   valid; positive window/offscreen sizes; window options only in windowed mode; max delta > 0 and
   not NaN (positive infinity passes); headless rate >= 0; non-empty title and pack path. It then
   creates the app-owned logging factory, logs one startup message from the `Bork2d.Runtime`
-  category (mode, `validation=passed`, layer type), and creates the options, internal engine, and
-  `IEngine.Root`. It creates no window, GPU resources, threads, or filesystem state; a logging
-  factory created before a later failure is disposed.
+  category (mode, `validation=passed`, layer type), and creates the options, clock, internal
+  engine, and app runtime. Windowed builds get unattached window/input proxies; headless/offscreen
+  get the throwing window stub and no input. It creates no SDL state, window, GPU resources,
+  threads, or filesystem state; a logging factory created before a later failure is disposed.
 
 ### `Bork2dApp`
 
 `public sealed class Bork2dApp : IDisposable` exposes `void Run()` and `void Dispose()`.
 
-- `Run()` is the M1 smoke path: `Setup`, exactly one `Tick`, then `Teardown`, then return. There
-  is no window, GPU work, pack, render thread, or pacing loop; M2/M7 replace it. It may run on any
-  thread and only once (a second call throws `InvalidOperationException`; after `Dispose()` it
-  throws `ObjectDisposedException`), and a failed run still counts as the one run.
-- If `Setup` throws, the exception propagates and `Teardown` is not called. If `Tick` throws,
-  `Teardown` is still attempted and the original exception is rethrown; if both throw, `Run()`
-  throws an `AggregateException` holding both. A failed run detaches the root's direct children.
+- **Windowed `Run()`** creates the SDL window on the engine-owned OS/window thread (visible before
+  `Setup`), attaches the window/input proxies, runs an uncapped `Setup` → `Tick`… → `Teardown` loop
+  until `IEngine.Exit()`, the window close button/`SDL_QUIT`, or a fatal platform error, then
+  destroys the window, quits SDL, and joins the OS thread. It never sleeps, spins, or paces.
+- **Headless/offscreen `Run()`** keeps the M1 one-tick path: `Setup`, exactly one `Tick`, then
+  `Teardown`, on the caller thread, with no platform and no clock advance.
+- `Run()` may run on any thread and only once (a second call throws `InvalidOperationException`;
+  after `Dispose()` it throws `ObjectDisposedException`), and a failed run still counts as the one
+  run. Exit during `Setup` finishes `Setup`, runs zero ticks, tears down once, and returns.
+- If `Setup` throws, the exception propagates and `Teardown` is not called; in windowed mode the
+  platform is still shut down. If `Tick` (or a text handler) throws, `Teardown` is still attempted
+  and the original exception is rethrown; if both throw, `Run()` throws an `AggregateException`
+  holding both. A window start failure throws `Bork2dException` (with the SDL error text) before
+  `Setup`, with no `Teardown`. A fatal platform error after startup stops the loop at the next
+  boundary, attempts `Teardown`, and rethrows the fatal `Bork2dException`. Every windowed path
+  destroys the window and joins the OS thread. A failed run detaches the root's direct children.
 - `Dispose()` is idempotent and safe before or after `Run`; it detaches the root's direct children,
-  disposes the app-owned logging factory and providers, and never calls `IGame.Teardown`. Stop with
-  `IEngine.Exit()` or the window close button (windowed); the M1 smoke completes its tick anyway.
-  `Run` returns `void`; failure is reported by exceptions.
+  detaches/marks the window and input proxies disposed, disposes the app-owned logging factory and
+  providers, and never calls `IGame.Teardown`. During an active `Run()` it throws
+  `InvalidOperationException` from any thread without disturbing the loop (D-M2-18); stop with
+  `IEngine.Exit()` or the window close button first.
+- After `Run` returns or the app is disposed, retained `IWindow`/`IInput` references remain valid
+  objects but their members throw `ObjectDisposedException`; `ITime` keeps its last values
+  readable, and `IEngine.Exit()` is a no-op. `Run` returns `void`; failure is reported by
+  exceptions.
 
 ## 13. Errors and exceptions
 
@@ -410,10 +444,14 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 | Null builder argument or null `CreateCamera`/`CreateSpriteRender` parent | `ArgumentNullException`; a blank string throws `ArgumentException` at the call. |
 | Non-engine or other-engine parent; singular parent world matrix | `Bork2dException`. |
 | Self/cycle parent; setting the root's own parent or a root local value | `InvalidOperationException`. |
-| Game callback exceptions | `Setup` propagates without `Teardown`; otherwise the original exception is rethrown, or `AggregateException` when `Tick` and `Teardown` both throw. |
-| `IWindow`/`IInput` member after windowed shutdown | `ObjectDisposedException` (D-M2-17); before the windowed host is wired, `IWindow` members are the headless stub and throw `NotSupportedException`. |
+| SDL init / window creation / platform-thread startup failure | Windowed `Run()` throws `Bork2dException` containing `SDL_GetError()` before `Setup`; no `Teardown`; the window and OS thread were already cleaned up. |
+| Game callback exceptions | `Setup` propagates without `Teardown`; a `Tick` or text-handler failure still tears down and rethrows the original; `AggregateException` when `Tick` and `Teardown` both throw. The window and OS thread are cleaned up in every path. |
+| Fatal platform error after windowed startup | Loop stops at the next boundary; `Teardown` is attempted; the fatal `Bork2dException` is rethrown (`AggregateException` if `Teardown` also throws). |
+| `Bork2dApp.Dispose()` during an active `Run()` | `InvalidOperationException` from any thread; the loop is unaffected. |
+| Second `Run()`, or `Run()` after `Dispose()` | `InvalidOperationException` / `ObjectDisposedException`. |
+| `IWindow`/`IInput` member after windowed shutdown | `ObjectDisposedException` (D-M2-17). Headless/offscreen `IWindow` members and the `IInput` getter throw `NotSupportedException`. |
 | Undefined `KeyCode`/`MouseButton` query | `false`; never throws. |
-| Input text handler throws | Treated as a `Tick` failure: no further text dispatch, `Teardown` attempted, the original exception rethrown (windowed host, M2 WP4). |
+| Input text handler throws | Treated as a `Tick` failure: no further text dispatch, loop stops, `Teardown` attempted, the original exception rethrown. |
 | `IWindow.Size` non-positive/NaN/infinite, or `IWindow.Title = null` | `ArgumentOutOfRangeException` / `ArgumentNullException` from the setter, before enqueueing. |
 | Missing/corrupt default pack, or missing asset (M3) | Pack: `Bork2dException` at startup; asset: log plus `Sprite.Empty`, not fatal. |
 

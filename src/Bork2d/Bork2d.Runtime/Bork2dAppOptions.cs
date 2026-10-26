@@ -9,9 +9,9 @@ namespace Bork2d.Runtime;
 /// by <see cref="Bork2dAppBuilder{TLayer}.Build"/>.
 /// </summary>
 /// <remarks>
-/// The M1 host consumes only the game, the mode, and the scene graph. The remaining options are
-/// stored and validated now so the M2/M3/M6 composition can consume them without changing the
-/// public builder surface.
+/// The M2 windowed host consumes the game, the mode, the window options, the maximum delta time,
+/// and the internal SDL factory seam. The remaining options are stored and validated now so the
+/// M3/M6 composition can consume them without changing the public builder surface.
 /// </remarks>
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
 internal sealed class Bork2dAppOptions<TLayer> where TLayer : struct, Enum
@@ -81,6 +81,17 @@ internal sealed class Bork2dAppOptions<TLayer> where TLayer : struct, Enum
 
     /// <summary>Gets or sets a value indicating whether GPU validation layers are requested.</summary>
     internal bool Validation { get; set; }
+
+    /// <summary>
+    /// Gets or sets the internal test seam for creating the SDL adapter on the OS/window thread.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="null"/> means production: the runtime creates a <see cref="SilkSdlApi"/> on
+    /// the OS thread. Tests supply a fake so the real windowed loop and platform run without a
+    /// desktop session or the native library. This member is internal and not part of the public
+    /// builder surface.
+    /// </remarks>
+    internal Func<ISdlApi>? SdlApiFactory { get; set; }
 
     /// <summary>Gets or sets the window-only options that were explicitly set.</summary>
     internal Bork2dWindowOptionFlags WindowOptionsSet { get; set; }
