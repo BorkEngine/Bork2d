@@ -322,10 +322,14 @@ public void Tick()
 
 ## 10. Assets
 
-`Status: Partial (M3 WP2).` The public contract and the internal path/VFS/browse stack are
-implemented, but `IEngine.Assets` still returns the throwing `UnsupportedAssets` stub in this
-tree: every member throws `NotSupportedException` until WP3/WP5 wire the asset service. The
-examples below compile against the contract and describe the target runtime behavior.
+`Status: Partial (M3 WP3).` The public contract, the internal path/VFS/browse stack, and the
+internal loader service are implemented: one dedicated loader thread, an unbounded FIFO queue,
+`LoadData`/`LoadAsset<T>` with fresh results per call, cancellation/join at shutdown, and the
+`AssetException`/`AssetErrorKind` failure contract. `IEngine.Assets` still returns the throwing
+`UnsupportedAssets` stub in this tree, so game code sees `NotSupportedException` until WP5 wires
+the service into `Run()`/`Dispose()`. `LoadSprite` remains a WP3 stub: it validates the path,
+logs a miss, and returns `Sprite.Empty`; the sprite/descriptor CPU pipeline is WP4. The examples
+below compile against the contract and describe the runtime behavior.
 
 ```csharp
 using PolyType;
@@ -357,7 +361,34 @@ Sprite player = _engine.Assets.LoadSprite("sprites/player/idle");
 - **Typed assets.** `LoadAsset<T>` is constrained to `where T : class, IShapeable<T>` (D-M3-22).
   `T` must carry a compiled `[GenerateShape]` shape (PolyType); a missing shape is a compile-time
   error, not a runtime fallback. There is no reflection resolver. Use `LoadData` for arbitrary
-  bytes, including raw texture payloads.
+  bytes, including raw texture payloads. Both members validate the path synchronously and resolve
+  the winning pack entry at enqueue time, so a later overlay mount does not change an in-flight
+  request.
+- **Loading and errors.** A valid missing path, a raw entry passed to `LoadAsset<T>`, and
+  decode/size failures fault the returned task instead of throwing:
+
+  ```csharp
+  try
+  {
+      GameConfig config = await _engine.Assets.LoadAsset<GameConfig>("data/config");
+  }
+  catch (AssetException exception) when (exception.Kind == AssetErrorKind.NotFound)
+  {
+      // A valid canonical path that is not in the merged VFS.
+  }
+  ```
+
+  `AssetErrorKind` is `NotFound`, `RawAsset`, `Decode`, `Io`, or `InvalidData`; `AssetPath` names
+  the canonical path (or the filesystem path for an IO failure). Null/invalid path arguments still
+  throw `ArgumentNullException`/`ArgumentException` from the call. Pack open/parse/mount failures
+  are `Bork2dException`, not `AssetException`. See the
+  [error contract](reference.md#71-assetexception-and-asseterrorkind).
+- **No retry, no loose files.** A failed lookup or decode stays failed for the process; v1 has no
+  automatic retry, pack unload, or loose-file fallback. Mount a corrected overlay (a later mount
+  shadows an earlier path) or restart the app.
+- **Shutdown.** Stopping the service cancels queued and in-flight load tasks (they complete as
+  canceled) and joins the loader. After that, every `IAssets` member throws
+  `ObjectDisposedException`; the `IEngine.Assets` getter never throws by itself.
 - **Paths.** Public inputs are normalized (`\` → `/`, invariant lowercase) and then validated:
   lowercase letters, digits, `_`, `-`, and `/` separators; no leading/trailing slash, empty
   segment, `.`/`..` segment, or source extension. `textures/bg.png` is invalid; use
@@ -376,18 +407,19 @@ Sprite player = _engine.Assets.LoadSprite("sprites/player/idle");
 - **`AssetInfo`.** Reports `Path`, `IsRaw`, `IsCompressed`, `Length`, `Size`, and `PackPath` from
   the header without decompressing. `PackPath` is the supplied pack identifier, not the resolved
   absolute path.
-- **Sprites.** `LoadSprite` is idempotent per path; handles are session-local and never serialized.
-  Missing paths log and return `Sprite.Empty`. A handle is skipped by the renderer until its CPU
-  metadata (and, in later milestones, its GPU page) is ready; M3 has no readiness query and no
-  placeholder.
-- **Lifetime.** All members are thread-safe. After the runtime service stops, members throw
-  `ObjectDisposedException`; the `IEngine.Assets` getter itself never throws. `AssetException`/
-  `AssetErrorKind` arrive with the loader in WP3.
+- **Sprites.** `LoadSprite` is a WP3 stub: it validates the path, logs a miss, and returns
+  `Sprite.Empty`. A present path also returns no handle yet; WP4 adds the idempotent session-local
+  handle and the CPU sprite/descriptor metadata load (the raw payload stays unread in M3). Handles
+  are never serialized, and M3 has no readiness query.
+- **Lifetime.** All members are thread-safe. Stopping the service (WP5 wires this into `Run`)
+  cancels pending load tasks and joins the loader. After that, members throw
+  `ObjectDisposedException`; the `IEngine.Assets` getter itself never throws.
 
 ### Building a pack (tooling only)
 
-The pack **writer** is available now from a tool, test, or editor host. The runtime loader is
-WP3–WP5; game code must not reference `Bork2d.Assets`.
+The pack **writer** is available now from a tool, test, or editor host. The internal runtime
+loader is WP3 and WP5 wires it into the app; the sprite pipeline is WP4. Game code must not
+reference `Bork2d.Assets`.
 
 ```csharp
 using Bork2d.Assets;

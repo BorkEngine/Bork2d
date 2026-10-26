@@ -30,10 +30,17 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **436 tests**: 427 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
+The suite is **486 tests**: 477 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
 are skipped unless the environment variable is set. The deterministic set includes the M3 WP1
-pack-format/writer tests and the WP2 path/VFS/browse/contract tests, which build packs in memory or
-in temp files and use no committed binary fixtures. On a desktop session run them with:
+pack-format/writer tests, the WP2 path/VFS/browse/contract tests, and the WP3 loader/threading and
+error-contract tests, which build packs in memory or in temp files and use no committed binary
+fixtures. Run only the asset tests with:
+
+```powershell
+dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "FullyQualifiedName~Pack|FullyQualifiedName~Asset"
+```
+
+On a desktop session run the whole suite (including the opt-in window tests) with:
 
 ```powershell
 $env:BORK2D_RUN_WINDOW_TESTS = '1'
@@ -91,7 +98,9 @@ are documented. The rule applies to every new public API; do not remove it.
 ## 6. Tests and CI
 
 - Add unit tests with behavior changes; pack/format tests for asset changes; threading tests for
-  handoff changes; GPU/visual tests for renderer changes.
+  handoff changes; GPU/visual tests for renderer changes. Asset-loader tests are deterministic:
+  they use a narrow internal hook plus bounded signals/joins (no sleeps, retries, or
+  timing assertions) to prove FIFO order, asynchronous completion, and shutdown cancellation.
 - Real-window tests use `[WindowFact]`, are skipped without `BORK2D_RUN_WINDOW_TESTS=1`, share the
   serialized `RealSdlWindow` collection, and may use only signals/bounded waits (no sleeps). Run
   them locally before a window/runtime PR.
