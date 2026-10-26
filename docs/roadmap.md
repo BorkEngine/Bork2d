@@ -19,13 +19,13 @@
 | Area | State | Notes |
 | --- | --- | --- |
 | Build | Green | SDK `11.0.100-rc.1`, `net11.0`, zero warnings/errors in Debug and Release; `dotnet format` clean. |
-| `Bork2d.Api` | Current | Contracts for engine, game, time, window, input, assets, camera, sprite, transform, root, `ZIndex`, `Bork2dException`, `AssetInfo`, `AssetException`/`AssetErrorKind`, the full `KeyCode` scancode set, and five `MouseButton` members. Window/input are implemented for windowed mode; assets are implemented in M3. |
+| `Bork2d.Api` | Current | Contracts for engine, game, time, window, input, assets, camera, sprite, transform, root, `ZIndex`, `Bork2dException`, `AssetInfo`, `AssetException`/`AssetErrorKind`, the public asset model (`SpriteAsset`, `TextureDescriptor`, `SpriteTopology`, `AssetRef<T>`, `DataRef`), the full `KeyCode` scancode set, and five `MouseButton` members. Window/input are implemented for windowed mode; assets are implemented in M3 and the reference model in D-035. |
 | `Bork2d.Common` | Partial | Root-owned unordered scene tree, transforms (degrees normalized), structural/per-object locks, time wrapper, layer validation, MessagePack shape policy. Snapshot structs are M7. |
 | `Bork2d.Runtime` | Current (M3) | Builder, validation, app-owned logging, SDL windowed host (window/input/time, uncapped loop), one-tick headless/offscreen host, `Exit`/`Dispose`/post-shutdown contract, and the app-scoped asset-service lifecycle. Renderer wiring is M6/M8. |
-| `Bork2d.Assets` | Current (M3) | v1 pack reader/writer, public `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`, canonical paths, base/overlay VFS, one loader thread with `LoadData`/`LoadAsset<T>`/`LoadSprite` CPU metadata, and the CPU resource table. |
+| `Bork2d.Assets` | Current (M3/D-035) | v1 pack reader/writer, public `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`, canonical paths, base/overlay VFS, one loader thread with `LoadData`/`LoadAsset<T>`, and generic pack-time reference validation. |
 | `Bork2d.Render` | Empty | Reference-wired; no Vulkan implementation (M6/M8). |
 | `Bork2d.Editor` | Absent | Not in the solution (M5). |
-| `Bork2d.Tests` | Current | 588 xUnit tests: 579 deterministic in CI (ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix, fake-SDL window/input/loop/time, pack/VFS/loader/descriptor/sprite, runtime asset lifecycle) plus 9 opt-in real-window tests. |
+| `Bork2d.Tests` | Current | 519 deterministic xUnit tests (ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix, fake-SDL window/input/loop/time, pack/VFS/loader, asset references/reference validation, runtime asset lifecycle) plus 9 opt-in real-window tests. |
 | NativeAOT | M3 baseline | Libraries use `IsAotCompatible` + trim/AOT analyzers; `Bork2d.AotSmoke` publishes/runs locally with zero warnings, headless with a temporary pack and `--windowed --ticks 120`. Local gate only. |
 | CI | Current | GitHub Actions on PRs to `develop` and pushes to `develop`: restore, format verify, build, test. No AOT or real-window job. |
 | Runnable engine | Partial (windowed shell + assets) | A real window, input, time, and an uncapped tick loop plus the pack/VFS/loader/CPU descriptor pipeline; no renderer yet. |
@@ -120,14 +120,15 @@ Goal: load, overlay, browse, and describe packed assets without a renderer.
 - VFS: default `assets.pck`, `LoadPack`, later-wins overlays, no unload, merged `Browse`/`Exists`.
 - Compression: header always Zstd max; debug payloads uncompressed; release max Zstd only when
   smaller; no payload checksum; no byte-level determinism.
-- One asset loader thread, FIFO queue, internal CPU resource table (no public readiness API in
-  M3); cancellation and join at shutdown.
+- One asset loader thread, FIFO queue, and no runtime CPU resource table in M3 (the pre-D-035
+  sprite resource types were removed); cancellation and join at shutdown.
 - Texture descriptors + raw RGBA8 payloads; sprite asset schema (texture, UVs, pixels-per-unit
   scale, pivot, topology, optional `indices`; no vertices array). M3 loads sprite + descriptor,
   not the raw payload.
 - `IAssets.LoadData`/`Exists`/`Browse`/`LoadPack`; shape-generic `LoadAsset<T>` (M3 tests use
   internal shapes; game types can satisfy the compiled `IShapeable<T>` constraint, with no M4
-  dependency); public tooling `Bork2d.Assets.Pack.PackBuilder` in `Bork2d.Assets`.
+  dependency); public `SpriteAsset`/`TextureDescriptor` and `AssetRef<T>`/`DataRef` references
+  (D-035); public tooling `Bork2d.Assets.Pack.PackBuilder` in `Bork2d.Assets`.
 - Headless tests: overlays, browse, corrupt header/checksum, missing pack, loader threads, AOT smoke.
 
 Exit: a pack with texture/sprite/data loads; overlays shadow correctly; corrupt and missing packs
@@ -150,7 +151,8 @@ Goal: TOML source becomes MessagePack assets and a packed release artifact.
 - TOML model/attributes and Nerdbank generated shapes (NativeAOT).
 - Tomlyn parser/writer for the JIT baker/editor; comment preservation if practical.
 - Custom data TOML → MessagePack; texture sidecars → descriptor + raw payload; sprite TOML → sprite
-  asset; deterministic baker and pack integration.
+  asset; `AssetRef<T>`/`DataRef` link baking; field/schema validation (UVs, scale, pivot, topology,
+  dimensions, format, filter/wrap, payload size); deterministic baker and pack integration.
 - Project descriptor (`bork2d.project.toml`) for asset root/type mapping; build command/MSBuild
   target with incremental bake.
 - Tests: round-trip, missing fields, bad references, deterministic output, AOT load.
@@ -331,6 +333,7 @@ bounds); RGBA8 + sRGB only. Remaining open decisions:
 | M1 Foundation/AOT | Merged (2026-10-25, PR #1) | 135 tests; Debug/Release zero warnings; format clean; AOT smoke publishes/runs locally; CI build/test/format on PRs to `develop` and `develop` pushes. [M1 spec](specs/m1-foundation.md). |
 | M2 SDL platform | Merged (2026-10-26, PR #2) | 292 tests (283 in CI, 292 with `BORK2D_RUN_WINDOW_TESTS=1`); Debug/Release zero warnings; format/docs clean; AOT headless and `--windowed --ticks 120` exit 0 with `SDL2.dll`; live-window 5,000,000-tick run exit 0; Escape/close graceful. [M2 spec](specs/m2-sdl-platform.md#125-acceptance-evidence-recorded-by-wp5). |
 | M3 Assets/pack | Merged (2026-10-26, PR #4) | 587 tests (578 deterministic + 9 opt-in real-window); Debug/Release zero warnings; format/docs clean; AOT publish zero AOT/trim warnings with `SDL2.dll`; default AOT run exit 0 loading a 2-entry temporary pack (raw + generated-shape MessagePack) and one tick; `--windowed --ticks 120` exit 0 with `WithoutAssets()`; crash-free pack/overlay failure matrix. [M3 spec](specs/m3-assets.md#123-acceptance-evidence-recorded-by-wp5). |
+| Asset-reference refactor | Implemented (2026-10-26, D-035) | 519 deterministic tests plus 9 opt-in real-window tests; Debug/Release zero warnings; format/docs/`git diff --check` clean; AOT publish zero AOT/trim warnings; default AOT run exit 0 with a 5-entry pack including the public `SpriteAsset`/`TextureDescriptor` shapes; `--windowed --ticks 120` exit 0. [Refactor spec](specs/refactor-asset-references.md). |
 | M4 Serialization/bake | Not started | — |
 | M5 Editor | Not started | — |
 | M6 Vulkan bring-up | Not started | — |

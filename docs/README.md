@@ -2,12 +2,13 @@
 
 > **Status:** **M0 complete; M1 merged into `develop` (2026-10-25, PR #1); M2 merged into `develop`
 > (2026-10-26, PR #2); M3 (assets: pack, VFS, descriptors) merged into `develop` (2026-10-26,
-> PR #4).** The
+> PR #4); the post-M3 asset-reference refactor (D-035) is implemented in this tree.** The
 > repository contains the M1 build/quality baseline, public contracts, root-owned scene tree,
 > builder, logging, the NativeAOT smoke app, the M2 SDL windowed host (window, input, time,
-> uncapped loop), and the M3 asset pipeline (pack reader/writer, VFS, loader, descriptors/sprites
-> CPU metadata, runtime integration). TOML bake is M4; the editor and renderer are target designs
-> for later milestones. Check status markers before treating an API as implemented.
+> uncapped loop), and the M3 asset pipeline (pack reader/writer, VFS, loader, public
+> `SpriteAsset`/`TextureDescriptor`, typed `AssetRef<T>`/`DataRef` links, runtime integration). TOML
+> bake is M4; the editor and renderer are target designs for later milestones. Check status markers
+> before treating an API as implemented.
 
 Bork2d is a focused 2D game engine for .NET: **Vulkan 1.3** rendering, **SDL2** windowing through
 **Silk.NET**, a NativeAOT runtime, and **`assets.pck`** assets addressed by canonical paths.
@@ -57,7 +58,8 @@ items. The [decision log](decisions.md) records why.
 | [Implementation roadmap](roadmap.md) | planner | M0–M10, exit criteria, risks, open decisions, progress. |
 | [M1 spec](specs/m1-foundation.md) | implementers | Historical M1 goal, decisions, and acceptance evidence. |
 | [M2 spec](specs/m2-sdl-platform.md) | implementers | Implemented M2 SDL window/input decisions, semantics, work packages, evidence, acceptance. |
-| [M3 spec](specs/m3-assets.md) | implementers | Implemented M3 asset pack/VFS/descriptor decisions, semantics, derived details, work packages, and acceptance evidence. |
+| [M3 spec](specs/m3-assets.md) | implementers | Historical M3 asset pack/VFS/descriptor decisions, semantics, work packages, and acceptance evidence. |
+| [Asset-reference refactor spec](specs/refactor-asset-references.md) | implementers | Public sprite/texture assets, typed `AssetRef`/`DataRef` links, pack-time reference validation, and the removal of sprite handles/resources. |
 | [Contributing](contributing.md) | contributors | Build, warnings, style, format, docs check, PR checklist. |
 | [Decision log](decisions.md) | everyone | Accepted decisions and consequences. |
 
@@ -131,8 +133,10 @@ One fact has one owner. Update the owner and link to it; do not copy.
 | **Scene root** | `IEngine.Root`; read-only strong owner of the live tree. |
 | **Rooted / unrooted** | Reachable / not reachable from the root. |
 | **Pack / overlay** | `assets.pck` file; a later mounted pack that shadows earlier paths. |
-| **Texture descriptor** | MessagePack metadata (payload, width, height, format, filter, wrap). |
-| **Sprite asset** | MessagePack quad definition: texture, UVs, pivot, topology, optional indices, pixels-per-unit. |
+| **Texture descriptor** | Public MessagePack metadata (payload `DataRef`, width, height, format, filter, wrap). |
+| **Sprite asset** | Public MessagePack quad definition: texture `AssetRef<TextureDescriptor>`, UVs, pivot, topology, optional indices, pixels-per-unit. |
+| **Asset reference** | `AssetRef<TAsset>`: a typed canonical path string to a MessagePack asset; `null` is absent. |
+| **Data reference** | `DataRef`: a canonical path string to a raw asset; `null` is absent. |
 | **Bindless** | Shader indexing of a descriptor array, so all texture pages are available in one draw. |
 | **NativeAOT** | Ahead-of-time publish mode; no runtime reflection or dynamic code. |
 | **Draw call** | One `vkCmdDraw` issuing all visible sprites of one camera as instances. |

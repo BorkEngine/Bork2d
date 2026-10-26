@@ -30,13 +30,12 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **588 tests**: 579 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
+The suite is **528 tests**: 519 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
 are skipped unless the environment variable is set. The deterministic set includes the M3
 pack-format/writer tests, the path/VFS/browse/contract tests, the loader/threading and
-error-contract tests, the descriptor/sprite validation, `LoadSprite`, resource-cache, and
-enqueue-snapshot tests, and the runtime asset lifecycle/error-matrix tests. They build packs in
-memory or in temp files and use **no committed binary fixtures**. Run only the asset/pack tests
-with:
+error-contract tests, generic pack-time reference validation, the public asset-reference/pack-build
+contracts, and the runtime asset lifecycle/error-matrix tests. They build packs in memory or in temp
+files and use **no committed binary fixtures**. Run only the asset/pack tests with:
 
 ```powershell
 dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "FullyQualifiedName~Pack|FullyQualifiedName~Asset"
@@ -87,8 +86,9 @@ is an error, D-034); `_camelCase` private fields; `PascalCase` constants; `I`-pr
 code; no commented-out code; XML docs on public API.
 
 M3 closed the former XML-doc gap: `IAssets`, `AssetInfo`, `AssetException`, `AssetErrorKind`,
-`Sprite`, `Color`, `ClearKind`, and `Bork2dAppBuilder.WithoutAssets()` are documented. The rule
-applies to every new public API; do not remove it.
+`AssetRef<T>`, `DataRef`, `SpriteAsset`, `TextureDescriptor`, `SpriteTopology`, `Color`,
+`ClearKind`, and `Bork2dAppBuilder.WithoutAssets()` are documented. The rule applies to every new
+public API; do not remove it.
 
 ## 5. Architecture boundaries
 

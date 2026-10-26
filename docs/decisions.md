@@ -42,6 +42,7 @@
 | D-032 | Accepted | M2 time/exit/lifetime: first tick `Time = DeltaTime = 0`, then raw monotonic `Time` and clamped `DeltaTime`; `Exit()` stops before the next freeze; `Dispose()` during `Run()` throws; after shutdown `IWindow`/`IInput` throw `ObjectDisposedException`, `ITime` stays readable, and `Exit()` is a no-op. |
 | D-033 | Accepted | Accepted fatal-platform-error exception to D-028: after an unrecoverable post-startup SDL error the OS thread may destroy the window before `Teardown`; the proxies remain attached for best-effort access. Normal, `Exit`, and close paths destroy the window only after `Teardown`. |
 | D-034 | Accepted | Source layout is folder-per-area and the namespace is derived from the project plus the folder path (IDE0130 enforced). Public contracts are split into `Bork2d.Api.Assets`, `.Scene`, `.Rendering`, `.Input`, and `.Platform`, with `IEngine`/`IGame`/`Bork2dException` staying in `Bork2d.Api`; the tooling pack writer is `Bork2d.Assets.Pack`. Breaking namespace change accepted under D-014; behavior unchanged. |
+| D-035 | Accepted | Post-M3 asset-reference refactor: `LoadSprite`, `Sprite`, `SpriteResource`, `TextureResource`, the handle table, and the sprite CPU resource pipeline are removed. `SpriteAsset`, `TextureDescriptor`, and `SpriteTopology` are public in `Bork2d.Api.Assets`. `AssetRef<TAsset>` and `DataRef` are typed canonical-path values serialized as strings; `null` means absent, an empty/invalid path is rejected at pack build. `LoadAsset<T>` deserializes only; `PackBuilder` validates every non-null reference at `Build`/`Write`; field validation belongs to the M4 baker/editor. `ISpriteRender.Sprite` is a `SpriteAsset?`. Supersedes D-M3-12, D-M3-13, and D-M3-17. |
 
 ## M3 asset decisions (approved 2026-10-26)
 
@@ -61,12 +62,12 @@ These entries record the accepted decisions only.
 | D-M3-09 | Accepted | Base pack plus later-wins overlays, no unload; `LoadPack` is synchronous/atomic/thread-safe and a bad overlay is not mounted. |
 | D-M3-10 | Accepted | Asset paths are normalized (lowercase, `\` → `/`) then validated; invalid paths throw `ArgumentException`. `Browse(null)` means all; prefixes match on segments. |
 | D-M3-11 | Accepted | One dedicated asset loader thread, unbounded FIFO queue, tasks complete asynchronously, shutdown cancels pending/in-flight work and joins the thread. |
-| D-M3-12 | Accepted | Sprite and descriptor resources are cached per path; `LoadData` returns a fresh `byte[]` and `LoadAsset<T>` a fresh instance per call; `LoadSprite` is idempotent per path. |
-| D-M3-13 | Accepted | M3 `LoadSprite` resolves the path/allocates a handle synchronously, loads sprite + descriptor asynchronously, and does not load the raw payload (M8). Missing → `Sprite.Empty` + log; failures stay non-renderable. |
+| D-M3-12 | Superseded by D-035 | Sprite and descriptor resources are cached per path; `LoadData` returns a fresh `byte[]` and `LoadAsset<T>` a fresh instance per call; `LoadSprite` is idempotent per path. |
+| D-M3-13 | Superseded by D-035 | M3 `LoadSprite` resolves the path/allocates a handle synchronously, loads sprite + descriptor asynchronously, and does not load the raw payload (M8). Missing → `Sprite.Empty` + log; failures stay non-renderable. |
 | D-M3-14 | Accepted | `IEngine.Assets` returns a real service in every mode; the getter never throws. After `Run()`/`Dispose`, every `IAssets` member throws `ObjectDisposedException`. |
 | D-M3-15 | Accepted | Pack open/parse/mount failures use `Bork2dException`; asset lookup/decode/IO failures use public `AssetException` with `AssetErrorKind`/`AssetPath`; argument errors use BCL exceptions. |
 | D-M3-16 | Superseded by D-M3-22 | `LoadAsset<T>` is shape-generic and requires a generated shape; M3 tests use internal shapes and `Project.Common` stays `Api`-only. A missing shape faults with `AssetException` naming `T`. `PackBuilder.AddMessagePack<T>` requires `T : IShapeable<T>`. |
-| D-M3-17 | Accepted | Texture descriptors and sprite assets stay internal; sprite topology is an integer enum in the pack and a string in TOML; only RGBA8/sRGB is accepted; no per-asset version. |
+| D-M3-17 | Superseded by D-035 | Texture descriptors and sprite assets stay internal; sprite topology is an integer enum in the pack and a string in TOML; only RGBA8/sRGB is accepted; no per-asset version. |
 | D-M3-18 | Accepted | No automatic retry, no loose-file overlay, no KTX2/color-space fields. |
 | D-M3-19 | Accepted | The default AOT smoke run builds a temporary pack, loads raw + generated-shape MessagePack assets, browses/exists, then deletes it; `--windowed` keeps the M2 demo with `WithoutAssets()`. |
 | D-M3-20 | Accepted | `Bork2d.Assets` pins `Nerdbank.MessagePack` 1.4.95, `PolyType` 1.4.1, and `System.IO.Hashing` 11.0.0-rc.1.26425.128; Zstd is the .NET 11 built-in codec. |
@@ -283,11 +284,11 @@ These entries record the accepted decisions only.
   …); a file's namespace is the project namespace plus the folder path, enforced by IDE0130.
   `Bork2d.Api` is split into `Bork2d.Api.Assets` (`IAssets`, `AssetInfo`, `AssetException`,
   `AssetErrorKind`), `Bork2d.Api.Scene` (`ISceneRoot`, `ITransform`, `ICamera`, `ISpriteRender`),
-  `Bork2d.Api.Rendering` (`Sprite`, `Color`, `ClearKind`), `Bork2d.Api.Input` (`IInput`, `KeyCode`,
+  `Bork2d.Api.Rendering` (`Color`, `ClearKind`), `Bork2d.Api.Input` (`IInput`, `KeyCode`,
   `MouseButton`), and `Bork2d.Api.Platform` (`IWindow`, `ITime`); `IEngine`, `IGame`, and
   `Bork2dException` stay in `Bork2d.Api`. `Data.cs` is split into `Sprite.cs`, `Color.cs`, and
-  `ClearKind.cs`. The public pack tooling (`PackBuilder`, `PackCompressionMode`) moves to
-  `Bork2d.Assets.Pack`.
+  `ClearKind.cs` (the `Sprite` handle file was later removed by D-035). The public pack tooling
+  (`PackBuilder`, `PackCompressionMode`) moves to `Bork2d.Assets.Pack`.
 - **Consequences:** Game code adds the relevant namespace usings; fully-qualified names and the
   dependency test change. This is a source- and binary-breaking namespace change accepted under
   D-014, with no behavior, unit, or semantic change. The `Bork2d.Assets` export set is unchanged in
@@ -295,6 +296,30 @@ These entries record the accepted decisions only.
 - **Docs:** [Projects and dependencies](architecture/projects.md#4-source-layout-and-namespaces),
   [API reference](api/reference.md#15-namespaces),
   [Contributing](contributing.md#4-c-conventions)
+
+### D-035 Generic asset references replace the special sprite path
+
+- **Decision:** The runtime no longer has `IAssets.LoadSprite`, the `Sprite` handle, `SpriteResource`,
+  `TextureResource`, the sprite handle table, or the sprite CPU resource pipeline. Game code loads
+  sprites like any other asset: `await engine.Assets.LoadAsset<SpriteAsset>("sprites/player")`.
+  `SpriteAsset`, `TextureDescriptor`, and `SpriteTopology` are public in `Bork2d.Api.Assets`.
+  `AssetRef<TAsset>` and `DataRef` are typed canonical-path values that serialize as strings; a
+  `null` path is an absent reference, and an empty/non-canonical path is rejected by pack creation.
+  `ISpriteRender<TLayer>.Sprite` is a `SpriteAsset?`; `null` draws nothing. `LoadAsset<T>` only
+  resolves and deserializes; it does not validate fields or links. `PackBuilder.Build`/`Write`
+  validate every non-null reference against the final entry table (existence and raw/MessagePack
+  kind). Field/schema validation moves to the M4 baker/editor. `AssetRef<T>` and `DataRef` resolve
+  their string form through public PolyType marshalers because the shape is generated in the
+  consumer assembly; `Bork2d.Api` grants `Bork2d.Assets` internal access to the reference marker so
+  the builder can collect links without reflection.
+- **Consequences:** Sprite handling stops being a special runtime path. Missing or invalid links
+  become pack-build errors, not load-time `InvalidData`; a hand-built invalid pack can still
+  deserialize malformed asset fields. `AssetRef<T>` cannot verify the referenced CLR type because
+  the pack header has no type metadata. Removing `Sprite`/`LoadSprite` is a breaking change under
+  D-014; D-M3-12, D-M3-13, and D-M3-17 are superseded.
+- **Docs:** [Assets and tooling](architecture/assets-and-tooling.md#6-public-asset-api),
+  [API reference](api/reference.md#7-iassets),
+  [Refactor spec](specs/refactor-asset-references.md)
 
 ## Superseding a decision
 

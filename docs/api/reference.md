@@ -57,19 +57,20 @@ from the top-left, and an integer `ZIndex` sorts higher later. Sprite asset geom
 | Max delta | `0.25` s gameplay clamp in windowed mode, not a pacing delay. |
 | Headless / logging | `60` ticks/s stored (`0` = uncapped; one tick in M2) / ZLogger console, local time ms, no colors or file sink; minimum Debug (Debug) or Information (Release). |
 | Camera | `Size = 10` (half-height), `Viewport = (0,0,1,1)`, `CullingMask` = all declared flags, `Clear = Color`, `ClearColor = Black`, `ZIndex = 0`. |
-| Sprite renderable | `Sprite.Empty`, `Layer = 0` (**invalid**; skipped by the future renderer), `Tint = White`, `ZIndex = 0`. |
+| Sprite renderable | `Sprite = null`, `Layer = 0` (**invalid**; skipped by the future renderer), `Tint = White`, `ZIndex = 0`. |
 
 ### 1.4 Public surface and NativeAOT
 
 `Bork2d.Api` declares the interfaces in §2–§10 across the area namespaces in §1.5, plus the value
-types `Sprite`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, and `Bork2dException`,
-and the error pair `AssetException`/`AssetErrorKind`; `ILoggerFactory` is a
-Microsoft.Extensions.Logging type exposed by `IEngine` (not defined in `Bork2d.Api`). The runtime
-is NativeAOT- and trim-safe: no reflection, assembly scanning, runtime TOML, or dynamic code;
-`LoadAsset<T>` requires a [PolyType](https://github.com/AArnott/PolyType) `IShapeable<T>` shape
-(a Nerdbank.MessagePack `[GenerateShape]` type) and the game is passed as an instance. `Bork2d.Api`
-references PolyType `1.4.1` for that constraint only (D-M3-22); it does not reference
-Nerdbank.MessagePack, `System.IO.Hashing`, Zstd, or file I/O. See
+types `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, `AssetRef<TAsset>`, `DataRef`,
+`SpriteAsset`, `TextureDescriptor`, `SpriteTopology`, and `Bork2dException`, and the error pair
+`AssetException`/`AssetErrorKind`; `ILoggerFactory` is a Microsoft.Extensions.Logging type exposed
+by `IEngine` (not defined in `Bork2d.Api`). The runtime is NativeAOT- and trim-safe: no reflection,
+assembly scanning, runtime TOML, or dynamic code; `LoadAsset<T>` requires a
+[PolyType](https://github.com/AArnott/PolyType) `IShapeable<T>` shape (a Nerdbank.MessagePack
+`[GenerateShape]` type) and the game is passed as an instance. `Bork2d.Api` references PolyType
+`1.4.1` for the shape contract and the asset-reference path marshalers (D-035); it does not
+reference Nerdbank.MessagePack, `System.IO.Hashing`, Zstd, or file I/O. See
 [NativeAOT](../architecture/nativeaot.md).
 
 The only other public surface is the tooling-only pack writer in `Bork2d.Assets.Pack` (§13). Game
@@ -83,9 +84,9 @@ namespace. Add the using for each area you touch (D-034).
 | Namespace | Types |
 | --- | --- |
 | `Bork2d.Api` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
-| `Bork2d.Api.Assets` | `IAssets`, `AssetInfo`, `AssetException`, `AssetErrorKind` |
+| `Bork2d.Api.Assets` | `IAssets`, `AssetInfo`, `AssetException`, `AssetErrorKind`, `AssetRef<TAsset>`, `DataRef`, `SpriteAsset`, `TextureDescriptor`, `SpriteTopology` |
 | `Bork2d.Api.Scene` | `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
-| `Bork2d.Api.Rendering` | `Sprite`, `Color`, `ClearKind` |
+| `Bork2d.Api.Rendering` | `Color`, `ClearKind` |
 | `Bork2d.Api.Input` | `IInput`, `KeyCode`, `MouseButton` |
 | `Bork2d.Api.Platform` | `IWindow`, `ITime` |
 
@@ -250,21 +251,22 @@ the clock, dispatches text, then calls `Tick`. In headless/offscreen there is no
 
 ## 7. `IAssets`
 
-`Status: Current (M3).` The six members, XML docs, the `IShapeable<T>` constraint, and `AssetInfo`
-are implemented. `IEngine.Assets` returns the real app-scoped service in every mode: the base pack
-is opened at `Run()` before the window and `Setup`, or an empty virtual filesystem is used when the
-app was built with `Bork2dAppBuilder.WithoutAssets()`. The service owns one dedicated loader thread,
-an unbounded FIFO queue, enqueue-time pack-entry resolution, cancellation/join at shutdown,
-`LoadData`, `LoadAsset<T>`, `LoadSprite` (sprite + texture-descriptor CPU metadata), and
-`AssetException`/`AssetErrorKind` failures. The raw sprite payload is never read in M3 and there is
-no public readiness API. Pack open/parse/mount failures stay `Bork2dException` (D-M3-15).
+`Status: Current (M3; asset-reference refactor D-035).` `IEngine.Assets` returns the real
+app-scoped service in every mode: the base pack is opened at `Run()` before the window and
+`Setup`, or an empty virtual filesystem is used when the app was built with
+`Bork2dAppBuilder.WithoutAssets()`. The service owns one dedicated loader thread, an unbounded FIFO
+queue, enqueue-time pack-entry resolution, cancellation/join at shutdown, `LoadData`,
+`LoadAsset<T>`, reference-typed overloads, and `AssetException`/`AssetErrorKind` failures. There
+is no sprite handle, sprite resource, or readiness API. Pack open/parse/mount failures stay
+`Bork2dException` (D-M3-15).
 
 ```csharp
 public interface IAssets
 {
     Task<T> LoadAsset<T>(string assetPath) where T : class, IShapeable<T>;
-    Sprite LoadSprite(string assetPath);
+    Task<T> LoadAsset<T>(AssetRef<T> reference) where T : class, IShapeable<T>;
     Task<byte[]> LoadData(string assetPath);
+    Task<byte[]> LoadData(DataRef reference);
     void LoadPack(string packPath);
     IReadOnlyList<AssetInfo> Browse(string? prefix = null);
     bool Exists(string assetPath);
@@ -272,14 +274,15 @@ public interface IAssets
 ```
 
 `IShapeable<T>` is `PolyType.IShapeable<T>`; `Bork2d.Api` references PolyType `1.4.1` for this
-contract only (D-M3-22). A missing shape is a compile-time error; there is no unconstrained or
+contract (D-M3-22). A missing shape is a compile-time error; there is no unconstrained or
 reflection-shape fallback.
 
 | Member | Contract |
 | --- | --- |
-| `LoadAsset<T>(string)` | Loads a MessagePack asset using the compiled shape on `T`. A fresh instance per call. Raw entries fault with `AssetException(RawAsset)`; missing paths fault with `NotFound`; decode failures fault with `Decode`. A deserialized internal `TextureDescriptor`/`SpriteAsset` is validated against the enqueue-time snapshot and faults `InvalidData` when invalid (including a missing texture descriptor/payload for a sprite). Use `LoadData` for raw bytes. |
-| `LoadSprite(string)` | Normalizes/validates the path and returns a session-local handle immediately. A cached path returns the same handle, including while pending and after failure. A missing path logs and returns `Sprite.Empty` without caching a handle. A present path allocates a handle, enqueues a sprite + texture-descriptor CPU load on the existing loader thread, and does not read the raw payload. Failures log and leave the handle non-renderable; there is no public readiness query and no retry. |
+| `LoadAsset<T>(string)` | Loads a MessagePack asset using the compiled shape on `T`. A fresh instance per call. Raw entries fault with `AssetException(RawAsset)`; missing paths fault with `NotFound`; decode failures fault with `Decode`. The value is returned as stored: fields and `AssetRef`/`DataRef` links are not validated at load. Use `LoadData` for raw bytes. |
+| `LoadAsset<T>(AssetRef<T>)` | Equivalent to the string overload when the reference has a path. An absent reference (null `Path`) is not a load request and throws `ArgumentException`; an empty or invalid path also throws. |
 | `LoadData(string)` | Decompressed bytes for any asset kind, as a fresh `byte[]` per call. Missing → `AssetException(NotFound)`; a declared size above `Array.MaxLength` → `AssetException(InvalidData)`. |
+| `LoadData(DataRef)` | Equivalent to the string overload when the reference has a path; an absent/invalid reference throws `ArgumentException`. |
 | `LoadPack(string)` | Synchronously opens, validates, and mounts a pack above the current stack. Later mounts shadow earlier paths; no unload. A bad/missing pack throws `Bork2dException` with the resolved path and leaves the stack unchanged. Thread-safe and atomic. |
 | `Browse(string? prefix = null)` | Materialized snapshot of visible entries, one per canonical path, shadowed paths hidden. `null` means all; a non-null prefix is normalized and matched on a `/` segment boundary; results are sorted by `Path` ordinal. Empty VFS → empty list. An empty prefix is invalid. |
 | `Exists(string assetPath)` | Exact canonical lookup, never a prefix match. A valid missing path is `false`; an invalid path throws. |
@@ -297,24 +300,24 @@ reflection-shape fallback.
   paths. Relative paths resolve against the process current directory at the call; absolute paths
   are accepted. Empty or whitespace throws `ArgumentException`, null throws
   `ArgumentNullException`.
-- **Loading.** `LoadData`/`LoadAsset<T>` validate the path and the disposed state synchronously;
-  a missing path, a raw entry via `LoadAsset<T>`, or a decode failure faults the returned `Task`
-  instead of throwing. Requests resolve their winning pack entry at enqueue time, so a later
-  overlay mount never changes an in-flight request. The loader thread only reads, decompresses,
-  and deserializes; task continuations run asynchronously, never inline on the caller or loader
-  thread. No mode initializes SDL or Vulkan.
+- **Loading and trust.** `LoadData`/`LoadAsset<T>` validate the path and the disposed state
+  synchronously; a missing path, a raw entry via `LoadAsset<T>`, or a decode failure faults the
+  returned `Task` instead of throwing. Requests resolve their winning pack entry at enqueue time,
+  so a later overlay mount never changes an in-flight request. The loader thread only reads,
+  decompresses, and deserializes; task continuations run asynchronously, never inline on the caller
+  or loader thread. It does not validate asset fields or follow links. A mounted pack is trusted:
+  `PackBuilder` validates reference integrity at pack creation and the M4 baker/editor validates
+  source fields. If a linked asset is missing, loading that link faults `NotFound`.
+- **References.** `AssetRef<TAsset>` and `DataRef` hold canonical path strings; `null` means the
+  reference is absent and is valid. `SpriteAsset.Texture` is an `AssetRef<TextureDescriptor>` and
+  `TextureDescriptor.Payload` is a `DataRef`. Load them with the reference overloads; an absent
+  reference is a programming error at the call, not a missing-asset fault.
 - **Threading and lifetime.** All members are thread-safe. `LoadPack` performs synchronous file I/O
   and validation, so mount before the first tick when possible. There is no unload, replacement,
   loose-file fallback, or automatic retry in v1. At `Run()` shutdown, after `Teardown`, the service
   stops accepting requests, cancels queued and in-flight load tasks, closes the packs, and joins
   the loader. After that, every member throws `ObjectDisposedException`; the `IEngine.Assets`
   getter itself keeps returning the disposed service and never throws (D-M3-14).
-- **Internal descriptor/sprite validation.** `TextureDescriptor` and `SpriteAsset` stay internal;
-  tests exercise them through `LoadAsset<T>`. A valid descriptor/sprite returns a fresh
-  deserialized instance; invalid data faults `InvalidData` naming the path/reason; missing/raw
-  top-level entries use `NotFound`/`RawAsset`. These reads are independent of the `LoadSprite`
-  caches. `LoadSprite` publishes only internal CPU resources and never exposes a readiness or
-  descriptor API.
 
 `AssetInfo` is the value type returned by `Browse`:
 
@@ -343,8 +346,8 @@ decompresses a payload.
 
 ### 7.1 `AssetException` and `AssetErrorKind`
 
-Asset lookup, decode, read, and payload-validation failures are reported through the faulted task
-returned by `LoadData`/`LoadAsset<T>` (D-M3-15):
+Asset lookup, decode, and read failures are reported through the faulted task returned by
+`LoadData`/`LoadAsset<T>` (D-M3-15):
 
 ```csharp
 public enum AssetErrorKind
@@ -373,13 +376,12 @@ public sealed class AssetException : Bork2dException
 | `RawAsset` | `LoadAsset<T>` was asked for a raw entry. |
 | `Decode` | MessagePack/Zstd decode failure, an exact declared-size violation, or a null deserialized asset. |
 | `Io` | Reading a mounted pack failed. |
-| `InvalidData` | A valid pack/payload shape is invalid at load time (for example a `LoadData` declared size above `Array.MaxLength`, an inconsistent descriptor size, or invalid sprite metadata). |
+| `InvalidData` | A valid pack/payload shape is invalid at load time (for example a `LoadData` declared size above `Array.MaxLength`). Asset-field/reference validation is a pack-build concern. |
 
 - Pack open/parse/mount failures stay `Bork2dException`, not `AssetException`.
 - Argument/programming errors stay BCL: null/invalid path → `ArgumentNullException`/
   `ArgumentException`.
 - `AssetPath` is the canonical path for load failures, or the filesystem path for IO failures.
-- `LoadSprite` missing is not an exception; it logs and returns `Sprite.Empty`.
 - Exceptions are not serialized.
 
 ## 8. `ICamera<TLayer>`
@@ -409,17 +411,17 @@ validation or diagnostic runs yet. Target semantics (M8):
 
 | Member | Semantics |
 | --- | --- |
-| `Sprite Sprite { get; set; }` | Opaque sprite asset handle; `Empty` draws nothing; a not-ready handle is skipped. |
+| `SpriteAsset? Sprite { get; set; }` | Loaded sprite asset; `null` draws nothing. A sprite whose texture reference is absent or missing is simply non-drawable. |
 | `TLayer Layer { get; set; }` | Exactly one non-zero bit; `0` and composites are invalid and skipped with a diagnostic. |
 | `Color Tint { get; set; }` | Linear RGBA multiplied with the texture; `White` is neutral. |
 | `int ZIndex { get; set; }` | Sort within a layer; higher draws later; ties are unspecified. |
 | `FlipX`, `FlipY` | `Planned`: mirror the sprite without changing the transform. |
 
-- The sprite asset supplies UVs, pivot, topology, optional `indices`, texture path, and a
+- The sprite asset supplies UVs, pivot, topology, optional `indices`, a texture reference, and a
   **pixels-per-unit** scale; `LocalScale` multiplies it. There is no global PPU or vertices array.
 - Sorting is layer numeric value, then `ZIndex`; ties are unspecified. Hide with
-  `Sprite = Sprite.Empty` or detach with `Parent = null`. Headless produces no instance, and the
-  object is not `IDisposable` and has no `IsAlive`.
+  `Sprite = null` or detach with `Parent = null`. Headless produces no instance, and the object is
+  not `IDisposable` and has no `IsAlive`.
 
 ## 10. `ITransform`
 
@@ -463,8 +465,24 @@ public interface ITransform
 
 ## 11. Value types
 
-`Sprite` is `readonly record struct Sprite(int Id)` with `static readonly Sprite Empty = default`.
-`Id == 0` is empty; equality is by `Id`; no public `int` conversion; persist asset paths, not IDs.
+`AssetRef<TAsset>` is `readonly record struct AssetRef<TAsset>(string? Path)` with
+`static AssetRef<TAsset> None => default` and `HasValue => Path is not null`. It constrains
+`TAsset : class, IShapeable<TAsset>`. `DataRef` is the same shape without a type parameter.
+Both serialize as their path string, so a reference field is a string (nil for absent) in the pack.
+`null` means absent and is valid; empty/whitespace/non-canonical paths are rejected by
+`PackBuilder`. Load with `IAssets.LoadAsset<T>(AssetRef<T>)` / `LoadData(DataRef)`; an absent
+reference is not a load request and throws `ArgumentException`.
+
+`AssetRefMarshaler<TAsset>` and `DataRefMarshaler` are public PolyType serialization
+infrastructure: a consumer assembly needs them to generate a closed shape for a reference property.
+They are not game-facing API and have no runtime behavior to call.
+
+`SpriteAsset` is a public generated-shape asset: `AssetRef<TextureDescriptor> Texture`,
+`Vector2[]? Uvs`, `float Scale`, `Vector2 Pivot`, `SpriteTopology Topology`, `ushort[]? Indices`.
+`TextureDescriptor` is a public generated-shape asset: `DataRef Payload`, `uint Width`,
+`uint Height`, `string? Format`, `string? Filter`, `string? Wrap`. Neither type has runtime field
+validation; the M4 baker/editor owns that. `SpriteTopology` is `Quad`, `TriangleStrip`, or
+`Triangles`; v1 draws `Quad` only.
 
 `AssetInfo` is `readonly record struct AssetInfo(string Path, bool IsRaw, bool IsCompressed,
 long Length, long Size, string PackPath)` (`Current`, M3): one visible pack entry as returned by
@@ -621,23 +639,28 @@ builder.Write("assets.pck");   // overwrites; relative to the current directory
 | `PackCompressionMode.Release` | Payloads use maximum-quality Zstd only when strictly smaller than the raw bytes. |
 | `PackBuilder(PackCompressionMode)` | Selects the payload policy. The header is always maximum-quality Zstd in both modes. |
 | `AddRaw(string, ReadOnlySpan<byte>)` | Adds an opaque payload; the bytes are copied. |
-| `AddMessagePack<T>(string, T)` | Serializes `T` with Nerdbank.MessagePack generated shapes; constrained to `T : IShapeable<T>` (no reflection resolver). |
-| `Build()` | Returns the complete pack as one `byte[]`; limited by `Array.MaxLength`; does not consume the builder. |
-| `Write(string)` | Streams the pack to an overwritten file, resolving relative paths against the process current directory. |
-| `Write(Stream)` | Streams the pack and leaves the destination open. Does not require the whole pack in one array. |
+| `AddMessagePack<T>(string, T)` | Serializes `T` with Nerdbank.MessagePack generated shapes; constrained to `T : IShapeable<T>` (no reflection resolver). Also collects `AssetRef<T>`/`DataRef` values in the object graph. |
+| `Build()` | Returns the complete pack as one `byte[]`; limited by `Array.MaxLength`; does not consume the builder. Validates all non-null references first. |
+| `Write(string)` | Streams the pack to an overwritten file, resolving relative paths against the process current directory. Validates all non-null references before opening the file. |
+| `Write(Stream)` | Streams the pack and leaves the destination open. Does not require the whole pack in one array. Validates all non-null references before writing. |
 
+- `Build`/`Write` validate every non-null `AssetRef<TAsset>`/`DataRef` found in a MessagePack asset:
+  the path must be canonical and present, an `AssetRef<T>` must target a MessagePack entry, and a
+  `DataRef` must target a raw entry. A violation throws `Bork2dException` with the source asset,
+  property path, and reference path. `null` is an absent reference and is valid.
 - Paths are normalized and validated with the canonical asset-path rules: `\` becomes `/`,
   invariant lowercase, and segments contain only lowercase letters, digits, `_`, and `-`.
   Null paths throw `ArgumentNullException`; other invalid paths throw `ArgumentException`.
-- Duplicate canonical paths, serialization failures, size overflow, and write failures throw
-  `Bork2dException`.
+- Duplicate canonical paths, invalid references, serialization failures, size overflow, and write
+  failures throw `Bork2dException`.
 - Entries are sorted by canonical path and use absolute offsets. There is **no byte-determinism
   guarantee**: the structure and round-trip are stable, but compressed bytes may vary across runs
   and runtime versions.
 - The builder is not thread-safe. `Build()`/`Write()` may be repeated, and entries may be added
-  after a build.
-- This section documents the writer only; no descriptor/sprite type is public, and game code
-  consumes packs through `IEngine.Assets` without referencing `Bork2d.Assets`.
+  after a build. Adding the missing target after a failed build makes the next build valid.
+- This section documents the writer only; game code consumes packs through `IEngine.Assets`
+  without referencing `Bork2d.Assets`. The public `SpriteAsset`/`TextureDescriptor` types live in
+  `Bork2d.Api.Assets`.
 
 ## 14. Errors and exceptions
 
@@ -662,7 +685,9 @@ builder.Write("assets.pck");   // overwrites; relative to the current directory
 | Missing/malformed base pack | `Run()` throws `Bork2dException` with the resolved path and reason before the window, platform, `Setup`, and `Teardown`; the partially started asset service is cleaned up. |
 | Bad or missing pack in `LoadPack` | `Bork2dException` naming the resolved filesystem path and reason; the mounted stack is unchanged. |
 | Asset lookup/decode/IO failure | The `LoadData`/`LoadAsset<T>` task faults with `AssetException` carrying `AssetErrorKind` (`NotFound`, `RawAsset`, `Decode`, `Io`, `InvalidData`) and `AssetPath` (§7.1). Pack failures stay `Bork2dException`. |
-| Missing asset | `LoadData`/`LoadAsset<T>` fault with `AssetException(NotFound)`; `LoadSprite` logs and returns `Sprite.Empty`; `Exists` is `false`. |
+| Missing asset | `LoadData`/`LoadAsset<T>` fault with `AssetException(NotFound)`; `Exists` is `false`. |
+| Missing/invalid asset reference at pack creation | `PackBuilder.Build`/`Write` throws `Bork2dException` with the source asset and reference path; the runtime does not re-validate. |
+| Empty `AssetRef<T>`/`DataRef` passed to a load overload | `ArgumentException`; an absent (`null`) reference is not a load request. |
 | After the asset service stops | Every `IAssets` member throws `ObjectDisposedException`; pending load tasks complete as canceled. The `IEngine.Assets` getter never throws and keeps returning the disposed service. |
 
 `Bork2dException` lives in `Bork2d.Api` with the standard constructors; BCL exceptions remain for
