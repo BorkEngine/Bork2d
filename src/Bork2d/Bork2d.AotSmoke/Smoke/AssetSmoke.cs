@@ -54,6 +54,17 @@ internal static class AssetSmoke
     /// <summary>The known RGBA8 texture payload stored in the pack.</summary>
     internal static ReadOnlySpan<byte> TexturePayload => [0x11, 0x22, 0x33, 0xFF];
 
+    /// <summary>
+    /// The fixture's class root that the WP6 baked-pack smoke loads from the baked fixture pack.
+    /// </summary>
+    /// <remarks>
+    /// Referencing the type at compile time keeps the <c>Bork2d.BakeFixture</c> assembly in the AOT
+    /// app's reference graph (Q-16) and proves the boundary in the dependency test. WP5 does not read
+    /// this property, so the default smoke behavior is unchanged; WP6 replaces the temporary pack with
+    /// the baked fixture pack and executes <c>LoadAsset&lt;GameConfig&gt;</c>.
+    /// </remarks>
+    internal static Type BakedGameConfigType => typeof(Bork2d.BakeFixture.GameConfig);
+
     /// <summary>Builds the smoke pack at a new absolute temporary path.</summary>
     /// <returns>The absolute pack path; the caller deletes it.</returns>
     internal static string CreatePack()

@@ -30,16 +30,32 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **528 tests**: 519 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
-are skipped unless the environment variable is set. The deterministic set includes the M3
-pack-format/writer tests, the path/VFS/browse/contract tests, the loader/threading and
-error-contract tests, generic pack-time reference validation, the public asset-reference/pack-build
-contracts, and the runtime asset lifecycle/error-matrix tests. They build packs in memory or in temp
-files and use **no committed binary fixtures**. Run only the asset/pack tests with:
+The suite is **871 tests**: 859 deterministic tests run in CI; 12 opt-in/conditional tests are
+skipped unless the environment variable or capability is present (9 `[WindowFact]` real-window tests
+and 3 reparse-point capability tests). The deterministic set includes the M3 pack-format/writer
+tests, the path/VFS/browse/contract tests, the loader/threading and error-contract tests, generic
+pack-time reference validation, the public asset-reference/pack-build contracts, the runtime asset
+lifecycle/error-matrix tests, the M4 bake pipeline (descriptor, host generation/load, TOML binder,
+textures, references, pack composition, determinism), and the M4 incremental/MSBuild tests. They
+build packs in memory or in temp files and use **no committed binary fixtures**. Run only the
+asset/pack tests with:
 
 ```powershell
 dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "FullyQualifiedName~Pack|FullyQualifiedName~Asset"
 ```
+
+Run the bake tests (bake pipeline, incremental, host, CLI, and the `dotnet build`/publish/clean
+MSBuild integration) with:
+
+```powershell
+dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "FullyQualifiedName~Bake"
+```
+
+The MSBuild integration test writes a temporary app project (sources and a generated PNG in test
+code), references `Bork2d.BakeFixture`, imports [`build/Bork2d.Bake.targets`](../build/Bork2d.Bake.targets),
+and runs `dotnet build`, `dotnet publish`, and `dotnet clean` as child processes. It therefore needs
+a warmed repository build (the targets build the CLI project in the current configuration) and adds
+a few seconds to the Debug pass; it is not marked slower and runs in the normal suite.
 
 On a desktop session run the whole suite (including the opt-in window tests) with:
 
@@ -58,12 +74,18 @@ $smoke = 'src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.
 & $smoke --windowed --ticks 120           # windowed gate: exit 0 after exactly 120 ticks
 ```
 
-The publish must report zero AOT/trim warnings and contain `SDL2.dll`. The default run builds and
-deletes its own temporary pack (no fixtures), then exits `0` only when the scene, raw-asset,
+The publish must report zero AOT/trim warnings and contain `SDL2.dll`. The AOT smoke imports
+[`build/Bork2d.Bake.targets`](../build/Bork2d.Bake.targets), so its build generates the bake host and
+bakes the prepared `Bork2d.BakeFixture` pack to `$(TargetDir)assets.pck` and copies it next to the
+published executable. WP6 makes the default run load that pack; in WP5 the default run still builds
+and deletes its own temporary pack (no fixtures), then exits `0` only when the scene, raw-asset,
 MessagePack-shape, public sprite/descriptor, browse/exists, and one-tick assertions pass. The
 windowed run uses `WithoutAssets()`, so it needs a desktop session but no pack; it asserts one
 `Setup`, exactly `N` ticks, and one `Teardown`. The interactive `--windowed` run is the manual
-visibility/input check.
+visibility/input check. The publish output must not contain `Bork2d.Bake`, `Bork2d.Bake.Cli`,
+`Bork2d.BakeHost`, Tomlyn, or StbImageSharp assemblies (`Bork2d.BakeFixture` is the expected
+game-side common assembly). `dotnet clean src/Bork2d/Bork2d.slnx` removes the generated host, the
+incremental state under `<descriptor>/obj/bork2d/bake`, and the pack.
 
 ## 3. Build, style, and warnings
 

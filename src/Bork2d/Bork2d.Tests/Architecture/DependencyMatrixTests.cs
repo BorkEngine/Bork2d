@@ -201,12 +201,27 @@ public sealed class DependencyMatrixTests
 
         foreach (Assembly assembly in runtimeAssemblies)
         {
+            // Bork2d.BakeFixture is the game-side Project.Common-like fixture (Q-16), not tooling; the
+            // AOT smoke references it deliberately. Everything else must not reference any Bake*
+            // assembly, the fixture included.
+            bool isAotSmoke = string.Equals(
+                assembly.GetName().Name,
+                "Bork2d.AotSmoke",
+                StringComparison.Ordinal);
+
             foreach (AssemblyName reference in assembly.GetReferencedAssemblies())
             {
                 string name = reference.Name ?? string.Empty;
                 Assert.False(
-                    name.StartsWith("Bork2d.Bake", StringComparison.Ordinal),
+                    name is "Bork2d.Bake" or "Bork2d.Bake.Cli" or "Bork2d.BakeHost",
                     $"{assembly.GetName().Name} must not reference '{name}'.");
+                if (!isAotSmoke)
+                {
+                    Assert.False(
+                        name.StartsWith("Bork2d.Bake", StringComparison.Ordinal),
+                        $"{assembly.GetName().Name} must not reference '{name}'.");
+                }
+
                 Assert.NotEqual(Tomlyn, name);
                 Assert.NotEqual(StbImageSharp, name);
             }
@@ -311,13 +326,16 @@ public sealed class DependencyMatrixTests
     {
         // Tests references Bork2d.AotSmoke as a project so its assembly is copied next to the
         // test assembly. No test type uses it, so it is loaded by name here. Assets is referenced
-        // for the public pack-tooling surface used by the default AOT pack proof (D-M3-04/D-M3-19).
+        // for the public pack-tooling surface used by the default AOT pack proof (D-M3-04/D-M3-19),
+        // and BakeFixture is the Project.Common-like fixture the M4 targets bake and the WP6 smoke
+        // loads (Q-16); it is never the bake tooling itself.
         var assembly = Assembly.Load("Bork2d.AotSmoke");
 
         AssertReferenceMatrix(
             assembly,
             "Bork2d.Api",
             "Bork2d.Assets",
+            "Bork2d.BakeFixture",
             "Bork2d.Common",
             "Bork2d.Runtime");
     }

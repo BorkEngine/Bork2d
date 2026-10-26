@@ -7,10 +7,15 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- A minimal Project.Common-like fixture: registered game data types only. It references
-             Bork2d.Api (the game contract) and nothing from the bake tooling, so the bake and AOT
-             proofs exercise the same boundary a real game has (Q-16). WP5 adds the fixture's
-             Assets/ tree and targets; WP6 adds the AOT baked-pack proof. -->
+        <!-- A minimal Project.Common-like fixture: registered game data types and a committed Assets/
+             tree. It references Bork2d.Api (the game contract) and nothing from the bake tooling, so
+             the bake and AOT proofs exercise the same boundary a real game has (Q-16).
+
+             Assets/ and bork2d.project.toml are build-time inputs for the MSBuild bake: the targets
+             copy them into the consuming app's obj/bork2d/fixture directory and generate the texture
+             there (no binary PNG is committed). They are deliberately not Content/CopyToOutputDirectory
+             items, so the fixture never pushes source data into a consuming app's output or the AOT
+             publish. The fixture library itself stays AOT-compatible and tooling-free. -->
         <ProjectReference Include="..\Bork2d.Api\Bork2d.Api.csproj" />
     </ItemGroup>
 

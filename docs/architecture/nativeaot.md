@@ -168,19 +168,26 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
 1. `dotnet build` with AOT/trim analyzers and warnings-as-errors, Debug and Release.
 2. `dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64`
    with zero AOT/trim warnings; `SDL2.dll` is copied next to the executable.
-3. Run the AOT-published headless smoke locally (no GPU): default logging, one
+3. The AOT smoke's build runs the M4 bake targets
+   ([`build/Bork2d.Bake.targets`](../../build/Bork2d.Bake.targets)): it builds the CLI out of process,
+   generates and builds the `Bork2d.BakeFixture` host, and bakes the prepared fixture pack to
+   `$(TargetDir)assets.pck`; `Publish` copies it next to the published executable. The publish output
+   must contain no `Bork2d.Bake`, `Bork2d.Bake.Cli`, `Bork2d.BakeHost`, Tomlyn, or StbImageSharp
+   assembly (`Bork2d.BakeFixture` is the expected game-side common assembly). WP6 makes the default
+   smoke load this pack and assert the baked custom data, sprite, descriptor, and raw payload.
+4. Run the AOT-published headless smoke locally (no GPU): default logging, one
    `Setup`/`Tick`/`Teardown`, root cleared, generated-shape round trip, a temporary pack with a raw
    asset, a data asset, and a public sprite asset/descriptor/payload loaded, browse/exists, exit
    `0`.
-4. Run the AOT-published windowed demo locally on a desktop session:
+5. Run the AOT-published windowed demo locally on a desktop session:
    `Bork2d.AotSmoke.exe --windowed --ticks 120` must exit `0` after exactly 120 ticks with one
    `Setup` and one `Teardown`; the demo uses `WithoutAssets()`. The interactive `--windowed` run
    observes the visible window and exits on Escape/close.
-5. Run a windowed/offscreen AOT-published app on a GPU machine before release (M8+).
-6. The AOT smoke loads a generated-shape data asset, the public `SpriteAsset` shape, and a raw
+6. Run a windowed/offscreen AOT-published app on a GPU machine before release (M8+).
+7. The AOT smoke loads a generated-shape data asset, the public `SpriteAsset` shape, and a raw
    asset from a real pack; the constrained `IShapeable<T>` contract makes a missing shape a
    compile-time error.
-7. The AOT app logs through the default ZLogger/Microsoft.Extensions.Logging path without trim
+8. The AOT app logs through the default ZLogger/Microsoft.Extensions.Logging path without trim
    warnings; `IEngine.LoggerFactory` is usable.
 
 CI scope is exactly: pull requests targeting `develop` and pushes to `develop`; it restores,

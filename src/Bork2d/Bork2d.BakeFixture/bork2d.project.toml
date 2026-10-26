@@ -1,0 +1,25 @@
+schema = 1
+name = "BakeFixture"
+
+[assets]
+root = "Assets"
+
+[bake]
+host = "obj/bork2d/bakehost"
+pack = "assets.pck"
+
+[textures]
+filter = "linear"
+wrap = "clamp"
+
+[[types]]
+prefix = "data"
+type = "Bork2d.BakeFixture.GameConfig"
+
+[[types]]
+prefix = "roots"
+type = "Bork2d.BakeFixture.StatsRoot"
+
+[[types]]
+prefix = "sprites"
+type = "Bork2d.Api.Assets.SpriteAsset"

@@ -1,0 +1,10 @@
+name = "campaign"
+health = 120
+max_players = 4
+must = "present"
+tint = [1.0, 0.5, 0.25, 1.0]
+texture = "textures/player"
+
+[stats]
+attack = 3
+defense = 7
