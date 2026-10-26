@@ -9,9 +9,9 @@ namespace Bork2d.Runtime;
 /// by <see cref="Bork2dAppBuilder{TLayer}.Build"/>.
 /// </summary>
 /// <remarks>
-/// The M2 windowed host consumes the game, the mode, the window options, the maximum delta time,
-/// and the internal SDL factory seam. The remaining options are stored and validated now so the
-/// M3/M6 composition can consume them without changing the public builder surface.
+/// The host consumes the game, the mode, the window options, the maximum delta time, the asset
+/// selection, and the internal SDL factory seam. The remaining options are stored and validated now
+/// so the M6 composition can consume them without changing the public builder surface.
 /// </remarks>
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
 internal sealed class Bork2dAppOptions<TLayer> where TLayer : struct, Enum
@@ -39,6 +39,16 @@ internal sealed class Bork2dAppOptions<TLayer> where TLayer : struct, Enum
 
     /// <summary>Gets or sets the base assets pack path.</summary>
     internal string AssetsPackPath { get; set; } = "assets.pck";
+
+    /// <summary>Gets or sets a value indicating whether <c>WithAssetsPack</c> was called.</summary>
+    /// <remarks>
+    /// The default pack path is always present, so this flag distinguishes an explicit pack choice
+    /// from the default when validating the <c>WithoutAssets</c> conflict.
+    /// </remarks>
+    internal bool AssetsPackSelected { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether <c>WithoutAssets</c> was called.</summary>
+    internal bool WithoutAssetsSelected { get; set; }
 
     /// <summary>
     /// Gets or sets the logging configuration accepted by <c>WithLogging</c>.

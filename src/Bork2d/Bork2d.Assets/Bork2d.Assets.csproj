@@ -12,6 +12,12 @@
     </ItemGroup>
 
     <ItemGroup>
+        <PackageReference Include="Nerdbank.MessagePack" Version="1.4.95" />
+        <PackageReference Include="PolyType" Version="1.4.1" />
+        <PackageReference Include="System.IO.Hashing" Version="11.0.0-rc.1.26425.128" />
+    </ItemGroup>
+
+    <ItemGroup>
         <InternalsVisibleTo Include="Bork2d.Runtime" />
         <InternalsVisibleTo Include="Bork2d.Render" />
         <InternalsVisibleTo Include="Bork2d.Editor" />

@@ -1,9 +1,9 @@
 # Contributing
 
-> **Status:** current through M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2). The warning/style/format/AOT gates
-> and the docs link check are active. CI runs docs link check, build, tests, and format
+> **Status:** current through M3 (the M3 PR is pending human review). The warning/style/format/AOT
+> gates and the docs link check are active. CI runs docs link check, build, tests, and format
 > verification on PRs to `develop` and pushes to `develop`; the NativeAOT publish/run smoke
-> (headless and windowed) is a required local gate.
+> (headless with a temporary pack, and windowed) is a required local gate.
 
 ## 1. Prerequisites
 
@@ -30,8 +30,19 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **292 tests**: 283 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
-are skipped unless the environment variable is set. On a desktop session run them with:
+The suite is **587 tests**: 578 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
+are skipped unless the environment variable is set. The deterministic set includes the M3
+pack-format/writer tests, the path/VFS/browse/contract tests, the loader/threading and
+error-contract tests, the descriptor/sprite validation, `LoadSprite`, resource-cache, and
+enqueue-snapshot tests, and the runtime asset lifecycle/error-matrix tests. They build packs in
+memory or in temp files and use **no committed binary fixtures**. Run only the asset/pack tests
+with:
+
+```powershell
+dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "FullyQualifiedName~Pack|FullyQualifiedName~Asset"
+```
+
+On a desktop session run the whole suite (including the opt-in window tests) with:
 
 ```powershell
 $env:BORK2D_RUN_WINDOW_TESTS = '1'
@@ -44,13 +55,15 @@ NativeAOT publish/run is required for runtime-affecting changes (both runs are l
 ```powershell
 dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
 $smoke = 'src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe'
-& $smoke                                  # headless one-tick M1 smoke
-& $smoke --windowed --ticks 120           # windowed M2 gate: exit 0 after exactly 120 ticks
+& $smoke                                  # headless smoke: scene + temporary pack load/browse
+& $smoke --windowed --ticks 120           # windowed gate: exit 0 after exactly 120 ticks
 ```
 
-The publish must report zero AOT/trim warnings and contain `SDL2.dll`; `--windowed` needs a desktop
-session. The windowed automated run asserts one `Setup`, exactly `N` ticks, and one `Teardown`; the
-interactive `--windowed` run is the manual visibility/input check.
+The publish must report zero AOT/trim warnings and contain `SDL2.dll`. The default run builds and
+deletes its own temporary pack (no fixtures), then exits `0` only when the scene, raw-asset,
+MessagePack-shape, browse/exists, and one-tick assertions pass. The windowed run uses
+`WithoutAssets()`, so it needs a desktop session but no pack; it asserts one `Setup`, exactly `N`
+ticks, and one `Teardown`. The interactive `--windowed` run is the manual visibility/input check.
 
 ## 3. Build, style, and warnings
 
@@ -71,25 +84,34 @@ obvious; braces for control flow; one type per file; `_camelCase` private fields
 constants; `I`-prefixed interfaces; `Async` suffix and no `async void` outside handlers; guard
 clauses; no regions except generated code; no commented-out code; XML docs on public API.
 
-Known gap: `IAssets` and the `Data.cs` types still predate the XML-doc rule. M2 documented
-`IWindow`, `IInput`, `ITime`, `KeyCode`, and `MouseButton`; add the remaining docs when the asset
-contracts are implemented (M3). Do not remove the rule.
+M3 closed the former XML-doc gap: `IAssets`, `AssetInfo`, `AssetException`, `AssetErrorKind`,
+`Sprite`, `Color`, `ClearKind`, and `Bork2dAppBuilder.WithoutAssets()` are documented. The rule
+applies to every new public API; do not remove it.
 
 ## 5. Architecture boundaries
 
 - Game code references `Bork2d.Api`/`Bork2d.Runtime` only; implementation projects are internal.
+  The one public exception is the tooling-only pack writer in `Bork2d.Assets`.
+- `Bork2d.AotSmoke` may reference `Bork2d.Assets` for the public pack-tooling surface used by the
+  AOT pack proof; it uses the same project-reference rules as any other project and updates the
+  dependency test/docs when the graph changes.
 - Editor/tooling stays JIT; no Avalonia, TOML, or reflection in runtime projects.
 - Runtime stays NativeAOT/trim-safe: no runtime reflection, assembly scanning, runtime TOML,
   dynamic code, or unregistered Nerdbank shapes.
-- No Vulkan/SDL types in `Bork2d.Api`; logging abstractions are the only external contract
-  dependency.
+- `Bork2d.Api` references the BCL plus `Microsoft.Extensions.Logging.Abstractions` and PolyType
+  `1.4.1` for the `IShapeable<T>` constraint only. It must not reference Nerdbank.MessagePack,
+  Zstd/`System.IO.Compression`, `System.IO.Hashing`, or file I/O; no Vulkan/SDL types either.
 - Pack format changes are versioned and documented in
   [Assets and tooling](architecture/assets-and-tooling.md).
 
 ## 6. Tests and CI
 
 - Add unit tests with behavior changes; pack/format tests for asset changes; threading tests for
-  handoff changes; GPU/visual tests for renderer changes.
+  handoff changes; GPU/visual tests for renderer changes. Asset/pack tests build packs in memory or
+  in temp files (`PackBuilder`/`TempPackDirectory`) and never commit binary fixtures; the default
+  AOT smoke builds and deletes its own pack. Asset-loader tests are deterministic: they use a narrow
+  internal hook plus bounded signals/joins (no sleeps, retries, or timing assertions) to prove FIFO
+  order, asynchronous completion, and shutdown cancellation.
 - Real-window tests use `[WindowFact]`, are skipped without `BORK2D_RUN_WINDOW_TESTS=1`, share the
   serialized `RealSdlWindow` collection, and may use only signals/bounded waits (no sleeps). Run
   them locally before a window/runtime PR.

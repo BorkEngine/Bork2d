@@ -60,6 +60,7 @@ public sealed class SdlWindowRunTests
             .WithSize(640, 360)
             .WithResizable(false)
             .WithLogging(logging => logging.AddProvider(provider))
+            .WithoutAssets()
             .Build();
 
         AppTestSupport.RunToCompletion(app);
@@ -98,6 +99,7 @@ public sealed class SdlWindowRunTests
             .WithSize(640, 360)
             .WithResizable(false)
             .WithLogging(logging => logging.AddProvider(provider))
+            .WithoutAssets()
             .Build();
 
         Exception? failure = null;

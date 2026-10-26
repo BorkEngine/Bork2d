@@ -1,13 +1,15 @@
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using Bork2d.Api;
+using Bork2d.Assets;
 using Bork2d.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Bork2d.Runtime;
 
 /// <summary>
-/// Owns the generic engine and game for one built app and runs the configured host loop.
+/// Owns the generic engine, game, and asset service for one built app and runs the configured host
+/// loop.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,9 +25,15 @@ namespace Bork2d.Runtime;
 /// aggregated; a window start failure happens before <c>Setup</c> and tears nothing down.
 /// </para>
 /// <para>
-/// The runtime detaches the window/input proxies only after the platform has shut down, so retained
-/// references throw <see cref="ObjectDisposedException"/> per D-M2-17 while <c>Teardown</c> can still
-/// use the live window and input.
+/// The asset service is app-owned: the constructed service is unstarted until <c>Run</c>, which
+/// starts it before the platform/`Setup` and stops it after <c>Teardown</c> on every path.
+/// <c>Dispose</c> disposes an unstarted or stopped service and then the logger factory, so the
+/// service can still log its own shutdown.
+/// </para>
+/// <para>
+/// The runtime detaches the window/input proxies only after the platform has shut down and the
+/// asset service has stopped, so retained references throw <see cref="ObjectDisposedException"/> per
+/// D-M2-17 while <c>Teardown</c> can still use the live window, input, and assets.
 /// </para>
 /// </remarks>
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
@@ -36,6 +44,7 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
     private readonly IFrameTime _time;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger _logger;
+    private readonly AssetService _assetService;
     private readonly Bork2dAppOptions<TLayer> _options;
     private readonly WindowProxy? _windowProxy;
     private readonly InputProxy? _inputProxy;
@@ -47,6 +56,7 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         IGame<TLayer> game,
         IFrameTime time,
         ILoggerFactory loggerFactory,
+        AssetService assetService,
         Bork2dAppOptions<TLayer> options,
         WindowProxy? windowProxy = null,
         InputProxy? inputProxy = null)
@@ -55,6 +65,7 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         ArgumentNullException.ThrowIfNull(game);
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(loggerFactory);
+        ArgumentNullException.ThrowIfNull(assetService);
         ArgumentNullException.ThrowIfNull(options);
 
         _engine = engine;
@@ -62,6 +73,7 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         _time = time;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger(Bork2dLogging.RuntimeCategory);
+        _assetService = assetService;
         _options = options;
         _windowProxy = windowProxy;
         _inputProxy = inputProxy;
@@ -112,9 +124,17 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         }
         finally
         {
-            if (_loggerFactory is IDisposable disposable)
+            try
             {
-                disposable.Dispose();
+                // Disposes an unstarted service or stops a started one (D-M3-14); idempotent.
+                _assetService.Dispose();
+            }
+            finally
+            {
+                if (_loggerFactory is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
             }
         }
     }
@@ -122,59 +142,70 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
     private static ISdlApi CreateDefaultSdlApi() => new SilkSdlApi();
 
     /// <summary>
-    /// The M1 one-tick sequence: <c>Setup</c>, exactly one <c>Tick</c>, <c>Teardown</c>.
+    /// The M1 one-tick sequence: start assets, <c>Setup</c>, exactly one <c>Tick</c>,
+    /// <c>Teardown</c>, stop assets.
     /// </summary>
     /// <remarks>
     /// The clock is not advanced and no platform exists. <c>Setup</c> is intentionally outside the
     /// tick/teardown pair: if it throws there is nothing to tear down and the original exception must
-    /// reach the caller.
+    /// reach the caller. The asset service is stopped on every path after a successful start,
+    /// including a <c>Setup</c> failure; a failed start has already cleaned its own partial state up.
     /// </remarks>
     private void RunOneTick()
     {
-        _game.Setup(_engine);
-
-        Exception? tickException = null;
+        _assetService.Start();
         try
         {
-            _game.Tick();
-        }
-        catch (Exception exception)
-        {
-            tickException = exception;
-        }
+            _game.Setup(_engine);
 
-        Exception? teardownException = null;
-        try
-        {
-            _game.Teardown();
-        }
-        catch (Exception exception)
-        {
-            teardownException = exception;
-        }
+            Exception? tickException = null;
+            try
+            {
+                _game.Tick();
+            }
+            catch (Exception exception)
+            {
+                tickException = exception;
+            }
 
-        if (tickException is not null && teardownException is not null)
-        {
-            throw new AggregateException(
-                "IGame.Tick and IGame.Teardown both threw; the original exceptions are inner.",
-                tickException,
-                teardownException);
-        }
+            Exception? teardownException = null;
+            try
+            {
+                _game.Teardown();
+            }
+            catch (Exception exception)
+            {
+                teardownException = exception;
+            }
 
-        if (tickException is not null)
-        {
-            ExceptionDispatchInfo.Capture(tickException).Throw();
-        }
+            if (tickException is not null && teardownException is not null)
+            {
+                throw new AggregateException(
+                    "IGame.Tick and IGame.Teardown both threw; the original exceptions are inner.",
+                    tickException,
+                    teardownException);
+            }
 
-        if (teardownException is not null)
+            if (tickException is not null)
+            {
+                ExceptionDispatchInfo.Capture(tickException).Throw();
+            }
+
+            if (teardownException is not null)
+            {
+                ExceptionDispatchInfo.Capture(teardownException).Throw();
+            }
+        }
+        finally
         {
-            ExceptionDispatchInfo.Capture(teardownException).Throw();
+            _assetService.Stop();
         }
     }
 
     /// <summary>
-    /// The windowed driver: start the platform, attach the proxies, run the uncapped loop, tear
-    /// down the game while the window is still alive, then shut the platform down.
+    /// The windowed driver: start assets, start the platform, attach the proxies, run the uncapped
+    /// loop, tear down the game while the window and assets are still alive, then shut the platform
+    /// and the asset service down.
     /// </summary>
     private void RunWindowed()
     {
@@ -182,6 +213,20 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
             ?? throw new InvalidOperationException("A windowed runtime requires a window proxy.");
         var inputProxy = _inputProxy
             ?? throw new InvalidOperationException("A windowed runtime requires an input proxy.");
+
+        // The base pack is validated before the window exists, so a missing/malformed pack produces
+        // no visible window and no Setup/Teardown (D-M3-01). The service cleans up its own partial
+        // state, and the proxies still become disposed objects for retained references (D-M2-17).
+        try
+        {
+            _assetService.Start();
+        }
+        catch
+        {
+            windowProxy.Detach();
+            inputProxy.Detach();
+            throw;
+        }
 
         // Disposed on every path, including a startup failure: Start already joins the OS thread
         // and releases SDL there, and Dispose releases the platform's wait signals (its Shutdown is
@@ -199,7 +244,9 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         }
         catch
         {
-            // No platform ran, but the proxies must still be disposed for D-M2-17.
+            // The platform never ran, but the assets did: stop them before Setup would have run.
+            // The proxies must still be disposed for D-M2-17.
+            _assetService.Stop();
             windowProxy.Detach();
             inputProxy.Detach();
             throw;
@@ -243,8 +290,8 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
             {
                 if (setupSucceeded)
                 {
-                    // The window and input are still alive here, so the game may issue best-effort
-                    // window commands; the platform is shut down immediately afterwards.
+                    // The window, input, and assets are still alive here, so the game may use them
+                    // for best-effort cleanup; shutdown follows immediately afterwards.
                     try
                     {
                         _game.Teardown();
@@ -260,6 +307,7 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         {
             stopwatch.Stop();
             platform.Shutdown();
+            _assetService.Stop();
             windowProxy.Detach();
             inputProxy.Detach();
         }

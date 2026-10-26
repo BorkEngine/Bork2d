@@ -8,16 +8,18 @@ namespace Bork2d.AotSmoke;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The default (no arguments) run keeps the M1 evidence: default logging, a one-tick headless app
-/// with a parented transform/camera/sprite, root cleanup, and a generated-shape MessagePack round
-/// trip. It never loads SDL.
+/// The default (no arguments) run proves the M1 scene path and the M3 asset path: it builds a small
+/// temporary pack with the public <see cref="Bork2d.Assets.PackBuilder"/>, runs a one-tick headless
+/// app against it with default logging, creates a parented transform/camera/sprite, loads a raw and
+/// a generated-shape MessagePack asset, browses/exists, checks root cleanup, and deletes the pack
+/// after the app has disposed. It never loads SDL.
 /// </para>
 /// <para>
-/// <c>--windowed</c> runs the M2 SDL demo on the real windowed host; <c>--ticks N</c> additionally
-/// turns it into the automated acceptance run that exits with code 0 after exactly <c>N</c> ticks.
-/// Invalid or unknown arguments print the usage and return 2. The app uses only the public
-/// <c>Bork2d.Api</c>/<c>Bork2d.Runtime</c> surface and the default logging path, so it stays
-/// NativeAOT-clean.
+/// <c>--windowed</c> runs the M2 SDL demo on the real windowed host with
+/// <c>WithoutAssets()</c>; <c>--ticks N</c> additionally turns it into the automated acceptance run
+/// that exits with code 0 after exactly <c>N</c> ticks. Invalid or unknown arguments print the usage
+/// and return 2. The app uses only the public <c>Bork2d.Api</c>/<c>Bork2d.Runtime</c> surface plus
+/// the tooling-only <c>PackBuilder</c>, so it stays NativeAOT-clean.
 /// </para>
 /// </remarks>
 internal static class Program
@@ -43,42 +45,67 @@ internal static class Program
     private static void WriteUsage(TextWriter writer)
     {
         writer.WriteLine("usage: Bork2d.AotSmoke [--windowed [--ticks N]]");
-        writer.WriteLine("  (no arguments)  run the headless one-tick NativeAOT smoke");
+        writer.WriteLine("  (no arguments)  run the headless one-tick NativeAOT smoke with a temporary pack");
         writer.WriteLine("  --windowed      run the interactive SDL windowed demo (Escape or close exits)");
         writer.WriteLine("  --ticks N       with --windowed: exit after exactly N completed ticks (N >= 1)");
     }
 
     /// <summary>
-    /// Runs the unchanged M1 headless one-tick smoke and verifies its assertions.
+    /// Runs the M1 scene checks and the M3 pack/load/browse proof against a temporary pack.
     /// </summary>
     /// <returns>0 when every assertion passes.</returns>
     private static int RunHeadless()
     {
-        var game = new SmokeGame();
-
-        using (var app = new Bork2dAppBuilder<SmokeLayer>()
-            .WithGame(game)
-            .WithHeadless()
-            .Build())
+        string packPath = AssetSmoke.CreatePack();
+        try
         {
-            app.Run();
+            var game = new SmokeGame(loadAssets: true);
 
-            SmokeChecks.Require(game.SetupCount == 1, "Setup must run exactly once.");
-            SmokeChecks.Require(game.TickCount == 1, "Tick must run exactly once.");
-            SmokeChecks.Require(game.TeardownCount == 1, "Teardown must run exactly once.");
-            var transform = game.ParentTransform;
+            using (var app = new Bork2dAppBuilder<SmokeLayer>()
+                .WithGame(game)
+                .WithHeadless()
+                .WithAssetsPack(packPath)
+                .Build())
+            {
+                app.Run();
+
+                SmokeChecks.Require(game.SetupCount == 1, "Setup must run exactly once.");
+                SmokeChecks.Require(game.TickCount == 1, "Tick must run exactly once.");
+                SmokeChecks.Require(game.TeardownCount == 1, "Teardown must run exactly once.");
+                var transform = game.ParentTransform;
+                SmokeChecks.Require(
+                    transform is not null && transform.Parent is null,
+                    "the game must detach the root's children during Teardown.");
+            }
+
             SmokeChecks.Require(
-                transform is not null && transform.Parent is null,
-                "the game must detach the root's children during Teardown.");
+                game.BrowsedEntryCount == AssetSmoke.EntryCount,
+                $"Browse must report {AssetSmoke.EntryCount} pack entries; got "
+                    + $"{game.BrowsedEntryCount}.");
+            SmokeChecks.Require(
+                game.RawByteCount == AssetSmoke.RawPayload.Length,
+                "LoadData must return the raw asset payload.");
+            SmokeChecks.Require(
+                game.LoadedName == AssetSmoke.Name,
+                "LoadAsset<MessagePackSmokeData> must return the generated-shape asset.");
+
+            VerifyMessagePackRoundTrip();
+            VerifyRootIsCleared(game);
+
+            Console.WriteLine(
+                $"Bork2d NativeAOT smoke passed: Setup/Tick/Teardown = 1/1/1, root cleared, "
+                + $"default logging, Nerdbank.MessagePack generated shape, pack entries="
+                + $"{game.BrowsedEntryCount} ({AssetSmoke.RawPath}, {AssetSmoke.MessagePackPath}), "
+                + $"rawBytes={game.RawByteCount}, messagePackName={game.LoadedName}.");
+            return 0;
         }
-
-        VerifyMessagePackRoundTrip();
-        VerifyRootIsCleared(game);
-
-        Console.WriteLine(
-            "Bork2d NativeAOT smoke passed: Setup/Tick/Teardown = 1/1/1, root cleared, "
-            + "default logging, Nerdbank.MessagePack generated shape.");
-        return 0;
+        finally
+        {
+            if (File.Exists(packPath))
+            {
+                File.Delete(packPath);
+            }
+        }
     }
 
     /// <summary>
@@ -96,6 +123,7 @@ internal static class Program
             .WithSize(WindowWidth, WindowHeight)
             .WithResizable(true)
             .WithMaxDeltaTime(0.25)
+            .WithoutAssets()
             .Build())
         {
             app.Run();

@@ -8,16 +8,17 @@ namespace Bork2d.Runtime;
 /// <para>
 /// A windowed app runs <c>IGame.Setup</c>, an uncapped sequence of <c>IGame.Tick</c> calls, and one
 /// <c>IGame.Teardown</c> until <c>IEngine.Exit()</c>, the window close button, or a fatal platform
-/// error. Headless and offscreen apps keep the one-tick M1 sequence. There is no GPU work, render
-/// thread, or pack loading yet; those arrive in later milestones.
+/// error. Headless and offscreen apps keep the one-tick M1 sequence. The base asset pack (or the
+/// <c>WithoutAssets()</c> empty filesystem) opens before the window and <c>Setup</c> and closes
+/// after <c>Teardown</c>; there is no GPU work or render thread yet.
 /// </para>
 /// <para>
 /// No member requires the process main thread. <see cref="Run"/> may be called once from any
 /// thread; a failed run still counts as the one call. <see cref="Dispose"/> is idempotent and safe
 /// before or after <see cref="Run"/>, but it throws while a run is active (D-M2-18): stop the loop
 /// with <c>IEngine.Exit()</c> or the close button first. Disposal detaches the scene root's direct
-/// children, detaches the window/input proxies, and disposes the app's logger factory, but never
-/// calls <c>IGame.Teardown</c> again.
+/// children, detaches the window/input proxies, disposes the unstarted or stopped asset service and
+/// the app's logger factory, but never calls <c>IGame.Teardown</c> again.
 /// </para>
 /// </remarks>
 public sealed class Bork2dApp : IDisposable
@@ -83,14 +84,15 @@ public sealed class Bork2dApp : IDisposable
     }
 
     /// <summary>
-    /// Disposes the app: detaches the root's direct children, detaches the window/input proxies, and
-    /// disposes the logger factory.
+    /// Disposes the app: detaches the root's direct children, detaches the window/input proxies,
+    /// disposes the unstarted or stopped asset service, and disposes the logger factory.
     /// </summary>
     /// <remarks>
     /// Idempotent and safe before or after <see cref="Run"/>. It throws
     /// <see cref="InvalidOperationException"/> while <see cref="Run"/> is active (D-M2-18), from any
     /// thread, without disturbing the loop; call <c>IEngine.Exit()</c> or close the window first. It
-    /// never invokes <c>IGame.Teardown</c>.
+    /// never invokes <c>IGame.Teardown</c>. Disposing an unstarted app disposes the constructed asset
+    /// service without opening a pack or starting its loader thread (D-M3-14).
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// A windowed run is active; stop it with <c>IEngine.Exit()</c> or the window close button.

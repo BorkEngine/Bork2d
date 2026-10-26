@@ -7,6 +7,8 @@ public sealed class DependencyMatrixTests
 {
     private const string LoggingAbstractions = "Microsoft.Extensions.Logging.Abstractions";
     private const string MessagePack = "Nerdbank.MessagePack";
+    private const string PolyType = "PolyType";
+    private const string Hashing = "System.IO.Hashing";
 
     private static readonly string[] _forbiddenApiReferencePrefixes =
     [
@@ -14,6 +16,8 @@ public sealed class DependencyMatrixTests
         "Vulkan",
         "Avalonia",
         "ZLogger",
+        "Nerdbank.MessagePack",
+        "System.IO.Hashing",
     ];
 
     [Fact]
@@ -29,9 +33,24 @@ public sealed class DependencyMatrixTests
                 IsForbiddenApiReference(reference.Name),
                 $"Bork2d.Api must not reference '{reference.Name}'.");
             Assert.True(
-                IsFrameworkReference(reference.Name) || reference.Name == LoggingAbstractions,
-                $"Bork2d.Api may only reference the BCL and {LoggingAbstractions}, not '{reference.Name}'.");
+                IsFrameworkReference(reference.Name)
+                    || reference.Name is LoggingAbstractions or PolyType,
+                $"Bork2d.Api may only reference the BCL, {LoggingAbstractions}, and {PolyType}, "
+                    + $"not '{reference.Name}'.");
         }
+    }
+
+    [Fact]
+    public void ApiReferencesPolyTypeOnlyForTheShapeContract()
+    {
+        var references = typeof(Bork2d.Api.IAssets).Assembly
+            .GetReferencedAssemblies()
+            .Select(reference => reference.Name)
+            .ToArray();
+
+        Assert.Contains(PolyType, references);
+        Assert.DoesNotContain(MessagePack, references);
+        Assert.DoesNotContain(Hashing, references);
     }
 
     [Fact]
@@ -61,9 +80,41 @@ public sealed class DependencyMatrixTests
     public void AssetsReferencesOnlyApiAndCommon()
     {
         AssertReferenceMatrix(
-            typeof(Bork2d.Assets.AssemblyReferenceAnchor).Assembly,
+            typeof(Bork2d.Assets.PackBuilder).Assembly,
             "Bork2d.Api",
             "Bork2d.Common");
+    }
+
+    [Fact]
+    public void AssetsExposesOnlyThePackToolingSurface()
+    {
+        var exported = typeof(Bork2d.Assets.PackBuilder).Assembly
+            .GetExportedTypes()
+            .Select(type => type.FullName ?? type.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "Bork2d.Assets.PackBuilder",
+                "Bork2d.Assets.PackCompressionMode",
+            },
+            exported);
+    }
+
+    [Fact]
+    public void AssetFileSystemStaysInternal()
+    {
+        var assembly = typeof(Bork2d.Assets.PackBuilder).Assembly;
+        var type = typeof(Bork2d.Assets.AssetFileSystem);
+
+        Assert.False(type.IsPublic);
+        Assert.DoesNotContain(type, assembly.GetExportedTypes());
+        Assert.False(typeof(Bork2d.Assets.ResolvedAsset).IsPublic);
+        Assert.DoesNotContain(typeof(Bork2d.Assets.ResolvedAsset), assembly.GetExportedTypes());
+        Assert.False(typeof(Bork2d.Assets.AssetService).IsPublic);
+        Assert.DoesNotContain(typeof(Bork2d.Assets.AssetService), assembly.GetExportedTypes());
     }
 
     [Fact]
@@ -123,10 +174,16 @@ public sealed class DependencyMatrixTests
     public void AotSmokeReferencesOnlyTheRuntimeSurfaceItUses()
     {
         // Tests references Bork2d.AotSmoke as a project so its assembly is copied next to the
-        // test assembly. No test type uses it, so it is loaded by name here.
+        // test assembly. No test type uses it, so it is loaded by name here. Assets is referenced
+        // for the public pack-tooling surface used by the default AOT pack proof (D-M3-04/D-M3-19).
         var assembly = Assembly.Load("Bork2d.AotSmoke");
 
-        AssertReferenceMatrix(assembly, "Bork2d.Api", "Bork2d.Common", "Bork2d.Runtime");
+        AssertReferenceMatrix(
+            assembly,
+            "Bork2d.Api",
+            "Bork2d.Assets",
+            "Bork2d.Common",
+            "Bork2d.Runtime");
     }
 
     private static void AssertReferenceMatrix(Assembly assembly, params string[] expectedReferences)

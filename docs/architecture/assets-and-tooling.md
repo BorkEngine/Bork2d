@@ -1,12 +1,13 @@
 # Assets, Bake, and Editor Tooling
 
-> **Status:** target contract. The **M3 asset spec is approved (2026-10-26)**
-> ([M3 spec](../specs/m3-assets.md)); it supersedes this document's M3-specific statements (base-pack
-> timing, per-asset versioning, size caps, byte determinism, the public pack-tooling surface, and
-> the M3 `LoadSprite` scope) until WP5 reconciles this document. In the current tree `Bork2d.Assets`
-> is still empty; pack/VFS/descriptors are roadmap **M3**, TOML bake and the production bake
-> integration **M4**, and the editor **M5**. M1 ships `IAssets` stubs that throw
-> `NotSupportedException`.
+> **Status:** M3 is implemented; the M3 PR is pending human review. `Bork2d.Assets` provides the v1
+> pack reader/writer and the public `PackBuilder`/`PackCompressionMode` tooling surface, canonical
+> paths, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, one loader thread with
+> `LoadData`/`LoadAsset<T>`, the internal texture-descriptor/sprite models with validation and the
+> CPU `LoadSprite` pipeline, and the app-scoped service wired into `Run()`/`Dispose()`. The
+> [M3 spec](../specs/m3-assets.md) owns M3 semantics. TOML bake and the production bake integration
+> are **M4**, and the editor is **M5**. `IEngine.Assets` returns the real service in every mode,
+> including the `WithoutAssets()` empty filesystem.
 
 ## 1. End-to-end model
 
@@ -74,9 +75,9 @@ All fixed-width fields are little-endian; the header is a Zstd-compressed Messag
 
 - The 28-byte prefix is fixed; only its layout is stable across versions. `version` sits outside the
   compressed header so a loader picks a v1/v2 parser before deserializing; `PackHeader` is v1 only.
-- The header is always maximum-compression Zstd, in debug and release, for determinism. `dataStart =
-  28 + headerCompressedLength`; entry offsets are absolute, at least `dataStart`, and `offset +
-  length` must not exceed the file size.
+- The header is always maximum-compression Zstd, in debug and release, for a stable structure.
+  `dataStart = 28 + headerCompressedLength`; entry offsets are absolute, at least `dataStart`, and
+  `offset + length` must not exceed the file size.
 - `headerChecksum` is XXH3-64 (`XxHash3`, seed `0`) of the **uncompressed** header via
   [`System.IO.Hashing`](https://www.nuget.org/packages/System.IO.Hashing)
   ([`XxHash3`](https://learn.microsoft.com/dotnet/api/system.io.hashing.xxhash3)); the loader
@@ -91,48 +92,66 @@ The header is a MessagePack **object**, not an array. Version 1 uses generated-s
 [GenerateShape]
 internal sealed partial class PackHeader
 {
-    public PackEntry[] Entries { get; init; } = [];
+    [Key(0)]
+    public required PackEntry[] Entries { get; init; }
 }
 
 [GenerateShape]
 internal sealed partial class PackEntry
 {
-    public string Path { get; init; } = "";
+    [Key(0)]
+    public required string Path { get; init; }
+
+    [Key(1)]
     public bool IsRaw { get; init; }
+
+    [Key(2)]
     public bool IsCompressed { get; init; }
+
+    [Key(3)]
     public ulong Offset { get; init; }
-    public ulong Length { get; init; }
-    public ulong Size { get; init; }
+
+    [Key(4)]
+    public uint Length { get; init; }
+
+    [Key(5)]
+    public uint Size { get; init; }
 }
 ```
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `PackHeader.Entries` | `PackEntry[]` | Asset entries; must not be null. |
-| `PackEntry.Path` | `string` | Canonical asset path. |
+| `PackHeader.Entries` | `PackEntry[]` | Asset entries; required, may be empty, never null. |
+| `PackEntry.Path` | `string` | Canonical asset path; required. |
 | `PackEntry.IsRaw` | `bool` | `true`: raw bytes; `false`: MessagePack. |
 | `PackEntry.IsCompressed` | `bool` | Whether stored bytes are Zstd-compressed. |
 | `PackEntry.Offset` | `uint64` | Absolute byte offset from the pack start. |
-| `PackEntry.Length` | `uint64` | Stored byte count (compressed length when compressed). |
-| `PackEntry.Size` | `uint64` | Byte count after decompression; equals `Length` when uncompressed. |
+| `PackEntry.Length` | `uint32` | Stored byte count (compressed length when compressed). |
+| `PackEntry.Size` | `uint32` | Byte count after decompression; equals `Length` when uncompressed. |
 
-Entry order is insignificant, but the builder sorts by `Path` for deterministic output and the loader
+Entry order is insignificant, but the builder sorts by `Path` for a stable structure and the loader
 builds a dictionary keyed by canonical path. No entry is parsed until the header checks pass.
 
 ### 4.3 Validation and compression
 
 The loader rejects a pack when: magic is not `BORK2DPK`; the version is unknown (checked before
-decompression); header lengths exceed limits or the file size; decompression does not produce exactly
+decompression); header lengths are zero or exceed the file; decompression does not produce exactly
 `headerUncompressedLength` bytes; the checksum does not match XXH3-64 of the uncompressed header; the
 header is not a v1 `PackHeader` or `Entries` is null; a path is empty, non-canonical, duplicated, or
-escapes the root; `Offset < dataStart`, `Offset + Length > fileSize`, or ranges overlap; uncompressed
-`Length != Size`; compressed data does not produce exactly `Size` bytes; or a decompressed size
-exceeds the safety limit. A corrupt pack fails with a diagnostic, never an out-of-bounds read.
+escapes the root; `Offset < dataStart`, `Offset + Length` overflows or exceeds the file length, or
+ranges overlap; uncompressed `Length != Size`; or compressed data does not produce exactly `Size`
+bytes. There are **no policy size caps**: the format field widths (`uint32` lengths/sizes, `uint64`
+offset), the pack file length, range/overlap checks, and .NET allocation limits are the only bounds.
+A corrupt pack fails with a diagnostic, never an out-of-bounds read.
 
 **Compression.** Zstd (.NET 11 built-in; no third-party dependency). The header is always maximum
-Zstd; payloads are uncompressed in debug and maximum Zstd in release **only when smaller**. `Size` is
-decompressed length and `Length` stored length; decompression enforces `Size` plus a global cap. The
-builder records its settings for deterministic rebuilds; keep the format behind the reader/writer.
+Zstd; payloads are uncompressed in debug and maximum Zstd in release **only when strictly smaller**.
+`Size` is the decompressed length and `Length` the stored length; decompression enforces the declared
+`Size`. Payloads have **no checksum**. Keep the format behind the reader/writer.
+
+**Determinism.** The writer sorts entries by canonical path and uses a fixed schema, but there is
+**no byte-identical guarantee**: Zstd output and runtime versions may produce different bytes. Tests
+assert structure, round-trip, entry order, and validation, not hashes.
 
 ## 5. Virtual filesystem, overlays, and browsing
 
@@ -141,10 +160,24 @@ builder records its settings for deterministic rebuilds; keep the format behind 
 3. Lookup walks top-down; later packs shadow earlier ones by canonical path.
 4. There is **no unload** in v1: a mounted pack stays for the process lifetime.
 
-- The default pack is `assets.pck`; `.WithAssetsPack(path)` overrides it. A missing or malformed base
-  pack throws at startup (M3): `Build()` throws `Bork2dException` with the resolved path before
-  window/GPU startup, with no empty-filesystem fallback. `LoadPack` throws for a bad overlay; tests
-  and tools use a valid empty pack.
+- The default pack is `assets.pck`; `.WithAssetsPack(path)` overrides it. The base pack is opened at
+  `Run()` before the window/`Setup` (D-M3-01), so `Build()` stays filesystem-free. A missing or
+  malformed base pack throws `Bork2dException` there. `.WithoutAssets()` opts out: the app starts
+  with an empty VFS and needs no base pack, while `LoadPack` may still mount overlays. `LoadPack`
+  throws for a bad overlay; the stack is unchanged.
+- **Status: `Current` (M3).** The internal `AssetFileSystem` implements the immutable base/overlay
+  stack, canonical path normalization, filesystem path resolution, `LoadPack` mounting,
+  `Browse`/`Exists` lookup, and `AssetInfo` projection. Mounting parses outside the swap lock and
+  publishes a new snapshot atomically; a failed mount leaves the stack unchanged; there is no
+  unload.
+- **Status: `Current` (M3).** The internal `AssetService` implements `LoadPack`/`Browse`/`Exists`
+  delegation, `LoadData`, and `LoadAsset<T>`, with one loader thread, an unbounded FIFO queue,
+  enqueue-time entry resolution, cancellation/join at shutdown, and the public
+  `AssetException`/`AssetErrorKind` contract. It also owns the `LoadSprite` handle table and CPU
+  pipeline, the `TextureDescriptor`/`SpriteAsset` generated shapes and validation, the per-texture
+  descriptor cache, the per-sprite resource cache, and enqueue-snapshot capture for sprite,
+  descriptor, and payload entries. The runtime starts it before the platform/`Setup` and stops it
+  after `Teardown`; `Bork2dApp.Dispose()` disposes an unstarted or stopped service.
 - `LoadPack` is thread-safe; mount during `Setup`/before the first tick. Mounting after a handle
   resolved does not change that handle; new lookups see the new pack.
 - `Browse(prefix)` returns a merged snapshot with shadowed entries hidden (`prefix` is canonical or
@@ -157,7 +190,7 @@ builder records its settings for deterministic rebuilds; keep the format behind 
 ```csharp
 public interface IAssets
 {
-    Task<T> LoadAsset<T>(string assetPath) where T : class;
+    Task<T> LoadAsset<T>(string assetPath) where T : class, IShapeable<T>;
     Sprite LoadSprite(string assetPath);
     Task<byte[]> LoadData(string assetPath);
     void LoadPack(string packPath);
@@ -171,52 +204,129 @@ public readonly record struct AssetInfo(
 
 | Member | Status | Semantics |
 | --- | --- | --- |
-| `LoadAsset<T>` | `Partial` | M1 declaration, stub throws. Target: deserialize a MessagePack asset with its generated shape; throws for raw assets or missing paths. |
-| `LoadSprite` | `Partial` | M1 declaration, stub throws. Target: resolve a sprite path immediately and load asynchronously; missing returns `Sprite.Empty` and logs. |
-| `LoadData` | `Partial` | M1 declaration, stub throws. Target: decompressed bytes for any asset kind. |
-| `LoadPack` | `Planned` M3 | Mounts a pack above the stack; later wins; no unload. |
-| `Browse` | `Planned` M3 | Merged snapshot of visible assets with an optional prefix filter. |
-| `Exists` | `Planned` M3 | Whether the merged filesystem contains the canonical path. |
-| `AssetInfo` | `Planned` M3 | Value type returned by `Browse`. |
+| `LoadAsset<T>` | `Current` (M3) | Deserializes a MessagePack asset with its compiled generated shape; no reflection fallback. Raw assets and missing paths fault. A deserialized internal `TextureDescriptor`/`SpriteAsset` is validated against the enqueue-time snapshot and faults `InvalidData` when invalid. |
+| `LoadSprite` | `Current` (M3) | Resolves a session-local handle synchronously and loads sprite + descriptor CPU metadata asynchronously. It never reads the raw payload and has no public readiness API. |
+| `LoadData` | `Current` (M3) | Decompressed bytes for any asset kind, as a fresh `byte[]` per call. |
+| `LoadPack` | `Current` (M3) | Mounts above the stack; later wins; no unload; bad pack throws `Bork2dException`; thread-safe and atomic. |
+| `Browse` | `Current` (M3) | Merged snapshot with an optional canonical prefix on a `/` segment boundary; sorted by path. |
+| `Exists` | `Current` (M3) | Exact canonical lookup. |
+| `AssetInfo` | `Current` (M3) | Value type returned by `Browse`; header fields plus the supplied pack identifier. |
+| `AssetException`/`AssetErrorKind` | `Current` (M3) | Public error contract for lookup/decode/read/payload-validation failures; pack failures stay `Bork2dException`. |
+| `WithoutAssets()` (builder) | `Current` (M3) | Selects an empty VFS with no base pack; `LoadPack` overlays are still allowed; mutually exclusive with `WithAssetsPack`. |
 
-All members are thread-safe and complete asynchronously. `LoadAsset<T>` requires a generated shape (a
-missing shape is a build/startup error naming the type, never reflection); `LoadData` returns a decoded
-copy. Do not call `Browse` in `Tick`; handles are session-local, and v1 has no unload (load-and-keep).
+`IShapeable<T>` is `PolyType.IShapeable<T>`; `Bork2d.Api` references PolyType `1.4.1` for the
+constraint only and stays free of Nerdbank.MessagePack, Zstd, `System.IO.Hashing`, and file I/O
+(D-M3-22). All members are thread-safe. `LoadPack` is synchronous; loads complete asynchronously.
+Do not call `Browse` in `Tick`; handles are session-local, and v1 has no unload (load-and-keep).
+`IEngine.Assets` returns the real app-scoped service in every mode and never throws from the
+getter; after `Run()`/`Dispose()` its members throw `ObjectDisposedException` (D-M3-14).
 
 ## 7. Loading, readiness, and failure
 
-A sprite is renderable only when its sprite asset, texture descriptor, and raw payload are loaded and
-decompressed and the renderer has created the GPU page and bindless descriptor. Any missing stage
-emits no instance: no placeholder, checkerboard, or blocking wait.
+`Status: loader and sprite/descriptor CPU pipeline Current (M3); GPU readiness/upload Planned (M8).`
+
+- **One loader thread.** The internal asset service owns one dedicated background thread per app
+  (started even for an empty VFS) and an **unbounded FIFO** request queue. There is no priority,
+  no parallelism, and no public cancellation token. The loader only reads, decompresses, and
+  deserializes; it never touches SDL, Vulkan, or game entities.
+- **Enqueue-time resolution.** `LoadData`/`LoadAsset<T>`/`LoadSprite` validate the path and the
+  disposed state synchronously, capture the current VFS snapshot, and resolve every entry for the
+  request against that snapshot. A later overlay mount does not change an in-flight request; new
+  lookups see the new stack. `LoadData`/`LoadAsset<T>` resolve the winning entry at enqueue;
+  `LoadSprite` uses its captured snapshot on the loader thread for the sprite entry, its texture
+  descriptor, and that descriptor's payload.
+- **Exact-size reads.** Packs are validated structurally at open; payload decompression is lazy
+  per read. `LoadData` decompresses to a declared-size buffer and returns a **fresh** `byte[]` per
+  call. `LoadAsset<T>` streams the decompressed payload through the compiled generated shape; the
+  stream is drained so a payload that decompresses to fewer or more bytes than its declared `Size`
+  is a decode failure. Neither path caches. A deserialized internal `TextureDescriptor`/
+  `SpriteAsset` is validated against the same snapshot; invalid data faults `InvalidData`.
+- **Sprite loading.** `LoadSprite` normalizes/validates the path and checks the disposed state
+  synchronously. A cached handle is returned immediately, whether its load is pending, ready, or
+  failed. A missing path logs at Information and returns `Sprite.Empty` without caching a handle;
+  repeated misses log again. A present path allocates an opaque handle (ids start at 1;
+  `Sprite.Empty`'s `Id == 0` is never a path), caches it, enqueues a sprite + descriptor load on the
+  existing loader thread, and returns without waiting. The loader deserializes and validates the
+  sprite asset, resolves and validates its texture descriptor (cached per texture path), checks
+  that the payload entry exists, is raw, and declares `width × height × 4` bytes, then publishes a
+  CPU sprite resource linked to the descriptor resource. The raw payload is **not** read or
+  decompressed in M3.
+- **Caches.** One CPU descriptor resource per texture path and one sprite resource per sprite path,
+  valid or failed; multiple sprites sharing a texture share one descriptor resource. A repeated
+  `LoadSprite` returns the same handle and never re-enqueues. `LoadData`/`LoadAsset<T>` never
+  consult these caches. A failed descriptor or sprite stays failed for the process (D-M3-18).
+- **Failures.** A missing path, a raw entry requested through `LoadAsset<T>`, a decode/size
+  failure, and an IO read failure fault the returned task with `AssetException`
+  (`NotFound`/`RawAsset`/`Decode`/`Io`/`InvalidData`). A descriptor/sprite validation failure faults
+  `InvalidData`; `LoadSprite` instead logs and leaves the handle non-renderable. Pack
+  open/parse/mount failures stay `Bork2dException`. There is **no automatic retry**, no loose-file
+  fallback, and no placeholder/blocking wait (D-M3-18).
+- **Shutdown.** Stopping the service rejects new requests, cancels queued and in-flight load tasks
+  (they complete as canceled), joins the loader, closes the mounted packs, and marks the service
+  disposed. Sprite loads have no caller task: their handles remain non-renderable and the loads are
+  dropped. Valid sprite publication and handle completion are ordered against shutdown under the
+  service lock: a load that observes shutdown before the final critical section is dropped without
+  publishing a valid resource, while a publication that completed before shutdown marked the service
+  disposed remains valid. Shutdown is idempotent; secondary failures are logged, not thrown.
+- **Logging** uses the `Bork2d.Assets` category: start (`Pack`/`Empty` with the configured and
+  resolved path, version, entries, bytes), overlay mounted, load failure (path, kind, reason),
+  `LoadSprite` misses, sprite load success at Debug (path, kind), descriptor cache hits at Debug,
+  and stop (pending/canceled counts, mounted packs). Nothing is logged per frame.
+- **No renderer in M3.** The loader never creates GPU resources. The CPU resource table is internal
+  and immutable after publication; M8 creates GPU pages/uploads on the render thread. There is no
+  public readiness query and no GPU work in M3.
+
+A sprite is drawable only when its sprite asset, texture descriptor, and raw payload are loaded and
+decompressed and the renderer has created the GPU page and bindless descriptor. M3 publishes the CPU
+metadata only: no GPU page exists, nothing renders, and the handle is resolved by the M8 renderer at
+draw time. Any missing stage emits no instance: no placeholder, checkerboard, or blocking wait.
 
 - `LoadSprite` returns immediately and is idempotent per path; a missing path returns `Sprite.Empty`
-  and logs. A failed decode/upload logs and stays non-renderable; retry is not automatic in v1.
-- Readiness can change between the snapshot tick and the draw, so the renderer resolves at draw time;
-  a sprite can appear one frame earlier than a snapshot-time check. `Sprite.Empty` (`Id == 0`) is not a
-  path; handles are session-local, save data stores paths, and v1 keeps resources for the process.
+  and logs. A failed decode/validation logs and stays non-renderable; retry is not automatic in v1.
+- Readiness can change between the snapshot tick and the draw, so the future renderer resolves at
+  draw time; a sprite can appear one frame earlier than a snapshot-time check. `Sprite.Empty`
+  (`Id == 0`) is not a path; handles are session-local, save data stores paths, and v1 keeps
+  resources for the process.
 
 ## 8. Texture descriptors
+
+`Status: internal model and M3 validation Current (M3); GPU upload and KTX2 Planned (M6/M8).`
 
 A texture is a MessagePack **descriptor** plus a **raw payload**: `textures/player` and
 `textures/raw/player`.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `payload` | `string` | Raw asset path containing pixels/KTX2 bytes. |
-| `width` | `uint32` | Pixel width. |
-| `height` | `uint32` | Pixel height. |
-| `format` | `string` | `rgba8` now; `ktx2` later. |
+| `payload` | `string` | Raw asset path containing RGBA8 pixels (M3 never reads it). |
+| `width` | `uint32` | Pixel width, `> 0`. |
+| `height` | `uint32` | Pixel height, `> 0`. |
+| `format` | `string` | `rgba8` only in v1; `ktx2` is rejected. |
 | `filter` | `string` | `nearest` or `linear`. |
 | `wrap` | `string` | `clamp` or `repeat`. |
 
 `rgba8` payload: width × height × 4 bytes, row-major, top-left origin, no padding, straight alpha,
-8 bits per channel, treated as sRGB unless a later color-space field says otherwise. A later `ktx2`
-payload carries its own dimensions/format; the descriptor still supplies sampler state and validates
-dimensions. The source is a Unity-style `<file>.toml` sidecar carrying **import settings only**
-(`filter`, `wrap`); the baker writes `textures/player` with payload `textures/raw/player`, and sprite
-definitions in `sprites/**.toml` reference the descriptor.
+8 bits per channel, treated as sRGB. The source is a Unity-style `<file>.toml` sidecar carrying
+**import settings only** (`filter`, `wrap`); the baker writes `textures/player` with payload
+`textures/raw/player`, and sprite definitions in `sprites/**.toml` reference the descriptor.
+
+- **Internal shape.** `TextureDescriptor` is an internal `[GenerateShape]` class with property-name
+  keys (no `[Key]`) and no per-asset version. `System.Numerics.Vector2` uses Nerdbank's generated
+  shape in sprite assets; there is no reflection resolver.
+- **M3 validation.** The payload path must be canonical and exist in the enqueue-time snapshot, the
+  payload entry must be raw, `Width > 0`, `Height > 0`, and `(ulong)Width × Height × 4` must equal
+  the payload's declared `Size` (unsigned, overflow-safe). `Format` must be `rgba8`, `Filter` one of
+  `nearest`/`linear`, and `Wrap` one of `clamp`/`repeat`.
+- **No payload read.** Validation uses header metadata only; the payload is not decompressed or
+  uploaded in M3. `LoadAsset<TextureDescriptor>` faults `InvalidData` for a bad descriptor;
+  `LoadSprite` logs and leaves the sprite non-renderable.
+- **Resource caching.** A validated descriptor becomes one immutable CPU texture resource per
+  texture path; a failed descriptor is cached as failed and shared by referencing sprites, with no
+  retry. `LoadAsset<TextureDescriptor>` does not use the cache.
 
 ## 9. Sprite assets
+
+`Status: internal model, M3 validation, and CPU sprite resources Current (M3); GPU/draw Planned
+(M8).`
 
 A sprite is a MessagePack asset (for example `sprites/player/idle`) describing a textured quad:
 
@@ -224,9 +334,9 @@ A sprite is a MessagePack asset (for example `sprites/player/idle`) describing a
 | --- | --- | --- |
 | `texture` | `string` | Texture descriptor path (`textures/player`). |
 | `uvs` | `Vector2[]` | Normalized UVs, top-left origin. Exactly four. |
-| `scale` | `float` | **Pixels per world unit**. |
+| `scale` | `float` | **Pixels per world unit**, `> 0`. |
 | `pivot` | `Vector2` | Normalized origin inside the quad; default `(0.5, 0.5)`. |
-| `topology` | enum | `Quad`, `TriangleStrip`, or `Triangles`. |
+| `topology` | enum | `Quad` (0), `TriangleStrip` (1), or `Triangles` (2); an integer in the pack. |
 | `indices` | `ushort[]?` | `null` for `Quad`; required for the other topologies. |
 
 There is no `vertices` array; the vertex shader generates positions from UVs, texture size, scale, and
@@ -240,11 +350,21 @@ pivot.
   top-left, top-right, bottom-right, bottom-left.
 - `Quad` requires `indices` to be **null** and draws as a four-corner triangle strip. `TriangleStrip`
   requires indices in `0..3`; `Triangles` requires indices in `0..3`, length a multiple of 3.
-- v1 draws `Quad` only. Non-Quad assets are valid and validated but never silently treated as quads;
-  the indexed path lands with M8.
+- v1 draws `Quad` only. Non-Quad assets are valid, validated, and cached as CPU resources but never
+  silently treated as quads; the indexed path lands with M8.
+
+**M3 validation.** `SpriteAsset` is an internal `[GenerateShape]` class with property-name keys, no
+per-asset version, and no vertices field. The loader validates: `Texture` is a canonical non-empty
+path whose descriptor resolves and validates; `Uvs` is exactly four finite `Vector2` values with
+every component in `[0,1]`, `maxU > minU`, and `maxV > minV`; `Scale` is finite and `> 0`; `Pivot`
+is finite with both components in `[0,1]`; `Topology` is one of the three values; `Quad` has
+`Indices == null`; `TriangleStrip`/`Triangles` have non-null indices, every value in `0..3`, at least
+three entries, and `Triangles` length a multiple of 3. Invalid data faults `InvalidData` from
+`LoadAsset<SpriteAsset>`; `LoadSprite` logs and leaves the handle non-renderable.
 
 The editor writes this as TOML; M4 bakes the MessagePack form. The renderer resolves sprite asset →
-descriptor → payload → GPU page; tint, layer, z-index, and transform stay on the renderable.
+descriptor → payload → GPU page; tint, layer, z-index, and transform stay on the renderable. In M3 the
+loader stops at the CPU sprite resource linked to its descriptor resource.
 
 ## 10. TOML source model
 
@@ -266,10 +386,11 @@ asset path, and a list of referenced types; `[Bork2dSerializable]` is optional e
 - References are canonical paths validated at bake time, never `Sprite.Id` or pack offsets; the editor
   checks the source tree and the baker checks baked assets. A missing reference is a diagnostic plus
   invisible renderable, not a crash; save data uses paths.
-- Every baked asset carries a schema version; additive changes with defaults are allowed, while
-  renames/removals need a migration or bump. The editor preserves unknown fields where practical,
-  runtime errors identify path/version/location, and pack versioning is separately validated. Output
-  is deterministic; the runtime never parses TOML.
+- There is **no per-asset schema version** (D-M3-05): the pack prefix `version` is the only format
+  version. A shape change is a pack-version change/migration; pre-1.0 breaking changes are allowed by
+  D-014. The editor preserves unknown fields where practical and runtime errors identify
+  path/location. Pack output has no byte-level determinism guarantee (D-M3-08); the runtime never
+  parses TOML.
 
 ## 11. Build pipeline
 
@@ -289,15 +410,17 @@ Bake (M4, JIT):
 Pack builder: collect baked assets and payloads; establish canonical paths, reject duplicates, sort
 entries; serialize `PackHeader`/`PackEntry`, compress the header with Zstd max, compute XXH3-64 over
 the uncompressed bytes; compress payloads in release only if smaller; write the 28-byte prefix,
-compressed header, and data with absolute offsets; write `assets.pck` deterministically.
+compressed header, and data with absolute offsets; write the pack (no byte-determinism guarantee).
 
 | Mode | Header | Asset payloads |
 | --- | --- | --- |
 | Debug | Always Zstd-compressed, XXH3-64 checksum | Uncompressed, `IsCompressed=false`, `Length==Size` |
 | Release | Always Zstd-compressed, XXH3-64 checksum | Zstd max, compressed only when smaller |
 
-`assets.pck` is copied next to the executable (or the `WithAssetsPack` path) when the loader lands
-(M3). MSBuild vs CLI is undecided (M4); incremental bake uses timestamps/hashes. The editor shares the validator and baker; CI builds
+The app opens `assets.pck` at `Run()` (or the `WithAssetsPack` path), resolved against the process
+current directory or given as an absolute path (D-M3-03). There is no "next to the executable"
+fallback; scripts set the working directory or pass an absolute path. MSBuild vs CLI is undecided
+(M4); incremental bake uses timestamps/hashes. The editor shares the validator and baker; CI builds
 a debug and a release pack and runs loader validation on both.
 
 ## 12. Editor
@@ -349,17 +472,42 @@ multi-project workspaces in v1.
   TOML, `Activator.CreateInstance`, or dynamic code in pack/asset loading.
 - Zstd is the .NET 11 built-in implementation, so no extra native codec is needed; pack paths and
   asset keys are data, not types. `WithGame(instance)` avoids reflection-based game construction.
+- The public tooling surface is `PackBuilder`/`PackCompressionMode` in `Bork2d.Assets`;
+  `Bork2d.AotSmoke` references `Bork2d.Assets` to build and load a temporary pack in the default
+  AOT run (D-M3-04, D-M3-19).
 - Runtime projects set `IsAotCompatible` with trim/AOT analyzers; only the AOT smoke app sets
   `PublishAot`. AOT publish/run is a required local gate, not a CI job.
 
 ## 14. Threading
 
-- Packs are opened and headers parsed at startup (asset service, any thread); path tables are
-  immutable unless a new pack is mounted, and `LoadPack` swaps the overlay stack atomically.
-- Loader threads decompress, deserialize, decode, and prepare CPU resources; they never touch Vulkan.
-- The render thread creates GPU texture pages and updates bindless descriptors, reading an immutable
-  resource table without per-sprite locks; GPU lifetime is retired after referencing frames complete.
-  Load-and-keep applies in v1. See [Threading](threading.md#6-asset-and-pack-coordination).
+`Status: loader and CPU resource table/sprite-descriptor caches Current (M3); renderer/GPU
+integration Planned (M8).`
+
+- Packs are opened and headers parsed by the asset service (`Start`, on the `Run` caller thread,
+  before the platform and `Setup`); path tables are immutable unless a new pack is mounted, and
+  `LoadPack` swaps the overlay stack atomically.
+- The service owns exactly **one** dedicated loader thread with an unbounded FIFO queue. Requests
+  capture the VFS snapshot at enqueue time; the loader thread deserializes and publishes CPU
+  resources, completes `TaskCompletionSource`-backed tasks with `RunContinuationsAsynchronously`,
+  and never touches SDL, Vulkan, or game entities. Task continuations therefore never run inline on
+  the loader. The runtime starts the service before the window/`Setup` and stops it after
+  `Teardown` on every path.
+- **Resource-table ownership.** The loader thread is the only writer of descriptor and sprite
+  resources. A published resource is immutable; the table holds one descriptor resource per texture
+  path and one sprite resource per sprite path, including cached failures. Handle allocation and
+  lookup happen on the calling thread under a short lock; the loader never blocks on a caller. Reads
+  take the same short lock; no lock is held across a load, an await, or a blocking wait.
+- **Caches.** A repeated `LoadSprite` returns the cached handle without enqueueing; descriptor
+  resources are shared by every sprite that references the same texture; `LoadData`/`LoadAsset<T>`
+  bypass the resource table entirely. There are no weak references and no unload in v1.
+- At shutdown the service stops accepting requests, cancels queued and in-flight load tasks, joins
+  the loader at a safe point, and only then closes the mounted archives. Handle completion signals
+  remain internal; sprite loads are dropped.
+- M3 has no GPU work: the loader never creates texture pages, and there is no public readiness or
+  resource-table API. The future renderer creates GPU texture pages and uploads on the render
+  thread, reading the immutable CPU resources without per-sprite locks; GPU lifetime is retired
+  after referencing frames complete. Load-and-keep applies in v1. See
+  [Threading](threading.md#6-asset-and-pack-coordination).
 
 `WithHeadless` supports packs, `LoadData`, `LoadAsset<T>`, `Browse`, and `Exists`; sprite handles
 resolve to CPU metadata, but no GPU page exists and nothing renders. `WithOffscreen` runs the normal
@@ -368,28 +516,39 @@ upload/draw path without a window or swapchain and discards frames in v1. Neithe
 
 ## 15. Limits and security
 
-Provisional v1 limits (final values are M3 decisions): maximum header 64 MiB; maximum assets per pack
-1,000,000; maximum path length 512 bytes; maximum decompressed asset size configured per project; no
-overlapping payload ranges, path traversal (`..`), absolute paths, or drive letters; unknown pack
-versions rejected; decompression bounded by declared `Size` and a global cap; malformed packs fail
-with `Bork2dException` (or a loader-specific exception) and a diagnostic, never an out-of-bounds read.
+There are **no policy size caps** (D-M3-06). The bounds are intrinsic:
+
+| Bound | Source |
+| --- | --- |
+| Header compressed/uncompressed lengths | `uint32` prefix fields and the file length. |
+| Per-entry stored/decompressed size | `uint32` `Length`/`Size` (max 4 GiB − 1). |
+| Offset | `uint64`, validated against the file length and the `long` file API. |
+| Pack file | `FileStream`/`long` length; no additional cap. |
+| Path and entry count | No cap; canonical validation and the header size bound them. |
+| `LoadData` | `Array.MaxLength` because the API returns a single `byte[]`. |
+| `LoadAsset<T>` | Streaming: the decompressed stream goes to the generated-shape deserializer. |
 
 The **header** has an XXH3-64 checksum verified before parsing; individual **payloads have no
 checksum** in v1, so a raw payload has no integrity check beyond bounds/length validation. Packs are
 trusted local content: signing is out of scope and the parser is defensive against malformed input.
+A malicious pack can still declare a large header/payload and cause memory pressure; M3 accepts
+that in exchange for no arbitrary caps, and fails cleanly rather than reading out of bounds.
 
 ## 16. Current status
 
 | Area | Status |
 | --- | --- |
-| `Bork2d.Assets` | `Empty`: project scaffold (`AssemblyReferenceAnchor` only) |
-| `assets.pck` reader/writer, VFS, overlays, `Browse`/`Exists` | `Planned` M3 |
-| Texture descriptors and raw RGBA8 payloads | `Planned` M3/M4 |
-| Sprite assets (UVs/scale/pivot/topology/indices) | `Planned` M3/M4; `Sprite` handle is `Current` |
+| `Bork2d.Assets` | `Current` (M3): v1 pack reader/writer, structural validation, canonical paths, public `PackBuilder`/`PackCompressionMode`, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, the app-scoped service (one thread, FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, `AssetException`), and the internal texture-descriptor/sprite models, validation, `LoadSprite` CPU pipeline, handle table, and resource cache |
+| `assets.pck` reader/writer | `Current` (M3): v1 format reader and writer; the VFS, overlays, `Browse`/`Exists`, and the loader are wired through `IEngine.Assets` |
+| Texture descriptors and raw RGBA8 payloads | `Current` (M3): internal `TextureDescriptor` model, M3 validation, and CPU descriptor resources; the raw payload is metadata only. Payload read/upload and KTX2 are M8/M6 |
+| Sprite assets (UVs/scale/pivot/topology/indices) | `Current` (M3): internal `SpriteAsset` model, M3 validation, CPU sprite resources, and the idempotent session-local handle; `LoadSprite` resolves sprite + descriptor without reading the payload. Drawing is M8 |
+| CPU resource table (descriptors/sprites) | `Current` (M3, internal): one descriptor resource per texture path, one sprite resource per sprite path, failed entries cached, no weak references, no public access or readiness API |
+| Runtime asset lifecycle | `Current` (M3): `WithoutAssets()`, base pack at `Run()` before the window/`Setup`, start/stop/error order, post-shutdown `ObjectDisposedException`, app disposal |
 | TOML model, baker, pack builder, deterministic bake | `Planned` M4 |
-| Serialization policy | `Partial`: Nerdbank.MessagePack `1.4.95` pinned with generated-shape smoke in Common, tests, and AOT smoke |
-| `IAssets` load members | `Partial`: declarations exist, stubs throw `NotSupportedException` |
-| `IAssets.LoadPack`/`Browse`/`Exists`, `AssetInfo` | `Planned` M3 |
+| Serialization policy | `Current` (M3): Nerdbank.MessagePack `1.4.95` pinned with generated-shape smoke in Common, tests, and AOT smoke; pack header/entry and internal descriptor/sprite shapes are generated; `Bork2d.Api` references PolyType `1.4.1` for the `IShapeable<T>` contract only; `LoadAsset<T>` passes the shape from `T.GetTypeShape()` |
+| `IAssets` load members | `Current` (M3): declarations, XML docs, the `IShapeable<T>` constraint, loader bodies, and `LoadSprite` CPU metadata; `IEngine.Assets` returns the real service in every mode |
+| `IAssets.LoadPack`/`Browse`/`Exists`, `AssetInfo` | `Current` (M3): `AssetInfo`, the internal VFS/lookup, and public delegation |
+| `AssetException`/`AssetErrorKind` | `Current` (M3): public error contract; pack open/parse/mount failures remain `Bork2dException` |
 | `Bork2d.Editor` / `Project.Editor` | `Planned` M5; editor absent, host is a template folder |
 
 ## 17. Related documents

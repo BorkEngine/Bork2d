@@ -1,10 +1,10 @@
 # Architecture Overview
 
-> **Status:** M2 (SDL windowed platform, WP1–WP5) is merged into `develop` (2026-10-26, PR #2); M1 is
-> merged into `develop` (2026-10-25). The builder, validation, windowed SDL host
-> (window/input/time/loop), one-tick headless/offscreen host, scene graph, logging, and AOT baseline
-> are `Current`; assets (M3/M4), the editor (M5), Vulkan and frame handoff (M6/M7), and the sprite
-> renderer (M8) are `Planned`. Status detail is in [the roadmap](../roadmap.md).
+> **Status:** M1 and M2 are merged into `develop`; M3 (pack, VFS, descriptors, runtime integration) is
+> implemented and its PR is pending human review. The builder, validation, windowed SDL host
+> (window/input/time/loop), one-tick headless/offscreen host, scene graph, logging, asset pipeline,
+> and AOT baseline are `Current`; the editor (M5), Vulkan and frame handoff (M6/M7), and the sprite
+> renderer (M8) are `Planned`. TOML bake is M4. Status detail is in [the roadmap](../roadmap.md).
 
 ## 1. Purpose
 
@@ -34,8 +34,11 @@ slicing and editing of custom serializable classes.
 - **NativeAOT runtime.** The game/runtime is trim-safe NativeAOT; the editor and build tools
   stay JIT. Serialization uses Nerdbank.MessagePack generated shapes; the game is an instance.
 - **Packed, path-addressed assets.** Game code and snapshots carry `Sprite` handles; the runtime
-  reads `assets.pck` plus overlays, loads/decompresses in the background, and skips handles whose
-  sprite/texture is not ready. TOML is source/editor format only; entities have no IDs.
+  reads `assets.pck` plus later-wins overlays, loads/decompresses in the background, and skips
+  handles whose sprite/texture is not ready. A pack holds raw payloads and MessagePack assets with
+  **no per-asset version** (only the pack prefix version) and **no policy size caps** (intrinsic
+  `uint32`/`uint64` field widths and streaming bounds). TOML is source/editor format only; entities
+  have no IDs. The pack writer is the public tooling exception in `Bork2d.Assets`.
 - **Headless and offscreen modes.** Servers run with no window, GPU, or render thread at a
   configured tick rate; tests render windowless to an internal offscreen target.
 - **Diagnostics and quality.** Microsoft.Extensions.Logging/ZLogger, `IEngine.LoggerFactory`;
@@ -82,10 +85,10 @@ Game code never references an engine project directly. Exact rules: [Projects](p
 ## 5. Runtime topology
 
 The engine invokes game callbacks on its tick thread, which may be any host thread; there is no
-process-main-thread affinity. In M2, windowed mode owns one OS/window thread (SDL, window
-commands, event pump) and runs the game loop on the caller's tick thread; it creates no render
-thread and no Vulkan object. Headless/offscreen still run `Setup`, one `Tick`, and `Teardown` on
-the calling thread. Asset loader threads (M3/M4) and the render thread (M6/M7) are `Planned`; the
+process-main-thread affinity. Windowed mode owns one OS/window thread (SDL, window commands, event
+pump) and runs the game loop on the caller's tick thread; it creates no render thread and no Vulkan
+object. Every mode owns one app-scoped asset loader thread. Headless/offscreen still run `Setup`,
+one `Tick`, and `Teardown` on the calling thread. The render thread (M6/M7) is `Planned`; the
 threads never touch each other's domain (SDL, Vulkan, or game objects).
 
 | Mode | Tick | OS/window thread | Render thread | SDL | Vulkan | Pacing (M2) |
@@ -106,8 +109,8 @@ only when the ring is full; headless has no ring and is timer-paced. The state m
 These rules bind the implementation and every future change. Violating one is an architecture
 bug, not a style preference.
 
-1. **Only `Bork2d.Api` and `Bork2d.Runtime` are public surfaces**; internal projects may change or disappear between releases.
-2. **`Bork2d.Api` contains no GPU, OS, or renderer types**; it uses BCL types plus `Microsoft.Extensions.Logging.Abstractions` for `ILoggerFactory`, and no other third party.
+1. **Only `Bork2d.Api` and `Bork2d.Runtime` are public surfaces for game code**; internal projects may change or disappear between releases. The one exception is the **tooling-only** pack writer (`PackBuilder`/`PackCompressionMode`) in `Bork2d.Assets` (D-001, D-M3-04).
+2. **`Bork2d.Api` contains no GPU, OS, or renderer types**; it uses BCL types, `Microsoft.Extensions.Logging.Abstractions` for `ILoggerFactory`, and `PolyType` 1.4.1 for the `IShapeable<T>` shape constraint only (D-M3-22), with no other third party.
 3. **Scene mutation is tick-scoped and quiescent at capture**: mutation happens only during `Setup`/`Tick`/`Teardown`, workers join before `Tick` returns, structural and per-object access use `System.Threading.Lock` (composite updates still need game synchronization), and the tree is unordered.
 4. **Snapshots are immutable after publication**: the render thread never reads a live entity, mutates snapshot memory, or blocks the tick on a specific frame.
 5. **Snapshots carry handles, not assets**: `Sprite` is an opaque ID resolved against the pack-backed table at draw time; not-ready handles are skipped.
@@ -118,7 +121,7 @@ bug, not a style preference.
 10. **At most one window and one app process in v1**: modes are windowed, offscreen, or headless; headless has no window or GPU and uses its tick rate (default 60, `0` = uncapped).
 11. **No steady-state per-frame allocations** in the tick snapshot builder or renderer hot path.
 12. **The runtime is NativeAOT- and trim-safe**: no runtime reflection, assembly scanning, runtime TOML, or dynamic code; MessagePack shapes are source-generated.
-13. **`assets.pck` is the runtime asset source**: TOML and source images live in `Project.Common`, only baked MessagePack/raw assets ship, overlays are packs (later wins), and a missing base pack throws at startup.
+13. **`assets.pck` is the runtime asset source**: TOML and source images live in `Project.Common`, only baked MessagePack/raw assets ship, overlays are packs (later wins), and a missing base pack throws at `Run()` unless the app calls `WithoutAssets()`. There is no per-asset version and no policy size cap.
 14. **Logging is available everywhere through `IEngine.LoggerFactory`**, configured with ZLogger; the default is a plain-text console provider.
 15. **Warnings and C# style violations are build errors**, with a format gate in CI.
 16. **Pre-1.0 breaking changes are allowed**, but every public change updates the API guide, reference, and decision log in the same change.

@@ -1,9 +1,10 @@
 # API Guide
 
-> **Status:** implemented M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2). The builder and host exist in
-> `Bork2d.Runtime`; `Build()` validates and `Run()` runs the uncapped windowed loop (window, input,
-> time) or the one-tick headless/offscreen sequence. Assets are M3 and the renderer is M8;
-> `IAssets` remains a throwing stub. See the
+> **Status:** implemented M3. M1 (foundation), M2 (SDL windowed host), and M3 (pack, VFS,
+> descriptors, runtime integration) exist in `Bork2d.Runtime`/`Bork2d.Assets`; the M3 PR is pending
+> human review. `Build()` validates and `Run()` runs the uncapped windowed loop (window, input,
+> time) or the one-tick headless/offscreen sequence, opening the base pack (or the
+> `WithoutAssets()` empty filesystem) before the window and `Setup`. The renderer is M8. See the
 > [API reference](reference.md#12-runtime-surface).
 
 ## 1. What you reference
@@ -15,7 +16,9 @@
 | `Project.Editor` (M5) | `Bork2d.Editor` + `Project.Common` | Thin Avalonia editor host. |
 
 Do not reference `Bork2d.Render`, `Bork2d.Common`, or `Bork2d.Assets` from game code; they are
-implementation details ([Projects and dependencies](../architecture/projects.md)).
+implementation details ([Projects and dependencies](../architecture/projects.md)). **Tooling and
+tests** may reference `Bork2d.Assets` for the public `PackBuilder`/`PackCompressionMode` writer
+(§10); that surface is not part of the game contract.
 
 ## 2. Start the engine
 
@@ -148,9 +151,10 @@ public sealed class MyGame : IGame<GameLayer>
 }
 ```
 
-Target label: the sprite line requires `IAssets` (M3) and rendering requires M8; in M2 `Setup`
-throws at `LoadSprite` because `IEngine.Assets` is a stub. The camera/transform code is `Current`;
-time is `Current` in windowed mode and stays `0` in the one-tick modes.
+Target label: `IAssets.LoadSprite` is real in M3 (it returns a session-local handle and loads the
+sprite plus descriptor CPU metadata, without reading the payload), and rendering requires M8, so
+nothing draws yet. The camera/transform code is `Current`; time is `Current` in windowed mode and
+stays `0` in the one-tick modes.
 
 ## 4. Layers
 
@@ -318,25 +322,136 @@ public void Tick()
 
 ## 10. Assets
 
-`Status: target for M3.` In M2 `IEngine.Assets` returns an `UnsupportedAssets`; `LoadSprite`,
-`LoadAsset<T>`, and `LoadData` throw `NotSupportedException`. `Build()` validates only that the
-pack path is non-empty.
+`Status: Current (M3).` The base pack (or the `WithoutAssets()` empty filesystem) opens at `Run()`
+before the window and `Setup`, and an app-scoped loader thread serves `LoadData`/`LoadAsset<T>`/
+`LoadSprite`. Packs mount overlays with `LoadPack`, `Browse`/`Exists` read the merged virtual
+filesystem, and `AssetException`/`AssetErrorKind` report failures. The raw sprite payload is not
+read in M3 and there is no public readiness query.
 
 ```csharp
-Sprite player = _engine.Assets.LoadSprite("sprites/player/idle");
-GameConfig config = await _engine.Assets.LoadAsset<GameConfig>("data/config");
-byte[] raw = await _engine.Assets.LoadData("textures/raw/player");
+using PolyType;
+
+[GenerateShape]
+public sealed partial class GameConfig
+{
+    public required string Name { get; set; }
+    public int MaxPlayers { get; set; }
+}
 ```
 
-- The default pack is the relative string `"assets.pck"` plus later-wins overlays. The call
-  returns a handle immediately; the renderer skips it until its sprite asset, texture descriptor,
-  raw payload, and GPU page are ready. Missing keys log and return `Sprite.Empty`.
-- Paths are canonical lowercase `/` keys without extensions. `LoadSprite` is idempotent per path;
-  handles are session-local and never serialized. `LoadAsset<T>` needs a Nerdbank generated shape
-  (NativeAOT). `LoadData` returns decompressed bytes for any asset kind.
-- `LoadPack`/`Browse`/`Exists` and `AssetInfo` are `Planned` for M3; there is no unload in v1. Do
-  not block a tick on I/O or mutate scene state from a continuation. See
-  [Assets and tooling](../architecture/assets-and-tooling.md).
+```csharp
+// Packs: mount overlays (later wins; no unload).
+_engine.Assets.LoadPack("overlays/hd.pck");
+
+// Browse/exists: canonical paths; Browse(null) lists everything.
+bool hasConfig = _engine.Assets.Exists("data/config");
+IReadOnlyList<AssetInfo> sprites = _engine.Assets.Browse("sprites");
+
+// Typed assets need a compiled shape; raw bytes use LoadData.
+GameConfig config = await _engine.Assets.LoadAsset<GameConfig>("data/config");
+byte[] pixels = await _engine.Assets.LoadData("textures/raw/player");
+
+// Sprites return a session-local handle immediately.
+Sprite player = _engine.Assets.LoadSprite("sprites/player/idle");
+```
+
+- **Base pack and `WithoutAssets`.** By default the app opens `assets.pck` at `Run()`. Build with
+  `.WithAssetsPack("path/to/game.pck")` to choose another filesystem path (relative to the process
+  current directory, or absolute), or `.WithAssetsPack` plus a script that sets the working
+  directory. If the app has no base pack, call `.WithoutAssets()`: it starts an empty virtual
+  filesystem with no pack file, still starts the loader thread, and still allows `LoadPack`
+  overlays mounted later (for example during `Setup`). `WithAssetsPack` and `WithoutAssets` are
+  mutually exclusive; using both fails `Build()`. A missing or malformed base pack fails `Run()`
+  with `Bork2dException` before any window or `Setup`.
+- **Typed assets.** `LoadAsset<T>` is constrained to `where T : class, IShapeable<T>` (D-M3-22).
+  `T` must carry a compiled `[GenerateShape]` shape (PolyType); a missing shape is a compile-time
+  error, not a runtime fallback. There is no reflection resolver. Use `LoadData` for arbitrary
+  bytes, including raw texture payloads. Both members validate the path synchronously and resolve
+  the winning pack entry at enqueue time, so a later overlay mount does not change an in-flight
+  request.
+- **Loading and errors.** A valid missing path, a raw entry passed to `LoadAsset<T>`, and
+  decode/size failures fault the returned task instead of throwing:
+
+  ```csharp
+  try
+  {
+      GameConfig config = await _engine.Assets.LoadAsset<GameConfig>("data/config");
+  }
+  catch (AssetException exception) when (exception.Kind == AssetErrorKind.NotFound)
+  {
+      // A valid canonical path that is not in the merged VFS.
+  }
+  ```
+
+  `AssetErrorKind` is `NotFound`, `RawAsset`, `Decode`, `Io`, or `InvalidData`; `AssetPath` names
+  the canonical path (or the filesystem path for an IO failure). Null/invalid path arguments still
+  throw `ArgumentNullException`/`ArgumentException` from the call. Pack open/parse/mount failures
+  are `Bork2dException`, not `AssetException`. See the
+  [error contract](reference.md#71-assetexception-and-asseterrorkind).
+- **No retry, no loose files.** A failed lookup or decode stays failed for the process; v1 has no
+  automatic retry, pack unload, or loose-file fallback. Mount a corrected overlay (a later mount
+  shadows an earlier path) or restart the app.
+- **Shutdown.** Stopping the service cancels queued and in-flight load tasks (they complete as
+  canceled) and joins the loader. After that, every `IAssets` member throws
+  `ObjectDisposedException`; the `IEngine.Assets` getter never throws by itself.
+- **Paths.** Public inputs are normalized (`\` → `/`, invariant lowercase) and then validated:
+  lowercase letters, digits, `_`, `-`, and `/` separators; no leading/trailing slash, empty
+  segment, `.`/`..` segment, or source extension. `textures/bg.png` is invalid; use
+  `textures/bg`. Null throws `ArgumentNullException`, other invalid paths throw
+  `ArgumentException`, and a valid missing path is simply absent.
+- **`LoadPack`.** Takes a filesystem path (relative to the process current directory or absolute),
+  validates and mounts it synchronously. Later mounts shadow earlier paths; mounting the same file
+  twice is allowed. A bad/missing pack throws `Bork2dException` with the resolved path and leaves
+  the stack unchanged. Mount before the first tick when possible; there is no unload, replacement,
+  loose-file fallback, or automatic retry in v1.
+- **`Browse`/`Exists`.** `Browse(null)` returns every visible path once (shadowed entries hidden),
+  sorted by `Path` ordinal; a non-null prefix must be canonical and matches on a `/` segment
+  boundary (`sprites/pl` matches `sprites/pl` and `sprites/pl/idle`, not `sprites/player`). An
+  empty prefix is invalid. `Exists` is an exact lookup, not a prefix match. Results are a
+  materialized snapshot; do not browse per frame.
+- **`AssetInfo`.** Reports `Path`, `IsRaw`, `IsCompressed`, `Length`, `Size`, and `PackPath` from
+  the header without decompressing. `PackPath` is the supplied pack identifier, not the resolved
+  absolute path.
+- **Sprites.** `LoadSprite` validates the path synchronously and returns a session-local `Sprite`
+  handle immediately. A cached path returns the same handle, including while the load is pending and
+  after it fails; a missing path logs and returns `Sprite.Empty` without caching a handle. The
+  handle is not a readiness signal: the sprite asset and its texture descriptor load on the loader
+  thread, and there is **no public readiness query** in M3 (M8 resolves readiness at draw time). The
+  raw texture payload is **not** read or decompressed in M3. A load or validation failure logs and
+  leaves the handle non-renderable; it does not throw to the caller, retry, or produce a
+  placeholder. Descriptor/sprite types stay internal; `LoadAsset<T>` with those internal shapes is
+  test-only and validates against the enqueue-time pack snapshot.
+- **Lifetime.** All members are thread-safe. At `Run()` shutdown (after `Teardown`) the service
+  cancels pending load tasks and joins the loader. After that, members throw
+  `ObjectDisposedException`; the `IEngine.Assets` getter itself keeps returning the disposed
+  service and never throws. `Dispose()` before `Run()` disposes the unstarted service without
+  opening a pack or starting a thread.
+
+### Building a pack (tooling only)
+
+The pack **writer** is the public tooling surface in `Bork2d.Assets`; tools, tests, and later the
+editor use it to produce the runtime packs the app loads. Game code must not reference
+`Bork2d.Assets`.
+
+```csharp
+using Bork2d.Assets;
+
+var builder = new PackBuilder(PackCompressionMode.Release);
+builder.AddRaw("textures/raw/player", rgba8Bytes);
+builder.AddMessagePack("data/config", new GameConfig { /* [GenerateShape] type */ });
+builder.Write("assets.pck"); // overwrites; relative paths resolve against the current directory
+```
+
+- `PackCompressionMode.Debug` stores payloads uncompressed; `Release` uses maximum-quality Zstd
+  only when strictly smaller. The header is always Zstd with an XXH3-64 checksum; payloads have no
+  checksum. There is no byte-determinism guarantee.
+- `Build()` returns one `byte[]`; `Write(Stream)` streams and leaves the stream open. Builder calls
+  are repeatable and do not consume the builder.
+- Paths are normalized/validated with the same canonical rules as runtime lookups. Duplicate
+  paths, serialization failures, and write failures throw `Bork2dException`; null/invalid path
+  arguments throw `ArgumentNullException`/`ArgumentException`.
+- See the [pack tooling reference](reference.md#13-pack-tooling-bork2dassets-tooling-only) for the
+  full contract.
 
 ## 11. Lifetimes and threading
 
@@ -361,11 +476,14 @@ byte[] raw = await _engine.Assets.LoadData("textures/raw/player");
 ## 12. NativeAOT
 
 - Pass the game as an instance; no reflection construction.
-- Use `LoadAsset<T>` only for types with Nerdbank generated shapes; do not scan assemblies, use
-  `Type.GetType`, runtime TOML, or dynamic code.
+- Use `LoadAsset<T>` only with types that satisfy the `IShapeable<T>` constraint (a compiled
+  Nerdbank/PolyType shape); do not scan assemblies, use `Type.GetType`, runtime TOML, or dynamic
+  code.
 - TOML is source/editor format only; the pack contains MessagePack/raw assets. The editor is JIT
   and not shipped with the game.
-- The runtime libraries are `IsAotCompatible`; AOT publish/run is a required local gate.
+- The runtime libraries are `IsAotCompatible`; AOT publish/run is a required local gate. The
+  default AOT smoke builds a temporary pack with `PackBuilder`, loads a raw and a generated-shape
+  MessagePack asset, browses/exists, and deletes it; the windowed demo uses `WithoutAssets()`.
 
 See [NativeAOT](../architecture/nativeaot.md).
 
