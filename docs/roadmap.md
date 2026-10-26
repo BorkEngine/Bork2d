@@ -1,10 +1,10 @@
 # Implementation Roadmap
 
 > **Status:** M0 complete; **M1 merged into `develop` (2026-10-25, PR #1)**; **M2 (SDL windowed
-> platform) merged into `develop` (2026-10-26, PR #2)**. **M3 (assets: pack, VFS, descriptors)
-> merged into `develop` (2026-10-26, PR #4)**. The sequence is
-> dependency-ordered. A milestone is done when its exit criterion is demonstrated, not merely when
-> code is merged.
+> platform) merged into `develop` (2026-10-26, PR #2)**; **M3 (assets: pack, VFS, descriptors)
+> merged into `develop` (2026-10-26, PR #4)**; **the D-035 asset-reference refactor merged (PR #6,
+> 2026-10-26)**. The sequence is dependency-ordered. A milestone is done when its exit criterion is
+> demonstrated, not merely when code is merged.
 
 ## 1. How to read this roadmap
 
@@ -25,7 +25,7 @@
 | `Bork2d.Assets` | Current (M3/D-035) | v1 pack reader/writer, public `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`, canonical paths, base/overlay VFS, one loader thread with `LoadData`/`LoadAsset<T>`, and generic pack-time reference validation. |
 | `Bork2d.Render` | Empty | Reference-wired; no Vulkan implementation (M6/M8). |
 | `Bork2d.Editor` | Absent | Not in the solution (M5). |
-| `Bork2d.Tests` | Current | 519 deterministic xUnit tests (ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix, fake-SDL window/input/loop/time, pack/VFS/loader, asset references/reference validation, runtime asset lifecycle) plus 9 opt-in real-window tests. |
+| `Bork2d.Tests` | Current | 519 deterministic xUnit tests (ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix, fake-SDL window/input/loop/time, pack/VFS/loader, asset references/reference validation, runtime asset lifecycle) plus 9 opt-in real-window tests (528 total). |
 | NativeAOT | M3 baseline | Libraries use `IsAotCompatible` + trim/AOT analyzers; `Bork2d.AotSmoke` publishes/runs locally with zero warnings, headless with a temporary pack and `--windowed --ticks 120`. Local gate only. |
 | CI | Current | GitHub Actions on PRs to `develop` and pushes to `develop`: restore, format verify, build, test. No AOT or real-window job. |
 | Runnable engine | Partial (windowed shell + assets) | A real window, input, time, and an uncapped tick loop plus the pack/VFS/loader/CPU descriptor pipeline; no renderer yet. |
@@ -71,78 +71,41 @@ M1-facing questions resolved, roadmap accepted.
 **Status:** merged into `develop` (2026-10-25, PR #1).
 
 Goal: project graph, public surface, builder contract, root-owned scene graph, logging, quality
-gate, and AOT smoke. Evidence: 135 tests, Debug/Release zero warnings, format clean,
-`Bork2d.AotSmoke` publishes/runs locally with zero AOT/trim warnings. Full record:
-[M1 spec](specs/m1-foundation.md).
+gate, and AOT smoke. Evidence: 135 tests; Debug/Release zero warnings; format clean;
+`Bork2d.AotSmoke` publishes and runs locally with zero AOT/trim warnings. See the
+[M1 record](specs/m1-foundation.md).
 
 ### M2 — SDL windowed platform
 
-**Status:** merged into `develop` (2026-10-26, PR #2). Full record:
-[M2 spec](specs/m2-sdl-platform.md).
+**Status:** merged into `develop` (2026-10-26, PR #2).
 
 Goal: a window that ticks, reads input, and exits cleanly; no Vulkan yet.
 
-- Add `Silk.NET.SDL` 2.23.0 and the SDL2 native runtime; document distribution and the 2.30.8
-  runtime version the shipped `SDL2.dll` reports.
-- Create a Vulkan-capable window that is visible at `Run()` start, with event pumping and
-  close/resize/fullscreen/cursor/focus handling.
-- Input: physical scancodes, five mouse buttons, position/delta/wheel, UTF-16 text, edge
-  accumulation, focus loss/regain.
-- Window-only `IWindow`/`IInput` and advanced `ITime`; headless/offscreen stay one-tick.
-- `IEngine.Exit`, `Dispose`, close, and post-shutdown contracts; uncapped loop until M7 supplies
-  backpressure.
-- Tests: 292 total (283 deterministic, 9 opt-in real-window), including the two real-window
-  `Run()` exit paths.
+- Visible window at `Run()` start on one engine-owned OS/window thread, with queued window commands.
+- Full physical-scancode input, five mouse buttons, text, focus/minimize/DPI semantics.
+- Windowed-only real loop plus `Exit`/close/`Dispose` contracts; headless/offscreen stay one-tick.
 
-Evidence: Debug/Release builds with zero warnings; 292 tests (283 in CI, 292 with
-`BORK2D_RUN_WINDOW_TESTS=1`); format/docs/`git diff --check` clean; AOT publish zero warnings with
-`SDL2.dll`; headless AOT run exit 0 with the M1 assertions; windowed AOT
-`--windowed --ticks 120` exit 0; a 5,000,000-tick run with an observed live window
-(`MainWindowTitle = "Bork2d M2 Demo"`) exit 0; interactive Escape/close and WASD movement verified.
-
-Exit: sample opens a window, shows a title, prints/moves on input, exits via close/Escape; edge
-semantics match the reference; no Vulkan device; no `Sleep`/target rate; clean shutdown.
+Evidence: 292 tests (283 deterministic + 9 opt-in); zero-warning Debug/Release and AOT publish;
+`--windowed --ticks 120` exit 0 at 150% DPI; a 5,000,000-tick live-window run exit 0. See the
+[M2 record](specs/m2-sdl-platform.md) and the
+[D-M2 decisions](decisions.md#m2-platform-decisions-approved-2026-10-26).
 
 ### M3 — Assets: pack, VFS, descriptors
 
-**Status:** merged into `develop` (2026-10-26, PR #4); all five WPs complete. Full
-record and acceptance evidence: [M3 spec](specs/m3-assets.md).
+**Status:** merged into `develop` (2026-10-26, PR #4). The sprite-specific parts were superseded by
+the [D-035 refactor](specs/refactor-asset-references.md) (merged, PR #6).
 
 Goal: load, overlay, browse, and describe packed assets without a renderer.
 
-- `assets.pck` reader/writer per [Assets and tooling](architecture/assets-and-tooling.md): magic,
-  28-byte prefix, compressed/XXH3-64 header, `uint64` offsets, `uint32` length/size,
-  `PackHeader`/`PackEntry` integer-keyed shapes, validation, missing/malformed base pack throws.
-  No per-asset schema version (pack version only) and no policy size caps (intrinsic/streaming
-  bounds).
-- Base pack opened in `Run()` before the window and `Setup`; `WithoutAssets()` opts out; relative
-  filesystem paths resolve against the process current directory.
-- VFS: default `assets.pck`, `LoadPack`, later-wins overlays, no unload, merged `Browse`/`Exists`.
-- Compression: header always Zstd max; debug payloads uncompressed; release max Zstd only when
-  smaller; no payload checksum; no byte-level determinism.
-- One asset loader thread, FIFO queue, and no runtime CPU resource table in M3 (the pre-D-035
-  sprite resource types were removed); cancellation and join at shutdown.
-- Texture descriptors + raw RGBA8 payloads; sprite asset schema (texture, UVs, pixels-per-unit
-  scale, pivot, topology, optional `indices`; no vertices array). M3 loads sprite + descriptor,
-  not the raw payload.
-- `IAssets.LoadData`/`Exists`/`Browse`/`LoadPack`; shape-generic `LoadAsset<T>` (M3 tests use
-  internal shapes; game types can satisfy the compiled `IShapeable<T>` constraint, with no M4
-  dependency); public `SpriteAsset`/`TextureDescriptor` and `AssetRef<T>`/`DataRef` references
-  (D-035); public tooling `Bork2d.Assets.Pack.PackBuilder` in `Bork2d.Assets`.
-- Headless tests: overlays, browse, corrupt header/checksum, missing pack, loader threads, AOT smoke.
+- v1 `assets.pck` reader/writer and public `PackBuilder`; canonical paths; base/overlay VFS.
+- One loader thread with `LoadData`/`LoadAsset<T>`; `Browse`/`Exists`/`AssetInfo`; `WithoutAssets()`.
+- Public `SpriteAsset`/`TextureDescriptor`/`AssetRef<T>`/`DataRef` after D-035; the old
+  `LoadSprite`/`Sprite`/resource-table path is gone.
 
-Exit: a pack with texture/sprite/data loads; overlays shadow correctly; corrupt and missing packs
-fail safely; loader is race-free under stress; AOT headless can load/browse without reflection/GPU.
-
-**Evidence (WP5):** Debug/Release builds with zero warnings/errors; 587 tests (578 deterministic +
-9 opt-in real-window) pass; `dotnet format`/docs/`git diff --check` clean; NativeAOT publish has
-zero AOT/trim warnings with `SDL2.dll` present; the AOT default run exits `0` after building,
-browsing, and loading a 2-entry temporary pack (one raw asset, one generated-shape MessagePack
-asset) and one `Setup`/`Tick`/`Teardown`; `--windowed --ticks 120` exits `0` with `WithoutAssets()`;
-the runtime tests cover the base-pack-before-window order, empty VFS, overlays, the platform/
-`Setup`/`Tick`+`Teardown`/fatal error matrix, post-shutdown `ObjectDisposedException`, logging, and
-`Dispose()` before/after `Run()`. Detailed commands/results are in
-[M3 spec §12.3](specs/m3-assets.md#123-acceptance-evidence-recorded-by-wp5).
+Evidence at merge: 587 tests (578 deterministic + 9 opt-in); zero-warning Debug/Release and AOT
+publish; the default AOT run exited 0 with a **2-entry** pack (5 entries after D-035); crash-free
+overlay/corruption matrix. The current tree has 528 tests (519 + 9). See the
+[M3 record](specs/m3-assets.md).
 
 ### M4 — Serialization and bake
 
@@ -197,7 +160,8 @@ Goal: bounded run-ahead snapshot ring for windowed/offscreen, plus timer-paced h
 
 - Three-slot ring (`Free/Writing/Ready/Rendering`); slots held until the GPU fence; tick waits only
   when full; newest `Ready` wins; older snapshots dropped.
-- No target tick rate/deadline/`Sleep` in windowed/offscreen; `MaxDeltaTime` clamp only.
+- No target tick rate/deadline/`Sleep` in windowed/offscreen; the builder's `WithMaxDeltaTime`
+  gameplay clamp only.
 - Headless loop with no ring, paced by `ticksPerSecond` (default 60, `0` uncapped).
 - Capture after `Tick`: unordered traversal into internal value-only `CameraSnapshot` /
   `SpriteSnapshot`, layer flattening, immutable snapshots.
@@ -298,15 +262,8 @@ unloading, public offscreen readback.
 
 ## 9. Open decisions
 
-The five M2 decisions (window visibility timing, fullscreen mode, minimize behavior, exposing the
-mode, and DPI/`IWindow.Size`) are resolved in the [M2 spec §4.1](specs/m2-sdl-platform.md#41-roadmap-open-decisions-resolved-by-this-spec)
-and the [decision log](decisions.md).
-
-The five M3 decisions are resolved by the approved [M3 spec §4](specs/m3-assets.md#4-locked-decisions)
-and implemented/merged (M3 merged 2026-10-26, PR #4):
-Zstd is the .NET 11 built-in (`ZstandardStream`, max quality 22); no automatic retry; no loose-file
-overlay; no policy size caps (`uint32` entry length/size, `uint64` offset, intrinsic/streaming
-bounds); RGBA8 + sRGB only. Remaining open decisions:
+Resolved choices are recorded in the [decision log](decisions.md), including the M2 and M3
+approvals; only unresolved choices are listed here.
 
 | Decision | Needed by | Default if unresolved |
 | --- | --- | --- |
@@ -330,10 +287,10 @@ bounds); RGBA8 + sRGB only. Remaining open decisions:
 | Milestone | Status | Evidence |
 | --- | --- | --- |
 | M0 Documentation | Complete (2026-10-25) | Docs set, decision log, accepted ownership/pack/editor/pacing decisions. |
-| M1 Foundation/AOT | Merged (2026-10-25, PR #1) | 135 tests; Debug/Release zero warnings; format clean; AOT smoke publishes/runs locally; CI build/test/format on PRs to `develop` and `develop` pushes. [M1 spec](specs/m1-foundation.md). |
-| M2 SDL platform | Merged (2026-10-26, PR #2) | 292 tests (283 in CI, 292 with `BORK2D_RUN_WINDOW_TESTS=1`); Debug/Release zero warnings; format/docs clean; AOT headless and `--windowed --ticks 120` exit 0 with `SDL2.dll`; live-window 5,000,000-tick run exit 0; Escape/close graceful. [M2 spec](specs/m2-sdl-platform.md#125-acceptance-evidence-recorded-by-wp5). |
-| M3 Assets/pack | Merged (2026-10-26, PR #4) | 587 tests (578 deterministic + 9 opt-in real-window); Debug/Release zero warnings; format/docs clean; AOT publish zero AOT/trim warnings with `SDL2.dll`; default AOT run exit 0 loading a 2-entry temporary pack (raw + generated-shape MessagePack) and one tick; `--windowed --ticks 120` exit 0 with `WithoutAssets()`; crash-free pack/overlay failure matrix. [M3 spec](specs/m3-assets.md#123-acceptance-evidence-recorded-by-wp5). |
-| Asset-reference refactor | PR open (2026-10-26, D-035, PR #6) | 519 deterministic tests plus 9 opt-in real-window tests; Debug/Release zero warnings; format/docs/`git diff --check` clean; AOT publish zero AOT/trim warnings; default AOT run exit 0 with a 5-entry pack including the public `SpriteAsset`/`TextureDescriptor` shapes; `--windowed --ticks 120` exit 0. [Refactor spec](specs/refactor-asset-references.md). |
+| M1 Foundation/AOT | Merged (2026-10-25, PR #1) | 135 tests; Debug/Release zero warnings; format clean; AOT smoke publishes/runs locally; CI build/test/format on PRs to `develop` and `develop` pushes. [M1 record](specs/m1-foundation.md). |
+| M2 SDL platform | Merged (2026-10-26, PR #2) | 292 tests (283 in CI, 292 with `BORK2D_RUN_WINDOW_TESTS=1`); Debug/Release zero warnings; format/docs clean; AOT headless and `--windowed --ticks 120` exit 0 with `SDL2.dll`; live-window 5,000,000-tick run exit 0; Escape/close graceful. [M2 record](specs/m2-sdl-platform.md). |
+| M3 Assets/pack | Merged (2026-10-26, PR #4) | 587 tests (578 deterministic + 9 opt-in real-window); Debug/Release zero warnings; format/docs clean; AOT publish zero AOT/trim warnings with `SDL2.dll`; default AOT run exit 0 loading a 2-entry temporary pack (raw + generated-shape MessagePack) and one tick; `--windowed --ticks 120` exit 0 with `WithoutAssets()`; crash-free pack/overlay failure matrix. [M3 record](specs/m3-assets.md). |
+| Asset-reference refactor | Merged (2026-10-26, PR #6, D-035) | 528 tests (519 deterministic + 9 opt-in real-window); Debug/Release zero warnings; format/docs/`git diff --check` clean; AOT publish zero AOT/trim warnings; default AOT run exit 0 with a 5-entry pack including the public `SpriteAsset`/`TextureDescriptor` shapes; `--windowed --ticks 120` exit 0. [Refactor record](specs/refactor-asset-references.md). |
 | M4 Serialization/bake | Not started | — |
 | M5 Editor | Not started | — |
 | M6 Vulkan bring-up | Not started | — |
@@ -345,8 +302,8 @@ bounds); RGBA8 + sRGB only. Remaining open decisions:
 ## 11. Related documents
 
 - [Architecture overview](architecture/overview.md) — invariants.
-- [M1 spec](specs/m1-foundation.md), [M2 spec](specs/m2-sdl-platform.md), [M3 spec](specs/m3-assets.md)
-  — historical records and the current draft.
+- [M1 record](specs/m1-foundation.md), [M2 record](specs/m2-sdl-platform.md),
+  [M3 record](specs/m3-assets.md) — historical milestone records.
 - [Decision log](decisions.md) — accepted decisions.
 - [Scene ownership](architecture/scene-ownership.md), [Threading](architecture/threading.md),
   [Runtime lifecycle](architecture/runtime-lifecycle.md).

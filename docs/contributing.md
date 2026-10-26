@@ -1,9 +1,9 @@
 # Contributing
 
-> **Status:** current through M3 (merged into `develop` 2026-10-26, PR #4). The warning/style/format/AOT
-> gates and the docs link check are active. CI runs docs link check, build, tests, and format
-> verification on PRs to `develop` and pushes to `develop`; the NativeAOT publish/run smoke
-> (headless with a temporary pack, and windowed) is a required local gate.
+> **Status:** current through M3 plus the D-035 asset-reference refactor (merged, PR #6). The
+> warning/style/format/AOT gates and the docs link check are active. CI runs docs link check, build,
+> tests, and format verification on PRs to `develop` and pushes to `develop`; the NativeAOT
+> publish/run smoke (headless with a temporary pack, and windowed) is a required local gate.
 
 ## 1. Prerequisites
 
@@ -17,7 +17,7 @@
   `SDL2.dll` next to the executable. Deployment is therefore a normal `dotnet publish -r win-x64`;
   a clean machine needs the Windows desktop session and whatever runtime the SDL2 build requires
   (full clean-machine validation remains M10).
-- Vulkan 1.3 GPU/driver for windowed/offscreen checks from M6 (not needed in M2).
+- Vulkan 1.3 GPU/driver for windowed/offscreen checks from M6 (not needed before M6).
 - NativeAOT toolchain (MSVC) for the local publish gate.
 
 ## 2. Build, test, and local gates
@@ -60,9 +60,10 @@ $smoke = 'src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.
 
 The publish must report zero AOT/trim warnings and contain `SDL2.dll`. The default run builds and
 deletes its own temporary pack (no fixtures), then exits `0` only when the scene, raw-asset,
-MessagePack-shape, browse/exists, and one-tick assertions pass. The windowed run uses
-`WithoutAssets()`, so it needs a desktop session but no pack; it asserts one `Setup`, exactly `N`
-ticks, and one `Teardown`. The interactive `--windowed` run is the manual visibility/input check.
+MessagePack-shape, public sprite/descriptor, browse/exists, and one-tick assertions pass. The
+windowed run uses `WithoutAssets()`, so it needs a desktop session but no pack; it asserts one
+`Setup`, exactly `N` ticks, and one `Teardown`. The interactive `--windowed` run is the manual
+visibility/input check.
 
 ## 3. Build, style, and warnings
 

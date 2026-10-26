@@ -92,8 +92,8 @@ position = viewProj * vec4(transform * local, 0, 1)
 
 The fragment shader samples `textures[TextureIndex]` and multiplies `Tint`. The asset also carries
 `indices` (`ushort[]?`): null for `Quad`, non-null for `TriangleStrip`/`Triangles` indexing the
-generated corners. v1 validates and preserves those assets but draws `Quad` only; the indexed path
-is M8 work and is never approximated as a quad.
+generated corners. Pack creation preserves those assets; field validation belongs to the M4
+baker/editor. v1 draws `Quad` only; the indexed path is M8 work and is never approximated as a quad.
 ## 5. One-draw contract
 
 One descriptor set per frame in flight:
@@ -160,7 +160,7 @@ zNdc = 0
 ```
 
 The negation is the only place the Y-up API meets Vulkan clip space. `ScreenToWorld`/`WorldToScreen`
-are `Planned`; camera and sprite property defaults are owned by
+are `Planned` (not declared in `Bork2d.Api` yet); camera and sprite property defaults are owned by
 [API reference defaults](../api/reference.md#13-defaults) and applied in M8.
 ## 8. Sorting, layers, and clears
 ### 8.1 Sort order
@@ -241,7 +241,7 @@ Provisional targets (validated in M8, not commitments):
 | Vulkan instance/device/swapchain, offscreen targets, dynamic rendering | `Planned` M6 |
 | Snapshot consumption, frame handoff, bounded run-ahead | `Planned` M7 |
 | Sprite pipeline, bindless pages, shader build, asset upload | `Planned` M8 |
-| Headless | `Partial`: mode selection/validation only; no renderer or GPU path exists |
+| Headless | `Current` for the asset/tick path with no SDL/Vulkan; the renderer is intentionally absent because headless has no GPU work |
 
 ## 12. Related documents
 
@@ -249,4 +249,4 @@ Provisional targets (validated in M8, not commitments):
 - [Assets and tooling](assets-and-tooling.md#8-texture-descriptors) — descriptors, sprite assets.
 - [Runtime lifecycle](runtime-lifecycle.md#2-modes) — windowed/offscreen/headless modes.
 - [API guide](../api/guide.md#5-cameras), [reference](../api/reference.md#13-defaults) — cameras.
-- [Roadmap](../roadmap.md), [decision log](../decisions.md#d-009-vulkan-13-instancing-bindless-dynamic-rendering).
+- [Roadmap](../roadmap.md), [decision log](../decisions.md) (D-009).

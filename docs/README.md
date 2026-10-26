@@ -2,13 +2,12 @@
 
 > **Status:** **M0 complete; M1 merged into `develop` (2026-10-25, PR #1); M2 merged into `develop`
 > (2026-10-26, PR #2); M3 (assets: pack, VFS, descriptors) merged into `develop` (2026-10-26,
-> PR #4); the post-M3 asset-reference refactor (D-035) is implemented in this tree.** The
-> repository contains the M1 build/quality baseline, public contracts, root-owned scene tree,
-> builder, logging, the NativeAOT smoke app, the M2 SDL windowed host (window, input, time,
-> uncapped loop), and the M3 asset pipeline (pack reader/writer, VFS, loader, public
-> `SpriteAsset`/`TextureDescriptor`, typed `AssetRef<T>`/`DataRef` links, runtime integration). TOML
-> bake is M4; the editor and renderer are target designs for later milestones. Check status markers
-> before treating an API as implemented.
+> PR #4); the post-M3 asset-reference refactor (D-035) is merged (PR #6).** The repository contains the M1
+> build/quality baseline, public contracts, root-owned scene tree, builder, logging, the NativeAOT
+> smoke app, the M2 SDL windowed host (window, input, time, uncapped loop), and the M3 asset
+> pipeline (pack reader/writer, VFS, loader, public `SpriteAsset`/`TextureDescriptor`, typed
+> `AssetRef<T>`/`DataRef` links, runtime integration). TOML bake is M4; the editor and renderer are
+> target designs for later milestones. Check status markers before treating an API as implemented.
 
 Bork2d is a focused 2D game engine for .NET: **Vulkan 1.3** rendering, **SDL2** windowing through
 **Silk.NET**, a NativeAOT runtime, and **`assets.pck`** assets addressed by canonical paths.
@@ -23,7 +22,8 @@ Game code consumes exactly two assemblies:
 | `Bork2d.Runtime` | Public startup surface: builder, app host, modes. Composes the internal engine and later platform/render/asset implementations. |
 
 `Bork2d.Editor` is the planned JIT/Avalonia tool surface (M5). `Bork2d.Common`, `Bork2d.Assets`, and
-`Bork2d.Render` are implementation details.
+`Bork2d.Render` are implementation details, except the tooling-only pack writer
+(`Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`).
 
 ## Status markers
 
@@ -37,8 +37,11 @@ Game code consumes exactly two assemblies:
 | `Deferred` | Explicitly postponed; the linked document records the questions. |
 | `Out of scope` | Not planned for v1. |
 
-Code is current truth for `Current` items; docs plus the roadmap are target truth for `Planned`
-items. The [decision log](decisions.md) records why.
+`Current` markers describe what the tree implements; `Planned` markers describe the target. The
+current milestone spec and the accepted architecture decisions define intended behavior. When code
+and documentation disagree, that is a defect: record it and reconcile it in the owning documentation
+and the milestone change ([AGENTS.md §10](../AGENTS.md)) rather than assuming either side
+automatically wins. The [decision log](decisions.md) records the accepted choices and their status.
 
 ## Documentation map
 
@@ -56,12 +59,12 @@ items. The [decision log](decisions.md) records why.
 | [API guide](api/guide.md) | game developers | Startup, modes, game loop, layers, cameras, sprites, input, assets. |
 | [API reference](api/reference.md) | game developers | Members, defaults, threading, status, errors. |
 | [Implementation roadmap](roadmap.md) | planner | M0–M10, exit criteria, risks, open decisions, progress. |
-| [M1 spec](specs/m1-foundation.md) | implementers | Historical M1 goal, decisions, and acceptance evidence. |
-| [M2 spec](specs/m2-sdl-platform.md) | implementers | Implemented M2 SDL window/input decisions, semantics, work packages, evidence, acceptance. |
-| [M3 spec](specs/m3-assets.md) | implementers | Historical M3 asset pack/VFS/descriptor decisions, semantics, work packages, and acceptance evidence. |
-| [Asset-reference refactor spec](specs/refactor-asset-references.md) | implementers | Public sprite/texture assets, typed `AssetRef`/`DataRef` links, pack-time reference validation, and the removal of sprite handles/resources. |
+| [M1 record](specs/m1-foundation.md) | implementers | Historical M1 goal, delivery, and acceptance evidence. |
+| [M2 record](specs/m2-sdl-platform.md) | implementers | Historical M2 SDL window/input decisions, semantics, and evidence. |
+| [M3 record](specs/m3-assets.md) | implementers | Historical M3 asset pack/VFS decisions, delivery, and evidence; D-035 supersessions. |
+| [Asset-reference refactor record](specs/refactor-asset-references.md) | implementers | Public sprite/texture assets, typed `AssetRef`/`DataRef` links, pack-time reference validation, and the removal of sprite handles/resources. |
 | [Contributing](contributing.md) | contributors | Build, warnings, style, format, docs check, PR checklist. |
-| [Decision log](decisions.md) | everyone | Accepted decisions and consequences. |
+| [Decision log](decisions.md) | everyone | Accepted decisions and their status (superseded entries kept as history). |
 
 ### Reading paths
 
@@ -94,6 +97,7 @@ One fact has one owner. Update the owner and link to it; do not copy.
 | AOT constraints | [NativeAOT](architecture/nativeaot.md) |
 | Logging | [Logging](architecture/logging.md) |
 | Milestone status/sequence | [Roadmap](roadmap.md) |
+| Milestone history and evidence | [`docs/specs/`](specs/) |
 | Accepted decisions | [Decision log](decisions.md) |
 | Build and quality gates | [Contributing](contributing.md) |
 

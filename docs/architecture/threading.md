@@ -16,7 +16,7 @@
 | --- | :-: | :-: | :-: | --- |
 | **Tick** | yes | yes | yes | Windowed loop, time, `IGame.Setup/Tick/Teardown`, input freeze/text dispatch, tick scope, scene/asset requests, snapshot capture (M7), shutdown. May be any host thread. |
 | **OS/window** | yes | no | no | SDL video/events and window operations; public `IWindow` calls are marshaled here. |
-| **Render** | yes | yes | no | Vulkan device, swapchain or offscreen targets, uploads, sprite resolution, sorting, instance building, draws, fences, present. |
+| **Render** | no (M7) | no (M7) | no | Vulkan device, swapchain or offscreen targets, uploads, sprite resolution, sorting, instance building, draws, fences, present. Target design; no render thread exists yet. |
 | **Asset loader** | yes | yes | yes | One per app: pack reads, decompression, and MessagePack deserialization. It caches no resolved assets and never touches SDL, Vulkan, or game entities. |
 | **Game workers** | yes | yes | yes | Game-spawned threads on distinct entities; the game joins them before `Tick` returns. |
 
@@ -207,7 +207,8 @@ stable; events applied after the freeze belong to the next one.
 - **Accumulation.** A non-repeat key down on an up key sets held plus a press edge; an up on a down
   key sets a release edge and clears held; duplicates, repeats, undefined scancodes, the unknown
   scancode zero, and buttons other than the five supported ones are ignored. The five mouse buttons
-  map from SDL's one-based index and pressed mask (`Left=1`, `Middle=2`, `Right=3`, `X1=4`, `X2=5`).
+  map from SDL's one-based index and pressed mask (`Left=1`, `Middle=2`, `Right=3`, `Back`/X1=4,
+  `Forward`/X2=5).
   Motion is stored in window points; the wheel accumulates with natural scrolling normalized so
   positive is up/away; text is appended character by character (a surrogate pair is two chars).
 - **Focus.** Loss synthesizes a release for every held key/button, clears held state, wheel, and
@@ -341,8 +342,8 @@ Thread-specific rules:
 
 `Bork2d.Tests` covers §2's scene rules, the M2 window/input/loop threading (fake SDL seam, bounded
 joins, no sleeps), the M3 asset loader (one thread, FIFO order, asynchronous completion,
-cancellation/join, resource-table ordering), and parts of 5 today; 1, 2, 4, and renderer pacing
-come with M7. The suite is 588 tests: 579 deterministic tests in CI plus 9 opt-in real-window tests
+cancellation/join, enqueue ordering), and parts of 5 today; 1, 2, 4, and renderer pacing
+come with M7. The suite is 528 tests: 519 deterministic tests in CI plus 9 opt-in real-window tests
 (`BORK2D_RUN_WINDOW_TESTS=1`).
 
 ## 10. Related documents
@@ -351,4 +352,4 @@ come with M7. The suite is 588 tests: 579 deterministic tests in CI plus 9 opt-i
 - [Scene ownership](scene-ownership.md) — root-owned lifetime model.
 - [Rendering](rendering.md) — windowed/offscreen render paths.
 - [Assets and tooling](assets-and-tooling.md) — pack mounting and loader ownership.
-- [Decision D-003](../decisions.md#d-003-bounded-run-ahead-snapshot-ring) — bounded run-ahead.
+- [Decision D-003](../decisions.md) — bounded run-ahead.

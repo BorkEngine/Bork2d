@@ -2,7 +2,7 @@
 
 > **Status:** the project graph is `Current` and enforced by the dependency test. M1, M2, and M3
 > are implemented and merged into `develop` (2026-10-26, PR #4), and the post-M3 asset-reference
-> refactor (D-035) is implemented in this tree. `Bork2d.Runtime` hosts the SDL window, input, time,
+> refactor (D-035) is merged (PR #6). `Bork2d.Runtime` hosts the SDL window, input, time,
 > the windowed loop, and the app-scoped asset service. `Bork2d.Assets` provides the v1 pack
 > reader/writer, its public tooling surface
 > (`Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`), canonical paths,
@@ -27,7 +27,7 @@ All projects target `net11.0` and live in `src/Bork2d/`, listed in
 | `Bork2d.Assets` | `Bork2d.Api`, `Bork2d.Common` | `Current` (M3/D-035) | v1 pack reader/writer, structural validation, Zstd/XXH3-64, canonical paths, public `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, the app-scoped service (one thread, FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, `AssetException` failures), and generic pack-time reference validation. |
 | `Bork2d.Render` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets` | `Empty` (wired) | Vulkan device, swapchain or offscreen targets, pipelines, bindless textures, draws, present. |
 | `Bork2d.AotSmoke` | `Bork2d.Api`, `Bork2d.Assets`, `Bork2d.Common`, `Bork2d.Runtime` | `Current` | NativeAOT smoke executable: the default headless one-tick run with a temporary pack, plus the opt-in `--windowed [--ticks N]` SDL demo; the local publish/run gate. Not a game template project. |
-| `Bork2d.Tests` | all five engine projects plus `Bork2d.AotSmoke` | `Current` | 519 deterministic xUnit tests plus 9 opt-in real-window tests, including pack-format/writer, VFS/path/browse, loader/threading, generic reference validation, asset-reference/pack-build contracts, asset error contract, runtime asset lifecycle/error-matrix, and dependency-surface tests. The smoke reference copies the app next to the tests; the dependency test loads it by name to check its references. |
+| `Bork2d.Tests` | all five engine projects plus `Bork2d.AotSmoke` | `Current` | 519 deterministic xUnit tests plus 9 opt-in real-window tests (528 total), including pack-format/writer, VFS/path/browse, loader/threading, generic reference validation, asset-reference/pack-build contracts, asset error contract, runtime asset lifecycle/error-matrix, and dependency-surface tests. The smoke reference copies the app next to the tests; the dependency test loads it by name to check its references. |
 | `Bork2d.Editor` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets` (+ Avalonia) | `Planned` (M5) | Avalonia editor library/app; JIT. |
 
 `Bork2d.Runtime` references `Microsoft.Extensions.Logging` `11.0.0-rc.1.26425.128` and `ZLogger`
@@ -74,8 +74,9 @@ Rules behind the matrix:
   through the API interface.
 - `Assets` implements `IAssets` and owns pack loading/serialization. It may use `Common` internals;
   it must not reference `Render`.
-- `Render` consumes internal snapshot and resource-table contracts. It must not reference
-  `Runtime` or call SDL; window/surface lifetime is handed to it, offscreen targets are its own.
+- `Render` consumes internal snapshot contracts and resolves public `SpriteAsset`/`TextureDescriptor`
+  values at draw time. It must not reference `Runtime` or call SDL; window/surface lifetime is handed
+  to it, offscreen targets are its own.
 - `Runtime` is the composition root: builder, app host, SDL window/input (windowed), Vulkan
   bootstrap, mode selection, ZLogger configuration, service wiring.
 - `AotSmoke` uses `Runtime` for the host, `Api`/`Common` for the scene graph, and the public
@@ -94,7 +95,7 @@ otherwise.
 
 | Assembly | Public types |
 | --- | --- |
-| `Bork2d.Api` | `IEngine<TLayer>`, `IGame<TLayer>`, `ITime`, `IWindow`, `IInput`, `IAssets`, `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, `AssetRef<TAsset>`, `DataRef`, `SpriteAsset`, `TextureDescriptor`, `SpriteTopology`, `AssetException`, `AssetErrorKind`, `Bork2dException`, plus the `AssetRefMarshaler<T>`/`DataRefMarshaler` serialization infrastructure. The types are grouped by area namespace (§4). `IAssets.LoadAsset<T>` carries the `where T : class, IShapeable<T>` constraint (M3). `Bork2d.Api` grants `Bork2d.Assets` internal access to the non-public reference marker used by pack-time traversal (D-035). |
+| `Bork2d.Api` | `IEngine<TLayer>`, `IGame<TLayer>`, `ITime`, `IWindow`, `IInput`, `IAssets`, `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, `AssetRef<TAsset>`, `DataRef`, `SpriteAsset`, `TextureDescriptor`, `SpriteTopology`, `AssetException`, `AssetErrorKind`, `Bork2dException`, plus the `AssetRefMarshaler<TAsset>`/`DataRefMarshaler` serialization infrastructure. The types are grouped by area namespace (§4). `IAssets.LoadAsset<T>` carries the `where T : class, IShapeable<T>` constraint (M3). `Bork2d.Api` grants `Bork2d.Assets` internal access to the non-public reference marker used by pack-time traversal (D-035). |
 | `Bork2d.Runtime` | `Bork2dAppBuilder<TLayer>`, `Bork2dApp`. Nothing else; options, runtime state, and implementation types stay internal. |
 | `Bork2d.Assets` | **Tooling only:** `Bork2d.Assets.Pack.PackBuilder`, `Bork2d.Assets.Pack.PackCompressionMode`. Every implementation type (pack reader/archive, header schema, paths, Zstd helpers, the internal loader service, reference collector, and validation) stays internal. Game code must not reference this assembly; it builds packs in tooling/tests and the runtime consumes them. |
 | `Bork2d.Editor` | `Bork2dEditorBuilder`, `Bork2dEditorApp`, and the public editor service types needed by `Project.Editor` (`Planned`, M5). |

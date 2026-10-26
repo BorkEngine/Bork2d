@@ -1,8 +1,8 @@
 # Architecture Overview
 
-> **Status:** M1, M2, and M3 (pack, VFS, descriptors, runtime integration) are merged into
-> `develop` (2026-10-26, PR #4); the post-M3 asset-reference refactor (D-035) is implemented in this
-> tree. The builder, validation, windowed SDL host (window/input/time/loop), one-tick
+> **Status:** M1, M2, and M3 (pack, VFS, runtime integration) are merged into
+> `develop` (2026-10-26, PR #4); the post-M3 asset-reference refactor (D-035) is merged (PR #6). The
+> builder, validation, windowed SDL host (window/input/time/loop), one-tick
 > headless/offscreen host, scene graph, logging, asset pipeline, and AOT baseline are `Current`; the
 > editor (M5), Vulkan and frame handoff (M6/M7), and the sprite renderer (M8) are `Planned`. TOML
 > bake is M4. Status detail is in [the roadmap](../roadmap.md).
@@ -43,8 +43,9 @@ slicing and editing of custom serializable classes.
   field widths and streaming bounds). TOML is source/editor format only; entities have no IDs. The
   pack writer is the public tooling exception in `Bork2d.Assets`; it validates references at pack
   build.
-- **Headless and offscreen modes.** Servers run with no window, GPU, or render thread at a
-  configured tick rate; tests render windowless to an internal offscreen target.
+- **Headless and offscreen modes.** Servers run with no window, GPU, or render thread; headless is
+  one tick today and becomes timer-paced at a configured rate in M7. Offscreen rendering is
+  M6/M8.
 - **Diagnostics and quality.** Microsoft.Extensions.Logging/ZLogger, `IEngine.LoggerFactory`;
   warnings and style violations are build errors.
 - **A short, composable startup API** through a builder in `Bork2d.Runtime`.
@@ -96,13 +97,13 @@ object. Every mode owns one app-scoped asset loader thread. Headless/offscreen s
 one `Tick`, and `Teardown` on the calling thread. The render thread (M6/M7) is `Planned`; the
 threads never touch each other's domain (SDL, Vulkan, or game objects).
 
-| Mode | Tick | OS/window thread | Render thread | SDL | Vulkan | Pacing (M2) |
+| Mode | Tick | OS/window thread | Render thread | SDL | Vulkan | Pacing (current) |
 | --- | :-: | :-: | :-: | :-: | :-: | --- |
 | Windowed | yes | yes | no (M6/M7) | yes | no (M6) | uncapped until M7 |
 | Offscreen | yes | no | no (M6/M7) | no | no (M6) | one tick (paced loop M7) |
 | Headless | yes | no | no | no | no | one tick (timer-paced M7) |
 
-All three modes are selected and validated by the builder. In M2 only windowed mode runs a real
+All three modes are selected and validated by the builder. Only windowed mode currently runs a real
 loop; the window is visible from `Run()` start and destroyed before `Run()` returns. Offscreen and
 headless keep the one-tick M1 sequence until M7. In the target design the tick publishes an
 immutable snapshot into a three-slot ring that the render thread consumes, and the tick may wait
@@ -125,7 +126,7 @@ bug, not a style preference.
 7. **Layers are single bits, culling masks combinations**: layer `0` or a multi-bit layer is invalid and skipped with a debug diagnostic.
 8. **World units are abstract and Y-up; rotation is CCW degrees normalized to `[0, 360)`**: `Camera.Size` is half the visible height, and sprite assets carry UVs, a pivot, a topology, optional indices, and a pixels-per-unit scale.
 9. **There is no depth buffer in v1**: draw order is layer then `ZIndex`, ties are unspecified with no entity-ID tie-breaker (D-026), and `ClearKind.Depth` is reserved.
-10. **At most one window and one app process in v1**: modes are windowed, offscreen, or headless; headless has no window or GPU and uses its tick rate (default 60, `0` = uncapped).
+10. **At most one window and one app process in v1**: modes are windowed, offscreen, or headless; headless has no window or GPU and stores its tick rate (default 60, `0` = uncapped; pacing arrives in M7).
 11. **No steady-state per-frame allocations** in the tick snapshot builder or renderer hot path.
 12. **The runtime is NativeAOT- and trim-safe**: no runtime reflection, assembly scanning, runtime TOML, or dynamic code; MessagePack shapes are source-generated.
 13. **`assets.pck` is the runtime asset source**: TOML and source images live in `Project.Common`, only baked MessagePack/raw assets ship, overlays are packs (later wins), and a missing base pack throws at `Run()` unless the app calls `WithoutAssets()`. There is no per-asset version and no policy size cap.

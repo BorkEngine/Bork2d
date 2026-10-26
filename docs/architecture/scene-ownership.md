@@ -114,5 +114,5 @@ the leak semantics.
 - [Runtime lifecycle](runtime-lifecycle.md#1-public-startup-contract) — builder, startup,
   shutdown.
 - [Threading](threading.md#2-tick-scoped-concurrency) — locking and the tick window.
-- [Decision D-023](../decisions.md#d-023-root-owned-scene-graph) — decision record.
-- [Decision D-026](../decisions.md#d-026-no-entity-ids-unordered-tree-camera-zindex-internal-snapshots).
+- [Decision D-023](../decisions.md) — decision record.
+- [Decision D-026](../decisions.md) — no entity IDs, unordered tree, camera `ZIndex`.

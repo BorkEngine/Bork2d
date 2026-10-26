@@ -7,7 +7,7 @@
 > `IWindow`/`IInput` proxies and advances `ITime`; headless/offscreen keep throwing stubs and a `0`
 > clock until M7. The base asset pack (or the `WithoutAssets()` empty filesystem) opens before the
 > window and `Setup` and closes after `Teardown`. GPU work and renderer pacing are later
-> milestones. The suite is 588 tests: 579 deterministic tests in CI plus 9 opt-in real-window
+> milestones. The suite is 528 tests: 519 deterministic tests in CI plus 9 opt-in real-window
 > tests.
 
 ## 1. Public startup contract
@@ -91,9 +91,9 @@ app.Run();
 - `IEngine.Assets` returns the real asset service in every mode, including `WithoutAssets()`. No
   mode initializes SDL or Vulkan because of assets. Headless/offscreen load packs without SDL;
   windowed loads them without any GPU work.
-- Windowed/offscreen have **no** target rate, frame limiter, deadline wait, `Sleep`, or spin; the
-  windowed loop is uncapped until M7 adds frame-handoff backpressure. Headless pacing is M7, so
-  its stored tick rate has no effect yet.
+- Windowed mode has **no** target rate, frame limiter, deadline wait, `Sleep`, or spin; the loop is
+  uncapped until M7 adds frame-handoff backpressure. Offscreen stays one-tick until M6/M7, and
+  headless pacing is M7, so its stored tick rate has no effect yet.
 
 ## 3. Builder options and validation
 
@@ -126,7 +126,7 @@ Validation and creation performed by `Build()`:
 4. Window-only options are rejected in headless/offscreen.
 5. `TLayer` is an `int`-backed `[Flags]` enum with 1–32 named single-bit values; `None = 0` is
    allowed and composite non-zero values are rejected.
-6. Sizes are positive; `MaxDeltaTime` is greater than zero and not `NaN` (positive infinity
+6. Sizes are positive; the max-delta option is greater than zero and not `NaN` (positive infinity
    passes); headless tick rate is `>= 0`; the window title and pack path are non-empty; an explicit
    `WithAssetsPack` plus `WithoutAssets()` is rejected.
 7. Validation runs first, then the factory is created and the `WithLogging` callback invoked once
@@ -147,9 +147,12 @@ also reject an invalid string immediately with `ArgumentException`; null argumen
 
 | Property | M2 status | Semantics |
 | --- | --- | --- |
-| `ITime.DeltaTime` | `Current` (windowed) | Raw interval between tick starts, exactly `0` on the first tick, otherwise clamped to `MaxDeltaTime`. `0` in the one-tick modes. |
+| `ITime.DeltaTime` | `Current` (windowed) | Raw interval between tick starts, exactly `0` on the first tick, otherwise clamped to the builder's `WithMaxDeltaTime` value. `0` in the one-tick modes. |
 | `ITime.Time` | `Current` (windowed) | `0` on the first tick, then raw monotonic seconds since that tick, never clamped. `0` in the one-tick modes. |
-| `MaxDeltaTime` | `Current` (windowed) | Validated at `Build()` and applied by the windowed clock; a gameplay clamp, not a pacing delay. |
+
+- `ITime` has no `MaxDeltaTime` member. The clamp is configured with
+  `WithMaxDeltaTime` (default `0.25` s), validated at `Build()`, and applied by the windowed clock;
+  it is a gameplay clamp, not a pacing delay.
 
 - The loop calls `NewFrame` once per tick on the tick thread before text dispatch and `Tick`; the
   one-tick modes never call it, so both values stay `0` until M7.
@@ -158,7 +161,7 @@ also reject an invalid string immediately with `ArgumentException`; null argumen
 - `ITime` reads take one short lock that publishes both values together, so a reader never sees a
   torn double, and remain readable after `Run()` returns.
 - Variable timestep: no fixed step, accumulator, `TickCount`, or interpolation. After a stall
-  `Time` still jumps but `DeltaTime` is limited to `MaxDeltaTime`.
+  `Time` still jumps but `DeltaTime` is limited to the configured clamp.
 
 ## 5. Tick loop and pacing
 
@@ -294,9 +297,9 @@ internal to `Bork2d.Runtime` and has no public surface; the runtime host starts 
 - The loop order is `input.Freeze()` → `time.NewFrame()` → `input.DispatchText()` → `game.Tick()`,
   so text handlers observe the current tick's time and events that arrive during `Tick` belong to
   the next freeze.
-- `IWindow` calls may originate on any thread and are marshaled to the OS/window thread. Title
-  applies immediately; size and fullscreen change the window; cursor visibility toggles; close
-  requests a graceful exit after the current tick.
+- `IWindow` calls may originate on any thread and are marshaled to the OS/window thread. Title,
+  size, fullscreen, and cursor commands apply on the next pump; close requests a graceful exit after
+  the current tick.
 - While minimized, ticks continue and `Size` keeps the last non-minimized framebuffer size;
   presentation is irrelevant until M6.
 - `ITime` follows D-M2-16 (first-tick zero, raw monotonic `Time`, clamped `DeltaTime`) and keeps its

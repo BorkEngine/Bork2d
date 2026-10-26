@@ -1,7 +1,7 @@
 # NativeAOT
 
 > **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4) and the post-M3
-> asset-reference refactor (D-035). `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`,
+> asset-reference refactor (D-035, merged PR #6). `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`,
 > and `Bork2d.Runtime` compile with `IsAotCompatible` plus the trim and AOT analyzers, and
 > `Bork2d.AotSmoke` publishes and runs with zero AOT/trim warnings. The default smoke builds a small
 > temporary pack with the public `PackBuilder`, loads a raw asset, a generated-shape data asset, and
@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | `Bork2d.Api` | Yes | Referenced by the AOT game; must avoid dynamic/reflection traps. |
 | `Bork2d.Common` | Yes | Runtime scene, transforms, time, snapshot policy, generated shapes. |
-| `Bork2d.Assets` | Yes | Pack parsing, decompression, MessagePack decoding, resource tables. |
+| `Bork2d.Assets` | Yes | Pack parsing, decompression, MessagePack decoding, and pack-time reference validation. |
 | `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. |
 | `Bork2d.Runtime` | Yes | Builder, host, and app-owned logging. |
 | `Bork2d.AotSmoke` | Yes | One-tick smoke executable published with `PublishAot`; the local gate. It references `Api`/`Assets`/`Common`/`Runtime` to build and load a temporary pack. The game template's `Project.Desktop` takes over this role in M9. |
@@ -82,16 +82,17 @@ reflection-based construction, which also allows constructor injection. See the
 - Runtime data assets are MessagePack (M3/M4), decoded by
   [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) **source-generated
   shapes**; no reflection resolver is configured.
-- M1 pins `Nerdbank.MessagePack` `1.4.95` in `Bork2d.Common`; `Bork2d.Assets` pins the same version
-  plus `PolyType` `1.4.1` and `System.IO.Hashing` `11.0.0-rc.1.26425.128`. An internal
-  `[GenerateShape]` smoke type and round-trip helper prove the generated-shape path;
+- M1 pins [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) `1.4.95` in
+  `Bork2d.Common`; `Bork2d.Assets` adds `PolyType` `1.4.1` and `System.IO.Hashing`
+  `11.0.0-rc.1.26425.128`. The full pin list is in [Projects §1](projects.md#1-current-projects).
+  An internal `[GenerateShape]` smoke type and round-trip helper prove the generated-shape path;
   `Bork2d.AotSmoke` sees them through the intentional `InternalsVisibleTo`. The v1 pack
   header/entry shapes and the public `TextureDescriptor`/`SpriteAsset` shapes are `Current`.
-  Descriptors and sprites use property-name keys (not `[Key]`), an integer `SpriteTopology`, no
-  per-asset version, and Nerdbank's generated `System.Numerics.Vector2` shape (a map with `X`/`Y`);
-  there is no `vertices` field. `AssetRef<T>`/`DataRef` use public PolyType path marshalers so a
-  consumer assembly can generate a closed shape for a reference property; the marshalers are
-  infrastructure types, not game-facing API.
+  Descriptors and sprites use PascalCase property-name keys (not `[Key]`), an integer
+  `SpriteTopology`, no per-asset version, and Nerdbank's generated `System.Numerics.Vector2` shape
+  (a map with `X`/`Y`); there is no `vertices` field. `AssetRef<T>`/`DataRef` use public PolyType
+  path marshalers so a consumer assembly can generate a closed shape for a reference property; the
+  marshalers are infrastructure types, not game-facing API.
 - `LoadAsset<T>` is declared as `Task<T> LoadAsset<T>(string assetPath) where T : class,
   IShapeable<T>` (D-M3-22). `T` must carry a compiled generated shape (for example `[GenerateShape]`
   on the root type), so a missing shape is a **compile-time** error. There is no unconstrained call,

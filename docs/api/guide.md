@@ -1,11 +1,11 @@
 # API Guide
 
-> **Status:** implemented M3. M1 (foundation), M2 (SDL windowed host), and M3 (pack, VFS,
-> descriptors, runtime integration) exist in `Bork2d.Runtime`/`Bork2d.Assets` and are merged into
-> `develop` (2026-10-26, PR #4). `Build()` validates and `Run()` runs the uncapped windowed loop (window, input,
-> time) or the one-tick headless/offscreen sequence, opening the base pack (or the
-> `WithoutAssets()` empty filesystem) before the window and `Setup`. The renderer is M8. See the
-> [API reference](reference.md#12-runtime-surface).
+> **Status:** implemented M3 plus the D-035 asset-reference refactor (merged, PR #6). M1
+> (foundation), M2 (SDL windowed host), and M3 (pack, VFS, runtime integration) exist in
+> `Bork2d.Runtime`/`Bork2d.Assets` and are merged into `develop`. `Build()` validates and `Run()` runs
+> the uncapped windowed loop (window, input, time) or the one-tick headless/offscreen sequence,
+> opening the base pack (or the `WithoutAssets()` empty filesystem) before the window and `Setup`.
+> The renderer is M8. See the [API reference](reference.md#12-runtime-surface).
 
 ## 1. What you reference
 
@@ -49,7 +49,8 @@ app.Run();
 - `Build()` validates the configuration. `Run()` blocks until shutdown. Windowed mode creates one
   visible window and runs an uncapped `Tick` loop until `IEngine.Exit()`, the close button, or a
   fatal error; headless/offscreen call `Setup`, exactly one `Tick`, and `Teardown`, then return.
-  There is no GPU work, pack loading, render thread, or frame limiter in M2.
+  There is no GPU work or render thread yet; the base pack is opened by `Run()` (M3), and the
+  windowed loop has no frame limiter.
 - `using`/`Dispose()` detaches the root's direct children and the window/input proxies and disposes
   the app-owned logger factory. It never calls `Teardown` again. `Dispose()` while `Run()` is active
   throws `InvalidOperationException`; call `IEngine.Exit()` or close the window first.
@@ -105,6 +106,7 @@ and `N >= 1`. Invalid or unknown arguments print usage and exit with code 2.
 ```csharp
 using System.Numerics;
 using Bork2d.Api;
+using Bork2d.Api.Assets;
 using Bork2d.Api.Rendering;
 using Bork2d.Api.Scene;
 using Microsoft.Extensions.Logging;
@@ -203,7 +205,7 @@ camera.ZIndex = 0;                         // ascending order; higher applies la
 - `Viewport` is normalized `(x, y, width, height)`, top-left origin. `ZIndex` orders cameras
   ascending, higher later, default `0`; ties are unspecified (M8). Split screen uses two cameras
   with viewports `(0, 0, 0.5, 1)` and `(0.5, 0, 0.5, 1)`;
-  `ScreenToWorld`/`WorldToScreen` are `Planned`.
+  `ScreenToWorld`/`WorldToScreen` are `Planned` (not declared in `Bork2d.Api` yet).
 - Multiple cameras are supported; each non-empty camera issues one draw (M8). A later camera with
   `Clear.Color` wipes its viewport, while `Clear.None` overlays.
 
@@ -232,7 +234,7 @@ sprite.LocalScale = new Vector2(2, 2);
   non-drawable until the texture and GPU page are ready (M8). Do not block.
 - `ZIndex` orders within a layer, higher later; ties are unspecified. `Tint` multiplies the
   texture, `White` is neutral.
-- `FlipX`/`FlipY` are `Planned`.
+- `FlipX`/`FlipY` are `Planned` (not declared in `Bork2d.Api` yet).
 - Parenting preserves the world transform: assigning `Parent` later keeps the child in place,
   cycles and setting the root's own parent throw `InvalidOperationException`, and a non-engine or
   foreign-engine parent throws `Bork2dException`. `ITransform.DetachAll()` detaches direct children
@@ -266,8 +268,9 @@ public void Tick()
     var scroll = input.MouseWheelDelta; // positive = up/away; reset next tick
 }
 
-public void Setup()
+public void Setup(IEngine<GameLayer> engine)
 {
+    _engine = engine;
     _engine.Input.OnTextTyped += character => _name += character;
 }
 ```
@@ -286,16 +289,17 @@ public void Setup()
   zero delta. Input is not part of render snapshots. `KeyCode`/`MouseButton` numeric values are
   unstable: never serialize them, and undefined values are safe `false` queries.
 - Full semantics are in the [API reference](reference.md#6-iinput).
+
 ## 8. Time
 
 ```csharp
-var dt = (float)_engine.Time.DeltaTime; // seconds, clamped to MaxDeltaTime
+var dt = (float)_engine.Time.DeltaTime; // seconds, clamped by the builder's WithMaxDeltaTime
 var now = _engine.Time.Time;            // raw seconds since the first tick
 ```
 
 - `Status: Current (M2, windowed).` The first tick publishes `Time = 0` and `DeltaTime = 0`;
   afterwards `Time` is raw monotonic seconds (never clamped) and `DeltaTime` is the interval
-  between tick starts clamped by `MaxDeltaTime` (default 0.25 s).
+  between tick starts clamped by the builder's `WithMaxDeltaTime` (default 0.25 s).
 - In headless/offscreen the one-tick host never advances the clock, so both values stay `0` until
   M7. Do not assume a non-zero delta or a tick count.
 - Variable timestep; no accumulator, fixed step, or render interpolation. The windowed loop is
@@ -372,30 +376,20 @@ TextureDescriptor texture = await _engine.Assets.LoadAsset(player.Texture);
 byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
 ```
 
-- **Base pack and `WithoutAssets`.** By default the app opens `assets.pck` at `Run()`. Build with
-  `.WithAssetsPack("path/to/game.pck")` to choose another filesystem path (relative to the process
-  current directory, or absolute), or `.WithAssetsPack` plus a script that sets the working
-  directory. If the app has no base pack, call `.WithoutAssets()`: it starts an empty virtual
-  filesystem with no pack file, still starts the loader thread, and still allows `LoadPack`
-  overlays mounted later (for example during `Setup`). `WithAssetsPack` and `WithoutAssets` are
-  mutually exclusive; using both fails `Build()`. A missing or malformed base pack fails `Run()`
-  with `Bork2dException` before any window or `Setup`.
-- **Typed assets and references.** `LoadAsset<T>` is constrained to
-  `where T : class, IShapeable<T>` (D-M3-22). `T` must carry a compiled `[GenerateShape]` shape
-  (PolyType); a missing shape is a compile-time error, not a runtime fallback. There is no
-  reflection resolver. Use `LoadData` for arbitrary bytes, including raw texture payloads.
-  `SpriteAsset.Texture` is an `AssetRef<TextureDescriptor>` and `TextureDescriptor.Payload` is a
-  `DataRef`; resolve them with the reference overloads. A `null` reference means absent; an absent
-  reference is not a load request and throws `ArgumentException`. The reference values serialize as
-  canonical path strings. `PackBuilder` validates every non-null reference when it builds a pack;
-  the runtime trusts the pack.
-- **`SpriteAsset` and `TextureDescriptor`.** Both are public MessagePack assets in
-  `Bork2d.Api.Assets`. `SpriteAsset` carries the texture reference, UVs, pixels-per-unit scale,
-  pivot, topology, and optional indices. `TextureDescriptor` carries the raw payload reference,
-  dimensions, and sampler state. Load them with `LoadAsset<SpriteAsset>`/`LoadAsset<TextureDescriptor>`.
-  A missing sprite texture link does not fail the sprite load; loading the link later faults
-  `NotFound`. Field validation (UV extents, dimensions, pivot, topology) belongs to the M4
-  baker/editor, not the runtime loader.
+- **Base pack and `WithoutAssets`.** By default the app opens `assets.pck` at `Run()`. Use
+  `.WithAssetsPack("path/to/game.pck")` for another filesystem path (relative to the process current
+  directory, or absolute). If the app has no base pack, call `.WithoutAssets()`: it starts an empty
+  virtual filesystem, still starts the loader thread, and still allows `LoadPack` overlays. The two
+  are mutually exclusive; a missing or malformed base pack fails `Run()` with `Bork2dException`
+  before any window or `Setup`.
+- **Typed assets and references.** `LoadAsset<T>` requires a compiled `[GenerateShape]` shape
+  (`where T : class, IShapeable<T>`, D-M3-22); a missing shape is a compile-time error, not a
+  runtime fallback. `SpriteAsset.Texture` is an `AssetRef<TextureDescriptor>` and
+  `TextureDescriptor.Payload` is a `DataRef`; resolve them with the reference overloads. A `null`
+  reference means absent and is not a load request (it throws `ArgumentException`). Both sprite and
+  descriptor are public MessagePack assets in `Bork2d.Api.Assets`; field validation (UV extents,
+  dimensions, pivot, topology) belongs to the M4 baker/editor, not the loader. `PackBuilder`
+  validates every non-null reference when it builds a pack; the runtime trusts the pack.
 - **Loading and errors.** A valid missing path, a raw entry passed to `LoadAsset<T>`, and
   decode/size failures fault the returned task instead of throwing:
 
@@ -413,42 +407,21 @@ byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
   `AssetErrorKind` is `NotFound`, `RawAsset`, `Decode`, `Io`, or `InvalidData`; `AssetPath` names
   the canonical path (or the filesystem path for an IO failure). Null/invalid path arguments still
   throw `ArgumentNullException`/`ArgumentException` from the call. Pack open/parse/mount failures
-  are `Bork2dException`, not `AssetException`. See the
-  [error contract](reference.md#71-assetexception-and-asseterrorkind).
-- **No retry, no loose files.** A failed lookup or decode stays failed for the process; v1 has no
-  automatic retry, pack unload, or loose-file fallback. Mount a corrected overlay (a later mount
-  shadows an earlier path) or restart the app.
-- **Shutdown.** Stopping the service cancels queued and in-flight load tasks (they complete as
-  canceled) and joins the loader. After that, every `IAssets` member throws
-  `ObjectDisposedException`; the `IEngine.Assets` getter never throws by itself.
-- **Paths.** Public inputs are normalized (`\` → `/`, invariant lowercase) and then validated:
-  lowercase letters, digits, `_`, `-`, and `/` separators; no leading/trailing slash, empty
-  segment, `.`/`..` segment, or source extension. `textures/bg.png` is invalid; use
-  `textures/bg`. Null throws `ArgumentNullException`, other invalid paths throw
-  `ArgumentException`, and a valid missing path is simply absent.
-- **`LoadPack`.** Takes a filesystem path (relative to the process current directory or absolute),
-  validates and mounts it synchronously. Later mounts shadow earlier paths; mounting the same file
-  twice is allowed. A bad/missing pack throws `Bork2dException` with the resolved path and leaves
-  the stack unchanged. Mount before the first tick when possible; there is no unload, replacement,
-  loose-file fallback, or automatic retry in v1.
-- **`Browse`/`Exists`.** `Browse(null)` returns every visible path once (shadowed entries hidden),
-  sorted by `Path` ordinal; a non-null prefix must be canonical and matches on a `/` segment
-  boundary (`sprites/pl` matches `sprites/pl` and `sprites/pl/idle`, not `sprites/player`). An
-  empty prefix is invalid. `Exists` is an exact lookup, not a prefix match. Results are a
-  materialized snapshot; do not browse per frame.
-- **`AssetInfo`.** Reports `Path`, `IsRaw`, `IsCompressed`, `Length`, `Size`, and `PackPath` from
-  the header without decompressing. `PackPath` is the supplied pack identifier, not the resolved
-  absolute path.
-- **Sprite assets.** `LoadAsset<SpriteAsset>` returns the packed sprite exactly as stored. It does
-  not resolve `Texture`, load the descriptor, read the raw payload, or run field checks. Render
-  `SpriteAsset`s with `ISpriteRender.Sprite`; `null` hides the renderable. A missing texture link is
-  non-drawable and only faults when that link is loaded. There is no handle, readiness state, or
-  placeholder. See [Assets and tooling](../architecture/assets-and-tooling.md#9-sprite-assets).
-- **Lifetime.** All members are thread-safe. At `Run()` shutdown (after `Teardown`) the service
-  cancels pending load tasks and joins the loader. After that, members throw
-  `ObjectDisposedException`; the `IEngine.Assets` getter itself keeps returning the disposed
-  service and never throws. `Dispose()` before `Run()` disposes the unstarted service without
-  opening a pack or starting a thread.
+  are `Bork2dException`, not `AssetException`.
+- **Packs, paths, and browsing.** Public asset paths are normalized (`\` → `/`, invariant lowercase)
+  then validated: lowercase letters, digits, `_`, `-`, and `/` separators; no leading/trailing
+  slash, empty or `.`/`..` segment, or source extension (`textures/bg.png` is invalid). `LoadPack`
+  takes a filesystem path, mounts synchronously on top of the stack, and leaves the stack unchanged
+  on failure; there is no unload. `Browse(null)` returns every visible path once, sorted by `Path`;
+  a canonical prefix matches on a `/` segment boundary. `Exists` is an exact lookup. Results are a
+  materialized snapshot, so do not browse per frame. `AssetInfo` reports `Path`, `IsRaw`,
+  `IsCompressed`, `Length`, `Size`, and `PackPath` from the header without decompressing. See the
+  [reference](reference.md#7-iassets) for the exact member contract.
+- **Lifetime and retry.** All members are thread-safe. There is no automatic retry, pack unload, or
+  loose-file fallback: a failed lookup stays failed unless a later overlay shadows the path or the
+  app restarts. At `Run()` shutdown (after `Teardown`) the service cancels queued and in-flight load
+  tasks and joins the loader; after that every `IAssets` member throws `ObjectDisposedException`,
+  while the `IEngine.Assets` getter keeps returning the disposed service and never throws.
 
 ### Building a pack (tooling only)
 
@@ -509,8 +482,9 @@ builder.Write("assets.pck"); // overwrites; relative paths resolve against the c
 - TOML is source/editor format only; the pack contains MessagePack/raw assets. The editor is JIT
   and not shipped with the game.
 - The runtime libraries are `IsAotCompatible`; AOT publish/run is a required local gate. The
-  default AOT smoke builds a temporary pack with `PackBuilder`, loads a raw and a generated-shape
-  MessagePack asset, browses/exists, and deletes it; the windowed demo uses `WithoutAssets()`.
+  default AOT smoke builds a temporary pack with `PackBuilder`, loads raw data, generated-shape
+  MessagePack data, a public texture descriptor and sprite, browses/exists, and deletes it; the
+  windowed demo uses `WithoutAssets()`.
 
 See [NativeAOT](../architecture/nativeaot.md).
 

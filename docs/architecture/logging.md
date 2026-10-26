@@ -7,7 +7,7 @@
 > with ticks and elapsed time, and the asset service logs start/overlay/error/stop events; there is
 > no per-frame or per-asset-per-tick logging. Configuration is identical in all modes, and the
 > default path runs in the AOT smoke (headless with a pack and `--windowed`) with zero trim/AOT
-> warnings. The suite is 588 tests (579 deterministic plus 9 opt-in real-window tests).
+> warnings. The suite is 528 tests (519 deterministic plus 9 opt-in real-window tests).
 
 ## 1. Surface
 
@@ -102,9 +102,9 @@ game code creates its own categories.
 | Category | Source |
 | --- | --- |
 | `Bork2d.Runtime` | builder, modes, lifecycle, windowing |
-| `Bork2d.Common` | entities, snapshots, time |
+| `Bork2d.Common` | reserved for scene/time/snapshot diagnostics; no current log sites |
 | `Bork2d.Assets` | pack parsing, decompression, loading |
-| `Bork2d.Render` | device, swapchain, pipelines, frames |
+| `Bork2d.Render` | target renderer diagnostics (M6/M8); no current log sites |
 | game-defined | `CreateLogger("MyGame")` or `CreateLogger<T>()` |
 Startup logs use `Bork2d.Runtime` and one structured message after validation:
 
