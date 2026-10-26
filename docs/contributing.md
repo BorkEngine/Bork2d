@@ -1,9 +1,11 @@
 # Contributing
 
-> **Status:** current through M3 plus the D-035 asset-reference refactor (merged, PR #6). The
+> **Status:** current through M3 plus the D-035 asset-reference refactor (merged, PR #6) and M4
+> serialization/bake (implementation complete on `m-4/common`, PR pending). The
 > warning/style/format/AOT gates and the docs link check are active. CI runs docs link check, build,
 > tests, and format verification on PRs to `develop` and pushes to `develop`; the NativeAOT
-> publish/run smoke (headless with a temporary pack, and windowed) is a required local gate.
+> publish/run smoke (headless loading the **baked fixture pack**, and windowed) is a required local
+> gate.
 
 ## 1. Prerequisites
 
@@ -70,22 +72,25 @@ NativeAOT publish/run is required for runtime-affecting changes (both runs are l
 ```powershell
 dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
 $smoke = 'src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe'
-& $smoke                                  # headless smoke: scene + temporary pack load/browse
+& $smoke                                  # headless: scene + baked fixture pack load/assertions
 & $smoke --windowed --ticks 120           # windowed gate: exit 0 after exactly 120 ticks
 ```
 
-The publish must report zero AOT/trim warnings and contain `SDL2.dll`. The AOT smoke imports
-[`build/Bork2d.Bake.targets`](../build/Bork2d.Bake.targets), so its build generates the bake host and
-bakes the prepared `Bork2d.BakeFixture` pack to `$(TargetDir)assets.pck` and copies it next to the
-published executable. WP6 makes the default run load that pack; in WP5 the default run still builds
-and deletes its own temporary pack (no fixtures), then exits `0` only when the scene, raw-asset,
-MessagePack-shape, public sprite/descriptor, browse/exists, and one-tick assertions pass. The
+The publish must report zero AOT/trim warnings and contain `assets.pck` and `SDL2.dll`. The AOT smoke
+imports [`build/Bork2d.Bake.targets`](../build/Bork2d.Bake.targets), so its build generates the bake
+host and bakes the prepared `Bork2d.BakeFixture` pack to `$(TargetDir)assets.pck` and copies it next
+to the published executable. The default headless run mounts that pack from
+`AppContext.BaseDirectory` (not the process CWD) and exits `0` only when the scene, the baked class
+root (nested struct/`Color`/texture reference), the `StatsRoot` through `AssetRef<StatsRoot>`, the
+sprite, the descriptor, the exact raw payload, browse/exists, and the 5-entry count all pass. The
 windowed run uses `WithoutAssets()`, so it needs a desktop session but no pack; it asserts one
 `Setup`, exactly `N` ticks, and one `Teardown`. The interactive `--windowed` run is the manual
-visibility/input check. The publish output must not contain `Bork2d.Bake`, `Bork2d.Bake.Cli`,
-`Bork2d.BakeHost`, Tomlyn, or StbImageSharp assemblies (`Bork2d.BakeFixture` is the expected
-game-side common assembly). `dotnet clean src/Bork2d/Bork2d.slnx` removes the generated host, the
-incremental state under `<descriptor>/obj/bork2d/bake`, and the pack.
+visibility/input check. Inspect the publish directory: it is a NativeAOT single-file output plus
+PDBs, so the managed assemblies are linked in. It must contain `assets.pck`, `SDL2.dll`, and the
+game-side `Bork2d.BakeFixture` PDB, and must not contain a `Bork2d.Bake.dll`, `Bork2d.Bake.Cli*`,
+`Bork2d.BakeHost*`, `Tomlyn*`, or `StbImageSharp*` file. `dotnet clean src/Bork2d/Bork2d.slnx`
+removes the generated host, the prepared fixture copy, the incremental/host state under
+`<descriptor>/obj/bork2d/bake`, and the pack.
 
 ## 3. Build, style, and warnings
 
@@ -117,8 +122,9 @@ public API; do not remove it.
 
 - Game code references `Bork2d.Api`/`Bork2d.Runtime` only; implementation projects are internal.
   The one public exception is the tooling-only pack writer in `Bork2d.Assets`.
-- `Bork2d.AotSmoke` may reference `Bork2d.Assets` for the public pack-tooling surface used by the
-  AOT pack proof; it uses the same project-reference rules as any other project and updates the
+- `Bork2d.AotSmoke` imports the bake targets and references the game-side `Bork2d.BakeFixture`; it
+  loads the baked pack through the public `IAssets` API and does not reference the pack tooling or
+  `Bork2d.Assets` directly (Assets remains in the publish through `Bork2d.Runtime`). It updates the
   dependency test/docs when the graph changes.
 - Editor/tooling stays JIT; no Avalonia, TOML, or reflection in runtime projects.
 - Runtime stays NativeAOT/trim-safe: no runtime reflection, assembly scanning, runtime TOML,
@@ -133,8 +139,9 @@ public API; do not remove it.
 
 - Add unit tests with behavior changes; pack/format tests for asset changes; threading tests for
   handoff changes; GPU/visual tests for renderer changes. Asset/pack tests build packs in memory or
-  in temp files (`PackBuilder`/`TempPackDirectory`) and never commit binary fixtures; the default
-  AOT smoke builds and deletes its own pack. Asset-loader tests are deterministic: they use a narrow
+  in temp files (`PackBuilder`/`TempPackDirectory`) and never commit binary fixtures; the bake tests
+  generate their own source trees and textures, and the default AOT smoke loads the pack baked by
+  the targets (no committed binary fixture). Asset-loader tests are deterministic: they use a narrow
   internal hook plus bounded signals/joins (no sleeps, retries, or timing assertions) to prove FIFO
   order, asynchronous completion, and shutdown cancellation.
 - Real-window tests use `[WindowFact]`, are skipped without `BORK2D_RUN_WINDOW_TESTS=1`, share the

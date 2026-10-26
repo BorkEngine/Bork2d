@@ -1,11 +1,12 @@
 # Architecture Overview
 
 > **Status:** M1, M2, and M3 (pack, VFS, runtime integration) are merged into
-> `develop` (2026-10-26, PR #4); the post-M3 asset-reference refactor (D-035) is merged (PR #6). The
-> builder, validation, windowed SDL host (window/input/time/loop), one-tick
-> headless/offscreen host, scene graph, logging, asset pipeline, and AOT baseline are `Current`; the
-> editor (M5), Vulkan and frame handoff (M6/M7), and the sprite renderer (M8) are `Planned`. TOML
-> bake is M4. Status detail is in [the roadmap](../roadmap.md).
+> `develop` (2026-10-26, PR #4); the post-M3 asset-reference refactor (D-035) is merged (PR #6);
+> **M4 serialization and bake is implementation complete on `m-4/common` (final PR pending, not
+> merged)**. The builder, validation, windowed SDL host (window/input/time/loop), one-tick
+> headless/offscreen host, scene graph, logging, asset pipeline, M4 bake tooling, and AOT baseline
+> are `Current`; the editor (M5), Vulkan and frame handoff (M6/M7), and the sprite renderer (M8) are
+> `Planned`. Status detail is in [the roadmap](../roadmap.md).
 
 ## 1. Purpose
 
@@ -21,6 +22,13 @@ three things:
 
 The design also includes a data-only editor (`Planned`, M5): no scene editing, only texture
 slicing and editing of custom serializable classes.
+
+The M4 tooling completes the source pipeline: a committed `bork2d.project.toml` maps source prefixes
+to CLR types, and the JIT `Bork2d.Bake`/`Bork2d.Bake.Cli` bake custom-data TOML and imported
+textures into `assets.pck` through a generated bake host and the unchanged `PackBuilder`. The
+runtime still reads MessagePack only, with compiled `[GenerateShape]` shapes and no TOML or
+reflection. See [Assets and tooling](assets-and-tooling.md#11-build-pipeline) and the
+[M4 spec](../specs/m4-serialization-and-bake.md).
 
 ## 2. Goals
 
@@ -40,7 +48,8 @@ slicing and editing of custom serializable classes.
   later-wins overlays, loads/decompresses in the background, and skips a sprite whose texture link
   is absent or not ready. A pack holds raw payloads and MessagePack assets with **no per-asset
   version** (only the pack prefix version) and **no policy size caps** (intrinsic `uint32`/`uint64`
-  field widths and streaming bounds). TOML is source/editor format only; entities have no IDs. The
+  field widths and streaming bounds). TOML is baked by the JIT M4 tooling and never parsed at
+  runtime; entities have no IDs. The
   pack writer is the public tooling exception in `Bork2d.Assets`; it validates references at pack
   build.
 - **Headless and offscreen modes.** Servers run with no window, GPU, or render thread; headless is
