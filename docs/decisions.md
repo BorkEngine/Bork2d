@@ -8,7 +8,7 @@
 
 | ID | Status | Decision |
 | --- | --- | --- |
-| D-001 | Accepted | Game code references only `Bork2d.Api` and `Bork2d.Runtime`; `Common`, `Assets`, and `Render` stay internal behind `InternalsVisibleTo`; `Editor` is a separate JIT tool surface. |
+| D-001 | Accepted | Game code references only `Bork2d.Api` and `Bork2d.Runtime`; `Common`, `Assets`, and `Render` stay internal behind `InternalsVisibleTo`. `Bork2d.Assets` is public for the M3 pack-tooling surface only (`PackBuilder`, `PackCompressionMode`); `Editor` is a separate JIT tool surface. |
 | D-002 | Accepted | A tick thread owns callbacks, time, and snapshot publication; a render thread owns Vulkan in windowed/offscreen; asset loaders are background threads. The public API has no main-thread affinity. |
 | D-003 | Accepted | Three snapshot slots (`Free → Writing → Ready → Rendering → Free`); the tick runs ahead while slots are free and waits only when the ring is full. Newest `Ready` wins; no target tick rate or `Sleep` in windowed/offscreen. |
 | D-004 | Accepted | Variable timestep: `DeltaTime` is wall-clock between tick starts, clamped by `MaxDeltaTime` (default 0.25 s). No accumulator or render interpolation; headless is timer-paced. |
@@ -17,7 +17,7 @@
 | D-007 | Accepted | Each non-empty camera produces one instanced draw; there is no global one-draw rule. Camera order is `ZIndex` (D-026). |
 | D-008 | Accepted | Abstract units, +X right/+Y up; `Camera.Size` is the half visible height; each sprite asset carries pixels-per-unit scale; the shader generates quad corners; no vertices array. Rotation rules are D-025. |
 | D-009 | Accepted | Vulkan 1.3 + SDL2/Silk.NET, one pipeline of instanced quads, bindless texture pages, dynamic rendering, no depth/MSAA/HDR; sort layer then `ZIndex`; straight alpha. |
-| D-010 | Accepted | Runtime assets live in `assets.pck`: 28-byte prefix, always-compressed and XXH3-64-checksummed MessagePack header, uint64 offsets. Later `LoadPack` overlays win; no unload; a missing base pack is fatal. |
+| D-010 | Accepted | Runtime assets live in `assets.pck`: 28-byte prefix, always-compressed and XXH3-64-checksummed MessagePack header, `uint64` offsets, `uint32` entry length/size. Later `LoadPack` overlays win; no unload; a missing base pack is fatal at `Run()`. M3 adds no per-asset version and no policy size caps (intrinsic/streaming bounds only). |
 | D-011 | Accepted | `Bork2d.Editor` is an Avalonia JIT library/app that slices textures and edits source data; no Vulkan preview and no scene editing. |
 | D-012 | Accepted | TOML is the source format; a JIT baker emits MessagePack plus raw payloads. The NativeAOT runtime reads MessagePack only, using Nerdbank generated shapes. |
 | D-013 | Accepted | Game solution: `Project.Common` (Api), `Project.Desktop` (Runtime + Common), `Project.Editor` (Editor + Common); registrations are compile-time, never assembly scanning. |
@@ -26,7 +26,7 @@
 | D-016 | Accepted | Runtime libraries are NativeAOT/trim-safe: no runtime reflection, TOML, or dynamic code; Nerdbank shapes are generated. Editor and baker stay JIT. |
 | D-017 | Accepted | Two non-windowed modes: `WithHeadless(ticksPerSecond = 60, 0 = uncapped)` and `WithOffscreen(w, h)`; mutually exclusive with each other and with window options. |
 | D-018 | Accepted | `WithGame(instance)` takes a caller-constructed game; no `new()` constraint or `Activator`. The caller keeps it alive through `Run()`. |
-| D-019 | Accepted | Textures use a MessagePack descriptor plus raw RGBA8 payload; sprites are MessagePack assets with texture path, UVs, pixels-per-unit scale, normalized pivot, topology, and optional indices. Source is TOML. |
+| D-019 | Accepted | Textures use a MessagePack descriptor plus raw RGBA8 payload; sprites are MessagePack assets with texture path, UVs, pixels-per-unit scale, normalized pivot, topology, and optional indices. Source is TOML. M3 validates descriptors/sprites and loads sprite + descriptor CPU metadata; raw payload loading/upload is M8. |
 | D-020 | Accepted | Editor extensions use compile-time registrations: `WithProject`, `WithAssetType<T>()`, `WithWindow<T>()`/instance. No assembly scanning. |
 | D-021 | Accepted | Microsoft.Extensions.Logging + ZLogger; `IEngine.LoggerFactory`; `WithLogging`; pretty plain-text console by default. Versions are pinned. |
 | D-022 | Accepted | Warnings-as-errors, `EnforceCodeStyleInBuild`, enforced style rules, `dotnet format --verify-no-changes`, and AOT/trim analyzers on every project. |
@@ -42,14 +42,44 @@
 | D-032 | Accepted | M2 time/exit/lifetime: first tick `Time = DeltaTime = 0`, then raw monotonic `Time` and clamped `DeltaTime`; `Exit()` stops before the next freeze; `Dispose()` during `Run()` throws; after shutdown `IWindow`/`IInput` throw `ObjectDisposedException`, `ITime` stays readable, and `Exit()` is a no-op. |
 | D-033 | Accepted | Accepted fatal-platform-error exception to D-028: after an unrecoverable post-startup SDL error the OS thread may destroy the window before `Teardown`; the proxies remain attached for best-effort access. Normal, `Exit`, and close paths destroy the window only after `Teardown`. |
 
+## M3 asset decisions (approved 2026-10-26)
+
+Semantics, schema details, and the approved derived details are in the [M3 asset spec](specs/m3-assets.md).
+These entries record the accepted decisions only.
+
+| ID | Status | Decision |
+| --- | --- | --- |
+| D-M3-01 | Accepted | The base pack opens in `Run()` before the window platform and `Setup`; `Build()` stays filesystem-free. Missing/malformed base pack → `Bork2dException` before any window/`Setup`/`Teardown`. |
+| D-M3-02 | Accepted | A base pack is required unless `Bork2dAppBuilder.WithoutAssets()` is used; `WithoutAssets` starts an empty VFS and still permits `LoadPack` overlays. `WithAssetsPack` + `WithoutAssets` is a `Build()` error. |
+| D-M3-03 | Accepted | `WithAssetsPack`/`LoadPack` filesystem paths resolve against the process current directory; absolute paths are accepted. |
+| D-M3-04 | Accepted | `Bork2d.Assets` is public for tooling only (`PackBuilder`, `PackCompressionMode`); game code still references only `Api`/`Runtime`. `Bork2d.AotSmoke` references `Bork2d.Assets` for the AOT pack proof. |
+| D-M3-05 | Accepted | Pack v1 uses integer-keyed `PackHeader`/`PackEntry`, `uint32` entry `Length`/`Size`, `uint64` `Offset`, and no per-asset schema version. |
+| D-M3-06 | Accepted | No policy size caps. Bounds come from field widths, the pack file length, range/overlap checks, and .NET allocation limits; `LoadData` is bounded by `Array.MaxLength`, and `LoadAsset<T>` streams. |
+| D-M3-07 | Accepted | Header always maximum-quality Zstd; debug payloads uncompressed; release payloads maximum-quality Zstd only when strictly smaller; no payload checksum. |
+| D-M3-08 | Accepted | No byte-level determinism guarantee; entries are sorted by path but compressed bytes may vary. |
+| D-M3-09 | Accepted | Base pack plus later-wins overlays, no unload; `LoadPack` is synchronous/atomic/thread-safe and a bad overlay is not mounted. |
+| D-M3-10 | Accepted | Asset paths are normalized (lowercase, `\` → `/`) then validated; invalid paths throw `ArgumentException`. `Browse(null)` means all; prefixes match on segments. |
+| D-M3-11 | Accepted | One dedicated asset loader thread, unbounded FIFO queue, tasks complete asynchronously, shutdown cancels pending/in-flight work and joins the thread. |
+| D-M3-12 | Accepted | Sprite and descriptor resources are cached per path; `LoadData` returns a fresh `byte[]` and `LoadAsset<T>` a fresh instance per call; `LoadSprite` is idempotent per path. |
+| D-M3-13 | Accepted | M3 `LoadSprite` resolves the path/allocates a handle synchronously, loads sprite + descriptor asynchronously, and does not load the raw payload (M8). Missing → `Sprite.Empty` + log; failures stay non-renderable. |
+| D-M3-14 | Accepted | `IEngine.Assets` returns a real service in every mode; the getter never throws. After `Run()`/`Dispose`, every `IAssets` member throws `ObjectDisposedException`. |
+| D-M3-15 | Accepted | Pack open/parse/mount failures use `Bork2dException`; asset lookup/decode/IO failures use public `AssetException` with `AssetErrorKind`/`AssetPath`; argument errors use BCL exceptions. |
+| D-M3-16 | Accepted | `LoadAsset<T>` is shape-generic and requires a generated shape; M3 tests use internal shapes and `Project.Common` stays `Api`-only. A missing shape faults with `AssetException` naming `T`. `PackBuilder.AddMessagePack<T>` requires `T : IShapeable<T>`. |
+| D-M3-17 | Accepted | Texture descriptors and sprite assets stay internal; sprite topology is an integer enum in the pack and a string in TOML; only RGBA8/sRGB is accepted; no per-asset version. |
+| D-M3-18 | Accepted | No automatic retry, no loose-file overlay, no KTX2/color-space fields. |
+| D-M3-19 | Accepted | The default AOT smoke run builds a temporary pack, loads raw + generated-shape MessagePack assets, browses/exists, then deletes it; `--windowed` keeps the M2 demo with `WithoutAssets()`. |
+| D-M3-20 | Accepted | `Bork2d.Assets` pins `Nerdbank.MessagePack` 1.4.95, `PolyType` 1.4.1, and `System.IO.Hashing` 11.0.0-rc.1.26425.128; Zstd is the .NET 11 built-in codec. |
+
 ## Detail: implemented and public-contract decisions
 
 ### D-001 Public surface: Api + Runtime
 
 - **Decision:** Only `Bork2d.Api` and `Bork2d.Runtime` are supported for game code.
-  `Common`/`Assets`/`Render` are internal; `Runtime` is the composition root.
-- **Consequences:** Small contract; internals can change. A public type in an internal project is
-  a bug unless intentionally re-exported.
+  `Common`/`Assets`/`Render` are internal; `Runtime` is the composition root. The one exception is
+  the M3 public pack-tooling surface in `Bork2d.Assets` (`PackBuilder`, `PackCompressionMode`),
+  which is for tooling and not part of the game contract.
+- **Consequences:** Small game contract; internals can change. A public type in an internal project
+  is a bug unless intentionally re-exported or part of the documented tooling surface.
 - **Docs:** [Projects and dependencies](architecture/projects.md#3-public-surface-and-assembly-visibility)
 
 ### D-003 Bounded run-ahead snapshot ring

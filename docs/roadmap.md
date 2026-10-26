@@ -1,9 +1,10 @@
 # Implementation Roadmap
 
 > **Status:** M0 complete; **M1 merged into `develop` (2026-10-25, PR #1)**; **M2 (SDL windowed
-> platform) merged into `develop` (2026-10-26, PR #2)**. Next milestone: M3. The sequence is
-> dependency-ordered. A milestone is done when its exit criterion is
-> demonstrated, not merely when code is merged.
+> platform) merged into `develop` (2026-10-26, PR #2)**. The **M3 asset spec is approved
+> (2026-10-26)**; implementation has not started. The sequence is
+> dependency-ordered. A milestone is done when its exit criterion is demonstrated, not merely when
+> code is merged.
 
 ## 1. How to read this roadmap
 
@@ -103,19 +104,29 @@ semantics match the reference; no Vulkan device; no `Sleep`/target rate; clean s
 
 ### M3 — Assets: pack, VFS, descriptors
 
+**Status:** spec approved (2026-10-26); implementation not started. Full record:
+[M3 spec](specs/m3-assets.md).
+
 Goal: load, overlay, browse, and describe packed assets without a renderer.
 
 - `assets.pck` reader/writer per [Assets and tooling](architecture/assets-and-tooling.md): magic,
-  28-byte prefix, compressed/XXH3-64 header, uint64 LE offsets, `PackHeader`/`PackEntry` shapes,
-  validation, missing/malformed base pack throws.
+  28-byte prefix, compressed/XXH3-64 header, `uint64` offsets, `uint32` length/size,
+  `PackHeader`/`PackEntry` integer-keyed shapes, validation, missing/malformed base pack throws.
+  No per-asset schema version (pack version only) and no policy size caps (intrinsic/streaming
+  bounds).
+- Base pack opened in `Run()` before the window and `Setup`; `WithoutAssets()` opts out; relative
+  filesystem paths resolve against the process current directory.
 - VFS: default `assets.pck`, `LoadPack`, later-wins overlays, no unload, merged `Browse`/`Exists`.
-- Compression: header always Zstd; debug payloads uncompressed; release max Zstd only when
-  smaller; no payload checksum.
-- Asset loader threads, immutable resource table, readiness/skipping.
+- Compression: header always Zstd max; debug payloads uncompressed; release max Zstd only when
+  smaller; no payload checksum; no byte-level determinism.
+- One asset loader thread, FIFO queue, immutable resource table, readiness/skipping; cancellation
+  and join at shutdown.
 - Texture descriptors + raw RGBA8 payloads; sprite asset schema (texture, UVs, pixels-per-unit
-  scale, pivot, topology, optional `indices`; no vertices array).
-- `IAssets.LoadData`/`Exists`/`Browse`; `LoadAsset<T>` for built-in MessagePack types; pack builder.
-- Headless tests: overlays, browse, corrupt header/checksum, missing pack, AOT smoke.
+  scale, pivot, topology, optional `indices`; no vertices array). M3 loads sprite + descriptor,
+  not the raw payload.
+- `IAssets.LoadData`/`Exists`/`Browse`/`LoadPack`; shape-generic `LoadAsset<T>` (M3 tests use
+  internal shapes; game types are M4); public tooling `PackBuilder` in `Bork2d.Assets`.
+- Headless tests: overlays, browse, corrupt header/checksum, missing pack, loader threads, AOT smoke.
 
 Exit: a pack with texture/sprite/data loads; overlays shadow correctly; corrupt and missing packs
 fail safely; loader is race-free under stress; AOT headless can load/browse without reflection/GPU.
@@ -275,15 +286,15 @@ unloading, public offscreen readback.
 
 The five M2 decisions (window visibility timing, fullscreen mode, minimize behavior, exposing the
 mode, and DPI/`IWindow.Size`) are resolved in the [M2 spec §4.1](specs/m2-sdl-platform.md#41-roadmap-open-decisions-resolved-by-this-spec)
-and the [decision log](decisions.md). Remaining open decisions:
+and the [decision log](decisions.md).
+
+The five M3 decisions are resolved by the approved [M3 spec §4](specs/m3-assets.md#4-locked-decisions):
+Zstd is the .NET 11 built-in (`ZstandardStream`, max quality 22); no automatic retry; no loose-file
+overlay; no policy size caps (`uint32` entry length/size, `uint64` offset, intrinsic/streaming
+bounds); RGBA8 + sRGB only. Remaining open decisions:
 
 | Decision | Needed by | Default if unresolved |
 | --- | --- | --- |
-| Zstd API shape in .NET 11 | M3 | Adapter behind pack reader/writer; format stays. |
-| Asset failure retry policy | M3 | No automatic retry in v1. |
-| Development loose-file overlay | M3 | Not supported; packs only. |
-| Pack size/path caps | M3 | Provisional: 64 MiB header, 1M assets, 512-byte path. |
-| KTX2 and color-space descriptor fields | M3/M4 | RGBA8 + sRGB only in v1. |
 | Frame count in flight / ring depth | M6/M7 | 2 GPU frames, 3 snapshot slots. |
 | Allocator: minimal suballocator vs VMA | M6 | Minimal first; VMA if profiling demands. |
 | sRGB fallback when no sRGB format exists | M6 | Fail startup; require sRGB. |
@@ -306,7 +317,7 @@ and the [decision log](decisions.md). Remaining open decisions:
 | M0 Documentation | Complete (2026-10-25) | Docs set, decision log, accepted ownership/pack/editor/pacing decisions. |
 | M1 Foundation/AOT | Merged (2026-10-25, PR #1) | 135 tests; Debug/Release zero warnings; format clean; AOT smoke publishes/runs locally; CI build/test/format on PRs to `develop` and `develop` pushes. [M1 spec](specs/m1-foundation.md). |
 | M2 SDL platform | Merged (2026-10-26, PR #2) | 292 tests (283 in CI, 292 with `BORK2D_RUN_WINDOW_TESTS=1`); Debug/Release zero warnings; format/docs clean; AOT headless and `--windowed --ticks 120` exit 0 with `SDL2.dll`; live-window 5,000,000-tick run exit 0; Escape/close graceful. [M2 spec](specs/m2-sdl-platform.md#125-acceptance-evidence-recorded-by-wp5). |
-| M3 Assets/pack | Not started | — |
+| M3 Assets/pack | Spec approved (2026-10-26); implementation not started | [M3 spec](specs/m3-assets.md); decisions recorded in the decision log. |
 | M4 Serialization/bake | Not started | — |
 | M5 Editor | Not started | — |
 | M6 Vulkan bring-up | Not started | — |
@@ -318,7 +329,8 @@ and the [decision log](decisions.md). Remaining open decisions:
 ## 11. Related documents
 
 - [Architecture overview](architecture/overview.md) — invariants.
-- [M1 spec](specs/m1-foundation.md), [M2 spec](specs/m2-sdl-platform.md) — historical and current records.
+- [M1 spec](specs/m1-foundation.md), [M2 spec](specs/m2-sdl-platform.md), [M3 spec](specs/m3-assets.md)
+  — historical records and the current draft.
 - [Decision log](decisions.md) — accepted decisions.
 - [Scene ownership](architecture/scene-ownership.md), [Threading](architecture/threading.md),
   [Runtime lifecycle](architecture/runtime-lifecycle.md).

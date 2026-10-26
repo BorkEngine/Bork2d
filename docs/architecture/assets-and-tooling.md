@@ -1,7 +1,11 @@
 # Assets, Bake, and Editor Tooling
 
-> **Status:** target contract. `Bork2d.Assets` is empty; pack/VFS/descriptors are roadmap **M3**,
-> TOML bake and the pack builder **M4**, and the editor **M5**. M1 ships `IAssets` stubs that throw
+> **Status:** target contract. The **M3 asset spec is approved (2026-10-26)**
+> ([M3 spec](../specs/m3-assets.md)); it supersedes this document's M3-specific statements (base-pack
+> timing, per-asset versioning, size caps, byte determinism, the public pack-tooling surface, and
+> the M3 `LoadSprite` scope) until WP5 reconciles this document. In the current tree `Bork2d.Assets`
+> is still empty; pack/VFS/descriptors are roadmap **M3**, TOML bake and the production bake
+> integration **M4**, and the editor **M5**. M1 ships `IAssets` stubs that throw
 > `NotSupportedException`.
 
 ## 1. End-to-end model
