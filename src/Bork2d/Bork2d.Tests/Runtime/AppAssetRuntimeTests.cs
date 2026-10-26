@@ -1,9 +1,7 @@
 using Bork2d.Api;
 using Bork2d.Api.Assets;
 using Bork2d.Api.Input;
-using Bork2d.Api.Rendering;
 using Bork2d.Assets.Loading;
-using Bork2d.Assets.Resources;
 using Bork2d.Common.Scene;
 using Bork2d.Common.Time;
 using Bork2d.Runtime;
@@ -168,7 +166,7 @@ public sealed class AppAssetRuntimeTests
         var game = new ScriptedGame<GameLayer>();
         IReadOnlyList<AssetInfo>? browse = null;
         bool? exists = null;
-        Sprite sprite = default;
+        Task<SpriteAsset>? spriteTask = null;
         Task<byte[]>? dataTask = null;
         Task<PackTestData>? assetTask = null;
         AssetService? service = null;
@@ -180,7 +178,7 @@ public sealed class AppAssetRuntimeTests
             Assert.NotNull(service.LoaderThread);
             browse = engine.Assets.Browse();
             exists = engine.Assets.Exists("data/missing");
-            sprite = engine.Assets.LoadSprite("sprites/missing");
+            spriteTask = engine.Assets.LoadAsset<SpriteAsset>("sprites/missing");
             dataTask = engine.Assets.LoadData("data/missing");
             assetTask = engine.Assets.LoadAsset<PackTestData>("data/config");
         };
@@ -191,7 +189,7 @@ public sealed class AppAssetRuntimeTests
 
         Assert.Empty(browse!);
         Assert.False(exists!.Value);
-        Assert.Equal(Sprite.Empty, sprite);
+        Assert.Equal(AssetErrorKind.NotFound, AssetErrorOf(spriteTask!));
         Assert.Equal(AssetErrorKind.NotFound, AssetErrorOf(dataTask!));
         Assert.Equal(AssetErrorKind.NotFound, AssetErrorOf(assetTask!));
         Assert.Equal(1, game.SetupCount);
@@ -204,7 +202,7 @@ public sealed class AppAssetRuntimeTests
         Assert.NotNull(engine.Assets);
         Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.Browse(); });
         Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.Exists("data/missing"); });
-        Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.LoadSprite("sprites/missing"); });
+        Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.LoadAsset<SpriteAsset>("sprites/missing"); });
         Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.LoadData("data/missing"); });
         Assert.Throws<ObjectDisposedException>(() => { engine.Assets.LoadPack("overlays/missing.pck"); });
         Assert.Null(service!.LoaderThread);
@@ -303,11 +301,9 @@ public sealed class AppAssetRuntimeTests
         byte[]? sharedBytes = null;
         PackTestData? config = null;
         bool? exists = null;
-        Sprite sprite = default;
-        bool spriteReady = false;
+        SpriteAsset? sprite = null;
         game.OnSetup = engine =>
         {
-            AssetService service = Assert.IsType<AssetService>(engine.Assets);
             engine.Assets.LoadPack(overlayPath);
             browse = engine.Assets.Browse();
             sharedPackPath = Assert.Single(engine.Assets.Browse("data/shared")).PackPath;
@@ -324,14 +320,10 @@ public sealed class AppAssetRuntimeTests
                 .WaitAsync(_loadTimeout)
                 .GetAwaiter()
                 .GetResult();
-            sprite = engine.Assets.LoadSprite(SpriteTestSupport.SpritePath);
-            spriteReady = service.GetSpriteCompletion(sprite)
+            sprite = engine.Assets.LoadAsset<SpriteAsset>(SpriteTestSupport.SpritePath)
                 .WaitAsync(_loadTimeout)
                 .GetAwaiter()
                 .GetResult();
-            Assert.True(service.TryGetSpriteResource(sprite, out SpriteResource? resource));
-            Assert.True(resource.IsValid);
-            Assert.False(service.TryGetTextureResource("textures/missing", out _));
         };
         ExitOnFirstTick(mode, game);
         using var app = CreateBuilder(
@@ -362,8 +354,8 @@ public sealed class AppAssetRuntimeTests
         Assert.Equal(new byte[] { 2, 3 }, sharedBytes);
         Assert.Equal("overlay", config!.Name);
         Assert.Equal(9, config.Value);
-        Assert.NotEqual(Sprite.Empty, sprite);
-        Assert.True(spriteReady, "The sprite and descriptor CPU resources must load.");
+        Assert.NotNull(sprite);
+        Assert.Equal(SpriteTestSupport.TexturePath, sprite!.Texture.Path);
 
         if (!IsWindowed(mode))
         {

@@ -15,7 +15,7 @@ The renderer turns one immutable [frame snapshot](threading.md#3-frame-snapshot)
 - explicit ordering by layer and `ZIndex`; windowed and offscreen modes (headless has none).
 
 It knows no game types, layer enum, TOML, or source tree; it consumes flattened snapshot data and
-an immutable resource table.
+the loaded public asset values (`SpriteAsset`/`TextureDescriptor`).
 ## 2. Backend stack and device requirements
 
 | Concern | Choice |
@@ -62,12 +62,13 @@ viewport/scissor regions, and a debug counter enforces at most `C` draws for `C`
 
 The render thread owns this work; the tick thread supplies immutable snapshots only.
 
-1. Take the immutable sprite resource table.
+1. Take the immutable snapshot of loaded sprite assets.
 2. Sort `SpriteSnapshot`s once by `(Layer, ZIndex)` ascending; all cameras share the order, filtering
    preserves it, and ties are unspecified.
-3. Per camera: filter `(CullingMask & Layer) != 0`; skip `Sprite.Empty`; resolve the handle to its
-   asset (descriptor, UVs, scale, pivot, topology, indices); skip until every part and the GPU page
-   are ready; for `Quad`, append one instance to the camera's contiguous range.
+3. Per camera: filter `(CullingMask & Layer) != 0`; skip a null `SpriteAsset`; resolve
+   `SpriteAsset.Texture` (`AssetRef<TextureDescriptor>`) and `TextureDescriptor.Payload`
+   (`DataRef`) to loaded values/GPU pages; skip until every part and the GPU page are ready; for
+   `Quad`, append one instance to the camera's contiguous range.
 
 Instances differ per camera because view-projection and viewport differ. Instance fields:
 

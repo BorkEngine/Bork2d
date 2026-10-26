@@ -2,7 +2,6 @@ using System.Numerics;
 using Bork2d.Api;
 using Bork2d.Api.Assets;
 using Bork2d.Api.Input;
-using Bork2d.Api.Rendering;
 using Bork2d.Api.Scene;
 using Bork2d.Common.Scene;
 using Bork2d.Common.Time;
@@ -233,7 +232,7 @@ public sealed class Bork2dAppTests
         var game = new ScriptedGame<GameLayer>();
         IReadOnlyList<AssetInfo>? browse = null;
         bool? exists = null;
-        Sprite sprite = default;
+        Task<SpriteAsset>? spriteTask = null;
         Task<byte[]>? dataTask = null;
         Task<PackTestData>? assetTask = null;
         Exception? loadPackError = null;
@@ -241,7 +240,7 @@ public sealed class Bork2dAppTests
         {
             browse = engine.Assets.Browse();
             exists = engine.Assets.Exists("data/missing");
-            sprite = engine.Assets.LoadSprite("sprites/missing");
+            spriteTask = engine.Assets.LoadAsset<SpriteAsset>("sprites/missing");
             dataTask = engine.Assets.LoadData("data/missing");
             assetTask = engine.Assets.LoadAsset<PackTestData>("data/config");
 
@@ -281,7 +280,11 @@ public sealed class Bork2dAppTests
         // The real asset service is empty but present (D-M3-14).
         Assert.Empty(browse!);
         Assert.False(exists!.Value);
-        Assert.Equal(Sprite.Empty, sprite);
+
+        var notFoundSprite = Assert.Throws<AssetException>(
+            () => spriteTask!.GetAwaiter().GetResult());
+        Assert.Equal(AssetErrorKind.NotFound, notFoundSprite.Kind);
+        Assert.Equal("sprites/missing", notFoundSprite.AssetPath);
 
         var notFoundData = Assert.Throws<AssetException>(() => dataTask!.GetAwaiter().GetResult());
         Assert.Equal(AssetErrorKind.NotFound, notFoundData.Kind);
@@ -297,7 +300,7 @@ public sealed class Bork2dAppTests
         Assert.NotNull(engine.Assets);
         Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.Browse(); });
         Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.Exists("data/missing"); });
-        Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.LoadSprite("sprites/missing"); });
+        Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.LoadAsset<SpriteAsset>("sprites/missing"); });
         Assert.Throws<ObjectDisposedException>(() => { _ = engine.Assets.LoadData("data/missing"); });
         Assert.Throws<ObjectDisposedException>(() => { engine.Assets.LoadPack("overlays/missing.pck"); });
     }

@@ -12,8 +12,12 @@ public sealed class AssetApiContractTests
     [Fact]
     public void LoadAssetRequiresAClassWithTheShapeableConstraint()
     {
-        MethodInfo method = typeof(IAssets).GetMethod(nameof(IAssets.LoadAsset))
-            ?? throw new InvalidOperationException("IAssets.LoadAsset was not found.");
+        MethodInfo method = typeof(IAssets)
+            .GetMethods()
+            .Single(candidate =>
+                candidate.Name == nameof(IAssets.LoadAsset)
+                && candidate.GetParameters()[0].ParameterType == typeof(string)
+                && candidate.IsGenericMethodDefinition);
         Assert.True(method.IsGenericMethodDefinition);
 
         Type parameter = Assert.Single(method.GetGenericArguments());
@@ -46,6 +50,17 @@ public sealed class AssetApiContractTests
     }
 
     [Fact]
+    public void PublicAssetTypesCarryCompiledShapes()
+    {
+        Assert.Contains(
+            typeof(IShapeable<>),
+            typeof(SpriteAsset).GetInterfaces().Select(UnwrapGeneric));
+        Assert.Contains(
+            typeof(IShapeable<>),
+            typeof(TextureDescriptor).GetInterfaces().Select(UnwrapGeneric));
+    }
+
+    [Fact]
     public void AssetInfoIsAPublicReadOnlyRecordStructWithTheDocumentedFields()
     {
         Type type = typeof(AssetInfo);
@@ -73,24 +88,77 @@ public sealed class AssetApiContractTests
     }
 
     [Fact]
-    public void IAssetsDeclaresTheSixDocumentedMembers()
+    public void IAssetsDeclaresOnlyTheDocumentedLoadMembers()
     {
-        string[] members = typeof(IAssets)
+        string[] signatures = typeof(IAssets)
             .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-            .Select(method => method.Name)
-            .OrderBy(name => name, StringComparer.Ordinal)
+            .Select(Describe)
+            .OrderBy(signature => signature, StringComparer.Ordinal)
             .ToArray();
 
         Assert.Equal(
             new[]
             {
-                "Browse",
-                "Exists",
-                "LoadAsset",
-                "LoadData",
-                "LoadPack",
-                "LoadSprite",
+                "Browse(String)",
+                "Exists(String)",
+                "LoadAsset(AssetRef`1)",
+                "LoadAsset(String)",
+                "LoadData(DataRef)",
+                "LoadData(String)",
+                "LoadPack(String)",
             },
-            members);
+            signatures);
+    }
+
+    [Fact]
+    public void SpriteHandleTypeIsGone()
+    {
+        Assert.DoesNotContain(
+            typeof(IAssets).Assembly.GetExportedTypes(),
+            type => type.FullName == "Bork2d.Api.Rendering.Sprite");
+        Assert.DoesNotContain(
+            typeof(IAssets).GetMethods(),
+            method => method.Name == "LoadSprite");
+    }
+
+    [Fact]
+    public void AssetReferenceValuesExposeTheirPaths()
+    {
+        var asset = new SpriteAsset
+        {
+            Texture = new AssetRef<TextureDescriptor>("textures/player"),
+            Scale = 16f,
+        };
+
+        Assert.Equal("textures/player", asset.Texture.Path);
+        Assert.True(asset.Texture.HasValue);
+        Assert.False(default(AssetRef<TextureDescriptor>).HasValue);
+
+        DataRef data = "textures/raw/player";
+        Assert.Equal("textures/raw/player", data.Path);
+        Assert.True(data.HasValue);
+        Assert.False(default(DataRef).HasValue);
+        Assert.Null(default(AssetRef<TextureDescriptor>).Path);
+        Assert.Null(default(DataRef).Path);
+    }
+
+    private static Type UnwrapGeneric(Type type)
+        => type.IsGenericType ? type.GetGenericTypeDefinition() : type;
+
+    private static string Describe(MethodInfo method)
+    {
+        string parameters = string.Join(
+            ',',
+            method.GetParameters().Select(parameter =>
+            {
+                Type type = parameter.ParameterType;
+                if (type.IsGenericType)
+                {
+                    return type.GetGenericTypeDefinition().Name;
+                }
+
+                return type.Name;
+            }));
+        return $"{method.Name}({parameters})";
     }
 }

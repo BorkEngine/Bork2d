@@ -1,5 +1,14 @@
 # M3 — Assets: Pack, VFS, Descriptors (spec)
 
+> **Superseded in part by D-035.** The post-M3 asset-reference refactor removed `LoadSprite`, the
+> `Sprite` handle, `SpriteResource`, `TextureResource`, the handle table, and the sprite CPU
+> resource pipeline. `SpriteAsset`, `TextureDescriptor`, and `SpriteTopology` are now public in
+> `Bork2d.Api.Assets`; links use `AssetRef<T>`/`DataRef`; runtime loading is deserialize-only and
+> `PackBuilder.Build`/`Write` validates references. The M3 decisions and acceptance evidence below
+> are historical; see the [refactor spec](refactor-asset-references.md) and
+> [D-035](../decisions.md#d-035-generic-asset-references-replace-the-special-sprite-path) for the
+> current contract.
+
 > **Status:** **approved by the human owner (2026-10-26), implemented by WP1–WP5, and merged into
 > `develop` (2026-10-26, PR #4).** WP1 (v1 pack reader/writer, canonical paths, and the
 > public pack-tooling surface), WP2 (the D-M3-22 public contract correction, `AssetInfo`,

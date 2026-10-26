@@ -156,14 +156,13 @@ per tick, or per sprite.
 | Overlay mounted | Information | supplied pack path, entry count |
 | Base/overlay validation failure | Error | path and reason; the exception also carries the failure |
 | Asset load failure | Error | canonical path, `AssetErrorKind`, reason |
-| `LoadSprite` missing path | Information | canonical path (returns `Sprite.Empty`) |
 | Asset load success | Debug | canonical path and kind (`data`/`messagepack`); never per tick |
 | Service stopped | Information | pending, canceled, and mounted-pack counts |
 
-A default headless run with a two-entry pack looks like:
+A default headless run with a five-entry pack looks like:
 
 ```text
-2026-10-26 16:11:58.721 [Information] Bork2d.Assets: Asset service started: mode Pack, configured pack C:\Temp\bork2d-aot-….pck, resolved path C:\Temp\bork2d-aot-….pck, version 1, entries 2, stored bytes 49.
+2026-10-26 16:11:58.721 [Information] Bork2d.Assets: Asset service started: mode Pack, configured pack C:\Temp\bork2d-aot-….pck, resolved path C:\Temp\bork2d-aot-….pck, version 1, entries 5, stored bytes 275.
 2026-10-26 16:11:58.721 [Debug] Bork2d.Assets: Asset loaded: path data/smoke, kind data.
 2026-10-26 16:11:58.721 [Information] Bork2d.Assets: Asset service stopped: pending 0, canceled 0, mounted packs 1.
 ```

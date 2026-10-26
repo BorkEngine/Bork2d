@@ -1,6 +1,5 @@
 using Bork2d.Api;
-using Bork2d.Api.Rendering;
-using Bork2d.Assets.Resources;
+using Bork2d.Api.Assets;
 using Bork2d.Tests.Assets.Pack;
 using Bork2d.Tests.Assets.Sprites;
 using Bork2d.Tests.Assets.Vfs;
@@ -148,7 +147,10 @@ public sealed class AssetServiceLifecycleTests
         Assert.Throws<ObjectDisposedException>(() => host.Service.Browse());
         Assert.Throws<ObjectDisposedException>(() => host.Service.Browse("data"));
         Assert.Throws<ObjectDisposedException>(() => host.Service.Exists("data/raw"));
-        Assert.Throws<ObjectDisposedException>(() => host.Service.LoadSprite("sprites/player"));
+        Assert.Throws<ObjectDisposedException>(() =>
+        {
+            _ = host.Service.LoadAsset<SpriteAsset>("sprites/player");
+        });
         Assert.Throws<ObjectDisposedException>(() =>
         {
             _ = host.Service.LoadData("data/raw");
@@ -210,7 +212,7 @@ public sealed class AssetServiceLifecycleTests
     }
 
     [Fact]
-    public async Task LoadSpriteReturnsARealHandleForPresentPaths()
+    public async Task LoadAssetSpriteReturnsThePackedAssetWithoutRuntimeValidation()
     {
         using var directory = TempPackDirectory.CreateUnderTemp();
         string packPath = SpriteTestSupport.WriteSpritePack(directory);
@@ -218,16 +220,22 @@ public sealed class AssetServiceLifecycleTests
         using var host = new AssetServiceHost(packPath);
         host.Start();
 
-        Sprite handle = host.Service.LoadSprite(SpriteTestSupport.SpritePath);
-        Assert.NotEqual(Sprite.Empty, handle);
+        SpriteAsset sprite = await host.Service
+            .LoadAsset<SpriteAsset>(SpriteTestSupport.SpritePath)
+            .WaitAsync(TimeSpan.FromSeconds(10));
 
-        await host.Service.GetSpriteCompletion(handle).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(SpriteTestSupport.TexturePath, sprite.Texture.Path);
+        Assert.Equal(16f, sprite.Scale);
+        Assert.Equal(SpriteTopology.Quad, sprite.Topology);
 
-        Assert.True(host.Service.TryGetSpriteResource(handle, out SpriteResource? resource));
-        Assert.True(resource.IsValid);
-
-        Assert.Throws<ArgumentNullException>(() => host.Service.LoadSprite(null!));
-        Assert.Throws<ArgumentException>(() => host.Service.LoadSprite("sprites/player.toml"));
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            _ = host.Service.LoadAsset<SpriteAsset>(null!);
+        });
+        Assert.Throws<ArgumentException>(() =>
+        {
+            _ = host.Service.LoadAsset<SpriteAsset>("sprites/player.toml");
+        });
     }
 
     [Fact]

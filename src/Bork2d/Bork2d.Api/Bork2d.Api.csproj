@@ -7,9 +7,16 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- The IShapeable<T> constraint on IAssets.LoadAsset<T> is the only PolyType contract
-             surface in Bork2d.Api. No Nerdbank.MessagePack, Zstd, or file I/O belongs here. -->
+        <!-- PolyType supplies the IShapeable<T> contract, the generated shapes for the public
+             asset types, and the path marshalers for AssetRef<T>/DataRef. No
+             Nerdbank.MessagePack, Zstd, or file I/O belongs here. -->
         <PackageReference Include="PolyType" Version="1.4.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- The pack builder uses the internal reference marker to validate asset links without
+             adding public API surface or reflection. -->
+        <InternalsVisibleTo Include="Bork2d.Assets" />
     </ItemGroup>
 
 </Project>

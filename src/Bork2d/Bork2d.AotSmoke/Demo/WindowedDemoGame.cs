@@ -123,7 +123,7 @@ internal sealed class WindowedDemoGame : IGame<SmokeLayer>
         _player = player;
 
         var sprite = engine.CreateSpriteRender(player);
-        sprite.Sprite = Sprite.Empty;
+        sprite.Sprite = null;
         sprite.Layer = SmokeLayer.World;
         sprite.ZIndex = 1;
         SpriteRender = sprite;

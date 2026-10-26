@@ -1,7 +1,6 @@
 using System.Numerics;
 using Bork2d.Api;
 using Bork2d.Api.Assets;
-using Bork2d.Api.Rendering;
 using Bork2d.Api.Scene;
 using Bork2d.Common.Scene;
 using Bork2d.Common.Serialization;
@@ -36,6 +35,7 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
     private readonly bool _loadAssets;
     private Task<byte[]>? _rawTask;
     private Task<MessagePackSmokeData>? _dataTask;
+    private Task<SpriteAsset>? _spriteTask;
 
     /// <summary>Initializes a new instance of the <see cref="SmokeGame"/> class.</summary>
     /// <param name="loadAssets">
@@ -76,6 +76,9 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
     /// <summary>Gets the MessagePack document name loaded in <c>Tick</c>.</summary>
     public string? LoadedName { get; private set; }
 
+    /// <summary>Gets the sprite's texture path loaded in <c>Tick</c>.</summary>
+    public string? LoadedSpriteTexturePath { get; private set; }
+
     /// <inheritdoc />
     public void Setup(IEngine<SmokeLayer> engine)
     {
@@ -98,7 +101,7 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
         Camera = camera;
 
         var sprite = engine.CreateSpriteRender(parent);
-        sprite.Sprite = Sprite.Empty;
+        sprite.Sprite = null;
         sprite.Layer = SmokeLayer.World;
         sprite.ZIndex = 3;
         SpriteRender = sprite;
@@ -108,6 +111,7 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
             // The base pack was opened by Run() before Setup, so the loader thread is live here.
             _rawTask = engine.Assets.LoadData(AssetSmoke.RawPath);
             _dataTask = engine.Assets.LoadAsset<MessagePackSmokeData>(AssetSmoke.MessagePackPath);
+            _spriteTask = engine.Assets.LoadAsset<SpriteAsset>(AssetSmoke.SpritePath);
         }
     }
 
@@ -193,11 +197,17 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
             browse.Any(info => info.Path == AssetSmoke.MessagePackPath),
             $"Browse must contain the MessagePack asset '{AssetSmoke.MessagePackPath}'.");
         SmokeChecks.Require(
+            browse.Any(info => info.Path == AssetSmoke.SpritePath),
+            $"Browse must contain the sprite asset '{AssetSmoke.SpritePath}'.");
+        SmokeChecks.Require(
             engine.Assets.Exists(AssetSmoke.RawPath),
             "Exists must find the raw asset.");
         SmokeChecks.Require(
             engine.Assets.Exists(AssetSmoke.MessagePackPath),
             "Exists must find the MessagePack asset.");
+        SmokeChecks.Require(
+            engine.Assets.Exists(AssetSmoke.SpritePath),
+            "Exists must find the sprite asset.");
         SmokeChecks.Require(
             !engine.Assets.Exists("data/missing"),
             "Exists must be false for a path that is not in the pack.");
@@ -207,6 +217,10 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
             .GetAwaiter()
             .GetResult();
         MessagePackSmokeData data = _dataTask!
+            .WaitAsync(_loadTimeout)
+            .GetAwaiter()
+            .GetResult();
+        SpriteAsset sprite = _spriteTask!
             .WaitAsync(_loadTimeout)
             .GetAwaiter()
             .GetResult();
@@ -224,6 +238,13 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
         SmokeChecks.Require(
             data.Scale == AssetSmoke.Scale,
             "LoadAsset<MessagePackSmokeData> must round-trip the scale.");
+        SmokeChecks.Require(
+            sprite.Texture.Path == AssetSmoke.TexturePath,
+            "LoadAsset<SpriteAsset> must round-trip the texture reference.");
+        SmokeChecks.Require(
+            sprite.Scale == 1f,
+            "LoadAsset<SpriteAsset> must round-trip the scale.");
         LoadedName = data.Name;
+        LoadedSpriteTexturePath = sprite.Texture.Path;
     }
 }

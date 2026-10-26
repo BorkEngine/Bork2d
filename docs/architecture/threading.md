@@ -1,14 +1,14 @@
 # Threading and Frame Handoff
 
-> **Status:** implemented through M3 (merged into `develop` 2026-10-26, PR #4). The M1 scene graph
-> implements the structural and per-object `System.Threading.Lock` rules in §2 and the public API
-> has no thread affinity. The M2 windowed platform's OS/window thread, command queue,
-> confirmed-state snapshot, event pump, input freeze, and the runtime tick loop that drives them are
-> `Current` (§5). The M3 asset service's one loader thread, FIFO queue, asynchronous completion,
-> cancellation/join, and immutable CPU resource table are `Current` (§6). The render thread,
-> snapshot ring, and frame handoff are `Planned` (M7). The engine has no debug-only tick-active,
-> structural, or slot-state checks. The suite is 588 tests: 579 deterministic plus 9 opt-in
-> real-window tests.
+> **Status:** implemented through M3 (merged into `develop` 2026-10-26, PR #4) and the post-M3
+> asset-reference refactor (D-035). The M1 scene graph implements the structural and per-object
+> `System.Threading.Lock` rules in §2 and the public API has no thread affinity. The M2 windowed
+> platform's OS/window thread, command queue, confirmed-state snapshot, event pump, input freeze,
+> and the runtime tick loop that drives them are `Current` (§5). The M3 asset service's one loader
+> thread, FIFO queue, asynchronous completion, cancellation/join, and deserialize-only load path
+> are `Current` (§6). The render thread, snapshot ring, and frame handoff are `Planned` (M7). The
+> engine has no debug-only tick-active, structural, or slot-state checks. The suite is 519
+> deterministic tests plus 9 opt-in real-window tests.
 
 ## 1. Threads by mode
 
@@ -17,7 +17,7 @@
 | **Tick** | yes | yes | yes | Windowed loop, time, `IGame.Setup/Tick/Teardown`, input freeze/text dispatch, tick scope, scene/asset requests, snapshot capture (M7), shutdown. May be any host thread. |
 | **OS/window** | yes | no | no | SDL video/events and window operations; public `IWindow` calls are marshaled here. |
 | **Render** | yes | yes | no | Vulkan device, swapchain or offscreen targets, uploads, sprite resolution, sorting, instance building, draws, fences, present. |
-| **Asset loader** | yes | yes | yes | One per app: pack reads, decompression, MessagePack/descriptor/sprite decoding, immutable CPU resource table. It never touches SDL, Vulkan, or game entities. |
+| **Asset loader** | yes | yes | yes | One per app: pack reads, decompression, and MessagePack deserialization. It caches no resolved assets and never touches SDL, Vulkan, or game entities. |
 | **Game workers** | yes | yes | yes | Game-spawned threads on distinct entities; the game joins them before `Tick` returns. |
 
 In the target design the engine owns the asset threads and, in windowed/offscreen modes, the
@@ -30,11 +30,11 @@ never calls Vulkan; the render thread never calls SDL window mutation.
 > All scene mutation happens inside the tick window (`Setup`/`Tick`/`Teardown`), including work
 > by game worker threads. Calls may originate on any thread; workers must be joined before
 > `Tick` returns, and the engine captures the snapshot at that quiescent point. Assets cross
-> threads through packs, queues, and an immutable table.
+> threads through packs, request queues, and deserialized immutable asset values.
 
 "Scene state" means creating, attaching, detaching, and clearing cameras and sprite renderables;
 changing transform local values or parents; changing camera/sprite properties (`Size`, `Viewport`,
-`CullingMask`, `Clear`, `ClearColor`, `ZIndex`, `Sprite`, `Layer`, `Tint`, planned flip flags);
+`CullingMask`, `Clear`, `ClearColor`, `ZIndex`, `SpriteAsset? Sprite`, `Layer`, `Tint`, planned flip flags);
 and changing `IWindow` state (windowed only, marshaled).
 
 The guarantees are deliberately precise:
@@ -67,13 +67,13 @@ tick: immutable after publication, free of live entity references, and internal 
 `Bork2d.Api`). It is built by an unordered traversal of the rooted tree with workers joined.
 `FrameSnapshot` holds sequence/time/delta plus camera and sprite arrays; `CameraSnapshot` holds
 `ZIndex`, world matrix, size, viewport, culling mask, and clear kind/color; `SpriteSnapshot`
-holds the handle, world matrix, tint, layer, `ZIndex`, and flip flags.
+holds a loaded `SpriteAsset?` reference, world matrix, tint, layer, `ZIndex`, and flip flags.
 
 - **Value-only, no entity IDs.** Structs contain only copied values; no `Transform`/`Camera`/
   `SpriteRender` reference crosses the boundary.
 - **Built after `Tick`, asset-agnostic.** Capture runs with all workers joined; workers must not
-  write scene state after `Tick` returns. A snapshot never contains textures, vertices, or
-  sprite metadata; the renderer resolves the `Sprite` handle at draw time.
+  write scene state after `Tick` returns. A snapshot never contains textures, vertices, or derived
+  sprite metadata; the renderer resolves the loaded `SpriteAsset.Texture` reference at draw time.
 - **World transforms only, layer erased.** The tick thread evaluates the parent hierarchy and
   writes the final world matrix; `TLayer` becomes a `uint` mask/bit so the renderer is
   non-generic.
@@ -262,44 +262,38 @@ thread never invokes a game callback.
 
 ## 6. Asset and pack coordination
 
-`Current (M3)` for the loader and the CPU resource table; renderer/GPU integration is `Planned`
-(M8).
+`Current (M3/D-035)` for the loader and pack-time reference validation; renderer/GPU integration is
+`Planned` (M8).
 
 - The internal asset service owns **one** dedicated loader thread per app and an unbounded FIFO
   request queue. There is no priority, no parallelism, and no cancellation token in the public API.
-  The loader reads, decompresses, deserializes, and validates only; it never touches SDL, Vulkan, or
-  game entities.
+  The loader reads, decompresses, and deserializes only; it never touches SDL, Vulkan, or game
+  entities, and it does not validate asset fields or follow references.
 - The runtime starts the service at `Run()` before the platform and `Setup` (opening the base pack
   or the empty `WithoutAssets()` filesystem) and stops it after `Teardown` and platform shutdown on
   every path. `Bork2dApp.Dispose()` disposes an unstarted or stopped service; `Dispose()` during a
   run still throws.
-- `LoadData`/`LoadAsset<T>`/`LoadSprite` validate arguments synchronously, capture the current
-  immutable VFS snapshot, and resolve every entry for the request against that snapshot. A later
-  `LoadPack` mount does not change an in-flight request; new lookups see the new stack. `LoadSprite`
-  uses its snapshot on the loader thread for the sprite entry, its descriptor, and the descriptor's
-  payload.
+- `LoadData`/`LoadAsset<T>` validate arguments synchronously, capture the current immutable VFS
+  snapshot, and resolve the winning entry for the request against that snapshot. A later `LoadPack`
+  mount does not change an in-flight request; new lookups see the new stack. `AssetRef<T>`/
+  `DataRef` overloads only unwrap a present path; they do not resolve links eagerly.
 - Requests complete through `TaskCompletionSource` with `RunContinuationsAsynchronously`, so no
   request completes a continuation on the caller or loader thread. `LoadData` returns a fresh
-  `byte[]` and `LoadAsset<T>` a fresh deserialized instance per call; there is no data/asset cache.
-- **CPU resource table.** The loader thread is the only writer of texture-descriptor and
-  sprite resources. A published resource is immutable; the table holds one descriptor resource per
-  texture path and one sprite resource per sprite path, including cached failures, with no weak
-  references and no unload. Handle allocation and lookup happen on the calling thread; reads take a
-  short `System.Threading.Lock` and no lock is held across a load, an await, or a blocking wait.
-  `LoadData`/`LoadAsset<T>` never consult the table, and there is no public readiness or resource
-  API. A repeated `LoadSprite` returns the same handle and does not enqueue.
+  `byte[]` and `LoadAsset<T>` a fresh deserialized instance per call; there is no data/asset cache
+  and no CPU resource table.
+- **Pack-time reference validation** runs in `PackBuilder.Build`/`Write`, not on the loader thread.
+  The builder walks each added asset's generated shape, collects every non-null reference, and
+  checks that the path exists and targets the matching raw/MessagePack kind. Field validation is
+  M4 baker/editor work.
 - Shutdown stops accepting requests, cancels queued and in-flight load tasks (they complete as
-  canceled), joins the loader at a safe point, and only then closes the mounted archives. Sprite
-  loads have no caller task; their handles stay non-renderable and the loads are dropped. A sprite
-  load checks the shutdown flag under the service lock before publishing a valid resource and
-  completing the handle, so a load that observes shutdown is dropped; a publication that completed
-  before the shutdown flag was set remains valid. After shutdown every `IAssets` member throws
-  `ObjectDisposedException`.
+  canceled), joins the loader at a safe point, and only then closes the mounted archives. After
+  shutdown every `IAssets` member throws `ObjectDisposedException`.
 - The virtual filesystem overlay table is immutable except for an atomic swap when `LoadPack`
   mounts a new pack; later packs shadow earlier ones and there is no unload in v1.
 - M3 has no renderer work: the loader never creates GPU resources. In M8 the renderer will create
-  GPU texture pages and uploads on the render thread and read the immutable CPU resources without
-  per-sprite locks; GPU page lifetime is retired after the referencing frames complete.
+  GPU texture pages and uploads on the render thread, resolving `SpriteAsset.Texture` and
+  `TextureDescriptor.Payload` at draw time; GPU page lifetime is retired after the referencing
+  frames complete.
 
 See [Assets and tooling](assets-and-tooling.md).
 
@@ -312,7 +306,7 @@ Thread-specific rules:
   snapshot publication, control messages, and stop. It never outlives the Vulkan
   instance/surface (windowed) or device (offscreen). The asset loader thread is cancellable and
   joinable; queued and in-flight load tasks are canceled and the loader is joined at shutdown
-  (M3); sprite loads are dropped and their handles stay non-renderable.
+  (M3).
 - The windowed OS thread is stopped and joined before `Run()` returns or throws; the window is
   destroyed before SDL quits. Background errors are stored and rethrown on the `Run()` caller after
   cleanup (the M2 platform fatal path is `Current`; the render-thread path is `Planned`). The tick

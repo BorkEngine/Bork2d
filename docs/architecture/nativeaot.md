@@ -1,13 +1,14 @@
 # NativeAOT
 
-> **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4). `Bork2d.Api`,
-> `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`, and `Bork2d.Runtime` compile with
-> `IsAotCompatible` plus the trim and AOT analyzers, and `Bork2d.AotSmoke` publishes and runs with
-> zero AOT/trim warnings. The default smoke builds a small temporary pack with the public
-> `PackBuilder`, loads a raw and a generated-shape MessagePack asset, browses/exists, runs one
-> headless tick, and deletes the pack; the windowed `--windowed [--ticks N]` SDL demo uses
-> `WithoutAssets()`. The smoke also keeps the default logging path, the M1 scene checks, and a
-> MessagePack round trip. The editor and build tools stay JIT; Vulkan AOT validation is M6.
+> **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4) and the post-M3
+> asset-reference refactor (D-035). `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`,
+> and `Bork2d.Runtime` compile with `IsAotCompatible` plus the trim and AOT analyzers, and
+> `Bork2d.AotSmoke` publishes and runs with zero AOT/trim warnings. The default smoke builds a small
+> temporary pack with the public `PackBuilder`, loads a raw asset, a generated-shape data asset, and
+> the public `SpriteAsset`/`TextureDescriptor` model, browses/exists, runs one headless tick, and
+> deletes the pack; the windowed `--windowed [--ticks N]` SDL demo uses `WithoutAssets()`. The smoke
+> also keeps the default logging path, the M1 scene checks, and a MessagePack round trip. The editor
+> and build tools stay JIT; Vulkan AOT validation is M6.
 
 ## 1. Scope
 
@@ -85,10 +86,12 @@ reflection-based construction, which also allows constructor injection. See the
   plus `PolyType` `1.4.1` and `System.IO.Hashing` `11.0.0-rc.1.26425.128`. An internal
   `[GenerateShape]` smoke type and round-trip helper prove the generated-shape path;
   `Bork2d.AotSmoke` sees them through the intentional `InternalsVisibleTo`. The v1 pack
-  header/entry shapes and the internal `TextureDescriptor`/`SpriteAsset` shapes are `Current`.
+  header/entry shapes and the public `TextureDescriptor`/`SpriteAsset` shapes are `Current`.
   Descriptors and sprites use property-name keys (not `[Key]`), an integer `SpriteTopology`, no
   per-asset version, and Nerdbank's generated `System.Numerics.Vector2` shape (a map with `X`/`Y`);
-  there is no `vertices` field.
+  there is no `vertices` field. `AssetRef<T>`/`DataRef` use public PolyType path marshalers so a
+  consumer assembly can generate a closed shape for a reference property; the marshalers are
+  infrastructure types, not game-facing API.
 - `LoadAsset<T>` is declared as `Task<T> LoadAsset<T>(string assetPath) where T : class,
   IShapeable<T>` (D-M3-22). `T` must carry a compiled generated shape (for example `[GenerateShape]`
   on the root type), so a missing shape is a **compile-time** error. There is no unconstrained call,
@@ -96,14 +99,14 @@ reflection-based construction, which also allows constructor injection. See the
   header/entry classes, texture descriptors, sprite assets, and custom game data all use generated
   shapes; TOML exists only in `Project.Common` and the JIT baker/editor.
 - The loader body deserializes with the shape from `T.GetTypeShape()` passed explicitly to the
-  serializer, so the reflection-shape provider is never consulted. The internal sprite pipeline
-  also deserializes `SpriteAsset`/`TextureDescriptor` with their generated shapes and validates
-  them with ordinary C# checks (`typeof`/pattern matching, no reflection); it publishes CPU
-  resources only. The loader thread performs file I/O, Zstd decompression, exact-size checking,
-  generated-shape deserialization, and metadata validation only; it never touches SDL, Vulkan, or
-  dynamic code. The default AOT smoke builds and loads a temporary pack (one raw, one
-  generated-shape MessagePack asset) as the runtime proof.
-- `Bork2d.Api` references PolyType `1.4.1` for the `IShapeable<T>` constraint only. It stays free
+  serializer, so the reflection-shape provider is never consulted. It performs file I/O, Zstd
+  decompression, exact-size checking, and generated-shape deserialization; it does not validate
+  fields, follow references, or create CPU/GPU resources. `PackBuilder` validates references at pack
+  build with a generated-shape traversal, not reflection. The default AOT smoke builds and loads a
+  temporary pack (one raw asset, one generated-shape data asset, and a public sprite asset with a
+  descriptor and raw payload) as the runtime proof.
+- `Bork2d.Api` references PolyType `1.4.1` for the `IShapeable<T>` shape contract and the
+  `AssetRef`/`DataRef` path marshalers (D-035). It stays free
   of Nerdbank.MessagePack, Zstd/`System.IO.Compression`, `System.IO.Hashing`, and file I/O, so the
   public contract does not pull the pack implementation into game code. `Bork2d.Assets.Pack`
   exposes only the tooling surface (`PackBuilder`, `PackCompressionMode`) publicly and keeps its
@@ -165,14 +168,16 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    with zero AOT/trim warnings; `SDL2.dll` is copied next to the executable.
 3. Run the AOT-published headless smoke locally (no GPU): default logging, one
    `Setup`/`Tick`/`Teardown`, root cleared, generated-shape round trip, a temporary pack with a raw
-   and a MessagePack asset loaded, browse/exists, exit `0`.
+   asset, a data asset, and a public sprite asset/descriptor/payload loaded, browse/exists, exit
+   `0`.
 4. Run the AOT-published windowed demo locally on a desktop session:
    `Bork2d.AotSmoke.exe --windowed --ticks 120` must exit `0` after exactly 120 ticks with one
    `Setup` and one `Teardown`; the demo uses `WithoutAssets()`. The interactive `--windowed` run
    observes the visible window and exits on Escape/close.
 5. Run a windowed/offscreen AOT-published app on a GPU machine before release (M8+).
-6. The AOT smoke loads a generated-shape MessagePack asset and a raw asset from a real pack; the
-   constrained `IShapeable<T>` contract makes a missing shape a compile-time error.
+6. The AOT smoke loads a generated-shape data asset, the public `SpriteAsset` shape, and a raw
+   asset from a real pack; the constrained `IShapeable<T>` contract makes a missing shape a
+   compile-time error.
 7. The AOT app logs through the default ZLogger/Microsoft.Extensions.Logging path without trim
    warnings; `IEngine.LoggerFactory` is usable.
 

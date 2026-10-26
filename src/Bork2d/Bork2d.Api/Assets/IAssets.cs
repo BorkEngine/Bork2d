@@ -1,4 +1,3 @@
-using Bork2d.Api.Rendering;
 using PolyType;
 
 namespace Bork2d.Api.Assets;
@@ -19,6 +18,12 @@ namespace Bork2d.Api.Assets;
 /// All members are thread-safe. Packs are mounted synchronously; later packs shadow earlier packs
 /// by canonical path and there is no unload in v1. Asset loads complete asynchronously. The engine
 /// exposes the service through <c>IEngine.Assets</c>.
+/// </para>
+/// <para>
+/// A mounted pack is trusted content. The loader resolves entries and deserializes them, but it
+/// does not validate asset fields or follow <see cref="AssetRef{TAsset}"/>/
+/// <see cref="DataRef"/> links. Pack creation validates reference integrity; the bake tooling
+/// validates source fields. A missing linked asset faults when that link is loaded.
 /// </para>
 /// </remarks>
 public interface IAssets
@@ -42,31 +47,29 @@ public interface IAssets
     /// <exception cref="ObjectDisposedException">The asset service has been disposed.</exception>
     /// <remarks>
     /// The returned task faults when the path is not in the merged filesystem, when the winning
-    /// entry is raw rather than MessagePack, or when decoding fails. Use
+    /// entry is raw rather than MessagePack, or when decoding fails. The deserialized value is
+    /// returned as stored; asset fields and references are not validated here. Use
     /// <see cref="LoadData(string)"/> for opaque bytes.
     /// </remarks>
     Task<T> LoadAsset<T>(string assetPath)
         where T : class, IShapeable<T>;
 
     /// <summary>
-    /// Resolves a sprite asset path to a session-local handle.
+    /// Loads the MessagePack asset named by a typed reference.
     /// </summary>
-    /// <param name="assetPath">The canonical sprite asset path.</param>
-    /// <returns>
-    /// A handle immediately. A missing path returns <see cref="Sprite.Empty"/> and logs; a present
-    /// path loads its CPU sprite metadata asynchronously and the handle is not renderable until
-    /// that load succeeds.
-    /// </returns>
-    /// <exception cref="ArgumentNullException"><paramref name="assetPath"/> is null.</exception>
+    /// <typeparam name="T">The referenced asset type.</typeparam>
+    /// <param name="reference">The typed asset reference.</param>
+    /// <returns>A task that produces a fresh deserialized instance per call.</returns>
     /// <exception cref="ArgumentException">
-    /// <paramref name="assetPath"/> is not a valid asset path.
+    /// <paramref name="reference"/> has no path, or its path is not a valid asset path.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The asset service has been disposed.</exception>
     /// <remarks>
-    /// The call is idempotent per path: repeated calls return the same handle. Handles are never
-    /// persisted; save data stores paths. There is no public readiness query in v1.
+    /// This is equivalent to <see cref="LoadAsset{T}(string)"/> with the reference's <c>Path</c>
+    /// when the reference has a path. An absent reference is not a valid load request.
     /// </remarks>
-    Sprite LoadSprite(string assetPath);
+    Task<T> LoadAsset<T>(AssetRef<T> reference)
+        where T : class, IShapeable<T>;
 
     /// <summary>
     /// Loads the decompressed bytes of an asset, whether it is raw or MessagePack.
@@ -84,6 +87,21 @@ public interface IAssets
     /// entries.
     /// </remarks>
     Task<byte[]> LoadData(string assetPath);
+
+    /// <summary>
+    /// Loads the decompressed bytes named by a raw-data reference.
+    /// </summary>
+    /// <param name="reference">The raw-data reference.</param>
+    /// <returns>A task that produces a fresh byte array per call.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="reference"/> has no path, or its path is not a valid asset path.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The asset service has been disposed.</exception>
+    /// <remarks>
+    /// This is equivalent to <see cref="LoadData(string)"/> with <see cref="DataRef.Path"/> when
+    /// the reference has a path. An absent reference is not a valid load request.
+    /// </remarks>
+    Task<byte[]> LoadData(DataRef reference);
 
     /// <summary>
     /// Synchronously opens, validates, and mounts a pack above the current pack stack.

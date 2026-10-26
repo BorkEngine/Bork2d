@@ -3,14 +3,14 @@ using Bork2d.Api;
 namespace Bork2d.Api.Assets;
 
 /// <summary>
-/// The exception reported for asset lookup, decode, read, and payload-validation failures.
+/// The exception reported for asset lookup, decode, and read failures.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The runtime reports asset failures through the faulted task returned by
 /// <see cref="IAssets.LoadData(string)"/> and <see cref="IAssets.LoadAsset{T}(string)"/>. A missing
-/// sprite path is not an exception: <see cref="IAssets.LoadSprite(string)"/> logs and returns
-/// <see cref="Sprite.Empty"/>.
+/// asset path faults with <see cref="AssetErrorKind.NotFound"/>; the loader does not validate
+/// fields or follow asset references.
 /// </para>
 /// <para>
 /// Pack open/parse/mount failures remain <see cref="Bork2dException"/> (D-M3-15). Null and invalid

@@ -125,6 +125,7 @@ public sealed class MyGame : IGame<GameLayer>
     private IEngine<GameLayer> _engine = null!;
     private ICamera<GameLayer> _camera = null!;
     private ISpriteRender<GameLayer> _player = null!;
+    private Task<SpriteAsset>? _playerLoad;
 
     public void Setup(IEngine<GameLayer> engine)
     {
@@ -138,13 +139,18 @@ public sealed class MyGame : IGame<GameLayer>
         _camera.ClearColor = Color.Black;
 
         _player = engine.CreateSpriteRender(engine.Root);
-        _player.Sprite = engine.Assets.LoadSprite("sprites/player/idle");
+        _playerLoad = engine.Assets.LoadAsset<SpriteAsset>("sprites/player/idle");
         _player.Layer = GameLayer.World;
         _player.LocalPosition = new Vector2(0, 1);
     }
 
     public void Tick()
     {
+        if (_player.Sprite is null && _playerLoad is { IsCompletedSuccessfully: true })
+        {
+            _player.Sprite = _playerLoad.Result;
+        }
+
         var dt = (float)_engine.Time.DeltaTime;
         _player.LocalPosition += new Vector2(4f * dt, 0);
         _camera.LocalPosition = _player.LocalPosition;
@@ -157,10 +163,11 @@ public sealed class MyGame : IGame<GameLayer>
 }
 ```
 
-Target label: `IAssets.LoadSprite` is real in M3 (it returns a session-local handle and loads the
-sprite plus descriptor CPU metadata, without reading the payload), and rendering requires M8, so
-nothing draws yet. The camera/transform code is `Current`; time is `Current` in windowed mode and
-stays `0` in the one-tick modes.
+Target label: `LoadAsset<SpriteAsset>` is real (the sprite asset is a normal public MessagePack
+asset), and rendering requires M8, so nothing draws yet. The camera/transform code is `Current`;
+time is `Current` in windowed mode and stays `0` in the one-tick modes. `Setup` is synchronous, so
+the example starts the load and assigns the asset in `Tick` when it completes; blocking startup on
+the load is also acceptable when a scene must be complete before the first tick.
 
 ## 4. Layers
 
@@ -202,11 +209,13 @@ camera.ZIndex = 0;                         // ascending order; higher applies la
 
 ## 6. Sprites and transforms
 
-`ISpriteRender<TLayer>` is a transform plus a sprite handle:
+`ISpriteRender<TLayer>` is a transform plus a loaded sprite asset:
 
 ```csharp
+SpriteAsset player = await engine.Assets.LoadAsset<SpriteAsset>("sprites/player/idle");
+
 var sprite = engine.CreateSpriteRender(engine.Root);
-sprite.Sprite = engine.Assets.LoadSprite("sprites/player/idle");
+sprite.Sprite = player;
 sprite.Layer = GameLayer.World;
 sprite.ZIndex = 10;
 sprite.Tint = Color.White;
@@ -215,12 +224,12 @@ sprite.LocalRotation = 45f; // degrees, CCW
 sprite.LocalScale = new Vector2(2, 2);
 ```
 
-- `Sprite` is an opaque handle to a sprite asset. The asset supplies UVs, pivot, topology, optional
-  `indices`, texture path, and a **pixels-per-unit** scale; `LocalScale` multiplies it. There is
-  no global PPU and no vertices array. See
+- `Sprite` holds the loaded `SpriteAsset` from `LoadAsset<SpriteAsset>`. The asset supplies UVs,
+  pivot, topology, optional `indices`, a texture reference, and a **pixels-per-unit** scale;
+  `LocalScale` multiplies it. There is no global PPU and no vertices array. See
   [Assets and tooling](../architecture/assets-and-tooling.md).
-- `Sprite.Empty` hides the entity; a not-ready asset draws nothing until its texture and GPU page
-  are ready (M8). Do not block.
+- `Sprite = null` hides the entity; a sprite whose texture reference is absent or missing is
+  non-drawable until the texture and GPU page are ready (M8). Do not block.
 - `ZIndex` orders within a layer, higher later; ties are unspecified. `Tint` multiplies the
   texture, `White` is neutral.
 - `FlipX`/`FlipY` are `Planned`.
@@ -328,11 +337,11 @@ public void Tick()
 
 ## 10. Assets
 
-`Status: Current (M3).` The base pack (or the `WithoutAssets()` empty filesystem) opens at `Run()`
-before the window and `Setup`, and an app-scoped loader thread serves `LoadData`/`LoadAsset<T>`/
-`LoadSprite`. Packs mount overlays with `LoadPack`, `Browse`/`Exists` read the merged virtual
-filesystem, and `AssetException`/`AssetErrorKind` report failures. The raw sprite payload is not
-read in M3 and there is no public readiness query.
+`Status: Current (M3; asset-reference refactor D-035).` The base pack (or the `WithoutAssets()`
+empty filesystem) opens at `Run()` before the window and `Setup`, and an app-scoped loader thread
+serves `LoadData`/`LoadAsset<T>`. Packs mount overlays with `LoadPack`, `Browse`/`Exists` read the
+merged virtual filesystem, and `AssetException`/`AssetErrorKind` report failures. The loader only
+resolves and deserializes; it does not validate asset fields or follow references.
 
 ```csharp
 using PolyType;
@@ -357,8 +366,10 @@ IReadOnlyList<AssetInfo> sprites = _engine.Assets.Browse("sprites");
 GameConfig config = await _engine.Assets.LoadAsset<GameConfig>("data/config");
 byte[] pixels = await _engine.Assets.LoadData("textures/raw/player");
 
-// Sprites return a session-local handle immediately.
-Sprite player = _engine.Assets.LoadSprite("sprites/player/idle");
+// Sprites are normal public assets; reference links are typed path values.
+SpriteAsset player = await _engine.Assets.LoadAsset<SpriteAsset>("sprites/player/idle");
+TextureDescriptor texture = await _engine.Assets.LoadAsset(player.Texture);
+byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
 ```
 
 - **Base pack and `WithoutAssets`.** By default the app opens `assets.pck` at `Run()`. Build with
@@ -369,12 +380,22 @@ Sprite player = _engine.Assets.LoadSprite("sprites/player/idle");
   overlays mounted later (for example during `Setup`). `WithAssetsPack` and `WithoutAssets` are
   mutually exclusive; using both fails `Build()`. A missing or malformed base pack fails `Run()`
   with `Bork2dException` before any window or `Setup`.
-- **Typed assets.** `LoadAsset<T>` is constrained to `where T : class, IShapeable<T>` (D-M3-22).
-  `T` must carry a compiled `[GenerateShape]` shape (PolyType); a missing shape is a compile-time
-  error, not a runtime fallback. There is no reflection resolver. Use `LoadData` for arbitrary
-  bytes, including raw texture payloads. Both members validate the path synchronously and resolve
-  the winning pack entry at enqueue time, so a later overlay mount does not change an in-flight
-  request.
+- **Typed assets and references.** `LoadAsset<T>` is constrained to
+  `where T : class, IShapeable<T>` (D-M3-22). `T` must carry a compiled `[GenerateShape]` shape
+  (PolyType); a missing shape is a compile-time error, not a runtime fallback. There is no
+  reflection resolver. Use `LoadData` for arbitrary bytes, including raw texture payloads.
+  `SpriteAsset.Texture` is an `AssetRef<TextureDescriptor>` and `TextureDescriptor.Payload` is a
+  `DataRef`; resolve them with the reference overloads. A `null` reference means absent; an absent
+  reference is not a load request and throws `ArgumentException`. The reference values serialize as
+  canonical path strings. `PackBuilder` validates every non-null reference when it builds a pack;
+  the runtime trusts the pack.
+- **`SpriteAsset` and `TextureDescriptor`.** Both are public MessagePack assets in
+  `Bork2d.Api.Assets`. `SpriteAsset` carries the texture reference, UVs, pixels-per-unit scale,
+  pivot, topology, and optional indices. `TextureDescriptor` carries the raw payload reference,
+  dimensions, and sampler state. Load them with `LoadAsset<SpriteAsset>`/`LoadAsset<TextureDescriptor>`.
+  A missing sprite texture link does not fail the sprite load; loading the link later faults
+  `NotFound`. Field validation (UV extents, dimensions, pivot, topology) belongs to the M4
+  baker/editor, not the runtime loader.
 - **Loading and errors.** A valid missing path, a raw entry passed to `LoadAsset<T>`, and
   decode/size failures fault the returned task instead of throwing:
 
@@ -418,15 +439,11 @@ Sprite player = _engine.Assets.LoadSprite("sprites/player/idle");
 - **`AssetInfo`.** Reports `Path`, `IsRaw`, `IsCompressed`, `Length`, `Size`, and `PackPath` from
   the header without decompressing. `PackPath` is the supplied pack identifier, not the resolved
   absolute path.
-- **Sprites.** `LoadSprite` validates the path synchronously and returns a session-local `Sprite`
-  handle immediately. A cached path returns the same handle, including while the load is pending and
-  after it fails; a missing path logs and returns `Sprite.Empty` without caching a handle. The
-  handle is not a readiness signal: the sprite asset and its texture descriptor load on the loader
-  thread, and there is **no public readiness query** in M3 (M8 resolves readiness at draw time). The
-  raw texture payload is **not** read or decompressed in M3. A load or validation failure logs and
-  leaves the handle non-renderable; it does not throw to the caller, retry, or produce a
-  placeholder. Descriptor/sprite types stay internal; `LoadAsset<T>` with those internal shapes is
-  test-only and validates against the enqueue-time pack snapshot.
+- **Sprite assets.** `LoadAsset<SpriteAsset>` returns the packed sprite exactly as stored. It does
+  not resolve `Texture`, load the descriptor, read the raw payload, or run field checks. Render
+  `SpriteAsset`s with `ISpriteRender.Sprite`; `null` hides the renderable. A missing texture link is
+  non-drawable and only faults when that link is loaded. There is no handle, readiness state, or
+  placeholder. See [Assets and tooling](../architecture/assets-and-tooling.md#9-sprite-assets).
 - **Lifetime.** All members are thread-safe. At `Run()` shutdown (after `Teardown`) the service
   cancels pending load tasks and joins the loader. After that, members throw
   `ObjectDisposedException`; the `IEngine.Assets` getter itself keeps returning the disposed
@@ -451,6 +468,10 @@ builder.Write("assets.pck"); // overwrites; relative paths resolve against the c
 - `PackCompressionMode.Debug` stores payloads uncompressed; `Release` uses maximum-quality Zstd
   only when strictly smaller. The header is always Zstd with an XXH3-64 checksum; payloads have no
   checksum. There is no byte-determinism guarantee.
+- `Build()`/`Write()` validate every non-null `AssetRef<T>`/`DataRef` in added MessagePack assets:
+  the path must exist and target the matching entry kind (`AssetRef` → MessagePack, `DataRef` →
+  raw). A bad reference throws `Bork2dException` naming the source asset and property path; `null`
+  references are allowed.
 - `Build()` returns one `byte[]`; `Write(Stream)` streams and leaves the stream open. Builder calls
   are repeatable and do not consume the builder.
 - Paths are normalized/validated with the same canonical rules as runtime lookups. Duplicate
