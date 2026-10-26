@@ -5,10 +5,11 @@
 > timing, per-asset versioning, size caps, byte determinism, the public pack-tooling surface, and
 > the M3 `LoadSprite` scope) until WP5 reconciles this document. In the current tree
 > `Bork2d.Assets` implements the v1 pack reader/writer and the public
-> `PackBuilder`/`PackCompressionMode` tooling surface (M3 WP1); the VFS, loader, descriptors,
-> sprites, and runtime wiring remain roadmap **M3** WP2–WP5, TOML bake and the production bake
-> integration **M4**, and the editor **M5**. `IAssets` still returns stubs that throw
-> `NotSupportedException`.
+> `PackBuilder`/`PackCompressionMode` tooling surface (M3 WP1), plus canonical paths, the internal
+> base/overlay VFS, `LoadPack` mounting, and `Browse`/`Exists` lookup (M3 WP2). The loader,
+> descriptors, sprites, and runtime wiring remain roadmap **M3** WP3–WP5, TOML bake and the
+> production bake integration **M4**, and the editor **M5**. `IEngine.Assets` still returns a stub
+> whose members throw `NotSupportedException`.
 
 ## 1. End-to-end model
 
@@ -144,9 +145,13 @@ builder records its settings for deterministic rebuilds; keep the format behind 
 4. There is **no unload** in v1: a mounted pack stays for the process lifetime.
 
 - The default pack is `assets.pck`; `.WithAssetsPack(path)` overrides it. A missing or malformed base
-  pack throws at startup (M3): `Build()` throws `Bork2dException` with the resolved path before
-  window/GPU startup, with no empty-filesystem fallback. `LoadPack` throws for a bad overlay; tests
-  and tools use a valid empty pack.
+  pack throws `Bork2dException` from `Run()` before the window/`Setup` (D-M3-01); `Build()` stays
+  filesystem-free. `LoadPack` throws for a bad overlay; tests and tools use a valid empty pack.
+- **M3 WP2 status:** the internal `AssetFileSystem` implements the immutable base/overlay stack,
+  canonical path normalization, filesystem path resolution, `LoadPack` mounting, `Browse`/`Exists`
+  lookup, and `AssetInfo` projection. Mounting parses outside the swap lock and publishes a new
+  snapshot atomically; a failed mount leaves the stack unchanged; there is no unload. The public
+  `IAssets` wiring, loader thread, and `AssetException` remain WP3/WP5.
 - `LoadPack` is thread-safe; mount during `Setup`/before the first tick. Mounting after a handle
   resolved does not change that handle; new lookups see the new pack.
 - `Browse(prefix)` returns a merged snapshot with shadowed entries hidden (`prefix` is canonical or
@@ -159,7 +164,7 @@ builder records its settings for deterministic rebuilds; keep the format behind 
 ```csharp
 public interface IAssets
 {
-    Task<T> LoadAsset<T>(string assetPath) where T : class;
+    Task<T> LoadAsset<T>(string assetPath) where T : class, IShapeable<T>;
     Sprite LoadSprite(string assetPath);
     Task<byte[]> LoadData(string assetPath);
     void LoadPack(string packPath);
@@ -173,17 +178,20 @@ public readonly record struct AssetInfo(
 
 | Member | Status | Semantics |
 | --- | --- | --- |
-| `LoadAsset<T>` | `Partial` | M1 declaration, stub throws. Target: deserialize a MessagePack asset with its generated shape; throws for raw assets or missing paths. |
-| `LoadSprite` | `Partial` | M1 declaration, stub throws. Target: resolve a sprite path immediately and load asynchronously; missing returns `Sprite.Empty` and logs. |
-| `LoadData` | `Partial` | M1 declaration, stub throws. Target: decompressed bytes for any asset kind. |
-| `LoadPack` | `Planned` M3 | Mounts a pack above the stack; later wins; no unload. |
-| `Browse` | `Planned` M3 | Merged snapshot of visible assets with an optional prefix filter. |
-| `Exists` | `Planned` M3 | Whether the merged filesystem contains the canonical path. |
-| `AssetInfo` | `Planned` M3 | Value type returned by `Browse`. |
+| `LoadAsset<T>` | `Partial` | Declaration and `IShapeable<T>` constraint are `Current` (WP2); the loader body is WP3. Deserializes a MessagePack asset with its compiled generated shape; no reflection fallback. Raw assets and missing paths fault. |
+| `LoadSprite` | `Partial` | Declaration is `Current`; the sprite pipeline is WP4. Resolves a sprite path immediately; missing returns `Sprite.Empty` and logs. |
+| `LoadData` | `Partial` | Declaration is `Current`; the loader body is WP3. Decompressed bytes for any asset kind. |
+| `LoadPack` | `Partial` | Internal VFS mount is `Current` (WP2); public service wiring is WP3/WP5. Mounts above the stack; later wins; no unload; bad pack throws `Bork2dException`. |
+| `Browse` | `Partial` | Internal merged snapshot is `Current` (WP2); public service wiring is WP3/WP5. Optional canonical prefix on a `/` segment boundary; sorted by path. |
+| `Exists` | `Partial` | Internal exact lookup is `Current` (WP2); public service wiring is WP3/WP5. |
+| `AssetInfo` | `Current` (M3 WP2) | Value type returned by `Browse`; header fields plus the supplied pack identifier. |
 
-All members are thread-safe and complete asynchronously. `LoadAsset<T>` requires a generated shape (a
-missing shape is a build/startup error naming the type, never reflection); `LoadData` returns a decoded
-copy. Do not call `Browse` in `Tick`; handles are session-local, and v1 has no unload (load-and-keep).
+`IShapeable<T>` is `PolyType.IShapeable<T>`; `Bork2d.Api` references PolyType `1.4.1` for the
+constraint only and stays free of Nerdbank.MessagePack, Zstd, `System.IO.Hashing`, and file I/O
+(D-M3-22). All members are thread-safe. `LoadPack` is synchronous; loads complete asynchronously.
+Do not call `Browse` in `Tick`; handles are session-local, and v1 has no unload (load-and-keep).
+`AssetException`/`AssetErrorKind` and the runtime service arrive in WP3; the current
+`IEngine.Assets` stub throws `NotSupportedException` for every member.
 
 ## 7. Loading, readiness, and failure
 
@@ -384,14 +392,14 @@ trusted local content: signing is out of scope and the parser is defensive again
 
 | Area | Status |
 | --- | --- |
-| `Bork2d.Assets` | `Partial` (M3 WP1): v1 pack reader/writer, structural validation, canonical paths, and public `PackBuilder`/`PackCompressionMode`; VFS/loader/descriptors are WP2–WP5 |
-| `assets.pck` reader/writer | `Partial` (M3 WP1): v1 format reader and writer implemented; VFS, overlays, `Browse`/`Exists` are `Planned` WP2 |
+| `Bork2d.Assets` | `Partial` (M3 WP1–WP2): v1 pack reader/writer, structural validation, canonical paths, public `PackBuilder`/`PackCompressionMode`, and the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`; loader/descriptors are WP3–WP4 and runtime wiring is WP5 |
+| `assets.pck` reader/writer | `Partial` (M3 WP1): v1 format reader and writer implemented; the VFS, overlays, `Browse`/`Exists` are implemented internally (WP2) and wired publicly in WP3/WP5 |
 | Texture descriptors and raw RGBA8 payloads | `Planned` M3/M4 |
 | Sprite assets (UVs/scale/pivot/topology/indices) | `Planned` M3/M4; `Sprite` handle is `Current` |
 | TOML model, baker, pack builder, deterministic bake | `Planned` M4 |
-| Serialization policy | `Partial`: Nerdbank.MessagePack `1.4.95` pinned with generated-shape smoke in Common, tests, and AOT smoke |
-| `IAssets` load members | `Partial`: declarations exist, stubs throw `NotSupportedException` |
-| `IAssets.LoadPack`/`Browse`/`Exists`, `AssetInfo` | `Planned` M3 |
+| Serialization policy | `Partial`: Nerdbank.MessagePack `1.4.95` pinned with generated-shape smoke in Common, tests, and AOT smoke; `Bork2d.Api` references PolyType `1.4.1` for the `IShapeable<T>` contract only |
+| `IAssets` load members | `Partial`: declarations, XML docs, and the `IShapeable<T>` constraint are `Current` (WP2); the runtime stub throws `NotSupportedException` until WP3/WP5 |
+| `IAssets.LoadPack`/`Browse`/`Exists`, `AssetInfo` | `Partial` (M3 WP2): `AssetInfo` and the internal VFS/lookup are `Current`; the public service wiring is WP3/WP5 |
 | `Bork2d.Editor` / `Project.Editor` | `Planned` M5; editor absent, host is a template folder |
 
 ## 17. Related documents
