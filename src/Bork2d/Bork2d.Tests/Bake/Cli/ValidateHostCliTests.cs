@@ -1,5 +1,6 @@
 using Bork2d.Bake.Cli;
 using Bork2d.Tests.Bake.Hosting;
+using Bork2d.Tests.Bake.Textures;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Cli;
@@ -36,6 +37,10 @@ public sealed class ValidateHostCliTests
                 pivot = [0.5, 0.5]
                 topology = "quad"
                 """));
+
+        string texturePath = Path.Combine(project, "Assets", "textures", "player.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(texturePath)!);
+        File.WriteAllBytes(texturePath, TextureImageFactory.RgbaPng());
 
         Result result = Run(
             "validate",
@@ -93,7 +98,7 @@ public sealed class ValidateHostCliTests
 
         Assert.Equal(CliApplication.UsageExitCode, result.ExitCode);
         Assert.Contains("error BK1014:", result.Error, StringComparison.Ordinal);
-        Assert.Contains("could not load the bake host", result.Output, StringComparison.Ordinal);
+        Assert.Contains("could not be loaded", result.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -163,7 +168,7 @@ public sealed class ValidateHostCliTests
     }
 
     [Fact]
-    public void WithoutAHostOnlyTheDescriptorIsValidated()
+    public void WithoutAHostTheDescriptorTexturesAndTomlSyntaxAreValidated()
     {
         string project = _fixture.CreateProjectCopy(
             "descriptor-only",
@@ -174,8 +179,31 @@ public sealed class ValidateHostCliTests
             "--project",
             Path.Combine(project, TempBakeFixture.DescriptorFileName));
 
+        Assert.Equal(CliApplication.DiagnosticsExitCode, result.ExitCode);
+        Assert.Contains("error BK2001:", result.Error, StringComparison.Ordinal);
+        Assert.Contains("Assets/data/config.toml(1,", result.Error, StringComparison.Ordinal);
+        Assert.Contains("source error(s)", result.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithoutAHostAbsentReferencesAndValidSyntaxPass()
+    {
+        string project = _fixture.CreateProjectCopy(
+            "descriptor-syntax-ok",
+            ("data/config.toml", """
+                name = "campaign"
+                health = 1
+                must = "m"
+                """));
+
+        Result result = Run(
+            "validate",
+            "--project",
+            Path.Combine(project, TempBakeFixture.DescriptorFileName));
+
         Assert.Equal(CliApplication.SuccessExitCode, result.ExitCode);
         Assert.Contains("is valid", result.Output, StringComparison.Ordinal);
+        Assert.Contains("1 custom-data source(s)", result.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("bound", result.Output, StringComparison.Ordinal);
     }
 

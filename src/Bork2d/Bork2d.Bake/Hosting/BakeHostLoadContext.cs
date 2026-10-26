@@ -10,11 +10,12 @@ namespace Bork2d.Bake.Hosting;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Shared assemblies (<c>Bork2d.*</c>, <c>Tomlyn</c>, <c>PolyType</c>, <c>Nerdbank.*</c>,
+/// The tooling assemblies (<c>Bork2d.Api</c>, <c>Bork2d.Assets</c>, <c>Bork2d.Bake</c>) and the
+/// tooling package/runtime assemblies (<c>Tomlyn</c>, <c>PolyType</c>, <c>Nerdbank.*</c>,
 /// <c>System.*</c>, <c>Microsoft.*</c>) always resolve to the default context, so
 /// <see cref="IBakeManifest"/>, <see cref="PackBuilder"/>, the API asset types, and PolyType shapes
-/// keep one identity. The host assembly and every non-shared assembly (<c>Project.Common</c>, a Q-04
-/// game data library) load from the host directory.
+/// keep one identity. The host assembly and every game assembly (<c>Project.Common</c>, a Q-04 game
+/// data library, or a fixture named <c>Bork2d.*</c>) load from the host directory.
 /// </para>
 /// <para>
 /// A shared assembly that the default context cannot resolve throws
@@ -24,9 +25,15 @@ namespace Bork2d.Bake.Hosting;
 /// </remarks>
 internal sealed class BakeHostLoadContext : AssemblyLoadContext
 {
+    private static readonly HashSet<string> _sharedAssemblyNames = new(StringComparer.Ordinal)
+    {
+        "Bork2d.Api",
+        "Bork2d.Assets",
+        "Bork2d.Bake",
+    };
+
     private static readonly string[] _sharedPrefixes =
     [
-        "Bork2d.",
         "Microsoft.",
         "Nerdbank.",
         "PolyType",
@@ -80,6 +87,11 @@ internal sealed class BakeHostLoadContext : AssemblyLoadContext
 
     private static bool IsShared(string name)
     {
+        if (_sharedAssemblyNames.Contains(name))
+        {
+            return true;
+        }
+
         foreach (string prefix in _sharedPrefixes)
         {
             if (name.StartsWith(prefix, StringComparison.Ordinal))

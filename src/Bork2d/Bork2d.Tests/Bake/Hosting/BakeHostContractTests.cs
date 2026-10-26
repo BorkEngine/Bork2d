@@ -48,9 +48,14 @@ public sealed class BakeHostContractTests
         Assert.Equal("data", registration.SourcePrefix);
         Assert.Equal(BakeAssetKind.MessagePack, registration.Kind);
 
-        var site = new BakeReferenceSite("items[0].icon", "data/icon", IsData: false);
+        var site = new BakeReferenceSite(
+            "items[0].icon",
+            "data/icon",
+            IsData: false,
+            TargetTypeName: "Bork2d.Api.Assets.TextureDescriptor");
         Assert.Equal("items[0].icon", site.MemberPath);
         Assert.Equal("data/icon", site.ReferencePath);
         Assert.False(site.IsData);
+        Assert.Equal("Bork2d.Api.Assets.TextureDescriptor", site.TargetTypeName);
     }
 }

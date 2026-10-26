@@ -4,6 +4,7 @@
   <Project Path="Bork2d.Assets/Bork2d.Assets.csproj" />
   <Project Path="Bork2d.Bake/Bork2d.Bake.csproj" />
   <Project Path="Bork2d.Bake.Cli/Bork2d.Bake.Cli.csproj" />
+  <Project Path="Bork2d.BakeFixture/Bork2d.BakeFixture.csproj" />
   <Project Path="Bork2d.Common/Bork2d.Common.csproj" />
   <Project Path="Bork2d.Render/Bork2d.Render.csproj" />
   <Project Path="Bork2d.Runtime/Bork2d.Runtime.csproj" />

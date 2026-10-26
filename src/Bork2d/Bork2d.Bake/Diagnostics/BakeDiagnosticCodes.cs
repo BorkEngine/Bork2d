@@ -125,6 +125,21 @@ internal static class BakeDiagnosticCodes
     /// <summary>A TOML source is not valid UTF-8.</summary>
     internal const string SourceNotUtf8 = "BK1028";
 
+    /// <summary>A reference path is not canonical.</summary>
+    internal const string ReferenceNotCanonical = "BK3001";
+
+    /// <summary>A reference targets an asset path this bake does not produce.</summary>
+    internal const string ReferenceMissing = "BK3002";
+
+    /// <summary>A reference's kind (MessagePack asset vs raw payload) does not match the target entry.</summary>
+    internal const string ReferenceWrongKind = "BK3003";
+
+    /// <summary>A typed reference's target type does not match the baked target's type.</summary>
+    internal const string ReferenceWrongType = "BK3004";
+
+    /// <summary>Two baked entries produce the same canonical path, or the same path in two kinds.</summary>
+    internal const string AssetPathCollision = "BK3005";
+
     /// <summary>TOML syntax (including duplicate keys) in a source file.</summary>
     internal const string TomlSyntax = "BK2001";
 
@@ -157,4 +172,13 @@ internal static class BakeDiagnosticCodes
 
     /// <summary>A collection or dictionary shape cannot be constructed from TOML.</summary>
     internal const string BinderUnsupportedCollection = "BK2011";
+
+    /// <summary>
+    /// The pack could not be composed because <c>PackBuilder</c> rejected an entry or reference. This
+    /// is an internal baker error: reference validation runs first, so a correct bake never reaches it.
+    /// </summary>
+    internal const string PackComposeFailed = "BK5001";
+
+    /// <summary>The pack could not be written or atomically replaced.</summary>
+    internal const string PackWriteFailed = "BK5002";
 }

@@ -1,8 +1,10 @@
 using System.Reflection;
+using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Hosting;
 using Bork2d.Bake.Project;
 using Bork2d.Bake.Sources;
+using Bork2d.Bake.Textures;
 
 namespace Bork2d.Bake.Cli;
 
@@ -17,10 +19,12 @@ namespace Bork2d.Bake.Cli;
 /// unexpected internal failure.
 /// </para>
 /// <para>
-/// <c>generate-host</c> writes the generated host project and manifest. <c>validate</c> checks the
-/// descriptor; with <c>--host</c> it also loads the host, checks that the host manifest matches the
-/// descriptor, and binds every mapped source. <c>validate</c> never validates references against the
-/// baked set and never writes a pack; <c>bake</c> stays a later work package.
+/// <c>generate-host</c> writes the generated host project and manifest. <c>bake</c> runs the complete
+/// pipeline (descriptor, host, custom-data binding, textures, reference validation, pack) and writes
+/// the pack atomically unless <c>--check</c> is passed. <c>validate</c> without a host checks the
+/// descriptor, the reachable texture sources, and custom-data TOML syntax; with <c>--host</c> it runs
+/// the same validation pipeline as <c>bake --check</c> but never writes a pack. <c>--force</c> is
+/// accepted for the WP5 incremental manifest and is a documented no-op in WP4.
 /// </para>
 /// </remarks>
 internal static class CliApplication
@@ -74,6 +78,9 @@ internal static class CliApplication
 
                 case "generate-host":
                     return RunGenerateHost(args.AsSpan(1), output, error);
+
+                case "bake":
+                    return RunBake(args.AsSpan(1), output, error);
 
                 case "validate":
                     return RunValidate(args.AsSpan(1), output, error);
@@ -259,6 +266,172 @@ internal static class CliApplication
         return SuccessExitCode;
     }
 
+    private static int RunBake(
+        ReadOnlySpan<string> args,
+        TextWriter output,
+        TextWriter error)
+    {
+        string? projectPath = null;
+        string? hostPath = null;
+        string? outputPath = null;
+        BakeMode mode = BakeMode.Debug;
+        bool check = false;
+        bool force = false;
+        bool verbose = false;
+        bool quiet = false;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--project":
+                    if (i + 1 >= args.Length)
+                    {
+                        return UsageError(error, "bake requires a value after --project.");
+                    }
+
+                    if (projectPath is not null)
+                    {
+                        return UsageError(error, "bake accepts --project only once.");
+                    }
+
+                    projectPath = args[++i];
+                    break;
+
+                case "--host":
+                    if (i + 1 >= args.Length)
+                    {
+                        return UsageError(error, "bake requires a value after --host.");
+                    }
+
+                    if (hostPath is not null)
+                    {
+                        return UsageError(error, "bake accepts --host only once.");
+                    }
+
+                    hostPath = args[++i];
+                    break;
+
+                case "--output":
+                    if (i + 1 >= args.Length)
+                    {
+                        return UsageError(error, "bake requires a value after --output.");
+                    }
+
+                    if (outputPath is not null)
+                    {
+                        return UsageError(error, "bake accepts --output only once.");
+                    }
+
+                    outputPath = args[++i];
+                    break;
+
+                case "--mode":
+                    if (i + 1 >= args.Length)
+                    {
+                        return UsageError(error, "bake requires a value after --mode.");
+                    }
+
+                    if (!BakeModeExtensions.TryParse(args[++i], out mode))
+                    {
+                        return UsageError(
+                            error,
+                            $"--mode must be 'debug' or 'release'; got '{args[i]}'.");
+                    }
+
+                    break;
+
+                case "--check":
+                    check = true;
+                    break;
+
+                case "--force":
+                    force = true;
+                    break;
+
+                case "--verbose":
+                    verbose = true;
+                    break;
+
+                case "--quiet":
+                    quiet = true;
+                    break;
+
+                default:
+                    return UsageError(error, $"bake does not accept '{args[i]}'.");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(projectPath))
+        {
+            return UsageError(error, "bake requires --project <bork2d.project.toml>.");
+        }
+
+        if (string.IsNullOrWhiteSpace(hostPath))
+        {
+            return UsageError(error, "bake requires --host <BakeHost.dll>.");
+        }
+
+        if (verbose && quiet)
+        {
+            return UsageError(error, "--verbose and --quiet are mutually exclusive.");
+        }
+
+        if (!TryResolveCliPath(projectPath, "--project", error, out string resolvedProject)
+            || !TryResolveCliPath(hostPath, "--host", error, out string resolvedHost))
+        {
+            return UsageExitCode;
+        }
+
+        string? resolvedOutput = null;
+        if (!string.IsNullOrWhiteSpace(outputPath)
+            && !TryResolveCliPath(outputPath, "--output", error, out resolvedOutput))
+        {
+            return UsageExitCode;
+        }
+
+        var options = new BakeOptions(
+            resolvedProject,
+            resolvedHost,
+            resolvedOutput,
+            mode,
+            check,
+            force);
+        var diagnostics = new BakeDiagnostics();
+        BakeResult result = BakePipeline.Run(options, diagnostics);
+        WriteDiagnostics(error, result.Diagnostics);
+
+        if (result.Status == BakeStatus.Success)
+        {
+            if (!quiet)
+            {
+                WriteBakeSuccessSummary(output, options, result);
+            }
+
+            if (verbose)
+            {
+                WriteEntryList(output, result.Entries);
+            }
+
+            if (force && !quiet)
+            {
+                output.WriteLine(
+                    "  --force is accepted and has no effect until the incremental manifest (WP5).");
+            }
+
+            return SuccessExitCode;
+        }
+
+        if (!quiet)
+        {
+            WriteBakeFailureSummary(output, options, result);
+        }
+
+        return result.Status == BakeStatus.ConfigurationError
+            ? UsageExitCode
+            : DiagnosticsExitCode;
+    }
+
     private static int RunValidate(
         ReadOnlySpan<string> args,
         TextWriter output,
@@ -324,9 +497,33 @@ internal static class CliApplication
             return UsageError(error, "--verbose and --quiet are mutually exclusive.");
         }
 
+        if (!TryResolveCliPath(projectPath, "--project", error, out string resolvedProject))
+        {
+            return UsageExitCode;
+        }
+
+        if (!string.IsNullOrWhiteSpace(hostPath))
+        {
+            if (!TryResolveCliPath(hostPath, "--host", error, out string resolvedHost))
+            {
+                return UsageExitCode;
+            }
+
+            return ValidateWithHost(resolvedProject, resolvedHost, verbose, quiet, output, error);
+        }
+
+        return ValidateWithoutHost(resolvedProject, verbose, quiet, output, error);
+    }
+
+    private static int ValidateWithoutHost(
+        string projectPath,
+        bool verbose,
+        bool quiet,
+        TextWriter output,
+        TextWriter error)
+    {
         var diagnostics = new BakeDiagnostics();
         ProjectDescriptor? descriptor = ProjectDescriptorParser.Parse(projectPath, diagnostics);
-
         if (descriptor is null || diagnostics.HasErrors)
         {
             WriteDiagnostics(error, diagnostics);
@@ -340,83 +537,13 @@ internal static class CliApplication
             return UsageExitCode;
         }
 
-        if (string.IsNullOrWhiteSpace(hostPath))
+        TextureBakeResult textures = TexturePipeline.Import(descriptor);
+        foreach (BakeDiagnostic diagnostic in textures.Diagnostics)
         {
-            if (!quiet)
-            {
-                output.WriteLine(
-                    $"{ProgramName}: '{descriptor.DescriptorPath}' is valid: assets root "
-                        + $"'{descriptor.AssetsRoot}', pack '{descriptor.PackPath}', host "
-                        + $"'{descriptor.HostPath}', {descriptor.Types.Count} type mapping(s).");
-            }
-
-            if (verbose)
-            {
-                foreach (ProjectTypeMapping mapping in descriptor.Types)
-                {
-                    output.WriteLine($"  {mapping.Prefix} -> {mapping.TypeName}");
-                }
-            }
-
-            return SuccessExitCode;
+            diagnostics.Add(diagnostic);
         }
 
-        if (!TryResolveCliPath(hostPath, "--host", error, out string resolvedHost))
-        {
-            return UsageExitCode;
-        }
-
-        return ValidateWithHost(
-            descriptor,
-            resolvedHost,
-            verbose,
-            quiet,
-            output,
-            error,
-            diagnostics);
-    }
-
-    private static int ValidateWithHost(
-        ProjectDescriptor descriptor,
-        string hostPath,
-        bool verbose,
-        bool quiet,
-        TextWriter output,
-        TextWriter error,
-        BakeDiagnostics diagnostics)
-    {
-        BakeHostHandle? handle = BakeHostLoader.TryLoad(hostPath, diagnostics);
-        if (handle is null)
-        {
-            WriteDiagnostics(error, diagnostics);
-            if (!quiet)
-            {
-                output.WriteLine(
-                    $"{ProgramName}: could not load the bake host '{hostPath}' "
-                        + $"({CountErrors(diagnostics)} error(s)).");
-            }
-
-            return UsageExitCode;
-        }
-
-        if (!BakeHostManifestValidator.Validate(descriptor, handle.Manifest, diagnostics)
-            || diagnostics.HasErrors)
-        {
-            WriteDiagnostics(error, diagnostics);
-            if (!quiet)
-            {
-                output.WriteLine(
-                    $"{ProgramName}: the bake host '{hostPath}' does not match the project "
-                        + "descriptor; regenerate the host.");
-            }
-
-            return UsageExitCode;
-        }
-
-        IReadOnlyList<BoundAsset> assets = BakeSourceBinder.BindAll(
-            descriptor,
-            handle.Manifest,
-            diagnostics);
+        int sourceCount = BakeSourceBinder.ValidateSyntax(descriptor, diagnostics);
 
         if (diagnostics.HasErrors)
         {
@@ -431,26 +558,163 @@ internal static class CliApplication
             return DiagnosticsExitCode;
         }
 
-        int referenceCount = assets.Sum(asset => asset.References.Count);
         if (!quiet)
         {
             output.WriteLine(
                 $"{ProgramName}: '{descriptor.DescriptorPath}' is valid: "
-                    + $"{assets.Count} asset(s) bound, {referenceCount} reference site(s). "
-                    + "References are not validated and no pack is written by validate.");
+                    + $"{sourceCount} custom-data source(s), {textures.Textures.Count} texture(s), "
+                    + $"{descriptor.Types.Count} type mapping(s); no pack written.");
         }
 
         if (verbose)
         {
-            foreach (BoundAsset asset in assets)
+            foreach (ProjectTypeMapping mapping in descriptor.Types)
             {
-                output.WriteLine(
-                    $"  {asset.AssetPath} -> {asset.TypeName} "
-                        + $"({asset.References.Count} reference(s), '{asset.SourcePath}')");
+                output.WriteLine($"  {mapping.Prefix} -> {mapping.TypeName}");
             }
         }
 
         return SuccessExitCode;
+    }
+
+    private static int ValidateWithHost(
+        string projectPath,
+        string hostPath,
+        bool verbose,
+        bool quiet,
+        TextWriter output,
+        TextWriter error)
+    {
+        var options = new BakeOptions(
+            projectPath,
+            hostPath,
+            outputPath: null,
+            BakeMode.Debug,
+            check: true,
+            force: false);
+        var diagnostics = new BakeDiagnostics();
+        BakeResult result = BakePipeline.Run(options, diagnostics);
+        WriteDiagnostics(error, result.Diagnostics);
+
+        if (result.Status == BakeStatus.Success)
+        {
+            if (!quiet)
+            {
+                output.WriteLine(
+                    $"{ProgramName}: '{projectPath}' is valid: "
+                        + $"{result.AssetCount} asset(s) bound, {result.TextureCount} texture(s), "
+                        + $"{result.ReferenceCount} reference site(s); no pack written.");
+            }
+
+            if (verbose)
+            {
+                WriteEntryList(output, result.Entries);
+            }
+
+            return SuccessExitCode;
+        }
+
+        if (!quiet)
+        {
+            WriteValidateFailureSummary(output, projectPath, hostPath, result);
+        }
+
+        return result.Status == BakeStatus.ConfigurationError
+            ? UsageExitCode
+            : DiagnosticsExitCode;
+    }
+
+    private static void WriteEntryList(TextWriter output, IReadOnlyList<BakedAssetEntry> entries)
+    {
+        foreach (BakedAssetEntry entry in entries)
+        {
+            string target = entry.TypeName ?? "raw payload";
+            output.WriteLine($"  {entry.Path} -> {target} ({entry.Kind})");
+        }
+    }
+
+    private static void WriteBakeSuccessSummary(
+        TextWriter output,
+        BakeOptions options,
+        BakeResult result)
+    {
+        if (result.PackWritten)
+        {
+            string mode = options.Mode == BakeMode.Release ? "release" : "debug";
+            output.WriteLine(
+                $"{ProgramName}: baked '{result.PackPath}' ({result.AssetCount} asset(s), "
+                    + $"{result.TextureCount} texture(s), {result.ReferenceCount} reference(s), "
+                    + $"{mode} mode).");
+            return;
+        }
+
+        output.WriteLine(
+            $"{ProgramName}: '{options.ProjectPath}' is valid: {result.AssetCount} asset(s), "
+                + $"{result.TextureCount} texture(s), {result.ReferenceCount} reference(s); "
+                + "no pack written (--check).");
+    }
+
+    private static void WriteBakeFailureSummary(
+        TextWriter output,
+        BakeOptions options,
+        BakeResult result)
+    {
+        int errors = CountErrors(result.Diagnostics);
+        switch (result.FailureStage)
+        {
+            case BakeFailureStage.Descriptor:
+                output.WriteLine(
+                    $"{ProgramName}: project descriptor '{options.ProjectPath}' is invalid "
+                        + $"({errors} error(s)).");
+                break;
+
+            case BakeFailureStage.Host:
+                output.WriteLine(
+                    $"{ProgramName}: the bake host '{options.HostPath}' could not be loaded or "
+                        + $"does not match the project descriptor; regenerate the host ({errors} "
+                        + "error(s)).");
+                break;
+
+            case BakeFailureStage.Pack:
+                output.WriteLine(
+                    $"{ProgramName}: failed to write the pack '{result.PackPath}' "
+                        + $"({errors} error(s)); the previous pack is unchanged.");
+                break;
+
+            default:
+                output.WriteLine(
+                    $"{ProgramName}: '{options.ProjectPath}' has {errors} error(s); no pack was "
+                        + "written.");
+                break;
+        }
+    }
+
+    private static void WriteValidateFailureSummary(
+        TextWriter output,
+        string projectPath,
+        string hostPath,
+        BakeResult result)
+    {
+        int errors = CountErrors(result.Diagnostics);
+        switch (result.FailureStage)
+        {
+            case BakeFailureStage.Descriptor:
+                output.WriteLine(
+                    $"{ProgramName}: project descriptor '{projectPath}' is invalid "
+                        + $"({errors} error(s)).");
+                break;
+
+            case BakeFailureStage.Host:
+                output.WriteLine(
+                    $"{ProgramName}: the bake host '{hostPath}' could not be loaded or does not "
+                        + $"match the project descriptor; regenerate the host ({errors} error(s)).");
+                break;
+
+            default:
+                output.WriteLine(
+                    $"{ProgramName}: '{projectPath}' has {errors} source error(s).");
+                break;
+        }
     }
 
     private static bool TryResolveCliPath(
@@ -482,17 +746,23 @@ internal static class CliApplication
     }
 
     private static void WriteDiagnostics(TextWriter error, BakeDiagnostics diagnostics)
+        => WriteDiagnostics(error, diagnostics.GetSorted());
+
+    private static void WriteDiagnostics(TextWriter error, IReadOnlyList<BakeDiagnostic> diagnostics)
     {
-        foreach (BakeDiagnostic diagnostic in diagnostics.GetSorted())
+        foreach (BakeDiagnostic diagnostic in diagnostics)
         {
             error.WriteLine(diagnostic.Format());
         }
     }
 
     private static int CountErrors(BakeDiagnostics diagnostics)
+        => CountErrors(diagnostics.GetSorted());
+
+    private static int CountErrors(IEnumerable<BakeDiagnostic> diagnostics)
     {
         int count = 0;
-        foreach (BakeDiagnostic diagnostic in diagnostics.GetSorted())
+        foreach (BakeDiagnostic diagnostic in diagnostics)
         {
             if (diagnostic.Severity == BakeSeverity.Error)
             {
@@ -516,12 +786,21 @@ internal static class CliApplication
         writer.WriteLine(
             "               write the generated bake host project and manifest");
         writer.WriteLine(
+            "  bake --project <bork2d.project.toml> --host <BakeHost.dll> [--output <assets.pck>]");
+        writer.WriteLine("       [--mode debug|release] [--check] [--force] [--verbose|--quiet]");
+        writer.WriteLine(
+            "               run the full bake and atomically write the pack; --check validates and");
+        writer.WriteLine(
+            "               writes nothing; --force is a no-op until the WP5 incremental manifest");
+        writer.WriteLine(
             "  validate --project <bork2d.project.toml> [--host <BakeHost.dll>] "
                 + "[--verbose|--quiet]");
         writer.WriteLine(
-            "               validate the descriptor; with --host, bind every mapped source");
+            "               without --host: descriptor, texture sources, and TOML syntax;");
         writer.WriteLine(
-            "exit codes: 0 success, 1 source diagnostics, 2 usage/descriptor error, 3 internal error");
+            "               with --host: the full bake validation (binding + references), no pack");
+        writer.WriteLine(
+            "exit codes: 0 success, 1 source diagnostics, 2 usage/descriptor/host error, 3 internal error");
     }
 
     private static string ToolVersion

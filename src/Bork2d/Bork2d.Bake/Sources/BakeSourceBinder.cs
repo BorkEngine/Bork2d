@@ -29,6 +29,47 @@ internal static class BakeSourceBinder
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true);
 
+    /// <summary>
+    /// Discovers every custom-data source and parses it for TOML syntax without binding it.
+    /// </summary>
+    /// <remarks>
+    /// This is the <c>validate</c> command's host-free path: it proves the source tree reads and
+    /// parses, but it cannot check types, required members, or references without the generated host.
+    /// Discovery diagnostics (unmapped sources, duplicate paths) are reported exactly as in a bake.
+    /// </remarks>
+    /// <param name="descriptor">The parsed project descriptor.</param>
+    /// <param name="diagnostics">The diagnostics bag to append to.</param>
+    /// <returns>The number of sources whose TOML syntax parsed successfully.</returns>
+    internal static int ValidateSyntax(
+        ProjectDescriptor descriptor,
+        BakeDiagnostics diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(diagnostics);
+
+        int parsed = 0;
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        foreach (BakeSource source in sources)
+        {
+            string? text = ReadSource(source, descriptor, diagnostics);
+            if (text is null)
+            {
+                continue;
+            }
+
+            string diagnosticPath = BakeDiagnosticPath.ForSource(
+                descriptor.DescriptorDirectory,
+                source.FullPath);
+
+            if (TomlDocument.TryParse(text, diagnosticPath, diagnostics, out _, out _))
+            {
+                parsed++;
+            }
+        }
+
+        return parsed;
+    }
+
     /// <summary>Discovers and binds every custom-data source of a project.</summary>
     /// <param name="descriptor">The parsed project descriptor.</param>
     /// <param name="manifest">The loaded generated host manifest.</param>

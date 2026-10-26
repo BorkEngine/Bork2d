@@ -35,6 +35,7 @@ internal sealed class BakeTypeResolver : IDisposable
     private readonly MetadataLoadContext _context;
     private readonly ImmutableArray<Assembly> _searchOrder;
     private readonly string _commonPath;
+    private readonly string _commonName;
     private readonly string _apiPath;
     private bool _disposed;
 
@@ -42,16 +43,25 @@ internal sealed class BakeTypeResolver : IDisposable
         MetadataLoadContext context,
         ImmutableArray<Assembly> searchOrder,
         string commonPath,
+        string commonName,
         string apiPath)
     {
         _context = context;
         _searchOrder = searchOrder;
         _commonPath = commonPath;
+        _commonName = commonName;
         _apiPath = apiPath;
     }
 
     /// <summary>Gets the absolute <c>Project.Common</c> assembly path.</summary>
     internal string CommonAssemblyPath => _commonPath;
+
+    /// <summary>
+    /// Gets the simple assembly name of the <c>Project.Common</c> assembly as its metadata declares
+    /// it. The generated host must reference it under this name, which may differ from the file name
+    /// (for example a fixture built as <c>Bork2d.BakeFixture.dll</c>).
+    /// </summary>
+    internal string CommonAssemblyName => _commonName;
 
     /// <summary>Gets the absolute <c>Bork2d.Api</c> assembly path used for resolution.</summary>
     internal string ApiAssemblyPath => _apiPath;
@@ -195,7 +205,12 @@ internal sealed class BakeTypeResolver : IDisposable
                 return false;
             }
 
-            resolver = new BakeTypeResolver(context, [.. searchOrder], fullPath, api.Location);
+            resolver = new BakeTypeResolver(
+                context,
+                [.. searchOrder],
+                fullPath,
+                common.GetName().Name ?? Path.GetFileNameWithoutExtension(fullPath),
+                api.Location);
             return true;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)

@@ -40,10 +40,10 @@ public sealed class CliApplicationTests
     [Fact]
     public void UnknownCommandIsAUsageError()
     {
-        var result = Run("bake");
+        var result = Run("update");
 
         Assert.Equal(CliApplication.UsageExitCode, result.ExitCode);
-        Assert.Contains("unknown command 'bake'", result.Error, StringComparison.Ordinal);
+        Assert.Contains("unknown command 'update'", result.Error, StringComparison.Ordinal);
         Assert.Equal(string.Empty, result.Output);
     }
 
