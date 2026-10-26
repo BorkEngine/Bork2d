@@ -69,6 +69,11 @@ These entries record the accepted decisions only.
 | D-M3-18 | Accepted | No automatic retry, no loose-file overlay, no KTX2/color-space fields. |
 | D-M3-19 | Accepted | The default AOT smoke run builds a temporary pack, loads raw + generated-shape MessagePack assets, browses/exists, then deletes it; `--windowed` keeps the M2 demo with `WithoutAssets()`. |
 | D-M3-20 | Accepted | `Bork2d.Assets` pins `Nerdbank.MessagePack` 1.4.95, `PolyType` 1.4.1, and `System.IO.Hashing` 11.0.0-rc.1.26425.128; Zstd is the .NET 11 built-in codec. |
+| D-M3-22 | Accepted | **Supersedes D-M3-16.** `IAssets.LoadAsset<T>` is `Task<T> LoadAsset<T>(string assetPath) where T : class, IShapeable<T>` (PolyType `IShapeable<T>`), so `Bork2d.Api` references PolyType 1.4.1 for this contract. Unconstrained/reflection-shape deserialization is rejected; the `NBMsgPack051` suppression and the runtime "missing shape" fault are removed. `PackBuilder.AddMessagePack<T>` keeps its `T : IShapeable<T>` constraint. D-001's game-code reference rule is unchanged: game code references only `Api`/`Runtime`, and `Bork2d.Assets` stays tooling-only. |
+
+D-M3-22 is a docs-only contract correction on the M3 target contract; the `Bork2d.Api`
+signature and PolyType package reference land with WP2, not in the current tree. D-M3-16 stays
+in the log as published history and is superseded by D-M3-22.
 
 ## Detail: implemented and public-contract decisions
 

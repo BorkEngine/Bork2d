@@ -1,12 +1,12 @@
 # API Reference
 
 > **Status:** the implemented M2 contract for the windowed host (M2 WP1–WP5; merged into `develop`
-> 2026-10-26, PR #2).
-> `Current` means implemented in this tree and covered by tests; `Partial` means the declaration
-> exists but behavior is stubbed, unwired, or incomplete; `Planned` means an agreed target that is
-> not implemented. Windowed mode runs a real SDL window, input, and time; headless/offscreen keep
-> the one-tick M1 path. The asset pipeline is M3 and renderer semantics are M8; see the
-> [roadmap](../roadmap.md). Code under `src/Bork2d` is authoritative.
+> 2026-10-26, PR #2), plus the M3 WP1 tooling-only pack writer. `Current` means implemented in this
+> tree and covered by tests; `Partial` means the declaration exists but behavior is stubbed,
+> unwired, or incomplete; `Planned` means an agreed target that is not implemented. Windowed mode
+> runs a real SDL window, input, and time; headless/offscreen keep the one-tick M1 path. The
+> runtime asset pipeline (VFS, loader, descriptors) is M3 WP2–WP5; renderer semantics are M8. See
+> the [roadmap](../roadmap.md). Code under `src/Bork2d` is authoritative.
 
 ## 1. Contract-wide rules
 
@@ -64,7 +64,12 @@ Microsoft.Extensions.Logging type exposed by `IEngine` (not defined in `Bork2d.A
 `AssetInfo` is `Planned` for M3. The runtime is NativeAOT- and trim-safe: no reflection, assembly
 scanning, runtime TOML, or dynamic code; `LoadAsset<T>` needs a
 [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) generated shape and the
-game is passed as an instance. See [NativeAOT](../architecture/nativeaot.md).
+game is passed as an instance. D-M3-22 makes that a `where T : class, IShapeable<T>` constraint on
+`IAssets.LoadAsset<T>` and adds a PolyType 1.4.1 contract reference to `Bork2d.Api` in WP2. See
+[NativeAOT](../architecture/nativeaot.md).
+
+The only other public surface is the tooling-only pack writer in `Bork2d.Assets` (§13). Game code
+still references only `Bork2d.Api` and `Bork2d.Runtime`.
 
 ## 2. `IEngine<TLayer>`
 
@@ -225,9 +230,10 @@ the clock, dispatches text, then calls `Tick`. In headless/offscreen there is no
 ## 7. `IAssets`
 
 `Status: Partial.` Asset behavior is `Planned` for M3. `public interface IAssets` declares
-`Task<T> LoadAsset<T>(string) where T : class`, `Sprite LoadSprite(string)`, and
+`Task<T> LoadAsset<T>(string) where T : class, IShapeable<T>`, `Sprite LoadSprite(string)`, and
 `Task<byte[]> LoadData(string)`. In M2 `IEngine.Assets` returns an `UnsupportedAssets`; all three
-methods throw `NotSupportedException`.
+methods throw `NotSupportedException`. The `IShapeable<T>` constraint and the PolyType contract
+reference land with WP2 (D-M3-22); until then the tree still has `where T : class`.
 
 `Planned for M3:` `LoadPack(string packPath)`, `Browse(string? prefix = null)`,
 `Exists(string assetPath)`, and `AssetInfo(Path, IsRaw, IsCompressed, Length, Size, PackPath)`.
@@ -240,8 +246,9 @@ Target rules (M3):
 - `LoadSprite` is idempotent per path; the handle is session-local and never persisted. A sprite
   is skipped until its sprite asset, texture descriptor, raw payload, and GPU page are ready
   (M8); no blocking, no placeholder. A missing key returns `Sprite.Empty` and logs.
-- `LoadAsset<T>` loads a MessagePack asset with a Nerdbank generated shape and throws for raw
-  assets; use `LoadData` for arbitrary bytes.
+- `LoadAsset<T>` loads a MessagePack asset with a Nerdbank generated shape; the
+  `where T : class, IShapeable<T>` constraint makes the shape a compile-time requirement (D-M3-22).
+  It throws for raw assets; use `LoadData` for arbitrary bytes.
 - The default pack is the relative string `"assets.pck"`. `Build()` validates only that the path
   is non-empty and never touches the filesystem in M2. A missing or malformed base pack throws
   `Bork2dException` at startup (no empty-filesystem fallback).
@@ -442,7 +449,46 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
   readable, and `IEngine.Exit()` is a no-op. `Run` returns `void`; failure is reported by
   exceptions.
 
-## 13. Errors and exceptions
+## 13. Pack tooling (`Bork2d.Assets`, tooling only)
+
+`Status: Current (M3 WP1).` `Bork2d.Assets` exposes exactly two public types for writing v1
+`assets.pck` files. This is a **tooling surface**: game code still references only `Bork2d.Api` and
+`Bork2d.Runtime`, and the runtime never exposes these types.
+
+```csharp
+using Bork2d.Assets;
+
+var builder = new PackBuilder(PackCompressionMode.Release);
+builder.AddRaw("textures/raw/player", rgba8Bytes);
+builder.AddMessagePack("data/config", new GameConfig { /* generated shape on GameConfig */ });
+builder.Write("assets.pck");   // overwrites; relative to the current directory
+```
+
+| Member | Contract |
+| --- | --- |
+| `PackCompressionMode.Debug` | Payloads are stored uncompressed. Intended for tests and local iteration. |
+| `PackCompressionMode.Release` | Payloads use maximum-quality Zstd only when strictly smaller than the raw bytes. |
+| `PackBuilder(PackCompressionMode)` | Selects the payload policy. The header is always maximum-quality Zstd in both modes. |
+| `AddRaw(string, ReadOnlySpan<byte>)` | Adds an opaque payload; the bytes are copied. |
+| `AddMessagePack<T>(string, T)` | Serializes `T` with Nerdbank.MessagePack generated shapes; constrained to `T : IShapeable<T>` (no reflection resolver). |
+| `Build()` | Returns the complete pack as one `byte[]`; limited by `Array.MaxLength`; does not consume the builder. |
+| `Write(string)` | Streams the pack to an overwritten file, resolving relative paths against the process current directory. |
+| `Write(Stream)` | Streams the pack and leaves the destination open. Does not require the whole pack in one array. |
+
+- Paths are normalized and validated with the canonical asset-path rules: `\` becomes `/`,
+  invariant lowercase, and segments contain only lowercase letters, digits, `_`, and `-`.
+  Null paths throw `ArgumentNullException`; other invalid paths throw `ArgumentException`.
+- Duplicate canonical paths, serialization failures, size overflow, and write failures throw
+  `Bork2dException`.
+- Entries are sorted by canonical path and use absolute offsets. There is **no byte-determinism
+  guarantee**: the structure and round-trip are stable, but compressed bytes may vary across runs
+  and runtime versions.
+- The builder is not thread-safe. `Build()`/`Write()` may be repeated, and entries may be added
+  after a build.
+- Runtime pack loading, overlays, `IAssets.Browse`/`Exists`, and descriptor/sprite assets are
+  WP2–WP5 and remain `Planned`; this section documents the writer only.
+
+## 14. Errors and exceptions
 
 | Situation | Contract |
 | --- | --- |
@@ -463,7 +509,7 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 
 `Bork2dException` lives in `Bork2d.Api` with the standard constructors; BCL exceptions remain for caller argument errors.
 
-## 14. Related documents
+## 15. Related documents
 
 - [API guide](guide.md) — usage examples; [Roadmap](../roadmap.md) — milestone ownership.
 - [Scene ownership](../architecture/scene-ownership.md) — root lifetime and parent rules;

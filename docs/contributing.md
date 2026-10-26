@@ -30,8 +30,10 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **292 tests**: 283 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
-are skipped unless the environment variable is set. On a desktop session run them with:
+The suite is **382 tests**: 373 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
+are skipped unless the environment variable is set. The deterministic set includes the M3 WP1
+pack-format/writer tests, which build packs in memory or in temp files and use no committed binary
+fixtures. On a desktop session run them with:
 
 ```powershell
 $env:BORK2D_RUN_WINDOW_TESTS = '1'

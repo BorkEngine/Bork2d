@@ -1,12 +1,14 @@
 # M3 — Assets: Pack, VFS, Descriptors (spec)
 
 > **Status:** **approved by the human owner (2026-10-26).** The decisions in §4 are locked for the
-> M3 implementation; implementation has not started. This spec owns M3 scope and
+> M3 implementation. WP1 (v1 pack reader/writer, canonical paths, and the public pack-tooling
+> surface) is implemented on `m-3/wp-1`; WP2–WP5 (VFS, loader, descriptors/sprites, runtime/AOT
+> integration, and final docs) are not implemented yet. This spec owns M3 scope and
 > semantics. It supersedes conflicting statements in
 > [Assets and tooling](../architecture/assets-and-tooling.md) and the M3 rows of
 > [Roadmap §9](../roadmap.md#9-open-decisions) until those documents are reconciled by WP5.
 > [AGENTS.md](../../AGENTS.md) owns the workflow; the [decision log](../decisions.md) owns accepted
-> decisions and now records D-M3-01…D-M3-20.
+> decisions and now records D-M3-01…D-M3-22 (including the D-M3-22 shape-contract correction).
 >
 > **Outcome:** a runtime that opens `assets.pck`, mounts overlays, browses canonical paths, loads
 > raw data and MessagePack assets, and resolves sprite/texture CPU metadata — headless, with no
@@ -63,7 +65,8 @@ drawing (M8). Sprite payload pixels are not decoded or uploaded in M3.
 - Audio, animation, tilemaps, materials, scene serialization.
 - A public texture/sprite descriptor model. Descriptors and sprite assets stay internal; games use
   `Sprite` handles, `LoadData`, `Browse`, and their own `[GenerateShape]` data types.
-- A public `LoadAsset<T>` registration API or a shape-dependency in `Bork2d.Api`.
+- A public `LoadAsset<T>` registration API. The constrained `IShapeable<T>` contract on
+  `IAssets.LoadAsset<T>` is a shape constraint, not a registration API (D-M3-22).
 - Multi-pack unloading, pack replacement while mounted, or editing `.pck` files.
 - A pack CLI. The public `PackBuilder` is the M3 tooling surface; M4 owns the bake tool.
 
@@ -122,7 +125,7 @@ them; if an implementation cannot satisfy one, stop and report (AGENTS.md).
 | **D-M3-13** | **`LoadSprite` in M3:** resolve the path and allocate/reuse a handle synchronously; a missing path returns `Sprite.Empty` and logs (no exception); the sprite asset and descriptor load asynchronously; the raw payload is **not** loaded in M3. Load failures log and leave the handle non-renderable; there is no public readiness API. |
 | **D-M3-14** | **`IAssets` lifetime:** `IEngine.Assets` returns a real service in every mode (including `WithoutAssets`, as an empty VFS). The getter never throws. After `Run()` returns/throws or the app is disposed, every `IAssets` member throws `ObjectDisposedException`. |
 | **D-M3-15** | **Error contract:** pack open/parse/mount failures use `Bork2dException`; asset lookup/decode/IO failures use the new public `AssetException` with `AssetErrorKind` and `AssetPath`. Invalid arguments throw `ArgumentException`/`ArgumentNullException` synchronously. `LoadSprite` missing is not an exception. |
-| **D-M3-16** | **`LoadAsset<T>` is generic over compiled shapes.** It requires a Nerdbank/PolyType generated shape on `T`; M3 tests use engine-internal shapes. `Project.Common` stays `Api`-only in M3; game data types become usable in M4. A missing shape faults the `Task` with `AssetException` naming `T`. `PackBuilder.AddMessagePack<T>` constrains `T : IShapeable<T>` so tooling gets a compile-time shape requirement. |
+| **D-M3-16** | **`LoadAsset<T>` is generic over compiled shapes.** It is `Task<T> LoadAsset<T>(string assetPath) where T : class, IShapeable<T>` (PolyType `IShapeable<T>`); the generated shape is required at compile time and unconstrained/reflection-shape deserialization is rejected. M3 tests use engine-internal shapes. `Project.Common` stays `Api`-only; game data types become usable once `Bork2d.Api` carries the PolyType contract (D-M3-22). `PackBuilder.AddMessagePack<T>` constrains `T : IShapeable<T>` so tooling gets the same compile-time shape requirement. |
 | **D-M3-17** | **Descriptors and sprites stay internal.** They are MessagePack assets with generated shapes; no public `TextureDescriptor`/`SpriteAsset` types. Sprite topology is an integer enum in the pack and a string in TOML (M4). Only `rgba8`/sRGB is accepted. No per-asset version. |
 | **D-M3-18** | **No automatic retry; no loose-file overlay; no KTX2/color-space fields.** A failed load logs and stays failed for the process (v1 has no unload). Packs are the runtime source. |
 | **D-M3-19** | **AOT smoke always exercises assets.** The default no-argument `Bork2d.AotSmoke` run builds a small temporary pack with the public writer, loads raw data and a generated-shape MessagePack asset, browses/exists, runs one headless tick, and deletes the temp pack. `--windowed` keeps the M2 demo and uses `WithoutAssets()`. |
@@ -139,7 +142,7 @@ three members change from `NotSupportedException` to real behavior.
 ```csharp
 public interface IAssets
 {
-    Task<T> LoadAsset<T>(string assetPath) where T : class;
+    Task<T> LoadAsset<T>(string assetPath) where T : class, IShapeable<T>;
     Sprite LoadSprite(string assetPath);
     Task<byte[]> LoadData(string assetPath);
     void LoadPack(string packPath);
@@ -148,9 +151,12 @@ public interface IAssets
 }
 ```
 
+`IShapeable<T>` is `PolyType.IShapeable<T>`; `Bork2d.Api` references PolyType 1.4.1 for this
+contract only (D-M3-22). Unconstrained deserialization and reflection-shape fallback are rejected.
+
 | Member | Semantics |
 | --- | --- |
-| `LoadAsset<T>(string)` | Loads a MessagePack asset with a generated shape on `T`. A fresh instance per call. Raw entries fault with `AssetException` (`RawAsset`); missing paths fault with `NotFound`; decode/shape failures fault with `Decode`. Requires `[GenerateShape]` on `T` (or a compiled shape provider); a missing shape names `T` in the exception. In M3 this is tested with internal shapes; game types are usable in M4. |
+| `LoadAsset<T>(string)` | Loads a MessagePack asset with the compiled generated shape on `T`; the `where T : class, IShapeable<T>` constraint makes the shape a compile-time requirement. A fresh instance per call. Raw entries fault with `AssetException` (`RawAsset`); missing paths fault with `NotFound`; decode failures fault with `Decode`. Use `LoadData` for raw bytes. In M3 this is tested with internal shapes; game types are usable because the shape contract is on `LoadAsset<T>` itself (D-M3-22). |
 | `LoadSprite(string)` | Resolves the path synchronously and returns a session-local handle. Missing path → `Sprite.Empty` + log. Present path → handle immediately; the sprite asset and descriptor load on the loader thread; the raw payload is **not** loaded in M3. Idempotent per path. Load failures log and leave the handle non-renderable; no readiness API in M3. |
 | `LoadData(string)` | Decompressed bytes for any asset kind (raw or MessagePack), as a **fresh** `byte[]` per call. Missing → `AssetException` (`NotFound`); a declared size above `Array.MaxLength` → `AssetException` (`InvalidData`). |
 | `LoadPack(string)` | Synchronously opens, validates, and mounts a pack **above** the current stack; later mounts shadow earlier paths. Bad/missing pack → `Bork2dException`; the stack is unchanged. Thread-safe and atomic. No unload. |
@@ -217,7 +223,7 @@ public sealed class AssetException : Bork2dException
 | --- | --- |
 | `NotFound` | A valid canonical path that is not in the merged VFS. |
 | `RawAsset` | `LoadAsset<T>` was asked for a raw entry. |
-| `Decode` | MessagePack/Zstd decode failure, a missing generated shape (message names `T`), or a null deserialized asset. |
+| `Decode` | MessagePack/Zstd decode failure or a null deserialized asset. |
 | `Io` | Reading a mounted pack or writing/reading a tooling file failed. |
 | `InvalidData` | A valid pack/payload shape is violated at load time (for example a declared size above `Array.MaxLength`, a descriptor whose payload size is inconsistent, or invalid sprite metadata). |
 
@@ -294,13 +300,13 @@ public sealed class PackBuilder
 
 | Assembly | New public surface |
 | --- | --- |
-| `Bork2d.Api` | `AssetInfo`, `AssetException`, `AssetErrorKind`, three `IAssets` members, XML docs on `IAssets`/`Sprite`/`Color`/`ClearKind`. |
+| `Bork2d.Api` | `AssetInfo`, `AssetException`, `AssetErrorKind`, three `IAssets` members (with the `IShapeable<T>` constraint), XML docs on `IAssets`/`Sprite`/`Color`/`ClearKind`; a PolyType 1.4.1 contract reference for the constraint. |
 | `Bork2d.Runtime` | `Bork2dAppBuilder.WithoutAssets()`. |
 | `Bork2d.Assets` | `PackBuilder`, `PackCompressionMode`; all other types internal. |
 
-No public type is added to `Bork2d.Common`/`Bork2d.Render`. `Bork2d.Api` remains free of PolyType,
-Nerdbank, Zstd, and file I/O. `Bork2d.Assets`' tooling API is the only public surface that mentions
-`PolyType.IShapeable<T>`.
+No public type is added to `Bork2d.Common`/`Bork2d.Render`. `Bork2d.Api` references PolyType for
+the `IShapeable<T>` constraint but remains free of Nerdbank, Zstd, and file I/O.
+`Bork2d.Assets`' tooling API is the other public surface that mentions `PolyType.IShapeable<T>`.
 
 ## 6. Pack format
 
@@ -552,11 +558,12 @@ Consequences:
 3. Enqueue a read. On the loader thread: decompress into a bounded stream and deserialize with
    Nerdbank.MessagePack using the generated shape on `T`.
 4. Return a **fresh** instance per call; no cache.
-5. `T` must have a compiled shape (`[GenerateShape]` / `IShapeable<T>`). A missing shape or
-   deserialization failure → `AssetException(Decode)` naming `T`; a null result is also `Decode`
-   ("deserialized to null").
+5. The compiled shape is required by the `where T : class, IShapeable<T>` constraint on
+   `IAssets.LoadAsset<T>`; there is no unconstrained/reflection fallback. A deserialization failure
+   → `AssetException(Decode)` naming `T`; a null result is also `Decode` ("deserialized to null").
+   Use `LoadData` when raw bytes are wanted.
 6. `LoadAsset<T>` for an internal `TextureDescriptor`/`SpriteAsset` is used by tests only; the types
-   are not public. Game types become practical in M4 with the game-side shape package setup.
+   are not public. Game types can satisfy the constraint wherever the PolyType shape is compiled.
 
 ### 8.4 `LoadSprite`
 
@@ -780,7 +787,7 @@ No mode initializes SDL/Vulkan because of assets. Headless/offscreen remain one-
 | Overlay missing/malformed | `LoadPack` | `Bork2dException`; stack unchanged; caller decides whether the tick/setup fails. |
 | Asset missing | `LoadData`/`LoadAsset<T>` | Faulted `Task` with `AssetException(NotFound)`; `LoadSprite` → `Sprite.Empty` + log. |
 | Raw asset via `LoadAsset<T>` | `LoadAsset<T>` | Faulted `Task` with `AssetException(RawAsset)`. |
-| Missing generated shape | `LoadAsset<T>` | Faulted `Task` with `AssetException(Decode)` naming `T`. |
+| Missing compiled shape | compile time | Rejected by `where T : class, IShapeable<T>`; no runtime fault exists. |
 | Decode/IO/validation failure | loader thread | Faulted `Task` with `AssetException`; `LoadSprite` logs + non-renderable. |
 | Invalid path argument | public member | `ArgumentException`/`ArgumentNullException` synchronously. |
 | Service disposed | public member | `ObjectDisposedException` synchronously. |
@@ -828,13 +835,17 @@ The AOT smoke's default logging output must stay trim/AOT-clean.
   surface for the AOT proof."
 - `Bork2d.Runtime` references `Bork2d.Assets` (already) and exposes only `WithoutAssets()` as new
   public surface. No Assets type leaks through `Bork2d.Runtime`.
-- `Bork2d.Api` remains free of PolyType, Nerdbank, Zstd, and file I/O.
+- `Bork2d.Api` references PolyType 1.4.1 for the `IShapeable<T>` constraint on
+  `IAssets.LoadAsset<T>` (D-M3-22). It remains free of Nerdbank, Zstd, and file I/O.
 - Game projects still reference only `Bork2d.Api`/`Bork2d.Runtime`; `Project.Common` stays
-  `Api`-only in M3.
+  `Api`-only in M3 and gets the shape contract transitively from `Bork2d.Api`.
 - `Bork2d.Editor`/M4 baker may use `PackBuilder` later; no editor project is added in M3.
 
 ### 11.2 Packages, Zstd, and hashing
 
+- `Bork2d.Api` adds the exact `PolyType` 1.4.1 contract reference for the public
+  `IShapeable<T>` constraint; `Bork2d.Assets` keeps its `PolyType` 1.4.1 pin for the tooling
+  surface and Nerdbank's transitive shape dependency.
 - `Bork2d.Assets` adds exact pins:
   - `Nerdbank.MessagePack` 1.4.95 (generated shapes);
   - `PolyType` 1.4.1 (public `IShapeable<T>` in the tooling API; also a transitive Nerdbank
@@ -853,13 +864,12 @@ The AOT smoke's default logging output must stay trim/AOT-clean.
 - `TextureDescriptor`/`SpriteAsset` are internal `[GenerateShape]` classes with property-name keys.
 - No reflection resolver, runtime TOML, `Activator.CreateInstance`, assembly scanning, or
   `Type.GetType`.
-- `LoadAsset<T>` uses the compiled shape on `T`; a missing shape faults with `AssetException`
-  naming `T`. `PackBuilder.AddMessagePack<T>` requires `T : IShapeable<T>` at compile time.
-- The public `IAssets.LoadAsset<T>` cannot name PolyType (Api boundary). The implementation is
-  expected to use a narrow `NBMsgPack051` suppression around the unconstrained deserialize call,
-  with a recorded justification: the contract requires `[GenerateShape]` on `T` and tests/AOT prove
-  the shape path. `PackBuilder.AddMessagePack<T>` is constrained and does not need it. Review this
-  suppression; do not add a broad `NoWarn`.
+- `LoadAsset<T>` uses the compiled shape on `T`. The `where T : class, IShapeable<T>` constraint on
+  `IAssets.LoadAsset<T>` makes a missing shape a compile-time error; there is no unconstrained call,
+  reflection-shape fallback, or `NBMsgPack051` suppression. `PackBuilder.AddMessagePack<T>` requires
+  the same `T : IShapeable<T>` constraint.
+- The constrained deserialize call is passed the generated shape from `T` (and the payload stream),
+  so the implementation never needs `PolyType` internals in `Bork2d.Api` beyond the constraint.
 - Generated-shape classes must satisfy `NBMsgPack110` (use `required`/`[DefaultValue]` rather than
   silent initializer defaults).
 
@@ -902,14 +912,14 @@ AOT/trim warnings.
 | VFS | Base pack; one/many overlays; later wins; shadowed entries hidden; `Browse` all/prefix/boundary/empty; `Exists`; `LoadPack` bad overlay leaves stack unchanged; duplicate mount; thread-safe mount/lookup. |
 | Paths | Lowercase/backslash normalization; invalid characters/segments/extensions/leading/trailing/double slash; null/empty; `Browse(null)` vs empty; `Exists` invalid; filesystem CWD/absolute resolution. |
 | `LoadData` | Raw/MessagePack returned as bytes; compressed decompressed; fresh array per call; missing fault; size above `Array.MaxLength`; invalid path sync. |
-| `LoadAsset<T>` | Internal descriptor/sprite shapes round-trip; raw entry fault; missing fault; missing shape fault naming `T`; null result fault; fresh instance per call. |
+| `LoadAsset<T>` | Internal descriptor/sprite shapes round-trip; raw entry fault; missing fault; compile-time `IShapeable<T>` constraint (no runtime missing-shape path); null result fault; fresh instance per call. |
 | `LoadSprite` | Missing → `Empty` + log; present → handle immediately; idempotent handle; async sprite+descriptor load; payload not read; invalid sprite/descriptor → log/non-renderable; shared texture descriptor cached; after shutdown non-renderable. |
 | Descriptor/sprite validation | Width/height/scale/pivot/UV rules; topology/indices rules; payload size mismatch; format/filter/wrap; KTX2 rejected; non-Quad valid but not drawn. |
 | Loader/threading | One loader thread; FIFO order; tasks complete asynchronously; no tick-thread completion; cancellation at shutdown; loader joined; no deadlock; cache behavior. |
 | Lifetime | Base pack missing/malformed before window/`Setup`; no `Teardown`; overlay failure; `WithoutAssets` empty VFS + later `LoadPack`; post-shutdown `ObjectDisposedException`; `IEngine.Assets` getter never throws; `Dispose` before/after `Run`; second `Run`. |
 | Modes | Headless/offscreen load packs without SDL/Vulkan; windowed loads without GPU; no SDL init in headless. |
 | Logging | Start/overlay/failure/stop events; no per-tick/asset-spam. |
-| Dependency/AOT analyzers | No public type leaks; Assets public surface exactly `PackBuilder`/`PackCompressionMode`; AotSmoke references Assets; no reflection/AOT warnings. |
+| Dependency/AOT analyzers | No public type leaks; Assets public surface exactly `PackBuilder`/`PackCompressionMode`; AotSmoke references Assets; Api may reference PolyType for `IShapeable<T>` but not Nerdbank/Zstd/file I/O; no reflection/AOT warnings. |
 
 All deterministic tests run in CI. Tests use temp files, no committed binary fixtures, and clean up.
 GC/thread tests are deterministic: bounded joins/signals, no sleeps; no entity IDs/order assertions.
@@ -989,8 +999,9 @@ Each WP:
       cancels/joins; post-shutdown members throw.
 - [ ] `LoadSprite` loads sprite + descriptor CPU metadata, not the raw payload; missing/failed sprites
       are non-renderable and do not throw.
-- [ ] `AssetException`/`AssetErrorKind`/`AssetInfo` and `IAssets` XML docs are complete; `Bork2d.Api`
-      stays free of PolyType/Nerdbank/Zstd/file I/O.
+- [ ] `AssetException`/`AssetErrorKind`/`AssetInfo` and `IAssets` XML docs are complete;
+      `IAssets.LoadAsset<T>` carries the `IShapeable<T>` constraint, and `Bork2d.Api` references
+      PolyType 1.4.1 for it but stays free of Nerdbank/Zstd/file I/O.
 - [ ] `Bork2d.Assets` exposes only `PackBuilder`/`PackCompressionMode` publicly; `AotSmoke`
       references it; dependency test/docs updated.
 - [ ] AOT default run builds/loads/browses a pack with zero AOT/trim warnings; windowed
@@ -1009,11 +1020,11 @@ Each WP:
 | [`docs/architecture/assets-and-tooling.md`](../architecture/assets-and-tooling.md) | Status to M3 `Current`; no per-asset version; intrinsic/streaming bounds (no policy caps); `uint32` length/size; no byte determinism; base pack at `Run`, CWD resolution; public tooling; `WithoutAssets`; M3 `LoadSprite` scope. |
 | [`docs/architecture/runtime-lifecycle.md`](../architecture/runtime-lifecycle.md) | Asset service start before window/`Setup`; builder `WithoutAssets`; startup/shutdown/error order; modes; post-shutdown. |
 | [`docs/architecture/threading.md`](../architecture/threading.md) | Asset loader thread `Current`; FIFO/caching; task/cancellation/shutdown; no renderer in M3. |
-| [`docs/architecture/nativeaot.md`](../architecture/nativeaot.md) | Assets public tooling/AotSmoke reference; Zstd/`System.IO.Hashing`/PolyType pins; generated shapes; missing shape; AOT smoke pack. |
+| [`docs/architecture/nativeaot.md`](../architecture/nativeaot.md) | Assets public tooling/AotSmoke reference; Zstd/`System.IO.Hashing`/PolyType pins; generated shapes; constrained `IShapeable<T>`; AOT smoke pack. |
 | [`docs/architecture/logging.md`](../architecture/logging.md) | `Bork2d.Assets` start/overlay/error/stop events; no per-frame. |
 | [`docs/architecture/projects.md`](../architecture/projects.md) | `Bork2d.Assets` public tooling surface; AotSmoke → Assets; package pins; dependency matrix/test. |
 | [`docs/architecture/overview.md`](../architecture/overview.md) | Asset pipeline status; no per-asset version/limits wording; public tooling exception. |
-| [`docs/decisions.md`](../decisions.md) | D-M3-01…D-M3-20 and the D-001 (Assets public tooling exception), D-010 (uint32 sizes, no per-asset version, no policy caps), and D-019 (M3 descriptor/sprite scope) updates recorded with the approval. |
+| [`docs/decisions.md`](../decisions.md) | D-M3-01…D-M3-22 (including the D-M3-22 constrained-`IShapeable<T>` correction) and the D-001 (Assets public tooling exception), D-010 (uint32 sizes, no per-asset version, no policy caps), and D-019 (M3 descriptor/sprite scope) updates recorded with the approval. |
 | [`docs/contributing.md`](../contributing.md) | Asset/pack test commands; AOT smoke with assets; no committed pack fixtures; dependency rules. |
 | [`docs/roadmap.md`](../roadmap.md) | M3 status/evidence; §9 M3 rows resolved (Zstd, retry, loose files, limits, KTX2); progress log when merged. |
 | [`docs/README.md`](../README.md) | Add this spec to the documentation map; status markers. |
@@ -1025,8 +1036,8 @@ Each WP:
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
 | Public `Bork2d.Assets` surface leaks internals or grows accidentally | Public contract bloat | Expose exactly `PackBuilder`/`PackCompressionMode`; add a dependency/export test; docs say tooling-only. |
-| `IShapeable<T>` in the public tooling API pulls PolyType into tooling consumers | Tooling dependency surface | Pin PolyType 1.4.1; document; game code does not reference Assets. |
-| `NBMsgPack051` suppression for unconstrained `LoadAsset<T>` | Hidden AOT shape failure | Narrow `#pragma`, justification, tests for missing shape, AOT smoke; stop if a broader suppression is needed. |
+| `IShapeable<T>` in the public contract pulls PolyType into `Bork2d.Api` and tooling consumers | Contract dependency surface | Pin PolyType 1.4.1; document; game code still references only `Api`/`Runtime`, and the shape requirement is compile-time (D-M3-22). |
+| The `IShapeable<T>` constraint cannot be expressed without a wider Api dependency | Public boundary breach | The human accepted the narrow PolyType contract reference (D-M3-22); stop if WP2 needs more than `IShapeable<T>`. |
 | Zstd API changes in a .NET 11 RC servicing update | Build/runtime break | Use only `ZstandardStream`/`ZstandardEncoder`/options; pin SDK; adapter internal; stop if the API disappears. |
 | `System.IO.Hashing` version mismatch | Restore/build failure | Pin 11.0.0-rc.1.26425.128; validate restore/AOT. |
 | Current-directory resolution surprises users | `assets.pck` not found when launched elsewhere | Document; allow absolute paths; log the resolved path; scripts set cwd. |
@@ -1042,9 +1053,10 @@ Each WP:
 | Too many small public exceptions/types | Contract churn | Only `AssetException`/`AssetErrorKind`/`AssetInfo`; keep constructors small. |
 
 **Stop and report** if: the public boundary decision conflicts with a hard requirement; Zstd/
-`System.IO.Hashing`/PolyType cannot be restored or AOT-published with zero warnings; the shape
-constraint cannot be expressed without leaking PolyType into `Bork2d.Api`; a pack/overlay semantic
-is ambiguous beyond §17; a test needs real sleeps/retries; or a dependency/tool is missing.
+`System.IO.Hashing`/PolyType cannot be restored or AOT-published with zero warnings; the
+`IShapeable<T>` contract needs an Api dependency wider than PolyType 1.4.1; a pack/overlay
+semantic is ambiguous beyond §17; a test needs real sleeps/retries; or a dependency/tool is
+missing.
 
 ## 17. Derived details (approved with the spec)
 
@@ -1067,8 +1079,9 @@ than silently choosing a different behavior.
    §9.3.
 7. `AssetInfo.PackPath` is the supplied pack identifier, not the resolved absolute path;
    `Length`/`Size` are `long` in the public type.
-8. `AssetErrorKind`: missing shape and null deserialization are `Decode`; descriptor/sprite payload
-   inconsistency is `InvalidData`; pack open/mount is not `AssetException`.
+8. `AssetErrorKind`: null deserialization is `Decode`; a missing shape is a compile-time error
+   because of the `IShapeable<T>` constraint (D-M3-22), not an `AssetErrorKind`; descriptor/sprite
+   payload inconsistency is `InvalidData`; pack open/mount is not `AssetException`.
 9. `LoadData`/`LoadAsset<T>` throw argument/disposed errors synchronously and fault the returned
    `Task` for lookup/decode/IO errors.
 10. The AOT default pack contains one raw asset and one generated-shape MessagePack asset;
