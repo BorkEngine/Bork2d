@@ -23,7 +23,8 @@ namespace Bork2d.Bake.Textures;
 /// source, and a stray <c>.toml</c> under <c>textures/</c> are errors. A missing sidecar is valid and
 /// applies the descriptor's <c>[textures]</c> defaults. Decoding normalizes to straight-alpha RGBA8
 /// without premultiplication, gamma, ICC, flipping, or resampling; explicit 16-bit PNGs are rejected
-/// before decode (Q-12).
+/// before decode (Q-12). Sources shorter than a derivable uncompressed BMP/TGA layout and JPEGs
+/// without an end-of-image marker are rejected as truncated (BK4015) before decode.
 /// </para>
 /// <para>
 /// This component does not write packs, validate custom-data references, or check cross-kind
@@ -400,6 +401,25 @@ internal static class TexturePipeline
                     return false;
                 }
 
+                long fileLength = stream.Length;
+                Span<byte> trailer = stackalloc byte[2];
+                int trailerLength = ReadTrailer(stream, fileLength, trailer);
+
+                if (TextureSourceProbe.TryGetTruncationProblem(
+                        header.AsSpan(0, headerLength),
+                        trailer[..trailerLength],
+                        fileLength,
+                        out string truncationDetail))
+                {
+                    diagnostics.Add(
+                        BakeSeverity.Error,
+                        TextureDiagnosticCodes.TextureTruncated,
+                        $"Texture source '{entry.DisplayPath}' is truncated: {truncationDetail}.",
+                        entry.DisplayPath,
+                        assetPath: entry.AssetPath);
+                    return false;
+                }
+
                 stream.Position = 0;
                 DecodedImage image = decoder.Decode(stream);
 
@@ -495,6 +515,17 @@ internal static class TexturePipeline
             out _)
             ? relativePath
             : fullPath;
+
+    private static int ReadTrailer(Stream stream, long fileLength, Span<byte> trailer)
+    {
+        if (fileLength < trailer.Length)
+        {
+            return 0;
+        }
+
+        stream.Position = fileLength - trailer.Length;
+        return stream.ReadAtLeast(trailer, trailer.Length, throwOnEndOfStream: false);
+    }
 
     private static string ToFilterName(BakeTextureFilter filter)
         => filter == BakeTextureFilter.Nearest ? "nearest" : "linear";

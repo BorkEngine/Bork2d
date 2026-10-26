@@ -124,6 +124,29 @@ public sealed class TexturePipelineTests
     }
 
     [Fact]
+    public void RleTgaIsLeftToTheDecoderAndStillBakes()
+    {
+        using var project = TextureTestProject.Create();
+        project.WriteImage("textures/rle.tga", TextureImageFactory.RleTga());
+
+        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+
+        Assert.Empty(result.Diagnostics);
+        BakedTexture texture = Assert.Single(result.Textures);
+        Assert.Equal(2u, texture.Descriptor.Width);
+        Assert.Equal(2u, texture.Descriptor.Height);
+        Assert.Equal(
+            new byte[]
+            {
+                255, 0, 0, 255,
+                255, 0, 0, 255,
+                255, 0, 0, 255,
+                255, 0, 0, 255,
+            },
+            texture.Payload);
+    }
+
+    [Fact]
     public void JpegDecodesThroughTheRealDecoderWithOpaqueAlpha()
     {
         using var project = TextureTestProject.Create();
@@ -248,6 +271,54 @@ public sealed class TexturePipelineTests
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
         Assert.Equal(TextureDiagnosticCodes.TextureDecode, error.Code);
         Assert.Equal("Assets/textures/truncated.png", error.FilePath);
+    }
+
+    [Fact]
+    public void TruncatedBmpPixelDataIsRejectedBeforeDecoding()
+    {
+        using var project = TextureTestProject.Create();
+        byte[] complete = TextureImageFactory.Bmp24();
+        project.WriteImage("textures/cut.bmp", complete[..^4]);
+
+        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+
+        Assert.Empty(result.Textures);
+        BakeDiagnostic error = Assert.Single(result.Diagnostics);
+        Assert.Equal(TextureDiagnosticCodes.TextureTruncated, error.Code);
+        Assert.Equal("Assets/textures/cut.bmp", error.FilePath);
+        Assert.Contains("BMP", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TruncatedTgaPixelDataIsRejectedBeforeDecoding()
+    {
+        using var project = TextureTestProject.Create();
+        byte[] complete = TextureImageFactory.Tga24(topLeftOrigin: true);
+        project.WriteImage("textures/cut.tga", complete[..^6]);
+
+        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+
+        Assert.Empty(result.Textures);
+        BakeDiagnostic error = Assert.Single(result.Diagnostics);
+        Assert.Equal(TextureDiagnosticCodes.TextureTruncated, error.Code);
+        Assert.Equal("Assets/textures/cut.tga", error.FilePath);
+        Assert.Contains("TGA", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TruncatedJpegIsRejectedBeforeDecoding()
+    {
+        using var project = TextureTestProject.Create();
+        byte[] complete = TextureImageFactory.TinyJpeg();
+        project.WriteImage("textures/cut.jpg", complete[..(complete.Length / 2)]);
+
+        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+
+        Assert.Empty(result.Textures);
+        BakeDiagnostic error = Assert.Single(result.Diagnostics);
+        Assert.Equal(TextureDiagnosticCodes.TextureTruncated, error.Code);
+        Assert.Equal("Assets/textures/cut.jpg", error.FilePath);
+        Assert.Contains("JPEG", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

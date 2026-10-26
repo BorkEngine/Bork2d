@@ -300,6 +300,33 @@ internal static class TextureImageFactory
     }
 
     /// <summary>
+    /// Creates a valid 2×2 RLE-compressed (image type 10) TGA with a single red run. The compressed
+    /// payload length cannot be derived from the header, so the pipeline must not reject it as
+    /// truncated.
+    /// </summary>
+    /// <returns>The TGA bytes.</returns>
+    internal static byte[] RleTga()
+    {
+        using var output = new MemoryStream();
+        using var writer = new BinaryWriter(output, Encoding.UTF8, leaveOpen: true);
+
+        var header = new byte[18];
+        header[2] = 10;
+        header[12] = 2;
+        header[14] = 2;
+        header[16] = 24;
+        header[17] = 0x20;
+        writer.Write(header);
+
+        writer.Write((byte)0x83);
+        writer.Write((byte)0);
+        writer.Write((byte)0);
+        writer.Write((byte)255);
+        writer.Flush();
+        return output.ToArray();
+    }
+
+    /// <summary>
     /// Returns a 2×2 solid red (220,30,30) JPEG encoded once and embedded as base64.
     /// </summary>
     /// <returns>The JPEG bytes.</returns>

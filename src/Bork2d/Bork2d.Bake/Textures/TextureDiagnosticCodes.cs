@@ -59,4 +59,10 @@ internal static class TextureDiagnosticCodes
 
     /// <summary>The decoded RGBA8 payload length is not <c>width × height × 4</c>.</summary>
     internal const string TexturePayloadSize = "BK4014";
+
+    /// <summary>
+    /// A source is shorter than its derivable byte layout (uncompressed BMP/TGA) or a JPEG stream
+    /// does not end with its end-of-image marker.
+    /// </summary>
+    internal const string TextureTruncated = "BK4015";
 }
