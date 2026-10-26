@@ -2,22 +2,23 @@
 
 > **Status:** the project graph is `Current` and enforced by the dependency test. M1, M2, and M3
 > are implemented and merged into `develop` (2026-10-26, PR #4), and the post-M3 asset-reference
-> refactor (D-035) is merged (PR #6). M4 WP1–WP5 are implemented on `m-4/common` (not yet merged to
-> `develop`): `Bork2d.Bake` now contains the descriptor, diagnostics, path safety, host/incremental
-> contracts, XXH3 hashing, a `MetadataLoadContext`-based host generator, the non-collectible host
-> loader, source discovery/binding, the generic shape-driven Tomlyn DOM binder, the texture pipeline,
-> the baked asset index and reference validation, pack composition, the atomic pack writer, and the
-> incremental planner/manifest and host-generation state (internal, with `InternalsVisibleTo` to the
-> host/CLI/editor/tests); `Bork2d.Bake.Cli` exposes
+> refactor (D-035) is merged (PR #6). **M4 WP1–WP6 are implementation complete on `m-4/common`
+> (final PR pending, not merged):** `Bork2d.Bake` contains the descriptor, diagnostics, path safety,
+> host/incremental contracts, XXH3 hashing, a `MetadataLoadContext`-based host generator, the
+> non-collectible host loader, source discovery/binding, the generic shape-driven Tomlyn DOM binder,
+> the texture pipeline, the baked asset index and reference validation, pack composition, the atomic
+> pack writer, the incremental planner/manifest, and host-generation state (internal, with
+> `InternalsVisibleTo` to the host/CLI/editor/tests); `Bork2d.Bake.Cli` exposes
 > `--help`, `--version`, `generate-host`, `bake` (full pipeline or up-to-date skip, `--check`,
 > `--mode`, `--output`, `--force`), and `validate` with or without `--host` (internal
 > `Program`/`CliApplication`). `Bork2d.BakeFixture` is the real `Project.Common`-like fixture for the
-> bake/load tests, with a committed `Assets/` tree and descriptor that the MSBuild targets prepare and
-> bake (WP6 adds the AOT baked-pack proof). `Bork2d.AotSmoke` imports
-> [`build/Bork2d.Bake.targets`](../../build/Bork2d.Bake.targets), references the fixture, and bakes
-> the fixture pack into its output/publish. `Bork2d.Runtime` hosts the SDL
-> window, input, time, the windowed loop, and the app-scoped asset service. `Bork2d.Assets` provides
-> the v1 pack reader/writer, its public tooling surface
+> bake/load tests and the AOT proof, with a committed `Assets/` tree and descriptor that the MSBuild
+> targets prepare and bake. `Bork2d.AotSmoke` imports
+> [`build/Bork2d.Bake.targets`](../../build/Bork2d.Bake.targets), references the fixture, bakes the
+> fixture pack into its output/publish, and its default headless run loads that pack from
+> `AppContext.BaseDirectory` (D-M4-09/Q-22); it no longer uses the pack tooling or a temporary pack.
+> `Bork2d.Runtime` hosts the SDL window, input, time, the windowed loop, and the app-scoped asset
+> service. `Bork2d.Assets` provides the v1 pack reader/writer, its public tooling surface
 > (`Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`), canonical paths, the internal
 > base/overlay VFS with `LoadPack`/`Browse`/`Exists`, the loader service (one dedicated thread,
 > unbounded FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, startup/stop logging), and
@@ -25,7 +26,8 @@
 > `LoadAsset<T>` (D-M4-11), `AssetException`/`AssetErrorKind`, the public
 > `SpriteAsset`/`TextureDescriptor`/`AssetRef<T>`/`DataRef` asset model, and the `ColorMarshaler`
 > serialization infrastructure (D-M4-12). `Bork2d.Render` is still reference-wired with no
-> implementation (`Planned`); `Bork2d.Editor` is `Planned` (M5).
+> implementation (`Planned`); `Bork2d.Editor` is `Planned` (M5) and reuses the now-implemented
+> `Bork2d.Bake`.
 
 ## 1. Current projects
 
@@ -38,13 +40,13 @@ All projects target `net11.0` and live in `src/Bork2d/`, listed in
 | `Bork2d.Common` | `Bork2d.Api` | `Partial` | Root-owned unordered scene tree, transforms, time, layer validation, MessagePack generated-shape policy. Snapshot capture is M7. |
 | `Bork2d.Runtime` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render` | `Current` (M3) | Public builder/app, validation, windowed SDL host (window, input, time, uncapped loop), one-tick headless/offscreen host, app-owned logging, and the app-scoped asset-service lifecycle. GPU/rendering is M6/M8. |
 | `Bork2d.Assets` | `Bork2d.Api`, `Bork2d.Common` | `Current` (M3/D-035) | v1 pack reader/writer, structural validation, Zstd/XXH3-64, canonical paths, public `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, the app-scoped service (one thread, FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, `AssetException` failures), and generic pack-time reference validation. Grants `Bork2d.Bake` internal access to the canonical path grammar. |
-| `Bork2d.Bake` | `Bork2d.Api`, `Bork2d.Assets` (+ Tomlyn, PolyType, `System.Reflection.MetadataLoadContext`, StbImageSharp, `System.IO.Hashing`) | `Partial` (M4 WP5) | JIT bake library, internal by default: project-descriptor model/parser, diagnostics, path/traversal safety, host and incremental contracts, XXH3-128 hashing, the shared canonical path grammar reuse, `Project.Common` metadata resolution (Q-04), the generated-host project/manifest writer, the non-collectible host loader with shared tooling type identity, source discovery/binding, the generic shape-driven Tomlyn DOM binder (Q-07), the texture pipeline (WP3), the baked asset index and §9 reference validation (BK3xxx), pack composition through `PackBuilder`, the atomic pack write, the full/check bake pipeline, the incremental planner/manifest (`obj/bork2d/bake/manifest.json`) and host-generation state (`obj/bork2d/bake/host-generation.json`). No `Bork2d.Common` reference (Q-20). |
-| `Bork2d.Bake.Cli` | `Bork2d.Bake` | `Partial` (M4 WP5) | JIT console (`OutputType=Exe`, `AssemblyName=Bork2d.Bake.Cli`, `IsPackable=false`), internal `Program`/`CliApplication`: `--help`, `--version`, `generate-host` (up-to-date skip, `--force`), `bake` (full pipeline or up-to-date skip, `--check`, `--mode debug|release`, `--output`, `--force`), and `validate` (descriptor/texture/TOML-syntax without a host; the full `bake --check` validation with `--host`). |
-| `Bork2d.BakeFixture` | `Bork2d.Api` | `Partial` (M4 WP5; Q-16) | Minimal `Project.Common`-like fixture library with public `[GenerateShape] partial` data types (`GameConfig`, `Stats`, `StatsRoot`), `IsAotCompatible=true`, and a committed `Assets/` tree (`data/game.toml`, `roots/stats.toml`, `sprites/player.toml`, `textures/player.png.toml`) plus `bork2d.project.toml`. The tree is a build-time input for the MSBuild targets, not `Content`, so it never reaches a consuming app's output; `build/write-fixture-texture.ps1` generates the deterministic 2x2 RGBA `textures/player.png` in the prepared copy (no binary PNG is committed). Referenced by `Bork2d.Tests` (full bake/load and host-reference tests) and by `Bork2d.AotSmoke` (build order and the WP6 baked-pack proof). It never references the bake tooling. |
+| `Bork2d.Bake` | `Bork2d.Api`, `Bork2d.Assets` (+ Tomlyn, PolyType, `System.Reflection.MetadataLoadContext`, StbImageSharp, `System.IO.Hashing`) | `Current` (M4) | JIT bake library, internal by default: project-descriptor model/parser, diagnostics, path/traversal safety, host and incremental contracts, XXH3-128 hashing, the shared canonical path grammar reuse, `Project.Common` metadata resolution (Q-04), the generated-host project/manifest writer, the non-collectible host loader with shared tooling type identity, source discovery/binding, the generic shape-driven Tomlyn DOM binder (Q-07), the texture pipeline (WP3), the baked asset index and §9 reference validation (BK3xxx), pack composition through `PackBuilder`, the atomic pack write, the full/check bake pipeline, the incremental planner/manifest (`obj/bork2d/bake/manifest.json`) and host-generation state (`obj/bork2d/bake/host-generation.json`). No `Bork2d.Common` reference (Q-20). |
+| `Bork2d.Bake.Cli` | `Bork2d.Bake` | `Current` (M4) | JIT console (`OutputType=Exe`, `AssemblyName=Bork2d.Bake.Cli`, `IsPackable=false`), internal `Program`/`CliApplication`: `--help`, `--version`, `generate-host` (up-to-date skip, `--force`), `bake` (full pipeline or up-to-date skip, `--check`, `--mode debug|release`, `--output`, `--force`), and `validate` (descriptor/texture/TOML-syntax without a host; the full `bake --check` validation with `--host`). |
+| `Bork2d.BakeFixture` | `Bork2d.Api` | `Current` (M4; Q-16) | Minimal `Project.Common`-like fixture library with public `[GenerateShape] partial` data types (`GameConfig`, `Stats`, `StatsRoot`), `IsAotCompatible=true`, and a committed `Assets/` tree (`data/game.toml`, `roots/stats.toml`, `sprites/player.toml`, `textures/player.png.toml`) plus `bork2d.project.toml`. The tree is a build-time input for the MSBuild targets, not `Content`, so it never reaches a consuming app's output; `build/write-fixture-texture.ps1` generates the deterministic 2x2 RGBA `textures/player.png` in the prepared copy (no binary PNG is committed). Referenced by `Bork2d.Tests` (full bake/load and host-reference tests) and by `Bork2d.AotSmoke` (the baked-pack AOT proof). It never references the bake tooling. |
 | `Bork2d.Render` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets` | `Empty` (wired) | Vulkan device, swapchain or offscreen targets, pipelines, bindless textures, draws, present. |
-| `Bork2d.AotSmoke` | `Bork2d.Api`, `Bork2d.Assets`, `Bork2d.BakeFixture`, `Bork2d.Common`, `Bork2d.Runtime` | `Current` | NativeAOT smoke executable: the default headless one-tick run with a temporary pack, plus the opt-in `--windowed [--ticks N]` SDL demo; the local publish/run gate. It imports [`build/Bork2d.Bake.targets`](../../build/Bork2d.Bake.targets) and references `Bork2d.BakeFixture`, so a Debug/Release build generates and builds the host and bakes the prepared fixture pack to `$(TargetDir)assets.pck` (copied to `$(PublishDir)`); WP6 switches the default run to load that pack. Not a game template project and it never references bake tooling. |
+| `Bork2d.AotSmoke` | `Bork2d.Api`, `Bork2d.BakeFixture`, `Bork2d.Common`, `Bork2d.Runtime` | `Current` (M4) | NativeAOT smoke executable: the default headless one-tick run loads the baked fixture pack from `AppContext.BaseDirectory/assets.pck` and asserts the custom data, struct root, sprite, descriptor, and raw payload; the opt-in `--windowed [--ticks N]` SDL demo uses `WithoutAssets()`. It imports [`build/Bork2d.Bake.targets`](../../build/Bork2d.Bake.targets), so a Debug/Release build generates and builds the host and bakes the prepared fixture pack to `$(TargetDir)assets.pck` (copied to `$(PublishDir)`). It no longer references `Bork2d.Assets` directly (the assembly reaches the publish transitively through `Bork2d.Runtime`) and never references bake tooling. |
 | `Bork2d.Tests` | every solution engine project (`Api`, `Common`, `Assets`, `Render`, `Runtime`, `Bake`, `Bake.Cli`, `BakeFixture`) plus `Bork2d.AotSmoke` | `Current` | 859 deterministic xUnit tests plus 12 opt-in/conditional tests (9 real-window and 3 reparse-point capability), including pack-format/writer, VFS/path/browse, loader/threading, generic reference validation, asset-reference/pack-build contracts, asset error contract, runtime asset lifecycle/error-matrix, D-M4-11 struct roots, D-M4-12 color marshaling, descriptor/diagnostic/path/hash/CLI foundations, the generated-host generator/loader/ALC identity, the generic shape-driven TOML binder matrix (leaves, structs, collections, attributes, spans, enum/date/numeric rules), source discovery/binding, `SpriteAsset` as data with a pack round-trip, the texture pipeline, the baked asset index and BK3xxx reference rules, pack composition/atomic replacement, the full bake → real `AssetService` load acceptance path (including a struct root and its `AssetRef<StatsRoot>`), structural determinism in-process and across separate CLI processes, incremental skip/force/manifest/host-state rules, the `dotnet build`/publish/clean MSBuild integration, and dependency-surface tests. The smoke reference copies the app next to the tests; the dependency test loads it by name to check its references. |
-| `Bork2d.Editor` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Bake` (+ Avalonia) | `Planned` (M5) | Avalonia editor library/app; JIT; reuses the bake library (D-M4-01). |
+| `Bork2d.Editor` | `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Bake` (+ Avalonia) | `Planned` (M5) | Avalonia editor library/app; JIT; reuses the M4 bake library (D-M4-01), which is implemented, internal, and targeted by the same IVT grant. |
 
 `Bork2d.Runtime` references `Microsoft.Extensions.Logging` `11.0.0-rc.1.26425.128` and `ZLogger`
 `2.5.10`; it also pins `Silk.NET.SDL` `2.23.0` for the internal windowed platform. That package
@@ -77,8 +79,8 @@ packable. `Bork2d.BakeFixture` is the `Project.Common`-like fixture: it referenc
 TOML/bake reference; its `Assets/` tree and descriptor are build-time inputs that the targets copy
 into the consuming app's `obj/bork2d/fixture` directory (they are deliberately not `Content`, so
 they never reach an output or publish); `Bork2d.Tests` references it for the full bake/load and
-host-reference tests, and `Bork2d.AotSmoke` references it for the targets' build order and the WP6
-baked-pack proof (Q-16). `Bork2d.AotSmoke` is the only project that sets `PublishAot`; libraries do
+host-reference tests, and `Bork2d.AotSmoke` references it for the targets' build order and the baked
+pack AOT proof (Q-16). `Bork2d.AotSmoke` is the only project that sets `PublishAot`; libraries do
 not publish independently, and no runtime project references the bake tooling or its packages. The
 targets are imported, not referenced: the bake CLI is built and executed out of process and the
 generated `Bork2d.BakeHost` project is built with MSBuild, so no `Bork2d.Bake`,
@@ -97,7 +99,7 @@ composition root and the only project that knows all the others.
 | **Assets** | ✓ | ✓ | — | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
 | **Render** | ✓ | ✓ | ✓ | — | ✗ | ✗ | ✗ | ✗ | ✗ |
 | **Runtime** | ✓ | ✓ | ✓ | ✓ | — | ✗ | ✗ | ✗ | ✗ |
-| **AotSmoke** | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ |
+| **AotSmoke** | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ |
 | **Bake** | ✓ | ✗ | ✓ | ✗ | ✗ | — | ✗ | ✗ | ✗ |
 | **Bake.Cli** | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | — | ✗ | ✗ |
 | **BakeFixture** | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | — | ✗ |
@@ -119,10 +121,11 @@ Rules behind the matrix:
   to it, offscreen targets are its own.
 - `Runtime` is the composition root: builder, app host, SDL window/input (windowed), Vulkan
   bootstrap, mode selection, ZLogger configuration, service wiring.
-- `AotSmoke` uses `Runtime` for the host, `Api`/`Common` for the scene graph, `BakeFixture` as the
-  game-side `Project.Common`, and the public `Bork2d.Assets.Pack` tooling surface (`PackBuilder`) to
-  build and load the AOT pack proof; it imports `build/Bork2d.Bake.targets` to bake the fixture pack.
-  It must not pull `Render` types or any bake tooling assembly in.
+- `AotSmoke` uses `Runtime` for the host, `Api`/`Common` for the scene graph, and `BakeFixture` as
+  the game-side `Project.Common`; it imports `build/Bork2d.Bake.targets` to bake the fixture pack and
+  its default run loads that pack through the public `IAssets` API. It does not reference
+  `Bork2d.Assets` directly (the assembly is in the publish transitively through `Runtime`), uses no
+  pack tooling, and must not pull `Render` types or any bake tooling assembly in.
 - `Bake` is JIT tooling: it references `Api` and `Assets` only (no `Common`, Q-20) plus Tomlyn,
   PolyType, `System.Reflection.MetadataLoadContext`, StbImageSharp, and `System.IO.Hashing`; it must
   not reference `Runtime`, `Render`, or `Editor`.
@@ -159,8 +162,9 @@ public type. `Bork2d.Api` takes it from `Microsoft.Extensions.Logging.Abstractio
 
 `Bork2d.Assets`' tooling types are the one exception to the internal-project rule (D-001,
 D-M3-04): they exist for pack creation, not for gameplay. The dependency test asserts that the
-assembly exports exactly those two types. `Bork2d.AotSmoke` references `Assets` only for that
-public tooling surface in the AOT pack proof.
+assembly exports exactly those two types. `Bork2d.AotSmoke` no longer references `Assets` directly:
+its default run loads the baked pack and consumes it through `IAssets` from `Bork2d.Api`; the
+`Bork2d.Assets` assembly is still present in the publish because `Bork2d.Runtime` references it.
 
 `Bork2d.Bake` and `Bork2d.Bake.Cli` are fully internal tooling assemblies (Q-02); the dependency
 test asserts that each exports zero public types. The generated `Bork2d.BakeHost` assembly is not a
@@ -257,7 +261,7 @@ MyGame/
     Project.Editor/
       Project.Editor.csproj      -> Bork2d.Editor, Project.Common
       Program.cs                 editor host (thin)
-  bork2d.project.toml            project descriptor (M4 tooling; bake pipeline WP2+)
+  bork2d.project.toml            project descriptor (M4 tooling, implemented on m-4/common)
 ```
 
 `Project.Desktop` imports `build/Bork2d.Bake.targets` and sets `Bork2dProjectDescriptor` and
@@ -283,7 +287,8 @@ through the editor builder. The generated solution references `Project.Common` d
 registers editable types at compile time; assembly scanning is not used. A mapped data type may
 live in an assembly that `Project.Common` references: resolution searches `Project.Common`, its
 referenced assemblies, then `Bork2d.Api` (Q-04). The project descriptor format is implemented by
-the M4 tooling ([assets and tooling §10](assets-and-tooling.md#10-toml-source-model)).
+the M4 tooling ([assets and tooling §11](assets-and-tooling.md#11-build-pipeline)); the M5 editor
+consumes the same descriptor and bake library.
 
 ## 6. Build, packaging, and versioning
 
@@ -299,12 +304,15 @@ the M4 tooling ([assets and tooling §10](assets-and-tooling.md#10-toml-source-m
   never in the AOT publish graph.
 - Build: `dotnet build src/Bork2d/Bork2d.slnx`. The AOT smoke imports
   [`build/Bork2d.Bake.targets`](../../build/Bork2d.Bake.targets), so its build generates the host and
-  bakes the prepared fixture pack to `$(TargetDir)assets.pck` before the app is compiled/published.
+  bakes the prepared fixture pack to `$(TargetDir)assets.pck`; `Publish` copies it next to the
+  published executable.
   Local AOT gate:
-  `dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64`.
+  `dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64`, then run
+  the published exe (default headless: loads the baked pack and exits 0) and
+  `--windowed --ticks 120` (exit 0 after exactly 120 ticks).
   AOT publish/run is a local gate, not a CI job; the publish output must contain no `Bork2d.Bake`,
   `Bork2d.Bake.Cli`, `Bork2d.BakeHost`, Tomlyn, or StbImageSharp assembly (`Bork2d.BakeFixture` is
-  the expected game-side common assembly) and must contain the baked `assets.pck`. See
+  the expected game-side common assembly) and must contain the baked `assets.pck` and `SDL2.dll`. See
   [NativeAOT](nativeaot.md#7-testing-and-ci).
 - CI restores, verifies formatting, builds Debug, and runs Debug tests on pull requests to
   `develop` and on pushes to `develop`.

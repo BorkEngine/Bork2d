@@ -399,6 +399,42 @@ public sealed class AssetException : Bork2dException
 - `AssetPath` is the canonical path for load failures, or the filesystem path for IO failures.
 - Exceptions are not serialized.
 
+### 7.2 Data serialization and bake
+
+`Status: Current (M4) for custom data and sprite-as-data; sprite field validation and slicing are
+M5.` The runtime deserializes packed MessagePack only. A game authors data as TOML and bakes it with
+the JIT tooling; the runtime has no TOML parser, reflection serializer, or bake reference.
+
+- **Registration and `partial`.** A custom-data root carries PolyType `[GenerateShape]` and is
+  declared `partial`. `partial` is **PolyType's** rule, not a Bork2d attribute or generator
+  requirement: on .NET 8+ `[GenerateShape]` injects `IShapeable<T>` through the partial declaration.
+  There is no `[Bork2dSerializable]` attribute, no Bork2d source generator, and no assembly scan.
+  Registration is the project descriptor's `[[types]]` list (canonical prefix → CLR full name); a
+  mapped type must implement `IShapeable<T>`.
+- **TOML authoring.** Keys are camelCase; `[JsonPropertyName]`, `[JsonIgnore]`, and `[JsonRequired]`
+  are honored. Supported leaves are booleans, integers, floats, strings, camelCase enum names,
+  `Guid`, offset date-times, `Vector2/3/4` (`[x, y]`), `Color` (`[r, g, b, a]`),
+  `AssetRef<T>`/`DataRef` (canonical path strings), arrays/lists, `Dictionary<string, T>`, and nested
+  tables. Unknown keys, missing required members, type/range errors, and local date-times fail with
+  `file:line:column`; absent nullable/reference values are simply absent. `SpriteAsset` TOML is
+  ordinary custom data.
+- **Structs.** A `readonly record struct` (or any struct) is supported as a member and as a
+  top-level root. A struct root loads through the same `LoadAsset<T>` path and can be referenced
+  with `AssetRef<T>`; a MessagePack `nil` root is a `Decode` fault, never a silent default.
+- **`Color`.** `Color` stays non-`partial` and carries
+  `[TypeShape(Marshaler = typeof(ColorMarshaler))]`; its packed form is the linear float surrogate
+  `[r, g, b, a]`, and a `null` surrogate is a `Decode` fault. `ColorMarshaler` is public
+  serialization infrastructure, not game-facing API.
+- **Tooling commands (not in the runtime).** `bork2d-bake generate-host` writes the generated host,
+  `bake` runs the full pipeline and atomically writes `assets.pck`, and `validate` checks the
+  descriptor and sources (and binding/references with `--host`). Exit codes are `0` success/up to
+  date, `1` source diagnostics, `2` usage/descriptor/host error, `3` internal failure. The build
+  pipeline is described in
+  [Assets and tooling §11](../architecture/assets-and-tooling.md#11-build-pipeline), the TOML model
+  and leaves in [Assets and tooling §10](../architecture/assets-and-tooling.md#10-toml-source-model),
+  and the as-built evidence in the
+  [M4 spec §22](../specs/m4-serialization-and-bake.md#22-as-built-evidence-m-4common-pr-pending).
+
 ## 8. `ICamera<TLayer>`
 
 `Status: Partial.` M2 properties store values; renderer semantics are `Planned` (M8): no
@@ -506,7 +542,8 @@ the pack has no per-asset version, D-M3-05).
 `Vector2[]? Uvs`, `float Scale`, `Vector2 Pivot`, `SpriteTopology Topology`, `ushort[]? Indices`.
 `TextureDescriptor` is a public generated-shape asset: `DataRef Payload`, `uint Width`,
 `uint Height`, `string? Format`, `string? Filter`, `string? Wrap`. Neither type has runtime field
-validation; the M4 baker/editor owns that. `SpriteTopology` is `Quad`, `TriangleStrip`, or
+validation; the M4 baker validates descriptor fields and binding/references, while sprite UV/pivot/
+scale/topology/indices validation is M5 (D-M4-06). `SpriteTopology` is `Quad`, `TriangleStrip`, or
 `Triangles`; v1 draws `Quad` only.
 
 `AssetInfo` is `readonly record struct AssetInfo(string Path, bool IsRaw, bool IsCompressed,

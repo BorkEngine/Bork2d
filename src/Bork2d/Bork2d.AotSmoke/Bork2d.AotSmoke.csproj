@@ -17,12 +17,13 @@
     </PropertyGroup>
 
     <!--
-        M4 bake integration (D-M4-08, Q-10/Q-11). This app owns the runtime pack: the imported
-        targets generate and build the bake host from the committed Bork2d.BakeFixture project and its
-        prepared Assets/ copy, bake $(TargetDir)assets.pck, copy it to PublishDir, and remove the
-        generated artifacts on Clean. The tool is built and executed out of process, so nothing from
-        Bork2d.Bake/Tomlyn/StbImageSharp enters this app's AOT publish graph. WP6 switches the default
-        smoke run to load the baked pack; WP5 only produces it.
+        M4 bake integration (D-M4-08, D-M4-09, Q-10/Q-11/Q-22). This app owns the runtime pack: the
+        imported targets generate and build the bake host from the committed Bork2d.BakeFixture
+        project and its prepared Assets/ copy, bake $(TargetDir)assets.pck, copy it to PublishDir,
+        and remove the generated artifacts on Clean. The tool is built and executed out of process,
+        so nothing from Bork2d.Bake/Tomlyn/StbImageSharp enters this app's AOT publish graph. The
+        default headless smoke loads $(TargetDir)assets.pck from AppContext.BaseDirectory; the
+        fixture reference below is the only bake-related assembly in the publish.
     -->
     <PropertyGroup>
         <Bork2dBakeUseFixtureAssets>true</Bork2dBakeUseFixtureAssets>
@@ -32,7 +33,6 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Bork2d.Api\Bork2d.Api.csproj" />
-        <ProjectReference Include="..\Bork2d.Assets\Bork2d.Assets.csproj" />
         <ProjectReference Include="..\Bork2d.BakeFixture\Bork2d.BakeFixture.csproj" />
         <ProjectReference Include="..\Bork2d.Common\Bork2d.Common.csproj" />
         <ProjectReference Include="..\Bork2d.Runtime\Bork2d.Runtime.csproj" />

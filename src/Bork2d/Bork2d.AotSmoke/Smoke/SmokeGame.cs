@@ -2,26 +2,31 @@ using System.Numerics;
 using Bork2d.Api;
 using Bork2d.Api.Assets;
 using Bork2d.Api.Scene;
+using Bork2d.BakeFixture;
 using Bork2d.Common.Scene;
-using Bork2d.Common.Serialization;
 using Microsoft.Extensions.Logging;
 
 namespace Bork2d.AotSmoke.Smoke;
 
 /// <summary>
-/// The one-tick game used by the AOT smoke app: it builds a small parented scene in
-/// <c>Setup</c>, verifies it in the single <c>Tick</c>, and detaches the root in <c>Teardown</c>.
+/// The one-tick game used by the default AOT smoke app: it builds a small parented scene in
+/// <c>Setup</c>, verifies it and the baked fixture pack in the single <c>Tick</c>, and detaches the
+/// root in <c>Teardown</c>.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The game deliberately uses only the public engine surface and the default logging path. It
-/// creates no window, GPU resource, or loop. With <c>loadAssets</c> it also exercises the M3 asset
-/// pipeline: <c>Setup</c> starts a raw and a generated-shape MessagePack load, and <c>Tick</c>
-/// browses/exists and awaits both tasks with a bounded timeout before asserting their values.
+/// creates no window, GPU resource, or loop. <c>Setup</c> starts the five loads from the baked
+/// packet the app mounted before <c>Setup</c>: the <see cref="GameConfig"/> class root, the
+/// <see cref="StatsRoot"/> struct root through an <see cref="AssetRef{TAsset}"/>, the
+/// <see cref="SpriteAsset"/>, its <see cref="TextureDescriptor"/>, and the raw RGBA8 payload.
+/// <c>Tick</c> browses/exists and awaits all five tasks with a bounded timeout before asserting
+/// their exact values.
 /// </para>
 /// <para>
 /// The asset checks use only the public <see cref="IAssets"/> surface, so the AOT smoke proves the
-/// constrained <c>LoadAsset&lt;T&gt;</c> shape path without touching internal asset types.
+/// shape-only <c>LoadAsset&lt;T&gt;</c> path, including the D-M4-11 struct-root reference overload,
+/// without touching internal asset types.
 /// </para>
 /// </remarks>
 internal sealed class SmokeGame : IGame<SmokeLayer>
@@ -33,13 +38,16 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
     private static readonly Vector2 _expectedScale = new(2f, 3f);
 
     private readonly bool _loadAssets;
-    private Task<byte[]>? _rawTask;
-    private Task<MessagePackSmokeData>? _dataTask;
+    private Task<GameConfig>? _gameTask;
+    private Task<StatsRoot>? _statsRootTask;
     private Task<SpriteAsset>? _spriteTask;
+    private Task<TextureDescriptor>? _textureTask;
+    private Task<byte[]>? _rawTask;
 
     /// <summary>Initializes a new instance of the <see cref="SmokeGame"/> class.</summary>
     /// <param name="loadAssets">
-    /// Whether the run also loads the temporary base pack's raw and MessagePack assets.
+    /// Whether the run also loads the baked fixture pack's custom data, sprite, descriptor, and raw
+    /// payload.
     /// </param>
     internal SmokeGame(bool loadAssets)
     {
@@ -70,14 +78,20 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
     /// <summary>Gets the number of visible pack entries observed in <c>Tick</c>.</summary>
     public int BrowsedEntryCount { get; private set; }
 
-    /// <summary>Gets the number of bytes loaded by the raw asset request.</summary>
+    /// <summary>Gets the number of bytes loaded by the raw texture payload request.</summary>
     public int RawByteCount { get; private set; }
 
-    /// <summary>Gets the MessagePack document name loaded in <c>Tick</c>.</summary>
-    public string? LoadedName { get; private set; }
+    /// <summary>Gets the baked <see cref="GameConfig"/> name loaded in <c>Tick</c>.</summary>
+    public string? LoadedGameName { get; private set; }
+
+    /// <summary>Gets the baked <see cref="StatsRoot"/> loaded in <c>Tick</c>.</summary>
+    public StatsRoot LoadedStatsRoot { get; private set; }
 
     /// <summary>Gets the sprite's texture path loaded in <c>Tick</c>.</summary>
     public string? LoadedSpriteTexturePath { get; private set; }
+
+    /// <summary>Gets the texture descriptor's payload path loaded in <c>Tick</c>.</summary>
+    public string? LoadedTexturePayloadPath { get; private set; }
 
     /// <inheritdoc />
     public void Setup(IEngine<SmokeLayer> engine)
@@ -108,10 +122,13 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
 
         if (_loadAssets)
         {
-            // The base pack was opened by Run() before Setup, so the loader thread is live here.
-            _rawTask = engine.Assets.LoadData(AssetSmoke.RawPath);
-            _dataTask = engine.Assets.LoadAsset<MessagePackSmokeData>(AssetSmoke.MessagePackPath);
+            // The baked pack was mounted by Run() before Setup, so the loader thread is live here.
+            _gameTask = engine.Assets.LoadAsset<GameConfig>(AssetSmoke.GamePath);
+            _statsRootTask = engine.Assets.LoadAsset(
+                new AssetRef<StatsRoot>(AssetSmoke.StatsRootPath));
             _spriteTask = engine.Assets.LoadAsset<SpriteAsset>(AssetSmoke.SpritePath);
+            _textureTask = engine.Assets.LoadAsset<TextureDescriptor>(AssetSmoke.TexturePath);
+            _rawTask = engine.Assets.LoadData(AssetSmoke.TexturePayloadPath);
         }
     }
 
@@ -190,33 +207,35 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
         SmokeChecks.Require(
             browse.Count == AssetSmoke.EntryCount,
             $"Browse must return exactly {AssetSmoke.EntryCount} entries; got {browse.Count}.");
-        SmokeChecks.Require(
-            browse.Any(info => info.Path == AssetSmoke.RawPath),
-            $"Browse must contain the raw asset '{AssetSmoke.RawPath}'.");
-        SmokeChecks.Require(
-            browse.Any(info => info.Path == AssetSmoke.MessagePackPath),
-            $"Browse must contain the MessagePack asset '{AssetSmoke.MessagePackPath}'.");
-        SmokeChecks.Require(
-            browse.Any(info => info.Path == AssetSmoke.SpritePath),
-            $"Browse must contain the sprite asset '{AssetSmoke.SpritePath}'.");
-        SmokeChecks.Require(
-            engine.Assets.Exists(AssetSmoke.RawPath),
-            "Exists must find the raw asset.");
-        SmokeChecks.Require(
-            engine.Assets.Exists(AssetSmoke.MessagePackPath),
-            "Exists must find the MessagePack asset.");
-        SmokeChecks.Require(
-            engine.Assets.Exists(AssetSmoke.SpritePath),
-            "Exists must find the sprite asset.");
+
+        string[] expectedPaths =
+        [
+            AssetSmoke.GamePath,
+            AssetSmoke.StatsRootPath,
+            AssetSmoke.SpritePath,
+            AssetSmoke.TexturePath,
+            AssetSmoke.TexturePayloadPath,
+        ];
+
+        foreach (string path in expectedPaths)
+        {
+            SmokeChecks.Require(
+                browse.Any(info => info.Path == path),
+                $"Browse must contain the baked asset '{path}'.");
+            SmokeChecks.Require(
+                engine.Assets.Exists(path),
+                $"Exists must find the baked asset '{path}'.");
+        }
+
         SmokeChecks.Require(
             !engine.Assets.Exists("data/missing"),
             "Exists must be false for a path that is not in the pack.");
 
-        byte[] raw = _rawTask!
+        GameConfig game = _gameTask!
             .WaitAsync(_loadTimeout)
             .GetAwaiter()
             .GetResult();
-        MessagePackSmokeData data = _dataTask!
+        StatsRoot statsRoot = _statsRootTask!
             .WaitAsync(_loadTimeout)
             .GetAwaiter()
             .GetResult();
@@ -224,30 +243,120 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
             .WaitAsync(_loadTimeout)
             .GetAwaiter()
             .GetResult();
+        TextureDescriptor texture = _textureTask!
+            .WaitAsync(_loadTimeout)
+            .GetAwaiter()
+            .GetResult();
+        byte[] raw = _rawTask!
+            .WaitAsync(_loadTimeout)
+            .GetAwaiter()
+            .GetResult();
 
+        VerifyGameConfig(game);
+        VerifyStatsRoot(statsRoot);
+        VerifySprite(sprite);
+        VerifyTexture(texture, raw);
+
+        LoadedGameName = game.Name;
+        LoadedStatsRoot = statsRoot;
+        LoadedSpriteTexturePath = sprite.Texture.Path;
+        LoadedTexturePayloadPath = texture.Payload.Path;
         RawByteCount = raw.Length;
+    }
+
+    private static void VerifyGameConfig(GameConfig game)
+    {
         SmokeChecks.Require(
-            raw.AsSpan().SequenceEqual(AssetSmoke.RawPayload),
-            "LoadData must return the exact raw payload bytes.");
+            game.Name == AssetSmoke.GameName,
+            "LoadAsset<GameConfig> must round-trip the required name.");
         SmokeChecks.Require(
-            data.Name == AssetSmoke.Name,
-            "LoadAsset<MessagePackSmokeData> must round-trip the name.");
+            game.Health == AssetSmoke.GameHealth,
+            "LoadAsset<GameConfig> must round-trip the health integer.");
         SmokeChecks.Require(
-            data.Value == AssetSmoke.Value,
-            "LoadAsset<MessagePackSmokeData> must round-trip the value.");
+            game.MaxPlayers == AssetSmoke.GameMaxPlayers,
+            "LoadAsset<GameConfig> must honor the [JsonPropertyName(\"max_players\")] mapping.");
         SmokeChecks.Require(
-            data.Scale == AssetSmoke.Scale,
-            "LoadAsset<MessagePackSmokeData> must round-trip the scale.");
+            game.Must == AssetSmoke.GameMust,
+            "LoadAsset<GameConfig> must round-trip the [JsonRequired] member.");
         SmokeChecks.Require(
-            data.Tint == AssetSmoke.Tint,
-            "LoadAsset<MessagePackSmokeData> must round-trip the Color marshaler surrogate.");
+            game.Stats == AssetSmoke.GameStats,
+            "LoadAsset<GameConfig> must round-trip the nested readonly record struct.");
+        SmokeChecks.Require(
+            game.Tint == AssetSmoke.GameTint,
+            "LoadAsset<GameConfig> must round-trip the Color marshaler surrogate.");
+        SmokeChecks.Require(
+            game.Texture.Path == AssetSmoke.TexturePath,
+            "LoadAsset<GameConfig> must round-trip the AssetRef<TextureDescriptor>.");
+    }
+
+    private static void VerifyStatsRoot(StatsRoot statsRoot)
+    {
+        SmokeChecks.Require(
+            statsRoot == AssetSmoke.GameStatsRoot,
+            "LoadAsset<StatsRoot>(AssetRef<StatsRoot>) must round-trip the baked struct root.");
+    }
+
+    private static void VerifySprite(SpriteAsset sprite)
+    {
         SmokeChecks.Require(
             sprite.Texture.Path == AssetSmoke.TexturePath,
             "LoadAsset<SpriteAsset> must round-trip the texture reference.");
+
+        Vector2[] uvs = sprite.Uvs
+            ?? throw new InvalidOperationException(
+                "AOT smoke check failed: the baked sprite UVs must not be null.");
         SmokeChecks.Require(
-            sprite.Scale == 1f,
-            "LoadAsset<SpriteAsset> must round-trip the scale.");
-        LoadedName = data.Name;
-        LoadedSpriteTexturePath = sprite.Texture.Path;
+            uvs.Length == AssetSmoke.SpriteUvs.Length,
+            $"the baked sprite must carry {AssetSmoke.SpriteUvs.Length} UVs; got {uvs.Length}.");
+        for (int index = 0; index < uvs.Length; index++)
+        {
+            SmokeChecks.Require(
+                uvs[index] == AssetSmoke.SpriteUvs[index],
+                $"the baked sprite UV {index} must round-trip.");
+        }
+
+        SmokeChecks.Require(
+            sprite.Scale == AssetSmoke.SpriteScale,
+            "LoadAsset<SpriteAsset> must round-trip the pixels-per-unit scale.");
+        SmokeChecks.Require(
+            sprite.Pivot == AssetSmoke.SpritePivot,
+            "LoadAsset<SpriteAsset> must round-trip the normalized pivot.");
+        SmokeChecks.Require(
+            sprite.Topology == AssetSmoke.SpriteAssetTopology,
+            "LoadAsset<SpriteAsset> must round-trip the topology enum.");
+
+        ushort[] indices = sprite.Indices
+            ?? throw new InvalidOperationException(
+                "AOT smoke check failed: the baked sprite indices must not be null.");
+        SmokeChecks.Require(
+            indices.AsSpan().SequenceEqual(AssetSmoke.SpriteIndices),
+            "LoadAsset<SpriteAsset> must round-trip the baked index buffer.");
+    }
+
+    private static void VerifyTexture(TextureDescriptor texture, byte[] raw)
+    {
+        SmokeChecks.Require(
+            texture.Payload.Path == AssetSmoke.TexturePayloadPath,
+            "LoadAsset<TextureDescriptor> must round-trip the DataRef payload path.");
+        SmokeChecks.Require(
+            texture.Width == AssetSmoke.TextureWidth && texture.Height == AssetSmoke.TextureHeight,
+            "LoadAsset<TextureDescriptor> must round-trip the 2x2 dimensions.");
+        SmokeChecks.Require(
+            texture.Format == AssetSmoke.TextureFormat,
+            "LoadAsset<TextureDescriptor> must round-trip the rgba8 format.");
+        SmokeChecks.Require(
+            texture.Filter == AssetSmoke.TextureFilter,
+            "LoadAsset<TextureDescriptor> must round-trip the nearest filter.");
+        SmokeChecks.Require(
+            texture.Wrap == AssetSmoke.TextureWrap,
+            "LoadAsset<TextureDescriptor> must round-trip the repeat wrap.");
+
+        int expectedLength = checked((int)(AssetSmoke.TextureWidth * AssetSmoke.TextureHeight * 4));
+        SmokeChecks.Require(
+            raw.Length == expectedLength,
+            $"the baked raw payload must be {expectedLength} bytes; got {raw.Length}.");
+        SmokeChecks.Require(
+            raw.AsSpan().SequenceEqual(AssetSmoke.TexturePayload),
+            "LoadData must return the exact baked RGBA8 payload bytes.");
     }
 }

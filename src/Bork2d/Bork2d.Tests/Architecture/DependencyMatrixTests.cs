@@ -325,16 +325,17 @@ public sealed class DependencyMatrixTests
     public void AotSmokeReferencesOnlyTheRuntimeSurfaceItUses()
     {
         // Tests references Bork2d.AotSmoke as a project so its assembly is copied next to the
-        // test assembly. No test type uses it, so it is loaded by name here. Assets is referenced
-        // for the public pack-tooling surface used by the default AOT pack proof (D-M3-04/D-M3-19),
-        // and BakeFixture is the Project.Common-like fixture the M4 targets bake and the WP6 smoke
-        // loads (Q-16); it is never the bake tooling itself.
+        // test assembly. No test type uses it, so it is loaded by name here. Since WP6 the default
+        // AOT run loads the pack baked by the imported targets instead of building one with the
+        // public pack tooling (D-M3-19 superseded by D-M4-09/Q-22), so the smoke no longer takes a
+        // direct Bork2d.Assets reference; Assets still reaches the publish transitively through
+        // Bork2d.Runtime. BakeFixture is the Project.Common-like fixture the M4 targets bake and
+        // the smoke loads; it is never the bake tooling itself.
         var assembly = Assembly.Load("Bork2d.AotSmoke");
 
         AssertReferenceMatrix(
             assembly,
             "Bork2d.Api",
-            "Bork2d.Assets",
             "Bork2d.BakeFixture",
             "Bork2d.Common",
             "Bork2d.Runtime");

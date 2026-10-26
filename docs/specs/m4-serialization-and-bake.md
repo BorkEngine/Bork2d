@@ -1,11 +1,15 @@
 # M4 — Serialization and Bake (spec)
 
-> **Status:** planned; **not implemented**. The owner decisions D-M4-01…D-M4-12 in §2 were
-> approved during the M4 spec review on 2026-10-26. The questions in §18 are **open** and block the
-> work packages listed against them. This is the first forward-looking milestone spec; the M1–M3
-> files under [`docs/specs/`](.) are historical records. When this spec and another document
-> disagree, this spec wins for M4 scope until it is implemented; the accepted architecture and API
-> documents win for inherited contracts.
+> **Status:** **implementation complete on `m-4/common`; final PR pending.** WP0–WP6 are implemented
+> and verified on the milestone branch; the PR to `develop` is **not open** and M4 is **not merged**.
+> The owner decisions D-M4-01…D-M4-12 in §2 were approved during the M4 spec review on 2026-10-26,
+> and the §18 questions are resolved as recorded in the
+> [decision log](../decisions.md#m4-serialization-and-bake-decisions-approved-2026-10-26). This is
+> the first forward-looking milestone spec; the M1–M3 files under [`docs/specs/`](.) are historical
+> records. When this spec and another document disagree, this spec wins for M4 scope; the accepted
+> architecture and API documents win for inherited contracts. The WP0 feasibility report is
+> [M4 WP0 — Serialization and Bake Feasibility Spike](m4-wp0-spike.md); as-built commands, results,
+> and the acceptance mapping are in §22.
 
 ## 1. Goal
 
@@ -951,3 +955,87 @@ marshaler.
 - [Contributing](../contributing.md#2-build-test-and-local-gates) — gates and tests.
 - [M3 record](m3-assets.md) and [asset-reference refactor](refactor-asset-references.md) — inherited
   asset model; D-035's field-validation sentence is adjusted by D-M4-06.
+
+## 22. As-built evidence (m-4/common, PR pending)
+
+**Status:** implementation complete on `m-4/common`; the final PR to `develop` is **not open** and
+M4 is **not merged**. All work packages (WP0–WP6) are landed on the milestone branch. The WP0
+feasibility report is [M4 WP0 — Serialization and Bake Feasibility Spike](m4-wp0-spike.md); it
+records the Tomlyn DOM binder (Q-06/Q-07), the generated-host/ALC mechanism (Q-08), the XXH3
+override (Q-09), and the `Color`/AOT findings that shaped WP1–WP2.
+
+### 22.1 Delivered scope
+
+- `Bork2d.Bake` (JIT, internal) and `Bork2d.Bake.Cli` (`generate-host`, `bake`, `validate`)
+  implement the descriptor model/parser, metadata type resolution, generated host, shape-driven
+  Tomlyn DOM binder, texture import, reference validation, structural determinism, atomic pack
+  write, incremental manifest/host state, and the non-collectible host loader.
+- `build/Bork2d.Bake.targets` runs `generate-host` → host build → `bake` after `Build`, copies the
+  pack on `Publish`, and removes the generated host, manifest, and pack on `Clean`. The tooling is
+  built and executed out of process; it is never referenced by the app.
+- `Bork2d.BakeFixture` is the game-side `Project.Common`-like fixture (data types plus `Assets/`
+  tree); `build/write-fixture-texture.ps1` generates the deterministic 2x2 PNG into the prepared
+  copy, so no binary fixture is committed.
+- `Bork2d.AotSmoke` imports the targets; its default headless run mounts the baked pack from
+  `AppContext.BaseDirectory/assets.pck` (D-M4-09, Q-22). The windowed demo keeps
+  `WithoutAssets()` and is unchanged.
+
+### 22.2 Baked fixture pack
+
+The targets bake exactly **5 entries** from `Bork2d.BakeFixture/Assets`:
+
+| Entry | Type | Values |
+| --- | --- | --- |
+| `data/game` | `Bork2d.BakeFixture.GameConfig` | `Name "campaign"`, `Health 120`, `MaxPlayers 4`, `Must "present"`, `Stats(3,7)`, `Tint Color(1,0.5,0.25,1)`, `Texture textures/player` |
+| `roots/stats` | `Bork2d.BakeFixture.StatsRoot` | `(11,13)` |
+| `sprites/player` | `Bork2d.Api.Assets.SpriteAsset` | texture `textures/player`, UVs `[[0,0],[1,0],[1,1],[0,1]]`, scale `16`, pivot `(0.5,0.5)`, topology `Triangles`, indices `[0,1,2,0,2,3]` |
+| `textures/player` | `Bork2d.Api.Assets.TextureDescriptor` | payload `textures/raw/player`, `2x2`, format `rgba8`, filter `nearest`, wrap `repeat` |
+| `textures/raw/player` | raw payload | 16 bytes `255,0,0,255, 0,255,0,128, 0,0,255,64, 255,255,255,0` |
+
+The default AOT run asserts the class root (including the nested `readonly record struct`, the
+`Color` marshaler form, and `AssetRef<TextureDescriptor>`), the sprite and its texture reference,
+the descriptor and the exact raw payload through `LoadData`, the struct root through
+`LoadAsset<StatsRoot>(AssetRef<StatsRoot>)`, `Browse`/`Exists`, and the 5-entry count, plus the M1
+scene graph and one `Setup`/`Tick`/`Teardown`.
+
+### 22.3 Commands and results
+
+Run on the milestone branch (Windows 11, SDK `11.0.100-rc.1.26425.128`, `win-x64`):
+
+| Command | Result |
+| --- | --- |
+| `dotnet build src/Bork2d/Bork2d.slnx -c Debug` | 0 warnings, 0 errors; the targets bake `Bork2d.AotSmoke/bin/Debug/net11.0/assets.pck` |
+| `dotnet build src/Bork2d/Bork2d.slnx -c Release` | 0 warnings, 0 errors; the targets bake the release pack |
+| `dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build` | 0 failed, **859 passed**, **12 skipped**, 871 total |
+| `dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore` | exit 0, no changes |
+| `pwsh scripts/check-docs.ps1` | passes (all local links/anchors) |
+| `git diff --check` | clean |
+| `dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64 --nologo` | **0 warnings** (AOT/trim included) |
+| published `Bork2d.AotSmoke.exe` (no arguments) | exit 0; loads the baked 5-entry pack and asserts every value above |
+| published `Bork2d.AotSmoke.exe --windowed --ticks 120` | exit 0 after exactly 120 ticks (`Setup/Tick/Teardown = 1/120/1`) |
+
+The 12 skipped tests are the existing conditional ones: 9 real-window tests gated by
+`BORK2D_RUN_WINDOW_TESTS=1` and 3 reparse-point capability tests. They are unrelated to M4's
+deterministic contract and run when the environment/capability is present.
+
+Publish inspection: the NativeAOT single-file output contains `Bork2d.AotSmoke.exe`, `assets.pck`,
+`SDL2.dll`, and the managed PDBs (`Bork2d.BakeFixture.pdb` confirms the fixture assembly was in the
+publish graph). It contains **no** `Bork2d.Bake.dll`, `Bork2d.Bake.Cli*`, `Bork2d.BakeHost*`,
+`Tomlyn*`, or `StbImageSharp*` assembly. The generated host is not a solution project.
+
+### 22.4 Acceptance mapping (§16)
+
+| §16 criterion | As-built evidence |
+| --- | --- |
+| 1. Bake and load (classes, struct members, `Color`, struct root with `AssetRef`, `nil` decode fault) | `BakePipelineTests`, `PackCompositionTests`, `ReferenceValidationTests`, and the default AOT baked-pack run |
+| 2. Invalid TOML diagnostics | `BakeSourceBinderTests` and the CLI tests cover syntax, required, unknown key, type mismatch, and numeric range with `file:line:column`; a failed bake leaves the pack unchanged |
+| 3. Reference diagnostics | `ReferenceValidationTests` covers missing, wrong-kind, wrong-type, non-canonical, and absent references with spans and member paths |
+| 4. Textures | `TexturePipelineTests` and `SpriteAssetBakeTests` cover PNG/BMP/TGA/JPG, sidecars/defaults, exact pixels, corrupt/unsupported sources, collisions, and reserved paths |
+| 5. Sprite-as-data | `SpriteAssetBakeTests` bakes and loads a `SpriteAsset`; M4 has no sprite field validation, documented as M5 (D-M4-06) |
+| 6. Determinism | `BakeCliTests.SeparateProcessBakesAreStructurallyIdentical` plus the in-process composition tests compare the entry table and decompressed payloads under D-M4-07 |
+| 7. Incremental | `BakeIncrementalCliTests`, `BakeIncrementalManifestTests`, and `BakeHostGenerationStateTests` cover skip, change, delete, corrupt/missing manifest, missing/modified pack, `--force`, host-state reuse, and failure preservation |
+| 8. MSBuild | `BakeTargetsIntegrationTests` runs a temporary app through the targets: build, pack location, canonical error propagation, publish copy, and clean |
+| 9. AOT | Published exe loads the baked pack and exits 0; `--windowed --ticks 120` exits 0; zero-warning publish contains no tooling assemblies |
+| 10. Boundaries | `DependencyMatrixTests` (Bake/Bake.Cli internal, runtime assemblies tooling-free, generated host not in the solution) and the fixture's `Bork2d.Api`-only reference |
+| 11. Docs and decisions | Owning docs, roadmap delta, D-M4 entries, and AOT-gate docs updated in this change; they state that `partial` is PolyType's `[GenerateShape]` requirement |
+| 12. Gates | Debug/Release builds, 859+12 tests, format, docs check, `git diff --check`, and the local AOT publish/run above |
