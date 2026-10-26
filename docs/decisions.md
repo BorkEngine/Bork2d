@@ -69,6 +69,7 @@ These entries record the accepted decisions only.
 | D-M3-18 | Accepted | No automatic retry, no loose-file overlay, no KTX2/color-space fields. |
 | D-M3-19 | Accepted | The default AOT smoke run builds a temporary pack, loads raw + generated-shape MessagePack assets, browses/exists, then deletes it; `--windowed` keeps the M2 demo with `WithoutAssets()`. |
 | D-M3-20 | Accepted | `Bork2d.Assets` pins `Nerdbank.MessagePack` 1.4.95, `PolyType` 1.4.1, and `System.IO.Hashing` 11.0.0-rc.1.26425.128; Zstd is the .NET 11 built-in codec. |
+| D-M3-21 | Accepted | Five sequential work packages (pack format/writer, VFS/browse, loader/threading, descriptors/sprites, runtime/AOT/docs/acceptance); no parallel wave. |
 | D-M3-22 | Accepted | **Supersedes D-M3-16.** `IAssets.LoadAsset<T>` is `Task<T> LoadAsset<T>(string assetPath) where T : class, IShapeable<T>` (PolyType `IShapeable<T>`), so `Bork2d.Api` references PolyType 1.4.1 for this contract. Unconstrained/reflection-shape deserialization is rejected; the `NBMsgPack051` suppression and the runtime "missing shape" fault are removed. `PackBuilder.AddMessagePack<T>` keeps its `T : IShapeable<T>` constraint. D-001's game-code reference rule is unchanged: game code references only `Api`/`Runtime`, and `Bork2d.Assets` stays tooling-only. |
 
 ## Detail: implemented and public-contract decisions
@@ -180,8 +181,8 @@ These entries record the accepted decisions only.
 - **Consequences:** Getters may lag one pump and commands coalesce per property. The OS thread
   cannot call the game, and no lock is held across an SDL call, a game callback, or the event
   wait. The platform is internal to `Bork2d.Runtime`; the public surface stays `IWindow`.
-- **Docs:** [Threading](architecture/threading.md#51-window-thread-command-queue-and-confirmed-state-m2-wp2-internal),
-  [Runtime lifecycle](architecture/runtime-lifecycle.md#71-windowed-window-platform-m2-wp2-internal)
+- **Docs:** [Threading](architecture/threading.md#51-window-thread-command-queue-and-confirmed-state-m2-internal),
+  [Runtime lifecycle](architecture/runtime-lifecycle.md#71-windowed-window-platform-m2-internal)
 
 ### D-028 Windowed-only M2 loop, visible at `Run()`, shutdown order
 
@@ -272,7 +273,7 @@ These entries record the accepted decisions only.
   with a teardown failure. The exception is limited to the unrecoverable-error path; M6+ must
   define the renderer/vsync equivalent rather than assuming M2's timing.
 - **Docs:** [Runtime lifecycle](architecture/runtime-lifecycle.md#6-shutdown-and-error-propagation),
-  [Threading](architecture/threading.md#51-window-thread-command-queue-and-confirmed-state-m2-wp2-internal)
+  [Threading](architecture/threading.md#51-window-thread-command-queue-and-confirmed-state-m2-internal)
 
 ## Superseding a decision
 

@@ -1,12 +1,13 @@
 # Logging
 
-> **Status:** `Current` for M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2). The builder creates an app-owned
-> Microsoft.Extensions.Logging factory, installs a plain-text ZLogger console provider by default,
-> logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`. The
-> windowed platform logs startup/stop/commands/failures and the runtime host logs the loop stop with
-> ticks and elapsed time; there is no per-frame logging. Configuration is identical in all modes,
-> and the default path runs in the AOT smoke (headless and `--windowed`) with zero trim/AOT
-> warnings.
+> **Status:** `Current` through M3 (the M3 PR is pending human review). The builder creates an
+> app-owned Microsoft.Extensions.Logging factory, installs a plain-text ZLogger console provider by
+> default, logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`.
+> The windowed platform logs startup/stop/commands/failures, the runtime host logs the loop stop
+> with ticks and elapsed time, and the asset service logs start/overlay/error/stop events; there is
+> no per-frame or per-asset-per-tick logging. Configuration is identical in all modes, and the
+> default path runs in the AOT smoke (headless with a pack and `--windowed`) with zero trim/AOT
+> warnings. The suite is 586 tests (577 deterministic plus 9 opt-in real-window tests).
 
 ## 1. Surface
 
@@ -105,7 +106,6 @@ game code creates its own categories.
 | `Bork2d.Assets` | pack parsing, decompression, loading |
 | `Bork2d.Render` | device, swapchain, pipelines, frames |
 | game-defined | `CreateLogger("MyGame")` or `CreateLogger<T>()` |
-
 Startup logs use `Bork2d.Runtime` and one structured message after validation:
 
 ```text
@@ -143,6 +143,34 @@ A normal shutdown therefore ends with the loop-stop line followed by the platfor
 are one-shot, Information, and carry no per-frame data. The M2 `--windowed` AOT demo logs its
 setup/teardown/tick-limit summaries through the same default path; game input transitions are
 Information-level events (they occur on a transition, never once per frame).
+
+### 5.2 Asset service (M3)
+
+The app-scoped asset service logs from `Bork2d.Assets`. The runtime starts it at `Run()` before the
+window/`Setup` and stops it after `Teardown`; every event is one-shot and none is emitted per frame,
+per tick, or per sprite.
+
+| Event | Level | Fields |
+| --- | --- | --- |
+| Asset service started | Information | mode (`Pack`/`Empty`), configured path, resolved path, pack version, entry count, stored bytes |
+| Overlay mounted | Information | supplied pack path, entry count |
+| Base/overlay validation failure | Error | path and reason; the exception also carries the failure |
+| Asset load failure | Error | canonical path, `AssetErrorKind`, reason |
+| `LoadSprite` missing path | Information | canonical path (returns `Sprite.Empty`) |
+| Asset load success | Debug | canonical path and kind (`data`/`messagepack`); never per tick |
+| Service stopped | Information | pending, canceled, and mounted-pack counts |
+
+A default headless run with a two-entry pack looks like:
+
+```text
+2026-10-26 16:11:58.721 [Information] Bork2d.Assets: Asset service started: mode Pack, configured pack C:\Temp\bork2d-aot-….pck, resolved path C:\Temp\bork2d-aot-….pck, version 1, entries 2, stored bytes 49.
+2026-10-26 16:11:58.721 [Debug] Bork2d.Assets: Asset loaded: path data/smoke, kind data.
+2026-10-26 16:11:58.721 [Information] Bork2d.Assets: Asset service stopped: pending 0, canceled 0, mounted packs 1.
+```
+
+The `WithoutAssets()` mode logs `mode Empty` with zero entries and the same start/stop lines. The
+AOT smoke's default run exercises these lines through the default logging path without trim/AOT
+warnings.
 
 ## 6. NativeAOT
 

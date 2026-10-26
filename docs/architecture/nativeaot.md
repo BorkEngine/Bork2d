@@ -1,13 +1,13 @@
 # NativeAOT
 
-> **Status:** `Current` through M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2).
-> `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`, and `Bork2d.Runtime` compile with
+> **Status:** `Current` through M3 (the M3 PR is pending human review). `Bork2d.Api`,
+> `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`, and `Bork2d.Runtime` compile with
 > `IsAotCompatible` plus the trim and AOT analyzers, and `Bork2d.AotSmoke` publishes and runs with
-> zero AOT/trim warnings. The smoke exercises the default logging path, a Nerdbank.MessagePack
-> generated shape, the unchanged headless one-tick run, and the windowed `--windowed [--ticks N]`
-> SDL demo. M3 WP2 adds the `Bork2d.Api` PolyType contract reference for the constrained
-> `IAssets.LoadAsset<T>`; the asset loader and AOT pack smoke are WP3–WP5. The editor and build
-> tools stay JIT; Vulkan AOT validation is M6.
+> zero AOT/trim warnings. The default smoke builds a small temporary pack with the public
+> `PackBuilder`, loads a raw and a generated-shape MessagePack asset, browses/exists, runs one
+> headless tick, and deletes the pack; the windowed `--windowed [--ticks N]` SDL demo uses
+> `WithoutAssets()`. The smoke also keeps the default logging path, the M1 scene checks, and a
+> MessagePack round trip. The editor and build tools stay JIT; Vulkan AOT validation is M6.
 
 ## 1. Scope
 
@@ -18,7 +18,7 @@
 | `Bork2d.Assets` | Yes | Pack parsing, decompression, MessagePack decoding, resource tables. |
 | `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. |
 | `Bork2d.Runtime` | Yes | Builder, host, and app-owned logging. |
-| `Bork2d.AotSmoke` | Yes | One-tick smoke executable published with `PublishAot`; the local gate. The game template's `Project.Desktop` takes over this role in M9. |
+| `Bork2d.AotSmoke` | Yes | One-tick smoke executable published with `PublishAot`; the local gate. It references `Api`/`Assets`/`Common`/`Runtime` to build and load a temporary pack. The game template's `Project.Desktop` takes over this role in M9. |
 | `Bork2d.Editor` | No (JIT) | Avalonia desktop tool; may reflect over the game model. M5. |
 | Asset baker / pack tool | No (JIT) | Build-time tool; may reflect over game assemblies. M4. |
 | Tests | Mixed | Unit tests run JIT; `Bork2d.AotSmoke` is the one AOT publish/run smoke. |
@@ -81,30 +81,33 @@ reflection-based construction, which also allows constructor injection. See the
 - Runtime data assets are MessagePack (M3/M4), decoded by
   [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) **source-generated
   shapes**; no reflection resolver is configured.
-- M1 pins `Nerdbank.MessagePack` `1.4.95` in `Bork2d.Common`. An internal `[GenerateShape]` smoke
-  type and round-trip helper prove the generated-shape path; `Bork2d.AotSmoke` sees them through
-  the intentional `InternalsVisibleTo`. The v1 pack header/entry shapes are `Current` (M3 WP1); the
-  internal `TextureDescriptor` and `SpriteAsset` shapes are `Current` (M3 WP4). Descriptors and
-  sprites use property-name keys (not `[Key]`), an integer `SpriteTopology`, no per-asset version,
-  and Nerdbank's generated `System.Numerics.Vector2` shape (a map with `X`/`Y`); there is no
-  `vertices` field.
+- M1 pins `Nerdbank.MessagePack` `1.4.95` in `Bork2d.Common`; `Bork2d.Assets` pins the same version
+  plus `PolyType` `1.4.1` and `System.IO.Hashing` `11.0.0-rc.1.26425.128`. An internal
+  `[GenerateShape]` smoke type and round-trip helper prove the generated-shape path;
+  `Bork2d.AotSmoke` sees them through the intentional `InternalsVisibleTo`. The v1 pack
+  header/entry shapes and the internal `TextureDescriptor`/`SpriteAsset` shapes are `Current`.
+  Descriptors and sprites use property-name keys (not `[Key]`), an integer `SpriteTopology`, no
+  per-asset version, and Nerdbank's generated `System.Numerics.Vector2` shape (a map with `X`/`Y`);
+  there is no `vertices` field.
 - `LoadAsset<T>` is declared as `Task<T> LoadAsset<T>(string assetPath) where T : class,
   IShapeable<T>` (D-M3-22). `T` must carry a compiled generated shape (for example `[GenerateShape]`
   on the root type), so a missing shape is a **compile-time** error. There is no unconstrained call,
   reflection-shape fallback, runtime "missing shape" fault, or `NBMsgPack051` suppression. Pack
   header/entry classes, texture descriptors, sprite assets, and custom game data all use generated
   shapes; TOML exists only in `Project.Common` and the JIT baker/editor.
-- The M3 WP3/WP4 loader body deserializes with the shape from `T.GetTypeShape()` passed explicitly
-  to the serializer, so the reflection-shape provider is never consulted. The internal sprite
-  pipeline also deserializes `SpriteAsset`/`TextureDescriptor` with their generated shapes and
-  validates them with ordinary C# checks (`typeof`/pattern matching, no reflection); it publishes
-  CPU resources only. The loader thread performs file I/O, Zstd decompression, exact-size checking,
+- The loader body deserializes with the shape from `T.GetTypeShape()` passed explicitly to the
+  serializer, so the reflection-shape provider is never consulted. The internal sprite pipeline
+  also deserializes `SpriteAsset`/`TextureDescriptor` with their generated shapes and validates
+  them with ordinary C# checks (`typeof`/pattern matching, no reflection); it publishes CPU
+  resources only. The loader thread performs file I/O, Zstd decompression, exact-size checking,
   generated-shape deserialization, and metadata validation only; it never touches SDL, Vulkan, or
-  dynamic code. The AOT smoke pack/load/browse proof is WP5.
+  dynamic code. The default AOT smoke builds and loads a temporary pack (one raw, one
+  generated-shape MessagePack asset) as the runtime proof.
 - `Bork2d.Api` references PolyType `1.4.1` for the `IShapeable<T>` constraint only. It stays free
   of Nerdbank.MessagePack, Zstd/`System.IO.Compression`, `System.IO.Hashing`, and file I/O, so the
-  public contract does not pull the pack implementation into game code. `Bork2d.Assets` keeps its
-  PolyType pin for the tooling API and its Nerdbank/Hashing pins for the pack.
+  public contract does not pull the pack implementation into game code. `Bork2d.Assets` exposes
+  only the tooling surface (`PackBuilder`, `PackCompressionMode`) publicly and keeps its
+  PolyType/Nerdbank/Hashing pins for the pack and tooling.
 - Zstd is the .NET 11 built-in codec; the pack header checksum uses the `System.IO.Hashing`
   package's `XxHash3`.
 - Asset paths are data, not type names; loading never resolves a type from a string.
@@ -136,16 +139,16 @@ determinism and a possible future AOT editor, not a current AOT requirement.
 - The SDL adapter uses `Sdl.GetApi()`, Silk.NET's default native-library resolver. That resolver
   probes `Assembly.Location`, `Assembly.CodeBase`, and `DependencyContext` for candidate paths,
   which ILC reports as `IL3000`/`IL3002` single-file trim warnings under NativeAOT. `Bork2d.AotSmoke`
-  — the AOT publisher, and the host of M2 WP5's `--windowed` demo — suppresses exactly those two
+  — the AOT publisher, and the host of the `--windowed` demo — suppresses exactly those two
   codes with a project-level `NoWarn`. No other warning code is suppressed and
   `SuppressTrimAnalysisWarnings` is not used. The suppression is justified: the SDL2 native ships
   from the package and is resolved by the runtime's normal native-asset lookup, so the flagged
   fallback probes are not used. Remove it when Silk.NET stops probing those APIs.
-- M2 WP1 verified the dependency with an AOT publish/run of a throwaway windowed probe that reaches
+- M2 verified the dependency with an AOT publish/run of a throwaway windowed probe that reaches
   the adapter through the default resolver: with the suppression applied the publish reports no
   warnings (the same graph reports six `IL3000`/`IL3002` warnings when `NoWarn` is cleared); SDL
   video init, window create/destroy, and quit succeed on an engine-created (non-main) thread; and
-  `SDL2.dll` is present in the output. M2 WP5 verified the real windowed runtime and its AOT demo
+  `SDL2.dll` is present in the output. M2 verified the real windowed runtime and its AOT demo
   (`--windowed --ticks 120`, and a 5,000,000-tick live-window run) with the same zero-warning
   publish.
 - No runtime shader compilation: SPIR-V is built offline.
@@ -161,14 +164,15 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
 2. `dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64`
    with zero AOT/trim warnings; `SDL2.dll` is copied next to the executable.
 3. Run the AOT-published headless smoke locally (no GPU): default logging, one
-   `Setup`/`Tick`/`Teardown`, root cleared, generated-shape round trip, exit `0`.
+   `Setup`/`Tick`/`Teardown`, root cleared, generated-shape round trip, a temporary pack with a raw
+   and a MessagePack asset loaded, browse/exists, exit `0`.
 4. Run the AOT-published windowed demo locally on a desktop session:
    `Bork2d.AotSmoke.exe --windowed --ticks 120` must exit `0` after exactly 120 ticks with one
-   `Setup` and one `Teardown`; the interactive `--windowed` run observes the visible window and
-   exits on Escape/close.
+   `Setup` and one `Teardown`; the demo uses `WithoutAssets()`. The interactive `--windowed` run
+   observes the visible window and exits on Escape/close.
 5. Run a windowed/offscreen AOT-published app on a GPU machine before release (M8+).
-6. A smoke test that no loaded asset type lacks a generated shape (M3/M4 adds the loader; M1
-   covers the policy with `MessagePackShapeTests`).
+6. The AOT smoke loads a generated-shape MessagePack asset and a raw asset from a real pack; the
+   constrained `IShapeable<T>` contract makes a missing shape a compile-time error.
 7. The AOT app logs through the default ZLogger/Microsoft.Extensions.Logging path without trim
    warnings; `IEngine.LoggerFactory` is usable.
 

@@ -1,12 +1,14 @@
 # Runtime Lifecycle
 
-> **Status:** implemented M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2). The builder, its validation, the
-> windowed `Bork2dApp.Run()` loop, the one-tick headless/offscreen path, app `Dispose()`, the
-> internal windowed platform (OS/window thread, window commands, confirmed state), and the
-> input/time handoff are `Current`. Windowed mode attaches real `IWindow`/`IInput` proxies and
-> advances `ITime`; headless/offscreen keep throwing stubs and a `0` clock until M7. GPU work, pack
-> loading, and renderer pacing are later milestones. The suite is 292 tests: 283 deterministic
-> tests in CI plus 9 opt-in real-window tests.
+> **Status:** implemented M3 (M1, M2, and the M3 asset integration; the M3 PR is pending human
+> review). The builder, its validation, the windowed `Bork2dApp.Run()` loop, the one-tick
+> headless/offscreen path, app `Dispose()`, the internal windowed platform, the input/time
+> handoff, and the app-scoped asset service are `Current`. Windowed mode attaches real
+> `IWindow`/`IInput` proxies and advances `ITime`; headless/offscreen keep throwing stubs and a `0`
+> clock until M7. The base asset pack (or the `WithoutAssets()` empty filesystem) opens before the
+> window and `Setup` and closes after `Teardown`. GPU work and renderer pacing are later
+> milestones. The suite is 586 tests: 577 deterministic tests in CI plus 9 opt-in real-window
+> tests.
 
 ## 1. Public startup contract
 
@@ -30,39 +32,46 @@ app.Run();
 - `Bork2dAppBuilder<TLayer>` is configured and built once and has no thread affinity.
 - `Build()` validates, creates the app-owned Microsoft.Extensions.Logging/ZLogger factory, logs
   the startup mode and validation outcome from `Bork2d.Runtime`, then creates the clock, engine,
-  scene root, and app runtime (root empty until `Setup`). Windowed builds get unattached internal
-  window/input proxies; headless/offscreen get the throwing window stub and no input. It creates
-  no SDL state, window, GPU resources, threads, or filesystem state; the factory is shared by the
-  engine and app runtime.
-- `Run()` may be called from any thread and only once. Windowed mode starts the platform, attaches
-  the window/input proxies, runs an uncapped `Setup` → `Tick`… → `Teardown` loop until
-  `IEngine.Exit()`, the close button, or a fatal error, then destroys the window and joins the OS
-  thread. Headless/offscreen run `Setup`, exactly one `Tick`, and `Teardown`. A failed run still
-  counts as the one call; a second call throws `InvalidOperationException`, and `Run()` after
-  `Dispose()` throws `ObjectDisposedException`.
-- If `Setup` throws, the platform is shut down but `Teardown` is not called and the original
-  exception propagates. If `Tick` (or a text handler) throws, `Teardown` is attempted and the
-  original exception is rethrown. If `Tick` and `Teardown` both throw, `Run()` throws an
-  `AggregateException` with both as inner exceptions. A fatal platform error stops the loop at the
-  next boundary, is rethrown after `Teardown`, and is aggregated with a teardown failure. A failed
-  run detaches the root's direct children.
+  scene root, an **unstarted** asset service, and the app runtime (root empty until `Setup`).
+  Windowed builds get unattached internal window/input proxies; headless/offscreen get the throwing
+  window stub and no input. It creates no SDL state, window, GPU resources, threads, packs, or
+  filesystem state; the factory is shared by the engine, app runtime, and asset service, and is
+  disposed if a later creation step fails.
+- `Run()` may be called from any thread and only once. It starts the asset service first, opening
+  and validating the base pack (or the empty `WithoutAssets()` filesystem) and starting the loader
+  thread. Windowed mode then starts the platform, attaches the window/input proxies, runs an
+  uncapped `Setup` → `Tick`… → `Teardown` loop until `IEngine.Exit()`, the close button, or a fatal
+  error, shuts the platform down, stops the assets, and detaches the proxies. Headless/offscreen
+  run `Setup`, exactly one `Tick`, and `Teardown`, then stop the assets. A failed run still counts
+  as the one call; a second call throws `InvalidOperationException`, and `Run()` after `Dispose()`
+  throws `ObjectDisposedException`.
+- A missing/malformed base pack throws `Bork2dException` from `Run()` before any window, platform,
+  `Setup`, or `Teardown`; the partially started asset service is cleaned up. A window-platform
+  start failure after the assets started stops the assets and throws before `Setup`. If `Setup`
+  throws, the platform and assets are shut down but `Teardown` is not called and the original
+  exception propagates. If `Tick` (or a text handler) throws, `Teardown` is attempted, the platform
+  and assets are shut down, and the original exception is rethrown. If `Tick` and `Teardown` both
+  throw, `Run()` throws an `AggregateException` with both as inner exceptions. A fatal platform
+  error stops the loop at the next boundary, is rethrown after `Teardown`, and is aggregated with a
+  teardown failure. A failed run detaches the root's direct children.
 - `Dispose()` is idempotent and safe before or after `Run()`, but throws
   `InvalidOperationException` while a run is active (D-M2-18), from any thread, without disturbing
   the loop. It detaches the root's direct children, detaches the window/input proxies so retained
-  references throw `ObjectDisposedException`, disposes the app-owned logger factory (including
-  `AddProvider` instances), and never calls `IGame.Teardown`. The app owns the engine and the
-  platform, renderer, asset service, and snapshot ring once implemented; the game instance stays
-  caller-owned.
+  references throw `ObjectDisposedException`, disposes the unstarted or already-stopped asset
+  service, disposes the app-owned logger factory (including `AddProvider` instances), and never
+  calls `IGame.Teardown`. The app owns the engine and the platform, asset service, renderer, and
+  snapshot ring once implemented; the game instance stays caller-owned.
 - Exact member names and signatures are in the
   [API reference](../api/reference.md#12-runtime-surface).
 
 ## 2. Modes
 
-| Mode | Builder | M2 behavior | Target |
+| Mode | Builder | Current behavior | Target |
 | --- | --- | --- | --- |
-| **Windowed** (default) | normal options | Visible SDL window on an OS/window thread, real `IWindow`/`IInput`, advanced `ITime`, uncapped loop until exit/close/fatal | Vulkan swapchain and render thread (M6/M7) |
-| **Offscreen** | `WithOffscreen(w, h)` | One-tick `Setup`/`Tick`/`Teardown`; no SDL, window, input, or clock advance | Windowless Vulkan internal target, render thread, frames discarded (M6/M8) |
-| **Headless** | `WithHeadless(ticksPerSecond = 60)` | One-tick `Setup`/`Tick`/`Teardown`; no SDL, window, input, or clock advance | No SDL/Vulkan/render thread; timer-paced ticks (M7) |
+| **Windowed** (default) | normal options | Visible SDL window on an OS/window thread, real `IWindow`/`IInput`, advanced `ITime`, uncapped loop until exit/close/fatal; base pack + overlays + loads work | Vulkan swapchain and render thread (M6/M7) |
+| **Offscreen** | `WithOffscreen(w, h)` | One-tick `Setup`/`Tick`/`Teardown`; no SDL, window, input, or clock advance; same assets as windowed | Windowless Vulkan internal target, render thread, frames discarded (M6/M8) |
+| **Headless** | `WithHeadless(ticksPerSecond = 60)` | One-tick `Setup`/`Tick`/`Teardown`; no SDL, window, input, or clock advance; same assets as windowed | No SDL/Vulkan/render thread; timer-paced ticks (M7) |
+| **`WithoutAssets()`** | modifier in any mode | Empty VFS; no base pack required; `LoadPack` may mount overlays; one loader thread still starts | Unchanged |
 
 - **Windowed** is the normal game. **Offscreen** is for tests, benchmarks, and visual
   validation and creates no surface/swapchain; a public readback API is future work (M8/M10).
@@ -72,16 +81,19 @@ app.Run();
   `WithSize`, `WithResizable`, `WithFullscreen`, `WithVSync`) are rejected in headless/offscreen
   by `Build()`.
 - Windowed mode makes `IWindow` real and `IInput` available; both proxies are attached before
-  `Setup` and detached after the platform shuts down. After the run, retained references throw
-  `ObjectDisposedException`; the `IEngine.Window`/`IEngine.Input` getters themselves do not throw.
-- M2 adds **no Vulkan** instance, device, surface, swapchain, or render thread. The window is
+  `Setup` and detached after the platform shuts down and the assets stop. After the run, retained
+  references throw `ObjectDisposedException`; the `IEngine.Window`/`IEngine.Input` getters
+  themselves do not throw.
+- M3 adds **no Vulkan** instance, device, surface, swapchain, or render thread. The window is
   created with the Vulkan-capable flag so M6 can create a surface on the same window later.
 - Headless/offscreen keep the throwing `UnsupportedWindow` (members throw
-  `NotSupportedException`), throw from the `IInput` getter, and `IEngine.Assets` remains an
-  `UnsupportedAssets` in every mode.
-- Windowed/offscreen have **no** target rate, frame limiter, deadline wait, `Sleep`, or spin in
-  M2; the windowed loop is uncapped until M7 adds frame-handoff backpressure. Headless pacing is
-  M7, so its stored tick rate has no effect yet.
+  `NotSupportedException`) and throw from the `IInput` getter.
+- `IEngine.Assets` returns the real asset service in every mode, including `WithoutAssets()`. No
+  mode initializes SDL or Vulkan because of assets. Headless/offscreen load packs without SDL;
+  windowed loads them without any GPU work.
+- Windowed/offscreen have **no** target rate, frame limiter, deadline wait, `Sleep`, or spin; the
+  windowed loop is uncapped until M7 adds frame-handoff backpressure. Headless pacing is M7, so
+  its stored tick rate has no effect yet.
 
 ## 3. Builder options and validation
 
@@ -91,7 +103,8 @@ window/time options. Parenthetical notes mark options with no effect yet.
 | Option | Default | Status | Meaning |
 | --- | --- | --- | --- |
 | `WithGame(IGame<TLayer> game)` | required | `Current` | Caller-owned game instance; exactly once. |
-| `WithAssetsPack(string path)` | `assets.pck` | `Current (stored)` | Base pack path. Stored as a relative path; M2 does not resolve it next to the executable or touch the filesystem. |
+| `WithAssetsPack(string path)` | `assets.pck` | `Current` | Base pack filesystem path. Opened at `Run()` before the window/`Setup`; relative to the process current directory, or absolute. Validated as non-empty at the setter. |
+| `WithoutAssets()` | off | `Current` | Empty VFS; no base pack required; `LoadPack` overlays still allowed; idempotent; mutually exclusive with `WithAssetsPack` (`Build()` throws). |
 | `WithLogging(Action<ILoggingBuilder>)` | pretty ZLogger console | `Current` | Configures the app-owned factory; invoked once at `Build` and suppresses the default provider. |
 | `WithTitle(string)` | entry assembly name, else `Bork2d` | `Current` (windowed) | Initial window title; `IWindow.Title` updates it later. |
 | `WithSize(int width, int height)` | `1280 × 720` | `Current` (windowed) | Initial framebuffer size in physical pixels. |
@@ -114,15 +127,17 @@ Validation and creation performed by `Build()`:
 5. `TLayer` is an `int`-backed `[Flags]` enum with 1–32 named single-bit values; `None = 0` is
    allowed and composite non-zero values are rejected.
 6. Sizes are positive; `MaxDeltaTime` is greater than zero and not `NaN` (positive infinity
-   passes); headless tick rate is `>= 0`; the window title and pack path are non-empty.
+   passes); headless tick rate is `>= 0`; the window title and pack path are non-empty; an explicit
+   `WithAssetsPack` plus `WithoutAssets()` is rejected.
 7. Validation runs first, then the factory is created and the `WithLogging` callback invoked once
    (or the default ZLogger console provider installed), then the startup mode and validation
    outcome are logged. The app owns and disposes the factory.
-8. The clock and engine are created next. Windowed mode also creates unattached window/input
-   proxies; headless/offscreen create neither. No SDL call, window, or OS thread happens here.
-9. The pack path is shape-checked only: non-empty, stored relative (default `assets.pck`), no
-   filesystem access. Existence, parsing, and checksum failures arrive with the M3 pack and
-   throw at startup then.
+8. The clock and engine are created next, with an **unstarted** internal asset service. Windowed
+   mode also creates unattached window/input proxies; headless/offscreen create neither. No SDL
+   call, window, OS thread, pack open, or path resolution happens here.
+9. The base pack is resolved and opened only by `Run()`. Existence, parsing, and checksum failures
+   throw `Bork2dException` from there before the window/platform/`Setup`; `WithoutAssets()` skips
+   the base pack entirely.
 
 Invalid configuration throws `Bork2dException` from `Build()`. `WithTitle` and `WithAssetsPack`
 also reject an invalid string immediately with `ArgumentException`; null arguments throw
@@ -147,11 +162,12 @@ also reject an invalid string immediately with `ArgumentException`; null argumen
 
 ## 5. Tick loop and pacing
 
-M2 has two drivers, both on the `Run()` caller thread.
+The host has two drivers, both on the `Run()` caller thread.
 
 - **Windowed** (`Current`):
 
   ```
+  assetService.Start()                // open/validate base pack, start loader; Bork2dException here
   platform.Start()                    // visible window or Bork2dException before Setup
   attach window/input proxies
   if (!Exit && !close && !fatal) Setup(engine)
@@ -160,16 +176,20 @@ M2 has two drivers, both on the `Run()` caller thread.
       time.NewFrame()
       input.DispatchText()            // OnTextTyped before Tick
       game.Tick()
-  if Setup succeeded: Teardown()      // window/input still alive
+  if Setup succeeded: Teardown()      // window, input, and assets still alive
   platform.Shutdown()                 // destroy window, quit SDL, join OS thread
+  assetService.Stop()                 // cancel loads, close packs, join loader
   detach proxies
   ```
 
   There is **no** fixed rate, target FPS, deadline wait, `Sleep`, `SpinWait`, or frame limiter;
-  the loop consumes a core in M2, which is accepted until M7 supplies frame-handoff backpressure.
-  The only blocking waits in the process are the OS thread's SDL event wait and ordinary locks.
-- **Headless/offscreen** (`Current`): exactly one `Setup`, one `Tick`, and one `Teardown`, with no
-  platform and no clock advance. This preserves the M1 AOT gate; M7 replaces it with a paced loop.
+  the loop consumes a core today, which is accepted until M7 supplies frame-handoff backpressure.
+  The only blocking waits in the process are the OS thread's SDL event wait, the asset service's
+  loader join, and ordinary locks.
+- **Headless/offscreen** (`Current`): `assetService.Start()`, exactly one `Setup`, one `Tick`, and
+  one `Teardown`, then `assetService.Stop()`, with no platform and no clock advance. A failed asset
+  start runs no `Setup`/`Teardown`; a `Setup` failure runs no `Teardown`. This preserves the M1 AOT
+  gate; M7 replaces it with a paced loop.
 - `IEngine.Exit()` finishes the current tick and stops the windowed loop before the next freeze; a
   close request between ticks stops it before the next freeze. Exit/close during `Setup` runs zero
   ticks but still tears down once (D-M2-19). Headless/offscreen ignore `Exit()`.
@@ -181,21 +201,24 @@ M2 has two drivers, both on the `Run()` caller thread.
 
 `IGame.Teardown` is `Current` and is not a future step. It runs once on the engine tick thread
 when `Setup` succeeded and is the last chance for the game to detach its subtrees, release
-resources, or issue best-effort window commands. Windowed shutdown then stops input, destroys the
-window, quits SDL, joins the OS thread, and only then detaches the proxies. The app then detaches
-the root's direct children on `Dispose()`. Headless skips render/asset shutdown steps (all
-`Planned`).
+resources, issue best-effort window commands, or use `IEngine.Assets`. Windowed shutdown then
+stops input, destroys the window, quits SDL, joins the OS thread; assets are stopped after
+`Teardown` (and after platform shutdown in windowed mode), then the proxies are detached. The app
+then detaches the root's direct children on `Dispose()`. Headless/offscreen stop the assets after
+`Teardown` and have no render/platform step.
 
 | Failure | Where detected | Behavior |
 | --- | --- | --- |
-| Invalid options / layer enum / conflicting modes | `Build()` | `Bork2dException`; no window, SDL, or threads. |
+| Invalid options / layer enum / conflicting modes / `WithAssetsPack`+`WithoutAssets` | `Build()` | `Bork2dException`; no window, SDL, threads, or file access. |
 | Game instance missing or set twice | `Build()` | `Bork2dException`. |
-| SDL init / window creation / platform-thread startup failure | Windowed `Run()`, before `Setup` | `Bork2dException` with `SDL_GetError()`; no `Setup`, no `Teardown`; the OS thread is joined and SDL released. |
-| Exception in `Setup` | `Run()` | Platform shut down; original exception; `Teardown` not called. |
-| Exception in `Tick` or a text handler | `Run()` | Platform shut down; `Teardown` attempted; original exception rethrown. |
-| `Tick` and `Teardown` both throw | `Run()` | `AggregateException` with both inner exceptions, after platform shutdown. |
-| Fatal platform error after startup | OS thread → `Run()` | Loop stops at the next boundary; `Teardown` attempted; fatal `Bork2dException` rethrown, aggregated with a teardown failure. The OS thread has already cleaned up, so the window may be destroyed before `Teardown`; the proxies remain attached for best-effort access. |
+| Missing/malformed base pack | `Run()`, before the window | `Bork2dException` with the resolved path and reason; no `Setup`/`Teardown`; the partially started asset service is cleaned up; no window. |
+| SDL init / window creation / platform-thread startup failure | Windowed `Run()`, after assets started, before `Setup` | `Bork2dException` with `SDL_GetError()`; no `Setup`, no `Teardown`; the asset service is stopped, the OS thread joined, SDL released, proxies detached. |
+| Exception in `Setup` | `Run()` | Platform and assets shut down; original exception; `Teardown` not called. |
+| Exception in `Tick` or a text handler | `Run()` | Platform and assets shut down; `Teardown` attempted; original exception rethrown. |
+| `Tick` and `Teardown` both throw | `Run()` | `AggregateException` with both inner exceptions, after platform shutdown and asset stop. |
+| Fatal platform error after startup | OS thread → `Run()` | Loop stops at the next boundary; `Teardown` attempted; fatal `Bork2dException` rethrown, aggregated with a teardown failure. Assets are stopped. The OS thread has already cleaned up, so the window may be destroyed before `Teardown`; the proxies remain attached for best-effort access. |
 | `IWindow`/`IInput` member after shutdown | Member | `ObjectDisposedException` (D-M2-17). |
+| `IAssets` member after `Run()`/`Dispose()` | Member | `ObjectDisposedException`; the `IEngine.Assets` getter keeps returning the disposed service and never throws (D-M3-14). |
 | `Dispose()` during `Run()` | `Dispose()` | `InvalidOperationException` from any thread; the loop continues. |
 | Second `Run()` / `Run()` after `Dispose()` | `Run()` | `InvalidOperationException` / `ObjectDisposedException`. |
 
@@ -213,12 +236,11 @@ the root's direct children on `Dispose()`. Headless skips render/asset shutdown 
 ## 7. Window and input (windowed only)
 
 Windowed mode has a real window and input for the duration of `Run()`: the internal
-`SdlWindowPlatform` (§7.1) and the input accumulator/freeze (§7.2) are attached through the
-internal proxies before `Setup` and detached after the platform shuts down. Headless/offscreen
+`SdlWindowPlatform` (§7.1) and the input accumulator/freeze (§7.2) are attached through the internal proxies before `Setup` and detached after the platform shuts down and the assets stop. Headless/offscreen
 have no window or input: `IWindow` members and the `IInput` getter throw
 `NotSupportedException`.
 
-### 7.1 Windowed window platform (M2 WP2, internal)
+### 7.1 Windowed window platform (M2, internal)
 
 `Status: Current (internal).` `SdlWindowPlatform` owns one engine-created OS/window thread. It is
 internal to `Bork2d.Runtime` and has no public surface; the runtime host starts it before

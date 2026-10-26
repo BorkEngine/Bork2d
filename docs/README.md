@@ -1,12 +1,12 @@
 # Bork2d Documentation
 
 > **Status:** **M0 complete; M1 merged into `develop` (2026-10-25, PR #1); M2 merged into `develop`
-> (2026-10-26, PR #2).** The repository contains
-> the M1 build/quality baseline, public contracts, root-owned scene tree, builder, logging, the
-> NativeAOT smoke app, and the M2 SDL windowed host (window, input, time, uncapped loop). The M3
-> asset spec is **approved (2026-10-26)** and implementation has not started; the editor and renderer
-> are target designs for later milestones. Check status markers before treating an API as
-> implemented.
+> (2026-10-26, PR #2); M3 implementation complete, PR pending human review (not merged).** The
+> repository contains the M1 build/quality baseline, public contracts, root-owned scene tree,
+> builder, logging, the NativeAOT smoke app, the M2 SDL windowed host (window, input, time,
+> uncapped loop), and the M3 asset pipeline (pack reader/writer, VFS, loader, descriptors/sprites
+> CPU metadata, runtime integration). TOML bake is M4; the editor and renderer are target designs
+> for later milestones. Check status markers before treating an API as implemented.
 
 Bork2d is a focused 2D game engine for .NET: **Vulkan 1.3** rendering, **SDL2** windowing through
 **Silk.NET**, a NativeAOT runtime, and **`assets.pck`** assets addressed by canonical paths.
@@ -56,7 +56,7 @@ items. The [decision log](decisions.md) records why.
 | [Implementation roadmap](roadmap.md) | planner | M0–M10, exit criteria, risks, open decisions, progress. |
 | [M1 spec](specs/m1-foundation.md) | implementers | Historical M1 goal, decisions, and acceptance evidence. |
 | [M2 spec](specs/m2-sdl-platform.md) | implementers | Implemented M2 SDL window/input decisions, semantics, work packages, evidence, acceptance. |
-| [M3 spec](specs/m3-assets.md) | implementers | Approved M3 asset pack/VFS/descriptor decisions, semantics, derived details, work packages. |
+| [M3 spec](specs/m3-assets.md) | implementers | Implemented M3 asset pack/VFS/descriptor decisions, semantics, derived details, work packages, and acceptance evidence. |
 | [Contributing](contributing.md) | contributors | Build, warnings, style, format, docs check, PR checklist. |
 | [Decision log](decisions.md) | everyone | Accepted decisions and consequences. |
 
