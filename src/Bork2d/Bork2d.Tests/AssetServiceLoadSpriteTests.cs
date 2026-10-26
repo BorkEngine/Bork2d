@@ -218,6 +218,15 @@ public sealed class AssetServiceLoadSpriteTests
     }
 
     [Fact]
+    public async Task InvalidTextureDescriptorIsNonRenderable()
+    {
+        TextureDescriptor descriptor = SpriteTestSupport.Descriptor();
+        descriptor.Format = "ktx2";
+
+        await AssertSpriteFailureAsync(descriptor: descriptor);
+    }
+
+    [Fact]
     public async Task MissingTexturePayloadIsNonRenderable()
     {
         await AssertSpriteFailureAsync(includePayload: false);
@@ -510,6 +519,7 @@ public sealed class AssetServiceLoadSpriteTests
         => await host.Service.GetSpriteCompletion(handle).WaitAsync(TimeSpan.FromSeconds(10));
 
     private static async Task AssertSpriteFailureAsync(
+        TextureDescriptor? descriptor = null,
         bool includeDescriptor = true,
         bool includePayload = true,
         byte[]? payload = null)
@@ -517,6 +527,7 @@ public sealed class AssetServiceLoadSpriteTests
         using var directory = TempPackDirectory.CreateUnderTemp();
         string packPath = SpriteTestSupport.WriteSpritePack(
             directory,
+            descriptor: descriptor,
             includeDescriptor: includeDescriptor,
             includePayload: includePayload,
             payload: payload);
