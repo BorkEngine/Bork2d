@@ -50,7 +50,7 @@ public sealed class SceneCreationTests
 
         var sprite = engine.CreateSpriteRender(engine.Root);
 
-        Assert.Equal(Sprite.Empty, sprite.Sprite);
+        Assert.Null(sprite.Sprite);
         Assert.Equal(GameLayer.None, sprite.Layer);
         Assert.Equal(Color.White, sprite.Tint);
         Assert.Equal(0, sprite.ZIndex);

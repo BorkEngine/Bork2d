@@ -1,10 +1,11 @@
+using Bork2d.Api.Assets;
 using Bork2d.Api.Rendering;
 using Bork2d.Api.Scene;
 
 namespace Bork2d.Common.Scene;
 
 /// <summary>
-/// An engine-owned sprite renderable: a transform plus a sprite handle and draw state.
+/// An engine-owned sprite renderable: a transform plus a sprite asset and draw state.
 /// </summary>
 /// <remarks>
 /// Sprite renderables are scene entities with no destruction state and no global registration.
@@ -13,7 +14,7 @@ namespace Bork2d.Common.Scene;
 internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
     where TLayer : struct, Enum
 {
-    private Sprite _sprite;
+    private SpriteAsset? _sprite;
     private TLayer _layer;
     private Color _tint;
     private int _zIndex;
@@ -21,13 +22,13 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
     internal SpriteRender(Lock structuralLock)
         : base(structuralLock)
     {
-        _sprite = Sprite.Empty;
+        _sprite = null;
         _layer = default;
         _tint = Color.White;
         _zIndex = 0;
     }
 
-    public Sprite Sprite
+    public SpriteAsset? Sprite
     {
         get
         {

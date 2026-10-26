@@ -90,15 +90,20 @@ internal static class Program
             SmokeChecks.Require(
                 game.LoadedName == AssetSmoke.Name,
                 "LoadAsset<MessagePackSmokeData> must return the generated-shape asset.");
+            SmokeChecks.Require(
+                game.LoadedSpriteTexturePath == AssetSmoke.TexturePath,
+                "LoadAsset<SpriteAsset> must return the public asset shape with its texture reference.");
 
             VerifyMessagePackRoundTrip();
             VerifyRootIsCleared(game);
 
             Console.WriteLine(
                 $"Bork2d NativeAOT smoke passed: Setup/Tick/Teardown = 1/1/1, root cleared, "
-                + $"default logging, Nerdbank.MessagePack generated shape, pack entries="
-                + $"{game.BrowsedEntryCount} ({AssetSmoke.RawPath}, {AssetSmoke.MessagePackPath}), "
-                + $"rawBytes={game.RawByteCount}, messagePackName={game.LoadedName}.");
+                + $"default logging, Nerdbank.MessagePack generated shape, public sprite asset, "
+                + $"pack entries={game.BrowsedEntryCount} ({AssetSmoke.RawPath}, "
+                + $"{AssetSmoke.MessagePackPath}, {AssetSmoke.SpritePath}), "
+                + $"rawBytes={game.RawByteCount}, messagePackName={game.LoadedName}, "
+                + $"spriteTexture={game.LoadedSpriteTexturePath}.");
             return 0;
         }
         finally

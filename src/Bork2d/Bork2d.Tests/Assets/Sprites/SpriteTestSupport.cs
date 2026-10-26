@@ -1,13 +1,13 @@
 using System.Numerics;
-using Bork2d.Assets.Descriptors;
+using Bork2d.Api.Assets;
 using Bork2d.Assets.Pack;
 using Bork2d.Tests.Assets.Vfs;
 
 namespace Bork2d.Tests.Assets.Sprites;
 
 /// <summary>
-/// Builds valid internal texture-descriptor and sprite-asset values and temporary packs for the M3
-/// WP4 tests. No binary fixture is committed.
+/// Builds valid public texture-descriptor and sprite-asset values and temporary packs for the
+/// asset-reference tests. No binary fixture is committed.
 /// </summary>
 internal static class SpriteTestSupport
 {
@@ -67,7 +67,8 @@ internal static class SpriteTestSupport
 
     /// <summary>
     /// Writes a debug pack containing a texture descriptor, its raw payload, and a sprite asset.
-    /// Callers override the values to build invalid cases; descriptor and payload may be omitted.
+    /// Callers override the values to build other cases; descriptor and payload may be omitted to
+    /// exercise pack-time reference failures.
     /// </summary>
     internal static string WriteSpritePack(
         TempPackDirectory directory,

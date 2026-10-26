@@ -89,12 +89,11 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <remarks>
     /// <para>
     /// No base pack is required or opened. <see cref="IAssets.Browse"/> returns an empty list,
-    /// <see cref="IAssets.Exists"/> is <see langword="false"/>,
+    /// <see cref="IAssets.Exists"/> is <see langword="false"/>, and
     /// <see cref="IAssets.LoadData"/> and <see cref="IAssets.LoadAsset{T}"/> fault with an
-    /// <c>AssetException</c> whose kind is <c>NotFound</c>, and <see cref="IAssets.LoadSprite"/>
-    /// returns <see cref="Sprite.Empty"/>. The asset service, including its one loader thread,
-    /// still starts, so <see cref="IAssets.LoadPack"/> can mount overlays on top of the empty
-    /// filesystem later (for example during <c>Setup</c>).
+    /// <c>AssetException</c> whose kind is <c>NotFound</c>. The asset service, including its one
+    /// loader thread, still starts, so <see cref="IAssets.LoadPack"/> can mount overlays on top of
+    /// the empty filesystem later (for example during <c>Setup</c>).
     /// </para>
     /// <para>
     /// Available in windowed, offscreen, and headless modes. It is mutually exclusive with

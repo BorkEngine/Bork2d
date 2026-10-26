@@ -37,8 +37,8 @@ public enum AssetErrorKind
     /// </summary>
     /// <remarks>
     /// For example, a declared size above <see cref="Array.MaxLength"/> for
-    /// <see cref="IAssets.LoadData(string)"/>, an inconsistent descriptor payload size, or invalid
-    /// sprite metadata.
+    /// <see cref="IAssets.LoadData(string)"/>. Asset-field and reference validation belongs to
+    /// pack creation, not the runtime loader.
     /// </remarks>
     InvalidData,
 }

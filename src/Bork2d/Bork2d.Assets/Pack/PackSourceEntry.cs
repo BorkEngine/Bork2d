@@ -11,11 +11,17 @@ internal sealed class PackSourceEntry
     /// <param name="path">The canonical asset path.</param>
     /// <param name="isRaw">Whether the payload is opaque raw bytes.</param>
     /// <param name="payload">The uncompressed payload bytes.</param>
-    internal PackSourceEntry(string path, bool isRaw, byte[] payload)
+    /// <param name="references">The asset/data references contained in the payload.</param>
+    internal PackSourceEntry(
+        string path,
+        bool isRaw,
+        byte[] payload,
+        IReadOnlyList<AssetReferenceInfo> references)
     {
         Path = path;
         IsRaw = isRaw;
         Payload = payload;
+        References = references;
     }
 
     /// <summary>Gets the canonical asset path.</summary>
@@ -26,4 +32,7 @@ internal sealed class PackSourceEntry
 
     /// <summary>Gets the uncompressed payload bytes.</summary>
     internal byte[] Payload { get; }
+
+    /// <summary>Gets the asset and data references contained in the payload.</summary>
+    internal IReadOnlyList<AssetReferenceInfo> References { get; }
 }

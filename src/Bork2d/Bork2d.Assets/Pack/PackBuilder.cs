@@ -19,6 +19,14 @@ namespace Bork2d.Assets.Pack;
 /// written. There is no byte-for-byte determinism guarantee: Zstd output may vary across runs and
 /// runtime versions.
 /// </para>
+/// <para>
+/// <see cref="Build"/> and <see cref="Write(string)"/> validate every non-null
+/// <c>AssetRef&lt;T&gt;</c> and <c>DataRef</c> in every MessagePack asset: the referenced path must
+/// be canonical and present, and the reference kind must match the target entry (asset references
+/// target MessagePack entries; data references target raw entries). A null path is an absent
+/// reference and is valid. Field-level asset validation belongs to the bake tooling, not the pack
+/// builder.
+/// </para>
 /// </remarks>
 public sealed class PackBuilder
 {
@@ -52,7 +60,9 @@ public sealed class PackBuilder
     {
         string canonicalPath = AssetPath.Normalize(path);
         ThrowIfDuplicate(canonicalPath);
-        _entries.Add(canonicalPath, new PackSourceEntry(canonicalPath, isRaw: true, payload.ToArray()));
+        _entries.Add(
+            canonicalPath,
+            new PackSourceEntry(canonicalPath, isRaw: true, payload.ToArray(), references: []));
     }
 
     /// <summary>
@@ -75,8 +85,10 @@ public sealed class PackBuilder
         ThrowIfDuplicate(canonicalPath);
 
         byte[] payload;
+        IReadOnlyList<AssetReferenceInfo> references;
         try
         {
+            references = AssetReferenceCollector.Collect(canonicalPath, value);
             payload = PackSerialization.SerializeAsset(value);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -86,14 +98,18 @@ public sealed class PackBuilder
                 exception);
         }
 
-        _entries.Add(canonicalPath, new PackSourceEntry(canonicalPath, isRaw: false, payload));
+        _entries.Add(
+            canonicalPath,
+            new PackSourceEntry(canonicalPath, isRaw: false, payload, references));
     }
 
     /// <summary>
     /// Builds the complete pack in one array.
     /// </summary>
     /// <returns>The pack bytes.</returns>
-    /// <exception cref="Bork2dException">The pack exceeds <see cref="Array.MaxLength"/>.</exception>
+    /// <exception cref="Bork2dException">
+    /// An asset reference is invalid, or the pack exceeds <see cref="Array.MaxLength"/>.
+    /// </exception>
     public byte[] Build()
     {
         PackLayout layout = CreateLayout();
@@ -108,7 +124,9 @@ public sealed class PackBuilder
     /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is empty or whitespace.</exception>
-    /// <exception cref="Bork2dException">The pack could not be written.</exception>
+    /// <exception cref="Bork2dException">
+    /// An asset reference is invalid, or the pack could not be written.
+    /// </exception>
     public void Write(string path)
     {
         ArgumentNullException.ThrowIfNull(path);
@@ -158,7 +176,9 @@ public sealed class PackBuilder
     /// <param name="destination">The writable destination stream.</param>
     /// <exception cref="ArgumentNullException"><paramref name="destination"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="destination"/> is not writable.</exception>
-    /// <exception cref="Bork2dException">The pack could not be written.</exception>
+    /// <exception cref="Bork2dException">
+    /// An asset reference is invalid, or the pack could not be written.
+    /// </exception>
     public void Write(Stream destination)
     {
         ArgumentNullException.ThrowIfNull(destination);
@@ -182,6 +202,8 @@ public sealed class PackBuilder
 
     private PackLayout CreateLayout()
     {
+        ValidateReferences();
+
         var source = new List<PackSourceEntry>(_entries.Count);
         source.AddRange(_entries.Values);
 
@@ -194,6 +216,57 @@ public sealed class PackBuilder
             throw new Bork2dException(
                 "The pack size exceeds the v1 field widths or the supported file length.",
                 exception);
+        }
+    }
+
+    private void ValidateReferences()
+    {
+        foreach (PackSourceEntry entry in _entries.Values)
+        {
+            foreach (AssetReferenceInfo reference in entry.References)
+            {
+                if (reference.Path is null)
+                {
+                    continue;
+                }
+
+                string location = reference.PropertyPath.Length == 0
+                    ? $"Asset '{reference.SourcePath}'"
+                    : $"Asset '{reference.SourcePath}' at '{reference.PropertyPath}'";
+
+                if (reference.Path.Length == 0)
+                {
+                    throw new Bork2dException(
+                        $"{location} has an empty reference path.");
+                }
+
+                if (!AssetPath.TryValidateCanonical(reference.Path, out string? reason))
+                {
+                    throw new Bork2dException(
+                        $"{location} references the non-canonical path "
+                            + $"'{reference.Path}': {reason}");
+                }
+
+                if (!_entries.TryGetValue(reference.Path, out PackSourceEntry? target))
+                {
+                    throw new Bork2dException(
+                        $"{location} references '{reference.Path}', which is not present in the "
+                            + "pack.");
+                }
+
+                if (reference.IsData == target.IsRaw)
+                {
+                    continue;
+                }
+
+                string expected = reference.IsData
+                    ? "raw data"
+                    : "a MessagePack asset";
+                string actual = target.IsRaw ? "raw data" : "a MessagePack asset";
+                throw new Bork2dException(
+                    $"{location} references '{reference.Path}' as {expected}, but the entry is "
+                        + $"{actual}.");
+            }
         }
     }
 

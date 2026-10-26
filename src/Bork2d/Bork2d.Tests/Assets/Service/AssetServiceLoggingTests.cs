@@ -1,5 +1,4 @@
 using Bork2d.Api.Assets;
-using Bork2d.Api.Rendering;
 using Bork2d.Tests.Assets.Pack;
 using Bork2d.Tests.Assets.Vfs;
 using Microsoft.Extensions.Logging;
@@ -146,21 +145,6 @@ public sealed class AssetServiceLoggingTests
         var error = Assert.Single(host.LogsAt(LogLevel.Error));
         Assert.Contains("data/corrupt", error.Message, StringComparison.Ordinal);
         Assert.Contains("kind Decode", error.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void LoadSpriteMissingPathLogsAndReturnsEmpty()
-    {
-        using var host = new AssetServiceHost();
-        host.Start();
-
-        Sprite sprite = host.Service.LoadSprite("sprites/missing");
-
-        Assert.Equal(Sprite.Empty, sprite);
-        var log = Assert.Single(
-            host.Logs,
-            entry => entry.Message.Contains("sprites/missing", StringComparison.Ordinal));
-        Assert.Equal(LogLevel.Information, log.Level);
     }
 
     [Fact]

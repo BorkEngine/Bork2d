@@ -1,5 +1,4 @@
 using Bork2d.Api.Assets;
-using Bork2d.Api.Rendering;
 using PolyType;
 
 namespace Bork2d.Tests.TestDoubles;
@@ -10,9 +9,14 @@ internal sealed class FakeAssets : IAssets
         where T : class, IShapeable<T>
         => throw new NotSupportedException("Scene-graph tests do not load assets.");
 
-    public Sprite LoadSprite(string assetPath) => Sprite.Empty;
+    public Task<T> LoadAsset<T>(AssetRef<T> reference)
+        where T : class, IShapeable<T>
+        => throw new NotSupportedException("Scene-graph tests do not load assets.");
 
     public Task<byte[]> LoadData(string assetPath)
+        => throw new NotSupportedException("Scene-graph tests do not load data.");
+
+    public Task<byte[]> LoadData(DataRef reference)
         => throw new NotSupportedException("Scene-graph tests do not load data.");
 
     public void LoadPack(string packPath)
