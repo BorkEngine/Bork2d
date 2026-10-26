@@ -1,12 +1,14 @@
 # API Reference
 
 > **Status:** the implemented M2 contract for the windowed host (M2 WP1–WP5; merged into `develop`
-> 2026-10-26, PR #2), plus the M3 WP1 tooling-only pack writer. `Current` means implemented in this
-> tree and covered by tests; `Partial` means the declaration exists but behavior is stubbed,
-> unwired, or incomplete; `Planned` means an agreed target that is not implemented. Windowed mode
-> runs a real SDL window, input, and time; headless/offscreen keep the one-tick M1 path. The
-> runtime asset pipeline (VFS, loader, descriptors) is M3 WP2–WP5; renderer semantics are M8. See
-> the [roadmap](../roadmap.md). Code under `src/Bork2d` is authoritative.
+> 2026-10-26, PR #2), the M3 WP1 tooling-only pack writer, and the M3 WP2 asset contract and
+> internal VFS. `Current` means implemented in this tree and covered by tests; `Partial` means the
+> declaration exists but behavior is stubbed, unwired, or incomplete; `Planned` means an agreed
+> target that is not implemented. Windowed mode runs a real SDL window, input, and time;
+> headless/offscreen keep the one-tick M1 path. The runtime asset service (loader, `LoadData`/
+> `LoadAsset<T>`/`LoadSprite` bodies) is M3 WP3–WP5, so `IEngine.Assets` still returns the throwing
+> stub. Renderer semantics are M8. See the [roadmap](../roadmap.md). Code under `src/Bork2d` is
+> authoritative.
 
 ## 1. Contract-wide rules
 
@@ -22,7 +24,7 @@ scene state afterwards.
 | `IEngine.Exit`, `ITime` reads | Any thread | Three-state exit token / locked snapshot values. |
 | `IInput` | Any thread | Tick-start frozen snapshot; the windowed loop publishes it once per tick. |
 | `IWindow` | Any thread | Setters enqueue a command for the OS/window thread; getters read the last confirmed immutable snapshot. |
-| `IAssets` (M3) | Any thread | Thread-safe requests; asynchronous completion. |
+| `IAssets` (M3) | Any thread | Immutable snapshots; mounts publish atomically and loads complete asynchronously. |
 | `IGame` callbacks | Engine tick thread | Invoked by the host; never concurrent. |
 | Builder, `Build`, `Run`, `Dispose`, `LoggerFactory` | Any thread | No main-thread requirement; MEL factories/loggers are thread-safe. |
 | Value types | Any thread | Copies. |
@@ -59,13 +61,13 @@ from the top-left, and an integer `ZIndex` sorts higher later. Sprite asset geom
 ### 1.4 Public surface and NativeAOT
 
 `Bork2d.Api` declares the interfaces in §2–§10 plus the value types `Sprite`, `Color`,
-`ClearKind`, `KeyCode`, `MouseButton`, and `Bork2dException`; `ILoggerFactory` is a
-Microsoft.Extensions.Logging type exposed by `IEngine` (not defined in `Bork2d.Api`), and
-`AssetInfo` is `Planned` for M3. The runtime is NativeAOT- and trim-safe: no reflection, assembly
-scanning, runtime TOML, or dynamic code; `LoadAsset<T>` needs a
-[Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) generated shape and the
-game is passed as an instance. D-M3-22 makes that a `where T : class, IShapeable<T>` constraint on
-`IAssets.LoadAsset<T>` and adds a PolyType 1.4.1 contract reference to `Bork2d.Api` in WP2. See
+`ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, and `Bork2dException`; `ILoggerFactory` is a
+Microsoft.Extensions.Logging type exposed by `IEngine` (not defined in `Bork2d.Api`). The runtime
+is NativeAOT- and trim-safe: no reflection, assembly scanning, runtime TOML, or dynamic code;
+`LoadAsset<T>` requires a [PolyType](https://github.com/AArnott/PolyType) `IShapeable<T>` shape
+(a Nerdbank.MessagePack `[GenerateShape]` type) and the game is passed as an instance. `Bork2d.Api`
+references PolyType `1.4.1` for that constraint only (D-M3-22); it does not reference
+Nerdbank.MessagePack, `System.IO.Hashing`, Zstd, or file I/O. See
 [NativeAOT](../architecture/nativeaot.md).
 
 The only other public surface is the tooling-only pack writer in `Bork2d.Assets` (§13). Game code
@@ -229,31 +231,75 @@ the clock, dispatches text, then calls `Tick`. In headless/offscreen there is no
 
 ## 7. `IAssets`
 
-`Status: Partial.` Asset behavior is `Planned` for M3. `public interface IAssets` declares
-`Task<T> LoadAsset<T>(string) where T : class, IShapeable<T>`, `Sprite LoadSprite(string)`, and
-`Task<byte[]> LoadData(string)`. In M2 `IEngine.Assets` returns an `UnsupportedAssets`; all three
-methods throw `NotSupportedException`. The `IShapeable<T>` constraint and the PolyType contract
-reference land with WP2 (D-M3-22); until then the tree still has `where T : class`.
+`Status: Partial (M3 WP2).` The public contract is `Current`: the six members, XML docs, the
+`IShapeable<T>` constraint, and `AssetInfo`. Canonical paths, filesystem resolution, the internal
+base/overlay VFS, atomic `LoadPack` mounting, and `Browse`/`Exists` lookup are implemented in
+`Bork2d.Assets` (WP2). `IEngine.Assets` still returns an `UnsupportedAssets` stub in this tree, so
+every member throws `NotSupportedException`; the real service, loader thread, and load bodies are
+WP3–WP5.
 
-`Planned for M3:` `LoadPack(string packPath)`, `Browse(string? prefix = null)`,
-`Exists(string assetPath)`, and `AssetInfo(Path, IsRaw, IsCompressed, Length, Size, PackPath)`.
-`LoadPack` mounts above the current stack (later wins, no unload); `Browse` returns the merged
-visible snapshot; `AssetInfo` describes one entry without loading a payload.
+```csharp
+public interface IAssets
+{
+    Task<T> LoadAsset<T>(string assetPath) where T : class, IShapeable<T>;
+    Sprite LoadSprite(string assetPath);
+    Task<byte[]> LoadData(string assetPath);
+    void LoadPack(string packPath);
+    IReadOnlyList<AssetInfo> Browse(string? prefix = null);
+    bool Exists(string assetPath);
+}
+```
 
-Target rules (M3):
+`IShapeable<T>` is `PolyType.IShapeable<T>`; `Bork2d.Api` references PolyType `1.4.1` for this
+contract only (D-M3-22). A missing shape is a compile-time error; there is no unconstrained or
+reflection-shape fallback.
 
-- Paths are canonical lowercase `/` keys without source extensions.
-- `LoadSprite` is idempotent per path; the handle is session-local and never persisted. A sprite
-  is skipped until its sprite asset, texture descriptor, raw payload, and GPU page are ready
-  (M8); no blocking, no placeholder. A missing key returns `Sprite.Empty` and logs.
-- `LoadAsset<T>` loads a MessagePack asset with a Nerdbank generated shape; the
-  `where T : class, IShapeable<T>` constraint makes the shape a compile-time requirement (D-M3-22).
-  It throws for raw assets; use `LoadData` for arbitrary bytes.
-- The default pack is the relative string `"assets.pck"`. `Build()` validates only that the path
-  is non-empty and never touches the filesystem in M2. A missing or malformed base pack throws
-  `Bork2dException` at startup (no empty-filesystem fallback).
-- No public pack/asset unload in v1; mount packs during `Setup`/before loading. Missing/failed
-  assets log; the retry policy is decided in M3 (see roadmap).
+| Member | Contract |
+| --- | --- |
+| `LoadAsset<T>(string)` | Loads a MessagePack asset using the compiled shape on `T`. A fresh instance per call. Raw entries fault with `AssetException(RawAsset)`; missing paths fault with `NotFound`; decode failures fault with `Decode` (WP3). Use `LoadData` for raw bytes. |
+| `LoadSprite(string)` | Resolves a canonical path synchronously to a session-local handle. Missing → `Sprite.Empty` plus a log; present → the handle immediately, with sprite/descriptor CPU metadata loaded asynchronously (WP4). Idempotent per path; no readiness query in v1. |
+| `LoadData(string)` | Decompressed bytes for any asset kind, as a fresh `byte[]` per call (WP3). Missing → `AssetException(NotFound)`. |
+| `LoadPack(string)` | Synchronously opens, validates, and mounts a pack above the current stack. Later mounts shadow earlier paths; no unload. A bad/missing pack throws `Bork2dException` with the resolved path and leaves the stack unchanged. Thread-safe and atomic. |
+| `Browse(string? prefix = null)` | Materialized snapshot of visible entries, one per canonical path, shadowed paths hidden. `null` means all; a non-null prefix is normalized and matched on a `/` segment boundary; results are sorted by `Path` ordinal. Empty VFS → empty list. An empty prefix is invalid. |
+| `Exists(string assetPath)` | Exact canonical lookup, never a prefix match. A valid missing path is `false`; an invalid path throws. |
+
+- **Paths.** Inputs are normalized first (`\` → `/`, invariant lowercase) and then validated:
+  lowercase letters, digits, `_`, `-`, and `/` separators only; no leading/trailing slash, empty
+  segment, `.`/`..` segment, or source extension. Null throws `ArgumentNullException`; any other
+  invalid path throws `ArgumentException`. A valid but absent path is not an argument error.
+- **Filesystem pack paths.** `LoadPack` takes a filesystem path, not an asset path. Relative paths
+  resolve against the process current directory at the call; absolute paths are accepted. Empty or
+  whitespace throws `ArgumentException`, null throws `ArgumentNullException`.
+- **Threading and lifetime.** All members are thread-safe. `LoadPack` performs synchronous file I/O
+  and validation, so mount before the first tick when possible. There is no unload, replacement,
+  loose-file fallback, or automatic retry in v1. After the runtime service is stopped (WP3/WP5),
+  every member throws `ObjectDisposedException`; the `IEngine.Assets` getter itself never throws.
+  `AssetException`/`AssetErrorKind` are WP3 and are not in this tree yet.
+
+`AssetInfo` is the value type returned by `Browse`:
+
+```csharp
+public readonly record struct AssetInfo(
+    string Path,
+    bool IsRaw,
+    bool IsCompressed,
+    long Length,
+    long Size,
+    string PackPath);
+```
+
+| Field | Meaning |
+| --- | --- |
+| `Path` | Canonical asset path. |
+| `IsRaw` | `true`: opaque bytes; `false`: MessagePack. |
+| `IsCompressed` | Whether the stored payload is Zstd-compressed. |
+| `Length` | Stored byte count (compressed length when compressed). |
+| `Size` | Byte count after decompression; equals `Length` when uncompressed. |
+| `PackPath` | The pack identifier as supplied when mounted (the `WithAssetsPack` value or the `LoadPack` argument), not the resolved absolute path. |
+
+`Length`/`Size` are `long` in the public type although the v1 header stores `uint32`; this leaves
+room for a future pack version and avoids unsigned arithmetic in game code. `Browse` never
+decompresses a payload.
 
 ## 8. `ICamera<TLayer>`
 
@@ -338,6 +384,11 @@ public interface ITransform
 
 `Sprite` is `readonly record struct Sprite(int Id)` with `static readonly Sprite Empty = default`.
 `Id == 0` is empty; equality is by `Id`; no public `int` conversion; persist asset paths, not IDs.
+
+`AssetInfo` is `readonly record struct AssetInfo(string Path, bool IsRaw, bool IsCompressed,
+long Length, long Size, string PackPath)` (`Current`, M3 WP2): one visible pack entry as returned by
+`IAssets.Browse`. The fields come from the pack header; `PackPath` is the supplied pack identifier,
+and `Length`/`Size` are `long` even though v1 stores `uint32`. See §7.
 
 `Color` is `readonly record struct Color(float R, float G, float B, float A)`: linear RGBA in
 `[0,1]` with `Transparent`, `Black`, `White`, `Red`, `Green`, `Blue`, `Yellow`, `Cyan`,
@@ -485,8 +536,9 @@ builder.Write("assets.pck");   // overwrites; relative to the current directory
   and runtime versions.
 - The builder is not thread-safe. `Build()`/`Write()` may be repeated, and entries may be added
   after a build.
-- Runtime pack loading, overlays, `IAssets.Browse`/`Exists`, and descriptor/sprite assets are
-  WP2–WP5 and remain `Planned`; this section documents the writer only.
+- Runtime path/VFS/browse internals are implemented in `Bork2d.Assets` (WP2); the public
+  `IAssets` service wiring and descriptor/sprite assets are WP3–WP5. This section documents the
+  writer only.
 
 ## 14. Errors and exceptions
 
@@ -505,9 +557,15 @@ builder.Write("assets.pck");   // overwrites; relative to the current directory
 | Undefined `KeyCode`/`MouseButton` query | `false`; never throws. |
 | Input text handler throws | Treated as a `Tick` failure: no further text dispatch, loop stops, `Teardown` attempted, the original exception rethrown. |
 | `IWindow.Size` non-positive/NaN/infinite, or `IWindow.Title = null` | `ArgumentOutOfRangeException` / `ArgumentNullException` from the setter, before enqueueing. |
-| Missing/corrupt default pack, or missing asset (M3) | Pack: `Bork2dException` at startup; asset: log plus `Sprite.Empty`, not fatal. |
+| Invalid asset path (public input) | `ArgumentNullException` for null; `ArgumentException` for an empty, non-canonical, extension-bearing, or otherwise invalid path. A valid missing path is not an error. |
+| Invalid `LoadPack` filesystem path | `ArgumentNullException` for null; `ArgumentException` for empty/whitespace or an unusable filesystem path. |
+| Bad or missing pack in `LoadPack` | `Bork2dException` naming the resolved filesystem path and reason; the mounted stack is unchanged. |
+| Asset lookup/decode/IO failure (M3 WP3+) | `Planned`: `AssetException` with `AssetErrorKind` (`NotFound`, `RawAsset`, `Decode`, `Io`, `InvalidData`) and `AssetPath`. Not in this tree yet; the runtime stub throws `NotSupportedException`. |
+| Missing asset (M3 WP3+) | `LoadData`/`LoadAsset<T>` fault with `AssetException(NotFound)`; `LoadSprite` logs and returns `Sprite.Empty`; `Exists` is `false`. |
+| After the runtime asset service stops (M3 WP3/WP5) | Every `IAssets` member throws `ObjectDisposedException`; the `IEngine.Assets` getter never throws. |
+| Current tree asset stub | `IEngine.Assets` returns `UnsupportedAssets`; every member throws `NotSupportedException` until WP3/WP5 wire the service. |
 
-`Bork2dException` lives in `Bork2d.Api` with the standard constructors; BCL exceptions remain for caller argument errors.
+`Bork2dException` lives in `Bork2d.Api` with the standard constructors; BCL exceptions remain for caller argument errors. Pack open/parse/mount failures are `Bork2dException` per D-M3-15; `AssetException`/`AssetErrorKind` are WP3 and are not declared in WP2.
 
 ## 15. Related documents
 

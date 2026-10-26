@@ -5,7 +5,9 @@
 > `IsAotCompatible` plus the trim and AOT analyzers, and `Bork2d.AotSmoke` publishes and runs with
 > zero AOT/trim warnings. The smoke exercises the default logging path, a Nerdbank.MessagePack
 > generated shape, the unchanged headless one-tick run, and the windowed `--windowed [--ticks N]`
-> SDL demo. The editor and build tools stay JIT; Vulkan AOT validation is M6.
+> SDL demo. M3 WP2 adds the `Bork2d.Api` PolyType contract reference for the constrained
+> `IAssets.LoadAsset<T>`; the asset loader and AOT pack smoke are WP3–WP5. The editor and build
+> tools stay JIT; Vulkan AOT validation is M6.
 
 ## 1. Scope
 
@@ -82,11 +84,16 @@ reflection-based construction, which also allows constructor injection. See the
 - M1 pins `Nerdbank.MessagePack` `1.4.95` in `Bork2d.Common`. An internal `[GenerateShape]` smoke
   type and round-trip helper prove the generated-shape path; `Bork2d.AotSmoke` sees them through
   the intentional `InternalsVisibleTo`. Pack and asset shapes are M3/M4.
-- When implemented (M3/M4), `LoadAsset<T>` works only for types with a generated shape (for example `[GenerateShape]` on
-  the root type). A missing shape is a build/startup error naming the type; there is no
-  reflection fallback. Pack header/entry classes, texture descriptors, sprite assets, and custom
-  game data all use generated shapes; TOML exists only in `Project.Common` and the JIT
-  baker/editor.
+- `LoadAsset<T>` is declared as `Task<T> LoadAsset<T>(string assetPath) where T : class,
+  IShapeable<T>` (D-M3-22). `T` must carry a compiled generated shape (for example `[GenerateShape]`
+  on the root type), so a missing shape is a **compile-time** error. There is no unconstrained call,
+  reflection-shape fallback, runtime "missing shape" fault, or `NBMsgPack051` suppression. Pack
+  header/entry classes, texture descriptors, sprite assets, and custom game data all use generated
+  shapes; TOML exists only in `Project.Common` and the JIT baker/editor.
+- `Bork2d.Api` references PolyType `1.4.1` for the `IShapeable<T>` constraint only. It stays free
+  of Nerdbank.MessagePack, Zstd/`System.IO.Compression`, `System.IO.Hashing`, and file I/O, so the
+  public contract does not pull the pack implementation into game code. `Bork2d.Assets` keeps its
+  PolyType pin for the tooling API and its Nerdbank/Hashing pins for the pack.
 - Zstd is the .NET 11 built-in codec; the pack header checksum uses the `System.IO.Hashing`
   package's `XxHash3`.
 - Asset paths are data, not type names; loading never resolves a type from a string.

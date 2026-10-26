@@ -1,10 +1,11 @@
 # API Guide
 
 > **Status:** implemented M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2), plus the M3 WP1
-> tooling-only pack writer in `Bork2d.Assets`. The builder and host exist in
+> tooling-only pack writer and the M3 WP2 asset contract/VFS. The builder and host exist in
 > `Bork2d.Runtime`; `Build()` validates and `Run()` runs the uncapped windowed loop (window, input,
-> time) or the one-tick headless/offscreen sequence. Runtime asset loading is M3 WP2–WP5 and the
-> renderer is M8; `IAssets` remains a throwing stub. See the
+> time) or the one-tick headless/offscreen sequence. The asset contract, canonical paths, and
+> internal VFS are M3 WP2; the loader/runtime service is WP3–WP5 and the renderer is M8;
+> `IEngine.Assets` remains a throwing stub. See the
 > [API reference](reference.md#12-runtime-surface).
 
 ## 1. What you reference
@@ -321,31 +322,72 @@ public void Tick()
 
 ## 10. Assets
 
-`Status: target for M3 (runtime loading); the tooling pack writer is Current (WP1).` In M2
-`IEngine.Assets` returns an `UnsupportedAssets`; `LoadSprite`, `LoadAsset<T>`, and `LoadData` throw
-`NotSupportedException`. `Build()` validates only that the pack path is non-empty.
+`Status: Partial (M3 WP2).` The public contract and the internal path/VFS/browse stack are
+implemented, but `IEngine.Assets` still returns the throwing `UnsupportedAssets` stub in this
+tree: every member throws `NotSupportedException` until WP3/WP5 wire the asset service. The
+examples below compile against the contract and describe the target runtime behavior.
 
 ```csharp
-Sprite player = _engine.Assets.LoadSprite("sprites/player/idle");
-GameConfig config = await _engine.Assets.LoadAsset<GameConfig>("data/config");
-byte[] raw = await _engine.Assets.LoadData("textures/raw/player");
+using PolyType;
+
+[GenerateShape]
+public sealed partial class GameConfig
+{
+    public required string Name { get; set; }
+    public int MaxPlayers { get; set; }
+}
 ```
 
-- The default pack is the relative string `"assets.pck"` plus later-wins overlays. The call
-  returns a handle immediately; the renderer skips it until its sprite asset, texture descriptor,
-  raw payload, and GPU page are ready. Missing keys log and return `Sprite.Empty`.
-- Paths are canonical lowercase `/` keys without extensions. `LoadSprite` is idempotent per path;
-  handles are session-local and never serialized. `LoadAsset<T>` is constrained to
-  `where T : class, IShapeable<T>` (D-M3-22), so `T` carries a compiled Nerdbank/PolyType shape;
-  `LoadData` returns decompressed bytes for any asset kind.
-- `LoadPack`/`Browse`/`Exists` and `AssetInfo` are `Planned` for M3; there is no unload in v1. Do
-  not block a tick on I/O or mutate scene state from a continuation. See
-  [Assets and tooling](../architecture/assets-and-tooling.md).
+```csharp
+// Packs: mount overlays (later wins; no unload).
+_engine.Assets.LoadPack("overlays/hd.pck");
+
+// Browse/exists: canonical paths; Browse(null) lists everything.
+bool hasConfig = _engine.Assets.Exists("data/config");
+IReadOnlyList<AssetInfo> sprites = _engine.Assets.Browse("sprites");
+
+// Typed assets need a compiled shape; raw bytes use LoadData.
+GameConfig config = await _engine.Assets.LoadAsset<GameConfig>("data/config");
+byte[] pixels = await _engine.Assets.LoadData("textures/raw/player");
+
+// Sprites return a session-local handle immediately.
+Sprite player = _engine.Assets.LoadSprite("sprites/player/idle");
+```
+
+- **Typed assets.** `LoadAsset<T>` is constrained to `where T : class, IShapeable<T>` (D-M3-22).
+  `T` must carry a compiled `[GenerateShape]` shape (PolyType); a missing shape is a compile-time
+  error, not a runtime fallback. There is no reflection resolver. Use `LoadData` for arbitrary
+  bytes, including raw texture payloads.
+- **Paths.** Public inputs are normalized (`\` → `/`, invariant lowercase) and then validated:
+  lowercase letters, digits, `_`, `-`, and `/` separators; no leading/trailing slash, empty
+  segment, `.`/`..` segment, or source extension. `textures/bg.png` is invalid; use
+  `textures/bg`. Null throws `ArgumentNullException`, other invalid paths throw
+  `ArgumentException`, and a valid missing path is simply absent.
+- **`LoadPack`.** Takes a filesystem path (relative to the process current directory or absolute),
+  validates and mounts it synchronously. Later mounts shadow earlier paths; mounting the same file
+  twice is allowed. A bad/missing pack throws `Bork2dException` with the resolved path and leaves
+  the stack unchanged. Mount before the first tick when possible; there is no unload, replacement,
+  loose-file fallback, or automatic retry in v1.
+- **`Browse`/`Exists`.** `Browse(null)` returns every visible path once (shadowed entries hidden),
+  sorted by `Path` ordinal; a non-null prefix must be canonical and matches on a `/` segment
+  boundary (`sprites/pl` matches `sprites/pl` and `sprites/pl/idle`, not `sprites/player`). An
+  empty prefix is invalid. `Exists` is an exact lookup, not a prefix match. Results are a
+  materialized snapshot; do not browse per frame.
+- **`AssetInfo`.** Reports `Path`, `IsRaw`, `IsCompressed`, `Length`, `Size`, and `PackPath` from
+  the header without decompressing. `PackPath` is the supplied pack identifier, not the resolved
+  absolute path.
+- **Sprites.** `LoadSprite` is idempotent per path; handles are session-local and never serialized.
+  Missing paths log and return `Sprite.Empty`. A handle is skipped by the renderer until its CPU
+  metadata (and, in later milestones, its GPU page) is ready; M3 has no readiness query and no
+  placeholder.
+- **Lifetime.** All members are thread-safe. After the runtime service stops, members throw
+  `ObjectDisposedException`; the `IEngine.Assets` getter itself never throws. `AssetException`/
+  `AssetErrorKind` arrive with the loader in WP3.
 
 ### Building a pack (tooling only)
 
-Runtime asset loading lands in WP2–WP5; the pack **writer** is available now from a tool, test, or
-editor host. Game code must not reference `Bork2d.Assets`.
+The pack **writer** is available now from a tool, test, or editor host. The runtime loader is
+WP3–WP5; game code must not reference `Bork2d.Assets`.
 
 ```csharp
 using Bork2d.Assets;

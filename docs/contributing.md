@@ -1,9 +1,9 @@
 # Contributing
 
-> **Status:** current through M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2). The warning/style/format/AOT gates
-> and the docs link check are active. CI runs docs link check, build, tests, and format
-> verification on PRs to `develop` and pushes to `develop`; the NativeAOT publish/run smoke
-> (headless and windowed) is a required local gate.
+> **Status:** current through M2 (WP1–WP5; merged into `develop` 2026-10-26, PR #2) and M3 WP2.
+> The warning/style/format/AOT gates and the docs link check are active. CI runs docs link check,
+> build, tests, and format verification on PRs to `develop` and pushes to `develop`; the NativeAOT
+> publish/run smoke (headless and windowed) is a required local gate.
 
 ## 1. Prerequisites
 
@@ -30,10 +30,10 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **382 tests**: 373 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
+The suite is **436 tests**: 427 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
 are skipped unless the environment variable is set. The deterministic set includes the M3 WP1
-pack-format/writer tests, which build packs in memory or in temp files and use no committed binary
-fixtures. On a desktop session run them with:
+pack-format/writer tests and the WP2 path/VFS/browse/contract tests, which build packs in memory or
+in temp files and use no committed binary fixtures. On a desktop session run them with:
 
 ```powershell
 $env:BORK2D_RUN_WINDOW_TESTS = '1'
@@ -73,9 +73,8 @@ obvious; braces for control flow; one type per file; `_camelCase` private fields
 constants; `I`-prefixed interfaces; `Async` suffix and no `async void` outside handlers; guard
 clauses; no regions except generated code; no commented-out code; XML docs on public API.
 
-Known gap: `IAssets` and the `Data.cs` types still predate the XML-doc rule. M2 documented
-`IWindow`, `IInput`, `ITime`, `KeyCode`, and `MouseButton`; add the remaining docs when the asset
-contracts are implemented (M3). Do not remove the rule.
+M3 WP2 closed the former XML-doc gap: `IAssets`, `AssetInfo`, `Sprite`, `Color`, and `ClearKind`
+are documented. The rule applies to every new public API; do not remove it.
 
 ## 5. Architecture boundaries
 
@@ -83,8 +82,9 @@ contracts are implemented (M3). Do not remove the rule.
 - Editor/tooling stays JIT; no Avalonia, TOML, or reflection in runtime projects.
 - Runtime stays NativeAOT/trim-safe: no runtime reflection, assembly scanning, runtime TOML,
   dynamic code, or unregistered Nerdbank shapes.
-- No Vulkan/SDL types in `Bork2d.Api`; logging abstractions are the only external contract
-  dependency.
+- `Bork2d.Api` references the BCL plus `Microsoft.Extensions.Logging.Abstractions` and PolyType
+  `1.4.1` for the `IShapeable<T>` constraint only. It must not reference Nerdbank.MessagePack,
+  Zstd/`System.IO.Compression`, `System.IO.Hashing`, or file I/O; no Vulkan/SDL types either.
 - Pack format changes are versioned and documented in
   [Assets and tooling](architecture/assets-and-tooling.md).
 
