@@ -16,11 +16,17 @@
 > bakes on build with a schema-3 incremental manifest. The runtime model and milestone sequence are
 > unchanged. Design: [asset processors](architecture/asset-processors.md); implementation spec:
 > [file processors](specs/file-processors.md).
+>
+> **Stage 1 — engine version 0.1.** Every milestone below belongs to Stage 1 and ships as engine
+> 0.1. There is **no API freeze**: the public API stays flexible until 1.0, and 1.0 is not
+> planned. M5 (Editor) is removed from Stage 1; later milestone IDs are unchanged, and no editor
+> work is planned for Stage 1.
 
 ## 1. How to read this roadmap
 
-- The order is fixed: foundation and platform first, then **assets → bake → editor**, then
-  **Vulkan → frame handoff → sprite renderer**, then template and hardening.
+- The order is fixed: foundation and platform first, then **assets → bake**, then
+  **Vulkan → frame handoff → sprite renderer**, then template, hardening, and the 0.1 release.
+  The editor is outside Stage 1.
 - Each milestone lists 3–5 scope bullets and testable exit criteria. Status is tracked in the
   progress log; details live in the owning architecture document and the milestone PR.
 - No dates are assigned; sizes are rough estimates, not promises.
@@ -36,7 +42,7 @@
 | `Bork2d.Assets` | Current (M3/D-035) | v1 pack reader/writer, public `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`, canonical paths, base/overlay VFS, one loader thread with `LoadData`/`LoadAsset<T>`, and generic pack-time reference validation. |
 | `Bork2d.Bake` / `Bork2d.Bake.Builder` | Implemented on `task/file-processors` (2026-10-27; D-036/D-037/D-038) | JIT tooling: builder-configured ordered packs, shape-driven Tomlyn binder, processor registry/sidecars, built-in texture processor, PPM/Unit acceptance processors, reference validation, structural determinism, schema-3 incremental bake, per-pack atomic writes, MSBuild targets. `Bork2d.Bake` is internal; `Bork2d.Bake.Builder` is the public JIT surface. No descriptor, generated host, host state, or `Bork2d.Bake.Cli`. |
 | `Bork2d.Render` | Empty | Reference-wired; no Vulkan implementation (M6/M8). |
-| `Bork2d.Editor` | Absent | Not in the solution (M5); consumes the public `Bork2d.Bake.Builder` (D-037). |
+| `Bork2d.Editor` | Absent | Not in the solution; the editor is removed from Stage 1 and deferred (M5 removed). |
 | `Bork2d.Tests` | Current | 946 deterministic xUnit tests plus 12 opt-in/conditional tests (958 total): ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix, fake-SDL window/input/loop/time, pack/VFS/loader, asset references, runtime lifecycle, the builder/processor/sidecar/bake suites, schema-3 incremental rules, and the MSBuild/AOT fixture flow. |
 | NativeAOT | Implemented on `task/file-processors` | Libraries use `IsAotCompatible` + trim/AOT analyzers; `Bork2d.AotSmoke` publishes/runs locally with zero warnings. The default headless run mounts the **baked main pack** (8 entries: `data/game`, `roots/stats`, `sprites/player`, `art/player`, `art/player-raw`, PPM `art/checker`/`art/checker-raw`, and Unit `data/archer`) and overlays `dlc1.pck` (1 entry: `data/dlc`, whose texture resolves to main), for 9 merged entries; `--windowed --ticks 120` uses `WithoutAssets()`. No tooling assembly is in the publish. Local gate only. |
 | CI | Current | GitHub Actions on PRs to `develop` and pushes to `develop`: restore, format verify, build, test. No AOT or real-window job. |
@@ -61,14 +67,19 @@
 | M2 | SDL windowed platform | Window/input/window ops and temporary tick loop | M1 | M | Medium |
 | M3 | Assets: pack + VFS + descriptors | `assets.pck`, overlays, browse, textures, sprite assets | M2 | L | High |
 | M4 | Serialization + bake | TOML → MessagePack → pack, release compression | M3 | M | Medium |
-| M5 | Editor | Avalonia builder, slicing, TOML editing, bake integration | M3/M4 | L | Medium |
-| M6 | Vulkan bring-up | Windowed and offscreen device/clear/validation | M5 | M | High |
+| M5 | — | Removed: the editor is out of scope for Stage 1 | — | — | — |
+| M6 | Vulkan bring-up | Windowed and offscreen device/clear/validation | M4 | M | High |
 | M7 | Frame handoff + pacing | Bounded run-ahead, latest snapshot, headless/offscreen loops | M6 | L | High |
 | M8 | Sprite renderer | Real sprite assets, one draw per camera | M7 | L | High |
 | M9 | Template, samples, packaging | Game solution, samples, AOT desktop/server | M8 | S/M | Low/Medium |
-| M10 | Hardening + v1 | Stability, performance, API review, release | all | L | Medium |
+| M10 | Hardening + 0.1 | Stability, performance, API review, release | all | L | Medium |
 
 `examples/` stays empty until M9.
+
+**M5 (Editor) is removed** from Stage 1: no `Bork2d.Editor`, no `Project.Editor` host, no texture
+slicing, and no editor preview. Sprite UV/pivot/topology/indices validation is likewise not planned
+until an editor exists; sprite assets remain ordinary custom data (D-M4-06). IDs M6–M10 are
+unchanged so existing specs, decisions, and branch history stay unambiguous.
 
 ## 5. Milestone detail
 
@@ -141,7 +152,8 @@ shapes the NativeAOT runtime uses.
   generated host; MSBuild targets; CLI; AOT load of a baked fixture pack; **no TOML or reflection in
   the runtime**.
 - **Scope delta (D-M4-06).** `SpriteAsset` is baked as ordinary custom data only. There is no sprite
-  source schema, no UV/pivot/scale/topology/indices validation, and no slicing in M4; those are M5.
+  source schema, no UV/pivot/scale/topology/indices validation, and no slicing in M4; those remain
+  out of scope until an editor exists.
 - **Struct roots (D-M4-11).** A `readonly record struct` root bakes, loads through the relaxed
   `where T : IShapeable<T>` contract, and is referenced with `AssetRef<T>`; a `nil` root is a
   `Decode` fault.
@@ -183,23 +195,8 @@ builder/CLI. The generated host is removed. D-039 locks the implementation basel
 owner-approved exception that makes the `TextureDescriptor` sampler fields non-null enums; the task
 was delivered on `task/file-processors` and merged into `develop` (2026-10-27, PR #8, merge commit
 `a98e0ab`) per the [file-processors spec](specs/file-processors.md). It does not change
-the M5–M10 sequence. See [asset processors](architecture/asset-processors.md) and
+the M6–M10 sequence. See [asset processors](architecture/asset-processors.md) and
 [D-036/D-037/D-038/D-039/D-040](decisions.md#post-m4-asset-processors-approved-2026-10-27).
-
-### M5 — Editor
-
-Goal: a developer-extensible Avalonia editor for source slicing and data.
-
-- `Bork2d.Editor` (JIT) with `Bork2dEditorBuilder`: `WithProject`, `WithAssetType<T>()`,
-  `WithWindow<T>()`/instance; compile-time registrations, no scanning.
-- `Project.Editor` thin host; asset browser over `Project.Common/Assets`.
-- Texture viewer: zoom/pan, manual (optionally grid) slicing, pivot, pixels-per-unit, topology,
-  filter/wrap, validation; writes sprite TOML/sidecars; Avalonia imaging preview.
-- Custom data: property grid + raw TOML, validation, save; bake/pack invocation and diagnostics.
-- No Vulkan, scene editing, or play mode.
-
-Exit: open project → slice → save → bake/pack → inspect pack; edit custom data to valid TOML;
-invalid data caught before bake; custom types/windows registered; runs without a GPU.
 
 ### M6 — Vulkan bring-up (windowed + offscreen)
 
@@ -246,7 +243,8 @@ Goal: render packed sprite assets with one instanced draw per non-empty camera.
 - Camera projection (`Size` half-height, Y-up), viewport/aspect, screen/world helpers; cameras
   ascending `ZIndex`; layers, z-order, tint, transforms; one dynamic-rendering pass and one draw
   per non-empty camera; clear/overlap semantics; split-screen and offscreen.
-- Validate `indices`; v1 draws `Quad`; non-Quad assets preserved for the future indexed path.
+- 0.1 draws `Quad`; non-Quad assets are preserved for the future indexed path. Sprite field
+  validation (UVs, pivot, topology, `indices`) is not part of Stage 1.
 - Debug counters/validation/capture; golden tests; benchmark at 1920×1080 with no artificial cap.
 
 Exit: packed scene renders with exactly one draw per non-empty camera; layers/z/tint/split-screen/
@@ -257,29 +255,29 @@ allocations; validation clean; offscreen matches windowed; not-ready sprites are
 
 Goal: a new game can be created, packed, and AOT-published.
 
-- Solution template: `Project.Common`, `MyGame.Assets`, `Project.Desktop`, `Project.Editor`, assets;
+- Solution template: `Project.Common`, `MyGame.Assets`, `Project.Desktop`, assets;
   builder configuration in `MyGame.Assets` (no project descriptor, D-037); `dotnet new bork2d` or
   documented copy; CI template build.
-- Sample game: sprites, layers, camera, input, data, overlays, editor slicing; headless server and
-  offscreen samples; NativeAOT publish profile and native SDL2/Vulkan deployment.
+- Sample game: sprites, layers, camera, input, data, overlays; headless server and offscreen
+  samples; NativeAOT publish profile and native SDL2/Vulkan deployment.
 - Docs samples compile; guide/reference match the surface; packaging decision and versioning.
 
 Exit: clean machine + SDK + Vulkan 1.3 builds/runs the template; game code references only
-`Bork2d.Api`/`Bork2d.Runtime`; debug/release packs load; AOT desktop and headless start/shut down;
-editor opens and slices the sample.
+`Bork2d.Api`/`Bork2d.Runtime`; debug/release packs load; AOT desktop and headless start/shut down.
 
-### M10 — Hardening and v1
+### M10 — Hardening and 0.1
 
-Goal: stability, performance, and a supportable public contract.
+Goal: stability, performance, and a supportable public contract for the 0.1 release.
 
 - Performance: tick cost, pack/decompression, snapshot copy, sorting, instance build, GPU.
 - Device loss, resize stress, alt-tab, multi-monitor/DPI, minimize/restore.
 - Pack compatibility/corruption, overlay stress, missing-pack behavior; memory/page budgets,
   allocation-free steady state, shutdown under load.
 - AOT/trimming matrix, clean-machine deployment, validation matrix, flaky-test quarantine.
-- API review and freeze for v1; docs final pass; release notes.
+- API review (no freeze), docs final pass, and 0.1 release notes.
 
-Exit: the v1 definition below is demonstrated and the public API is frozen.
+Exit: the 0.1 definition below is demonstrated and engine 0.1 is released. The public API remains
+unfrozen and may break until 1.0, which is not planned.
 
 ## 6. Cross-cutting work
 
@@ -293,7 +291,11 @@ Exit: the v1 definition below is demonstrated and the public API is frozen.
 | Quality | Warnings-as-errors, style errors, format gate, AOT/trim analyzers on every project. |
 | Scope | Audio/UI/physics/animation need a decision entry and roadmap change. |
 
-## 7. v1 definition of done
+## 7. 0.1 definition of done
+
+Stage 1 ships as engine 0.1. **0.1 is not an API-stability milestone:** the public API stays
+flexible until 1.0, which is not planned, and breaking changes are allowed throughout Stage 1.
+Every public change still updates the API guide, reference, and decision log in the same change.
 
 - **Engine/runtime:** generated game builds/runs on Windows 10/11 with Vulkan 1.3; NativeAOT desktop
   and headless server start/stop cleanly; windowed/offscreen/headless behave as documented;
@@ -301,17 +303,15 @@ Exit: the v1 definition below is demonstrated and the public API is frozen.
 - **Assets:** `assets.pck` format as specified; header compressed/checksummed; debug payloads
   uncompressed, release Zstd only when smaller; overlays/browse; missing/malformed base pack fails;
   textures/sprites baked from TOML; AOT uses generated shapes only.
-- **Editor:** Avalonia JIT editor with builder, slicing, metadata editing, property grid/raw TOML,
-  bake/pack integration, compile-time registrations; no Vulkan, scene editing, or scanning.
 - **Rendering:** Vulkan 1.3 dynamic rendering, bindless pages, instanced generated quads, one draw
   per non-empty camera, documented sorting/clear semantics, windowed present and offscreen
   discard, zero validation errors.
 - **Process:** docs and decision log match the implementation; CI gates pass; warnings/style are
-  errors; public API reviewed and frozen.
+  errors; public API reviewed, with no freeze.
 
-**Non-goals for v1:** 3D, HDR, MSAA, post-processing, physics, audio, in-game UI, networking, scene
-editing, hot reload, multi-window, Linux/macOS guarantees, indexed non-Quad drawing, asset/pack
-unloading, public offscreen readback.
+**Non-goals for 0.1:** 3D, HDR, MSAA, post-processing, physics, audio, in-game UI, networking,
+scene editing, an editor, hot reload, multi-window, Linux/macOS guarantees, indexed non-Quad
+drawing, asset/pack unloading, public offscreen readback.
 
 ## 8. Risks
 
@@ -337,11 +337,10 @@ approvals; only unresolved choices are listed here.
 | Headless timer accuracy / fractional rates | M7 | Integer `ticksPerSecond`; `0` uncapped. |
 | Bindless page capacity and overflow policy | M8 | 4096 pages; hard failure on overflow. |
 | Shader compiler/build integration | M8 | `glslangValidator` build target; embedded SPIR-V. |
-| Offscreen readback/capture API | M8/M10 | Internal discard in v1; public later. |
+| Offscreen readback/capture API | M8/M10 | Internal discard in 0.1; public later. |
 | Validation warning policy | M8 | Errors fail; warnings are reviewed. |
-| Multi-GPU / device override | M10 | First suitable device; no override in v1. |
+| Multi-GPU / device override | M10 | First suitable device; no override in 0.1. |
 | Packaging: project references vs NuGet | M9 | Project references in the template; NuGet later. |
-| Public API freeze | M10 | Freeze at v1.0. |
 
 ## 10. Progress log
 
@@ -354,12 +353,14 @@ approvals; only unresolved choices are listed here.
 | Asset-reference refactor | Merged (2026-10-26, PR #6, D-035) | 528 tests (519 deterministic + 9 opt-in real-window); Debug/Release zero warnings; format/docs/`git diff --check` clean; AOT publish zero AOT/trim warnings; default AOT run exit 0 with a 5-entry pack including the public `SpriteAsset`/`TextureDescriptor` shapes; `--windowed --ticks 120` exit 0. [Refactor record](specs/refactor-asset-references.md). |
 | M4 Serialization/bake | Merged (2026-10-27, PR #7) | WP0–WP6 landed: bake library + CLI, generated host, per-source `[bork2d]` metadata, descriptor/TOML binder, location-free texture pipeline, reference validation, structural determinism, incremental bake, MSBuild targets, `Bork2d.BakeFixture`, and the AOT baked-pack smoke. The fix-1 revision removed the descriptor `[[types]]`/prefix model, moved type metadata into each data TOML, allowed data/textures anywhere under the asset root, and changed raw payload paths to `<descriptor>-raw`. Fix-2 commits the fixture **source** PNG at `Bork2d.BakeFixture/Assets/art/player.png` (sidecar `art/player.png.toml`; data/sprite TOMLs reference `art/player`), removes the texture generator, and leaves test images/packs generated in temp directories. Fix-3 applies D-M4-14/D-M4-15: ordered `[[assets]]` multi-pack descriptors (first is main; no `name`/`[bake].pack`), one host over all roots, per-pack bake with main-only external references, internal `PackBuilder` external-main seam, `bake --output-root` (no `--output`), all-output incremental manifest schema 2, MSBuild bake/publish/clean for every declared pack, fixture `DLC1/data/dlc.toml`, and the AOT main + `dlc1.pck` overlay proof; texture sidecars are retained. The main fixture pack has 5 entries (ending in `art/player` and `art/player-raw`) and the DLC pack 1 (`data/dlc`). 911 deterministic + 12 conditional tests (923 total); Debug/Release zero warnings; format/docs/diff checks clean. Fix-3 AOT publish is zero-warning with `assets.pck`/`dlc1.pck`/`SDL2.dll` and no Bake/Tomlyn/StbImageSharp assemblies; the published headless run exits 0 with `mainEntries=5`, `mergedEntries=6`, the DLC → main texture reference, and 16 raw bytes; `--windowed --ticks 120` exits 0. Final CI run [40455684420](https://github.com/BorkEngine/Bork2d/actions/runs/40455684420) succeeded: 914 passed, 9 skipped (the 3 reparse tests ran with symlink capability; the local gate is 911 passed, 12 skipped). [M4 spec §22](specs/m4-serialization-and-bake.md#22-as-built-evidence-m4-merged-to-develop). |
 | Post-M4 asset processors | Merged into `develop` (2026-10-27, PR #8, merge `a98e0ab`; CI green on `39563f9`) | D-036/D-037/D-038/D-039/D-040 as-built: public `Bork2d.Bake.Builder`, build-time `MyGame.Assets`/`Bork2d.BakeFixture.Assets`, explicit `RegisterAsset<T>()` + defaults, processor extension point with PPM/Unit acceptance processors, no descriptor/generated host/`Bake.Cli`, schema-3 incremental manifest and build targets, and the AOT fixture flow (8 main / 9 merged entries, no tooling assemblies in publish). D-040 makes the `TextureDescriptor` sampler fields the non-null `TextureFormat`/`TextureFilter`/`TextureWrap` enums. 946 deterministic + 12 conditional tests (958 total); Debug/Release, format, docs, and AOT gates pass locally. Design: [asset processors](architecture/asset-processors.md); spec: [file processors](specs/file-processors.md). |
-| M5 Editor | Not started | — |
 | M6 Vulkan bring-up | Not started | — |
 | M7 Frame handoff/pacing | Not started | — |
 | M8 Sprite renderer | Not started | — |
 | M9 Template/samples | Not started | — |
-| M10 Hardening/v1 | Not started | — |
+| M10 Hardening/0.1 | Not started | — |
+
+**Planning change (2026-10-27):** M5 (Editor) was removed from Stage 1; M6–M10 IDs are unchanged.
+No editor work is planned.
 
 ## 11. Related documents
 
