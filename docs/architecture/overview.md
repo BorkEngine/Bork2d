@@ -7,6 +7,11 @@
 > headless/offscreen host, scene graph, logging, asset pipeline, M4 bake tooling, and AOT baseline
 > are `Current`; the editor (M5), Vulkan and frame handoff (M6/M7), and the sprite renderer (M8) are
 > `Planned`. Status detail is in [the roadmap](../roadmap.md).
+>
+> **Post-M4 target (D-036/D-037, Planned on `task/file-processors`).** Source file types become
+> registered asset processors with optional `[GenerateShape]` sidecars; the built-in texture
+> importer is one processor. The project descriptor is removed and the game-owned `MyGame.Assets`
+> executable configures/bakes through `BakeApplicationBuilder`. The runtime model is unchanged.
 
 ## 1. Purpose
 
@@ -30,6 +35,12 @@ generated bake host and the unchanged `PackBuilder`. The runtime still reads Mes
 compiled `[GenerateShape]` shapes and no TOML or reflection. See
 [Assets and tooling](assets-and-tooling.md#11-build-pipeline) and the
 [M4 spec](../specs/m4-serialization-and-bake.md).
+
+**Target (D-036/D-037).** A game-owned `MyGame.Assets` executable contains the asset roots and
+registers processors by extension; each processor has an optional `[GenerateShape]` sidecar and
+emits base-path-derived MessagePack/raw outputs. The built-in texture importer is one processor.
+The builder configures the ordered packs and bakes when the assets project builds; there is no
+descriptor. See [asset processors](asset-processors.md).
 
 ## 2. Goals
 
@@ -139,7 +150,7 @@ bug, not a style preference.
 10. **At most one window and one app process in v1**: modes are windowed, offscreen, or headless; headless has no window or GPU and stores its tick rate (default 60, `0` = uncapped; pacing arrives in M7).
 11. **No steady-state per-frame allocations** in the tick snapshot builder or renderer hot path.
 12. **The runtime is NativeAOT- and trim-safe**: no runtime reflection, assembly scanning, runtime TOML, or dynamic code; MessagePack shapes are source-generated.
-13. **Packs are the runtime asset source**: TOML and source images live in `Project.Common`, only baked MessagePack/raw assets ship, the descriptor's first `[[assets]]` entry is the main pack and later entries are DLC packs, overlays are packs (later wins), and a missing main pack throws at `Run()` unless the app calls `WithoutAssets()`. There is no per-asset version and no policy size cap.
+13. **Packs are the runtime asset source**: TOML and source images live in the game-owned `MyGame.Assets` project (M4: `Project.Common/Assets`), only baked MessagePack/raw assets ship, the builder's first pack is main and later packs are DLC/overlay, overlays are packs (later wins), and a missing main pack throws at `Run()` unless the app calls `WithoutAssets()`. There is no per-asset version and no policy size cap. Source file types are processors (target D-036).
 14. **Logging is available everywhere through `IEngine.LoggerFactory`**, configured with ZLogger; the default is a plain-text console provider.
 15. **Warnings and C# style violations are build errors**, with a format gate in CI.
 16. **Pre-1.0 breaking changes are allowed**, but every public change updates the API guide, reference, and decision log in the same change.
@@ -152,6 +163,8 @@ bug, not a style preference.
 - [Scene ownership](scene-ownership.md) — root-owned lifetime.
 - [Threading and frame handoff](threading.md) — bounded run-ahead and the snapshot ring.
 - [Assets and tooling](assets-and-tooling.md) — `assets.pck`, overlays, sprites, editor, bake.
+- [Asset processors and `MyGame.Assets`](asset-processors.md) — target processor contract,
+  sidecars, builder/no descriptor, PPM/Unit tests.
 - [Rendering](rendering.md) — windowed/offscreen Vulkan and the one-draw contract.
 - [Logging](logging.md) — ZLogger and `IEngine.LoggerFactory`.
 - [NativeAOT](nativeaot.md) — runtime constraints and source generation.

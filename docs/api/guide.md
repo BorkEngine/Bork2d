@@ -7,20 +7,27 @@
 > runs the uncapped windowed loop (window, input, time) or the one-tick headless/offscreen sequence,
 > opening the base pack (or the `WithoutAssets()` empty filesystem) before the window and `Setup`.
 > The renderer is M8. See the [API reference](reference.md#12-runtime-surface).
+>
+> **Post-M4 target (D-036/D-037, Planned):** assets/processors move to a build-time `MyGame.Assets`
+> executable configured with `BakeApplicationBuilder`; the project descriptor is removed. Runtime
+> game code still references only `Bork2d.Api`/`Bork2d.Runtime`.
 
 ## 1. What you reference
 
 | Project | References | Contains |
 | --- | --- | --- |
-| `Project.Common` | `Bork2d.Api` only | Gameplay classes, custom data types, source assets. |
-| `Project.Desktop` | `Bork2d.Runtime` + `Project.Common` | Entry point that builds and runs the app. |
+| `Project.Common` | `Bork2d.Api` only | Gameplay classes and runtime `[GenerateShape]` data types. |
+| `MyGame.Assets` (target D-037) | `Bork2d.Bake.Builder` + `Project.Common` | Build-time executable: asset roots, processors, `BakeApplicationBuilder` config, CLI; bakes on build. |
+| `Project.Desktop` | `Bork2d.Runtime` + `Project.Common`; build-only `MyGame.Assets` | Entry point that builds and runs the app. |
 | `Project.Editor` (M5) | `Bork2d.Editor` + `Project.Common` | Thin Avalonia editor host. |
 
-Do not reference `Bork2d.Render`, `Bork2d.Common`, or `Bork2d.Assets` from game code; they are
-implementation details ([Projects and dependencies](../architecture/projects.md)). **Tooling and
+Do not reference `Bork2d.Render`, `Bork2d.Common`, or `Bork2d.Assets` from runtime game code; they
+are implementation details ([Projects and dependencies](../architecture/projects.md)). **Tooling and
 tests** may reference `Bork2d.Assets` for the public `Bork2d.Assets.Pack.PackBuilder`/
 `PackCompressionMode` writer (§10); that surface is not part of the game contract. The M4 bake
-library/CLI are JIT tooling driven by `build/Bork2d.Bake.targets`; game code never references them.
+library/CLI are JIT tooling driven by `build/Bork2d.Bake.targets`; runtime game code never references
+them. The target replaces the descriptor/CLI flow with the build-time `MyGame.Assets` builder and
+`Bork2d.Bake.Builder` (D-036/D-037); it is never part of the runtime app or AOT publish.
 
 `Bork2d.Api` is split by area: engine/game in `Bork2d.Api`, scene types in `Bork2d.Api.Scene`,
 render value types in `Bork2d.Api.Rendering`, input in `Bork2d.Api.Input`, window/time in
@@ -440,34 +447,36 @@ byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
 
 ### Data serialization and bake
 
-`Status: Current (M4) for custom data and sprite-as-data; sprite field validation and slicing are
-M5.` Author data as TOML in the pack roots declared by `Project.Common/Assets` (and optional DLC
-roots), declare each type in its own `[bork2d]` table, and let the M4 tooling bake the main pack and
+`Status: M4 as-built for custom data and sprite-as-data; the post-M4 target (D-036/D-037, planned on
+task/file-processors) replaces the project descriptor with a builder in `MyGame.Assets`. Sprite
+field validation and slicing are M5.` Author data as TOML in the pack roots configured by the
+builder, declare each type in its own `[bork2d]` table, and let the tooling bake the main pack and
 any DLC packs. The runtime never sees TOML.
 
-The descriptor declares ordered `[[assets]]` entries (D-M4-14); the first is the main/base pack and
-later entries are DLC/overlay packs:
+**Target layout (D-037).** The game has a build-time `MyGame.Assets` executable that owns the asset
+roots and processors. Its `Program.cs` configures the bake; there is no `bork2d.project.toml`:
 
-```toml
-schema = 1
-
-[[assets]]
-root = "Assets"
-pack = "assets.pck"
-
-[[assets]]
-root = "DLC1"
-pack = "dlc1.pck"
-
-[bake]
-host = "obj/bork2d/bakehost"
+```csharp
+return await new BakeApplicationBuilder()
+    .WithPack("assets.pck", "Assets")          // first = main
+    .WithPack("dlc1.pck", "DLC1")              // later = overlay
+    .WithHostDirectory("obj/bork2d/bakehost")
+    .WithCommonAssembly(typeof(GameConfig).Assembly)
+    .WithTextureDefaults(TextureFilter.Linear, TextureWrap.Clamp)
+    .AddProcessor(new PpmProcessor())
+    .Build()
+    .RunAsync(args);
 ```
 
-There is no project `name` and no `[bake].pack`. A DLC pack may reference an asset in the main pack;
-the main pack may not reference a DLC asset, and DLC-to-DLC references are errors. The same
-canonical path may exist in different packs (the runtime overlays them with `LoadPack`; later wins);
-duplicates inside one pack are errors. `IAssets` is unchanged: mount the main pack with
-`WithAssetsPack`, then mount DLC packs with `IAssets.LoadPack` before the first tick when possible.
+Building `MyGame.Assets` runs `bake` automatically; it is also the CLI. The M4 `bork2d.project.toml`
+descriptor is removed by D-037; see [asset processors](../architecture/asset-processors.md). The
+current M4 tree still reads the descriptor, documented in [assets and tooling §11](../architecture/assets-and-tooling.md#11-build-pipeline).
+
+A DLC pack may reference an asset in the main pack; the main pack may not reference a DLC asset,
+and DLC-to-DLC references are errors. The same canonical path may exist in different packs (the
+runtime overlays them with `LoadPack`; later wins); duplicates inside one pack are errors. `IAssets`
+is unchanged: mount the main pack with `WithAssetsPack`, then mount DLC packs with
+`IAssets.LoadPack` before the first tick when possible.
 
 ```csharp
 using System.Text.Json.Serialization;
@@ -475,7 +484,7 @@ using Bork2d.Api.Assets;
 using Bork2d.Api.Rendering;
 using PolyType;
 
-// The data TOML's [bork2d] table declares MyGame.Data.GameConfig; the descriptor has no type list.
+// The data TOML's [bork2d] table declares MyGame.Data.GameConfig; there is no type list.
 // [GenerateShape] + partial is PolyType's rule: it injects IShapeable<T> into the partial type.
 [GenerateShape]
 public sealed partial class GameConfig
@@ -524,13 +533,77 @@ type = "MyGame.Data.GameConfig"
 - **References.** `AssetRef<T>`/`DataRef` are canonical path strings; the bake validates every
   present reference against the pack's local baked set and, for a DLC, the main pack. An absent key
   is an absent reference.
-- **Commands (tooling only).** `bork2d-bake generate-host`, `bake`, and `validate`; MSBuild normally
-  drives them through `build/Bork2d.Bake.targets` (build/publish/clean). `bake` writes every pack
-  under `--output-root` (the descriptor directory by default). Exit codes: `0`
-  success/up to date, `1` source diagnostics, `2` usage/descriptor/host error, `3` internal failure.
-  The runtime does not reference this tooling. See
-  [Assets and tooling §10–§11](../architecture/assets-and-tooling.md#10-toml-source-model) for the
-  full mapping/pipeline and the [M4 spec](../specs/m4-serialization-and-bake.md) for scope.
+- **Commands (tooling only).** Current M4: `bork2d-bake generate-host`, `bake`, `validate` driven by
+  `build/Bork2d.Bake.targets`. Target (D-037): `MyGame.Assets` is the CLI, exposing `bake`,
+  `generate-host`, `validate`, `clean`, and `copy-packs`; building the project runs `bake`
+  automatically. `bake` writes every configured pack under its output root. Exit codes: `0`
+  success/up to date, `1` source diagnostics, `2` usage/configuration/host error, `3` internal
+  failure. The runtime does not reference this tooling. See
+  [asset processors](../architecture/asset-processors.md) for the target contract and
+  [assets and tooling §10–§11](../architecture/assets-and-tooling.md#10-toml-source-model) for the
+  full mapping/pipeline and current M4 details.
+
+### Asset processors and `MyGame.Assets` (target, D-036/D-037)
+
+`Status: Planned on task/file-processors. The current M4 tree has the texture-specific pipeline.`
+
+A non-TOML source type is handled by a processor registered in `MyGame.Assets`. The processor
+declares extensions, a sidecar policy, an optional `[GenerateShape]` sidecar type, and code that
+emits MessagePack/raw outputs:
+
+```csharp
+[GenerateShape]
+public sealed partial class UnitSidecar
+{
+    public string? Name { get; set; }
+}
+
+public sealed class UnitProcessor : AssetProcessor<UnitSidecar>
+{
+    public override IReadOnlyList<string> Extensions => ["unit"];
+    public override SidecarPolicy SidecarPolicy => SidecarPolicy.Optional;
+
+    protected override void Process(AssetProcessorContext context, UnitSidecar sidecar)
+    {
+        var json = ParseJson(context.SourcePath); // pseudo-helper; processor-owned JSON
+        string name = sidecar.Name ?? context.SourceFileNameWithoutExtension;
+        context.Outputs.AddMessagePack(
+            context.BaseAssetPath,
+            new Unit(name, json.Health, json.Attack)); // Unit is [GenerateShape] in Project.Common
+    }
+}
+```
+
+```json
+{
+    "Health": 50,
+    "Attack": 20
+}
+```
+
+```toml
+# Assets/data/archer.unit.toml (optional; name defaults to "archer")
+name = "archer"
+```
+
+```csharp
+[GenerateShape]
+public readonly partial record struct Unit(string Name, int Health, int Attack);
+```
+
+- The output path is base-path-derived (`data/archer`); a processor may add a `-suffix` output, but it
+  cannot write outside its source's base path.
+- The built-in PNG/JPG/JPEG/BMP/TGA importer is a processor registered automatically. A later
+  registration overrides it for a duplicate extension.
+- Processor outputs do not need to be registered with the generated host; `AddMessagePack<T>` uses
+  the type's compiled shape. The runtime can load them with `LoadAsset<T>` when the type lives in a
+  runtime assembly such as `Project.Common`.
+- Sidecar binding uses the same camelCase/unknown-key/required rules as data TOML. `Optional`
+  sidecars may be absent; `Required` sidecars are created once from the processor default when
+  missing; `None` has no sidecar.
+- Processor errors use `BK7xxx`; sidecar binding errors use `BK2xxx`; texture decode/probe errors
+  remain `BK4xxx`.
+- The full contract is in [asset processors](../architecture/asset-processors.md).
 
 ### Building a pack (tooling only)
 

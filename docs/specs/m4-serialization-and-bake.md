@@ -13,6 +13,15 @@
 > architecture and API documents win for inherited contracts. The WP0 feasibility report is
 > [M4 WP0 — Serialization and Bake Feasibility Spike](m4-wp0-spike.md); as-built commands, results,
 > and the acceptance mapping are in §22.
+>
+> **Post-M4 revision (D-036/D-037, Planned on `task/file-processors`, 2026-10-27).** This document is
+> the historical M4 record. The target replaces the project descriptor with a builder in the
+> game-owned `MyGame.Assets` executable, makes every non-TOML source type a registered asset
+> processor with an optional `[GenerateShape]` sidecar (the built-in texture importer is one
+> processor), and removes the hand-written texture sidecar parser and texture-specific discovery.
+> Sections below that describe the descriptor or texture-specific sidecar pipeline are M4 as-built
+> history. Target design: [asset processors](../architecture/asset-processors.md); decisions:
+> D-036/D-037 in the [decision log](../decisions.md#post-m4-asset-processors-approved-2026-10-27).
 
 ## 1. Goal
 
