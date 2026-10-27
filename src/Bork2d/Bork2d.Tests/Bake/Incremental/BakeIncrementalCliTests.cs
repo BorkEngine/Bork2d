@@ -27,11 +27,17 @@ public sealed class BakeIncrementalCliTests
         [stats]
         attack = 3
         defense = 7
+
+        [bork2d]
+        type = "Bork2d.BakeFixture.GameConfig"
         """;
 
     private const string StatsToml = """
         attack = 11
         defense = 13
+
+        [bork2d]
+        type = "Bork2d.BakeFixture.StatsRoot"
         """;
 
     private const string SpriteToml = """
@@ -41,6 +47,9 @@ public sealed class BakeIncrementalCliTests
         pivot = [0.5, 0.5]
         topology = "triangles"
         indices = [0, 1, 2, 0, 2, 3]
+
+        [bork2d]
+        type = "Bork2d.Api.Assets.SpriteAsset"
         """;
 
     private const string SidecarToml = """
@@ -176,6 +185,16 @@ public sealed class BakeIncrementalCliTests
     public void DeletingASourceRebakesAndDropsTheAsset()
     {
         (string project, string pack) = CreateProject("incremental-delete");
+        BakeProjectFixture.WriteAsset(
+            project,
+            "roots/extra.toml",
+            """
+            attack = 2
+            defense = 4
+
+            [bork2d]
+            type = "Bork2d.BakeFixture.StatsRoot"
+            """);
         Assert.Equal(CliApplication.SuccessExitCode, Bake(project, pack).ExitCode);
         Assert.Contains(
             BakeProjectFixture.StatsPath,
@@ -336,6 +355,40 @@ public sealed class BakeIncrementalCliTests
             "debug",
             Assert.IsType<BakeIncrementalManifest>(
                 BakeManifestStore.TryRead(ManifestPath(project))).Mode);
+    }
+
+    [Fact]
+    public void TextureAndSidecarUnderArbitraryPathsAreTrackedInputs()
+    {
+        string project = BakeProjectFixture.CreateProject("incremental-art");
+        BakeProjectFixture.WriteAssetBytes(
+            project,
+            "art/player.png",
+            TextureImageFactory.RgbaPng());
+        BakeProjectFixture.WriteAsset(project, "art/player.png.toml", SidecarToml);
+        string pack = Path.Combine(project, "out", "assets.pck");
+
+        Result result = Run(
+            "bake",
+            "--project",
+            Path.Combine(project, BakeProjectFixture.DescriptorFileName),
+            "--host",
+            _fixture.EmptyHostAssemblyPath,
+            "--output",
+            pack);
+
+        Assert.Equal(CliApplication.SuccessExitCode, result.ExitCode);
+        BakeIncrementalManifest manifest = Assert.IsType<BakeIncrementalManifest>(
+            BakeManifestStore.TryRead(ManifestPath(project)));
+        Assert.Contains(
+            manifest.Inputs,
+            input => input.Path == "Assets/art/player.png");
+        Assert.Contains(
+            manifest.Inputs,
+            input => input.Path == "Assets/art/player.png.toml");
+        Assert.Equal(
+            new[] { "art/player", "art/player-raw" },
+            BakedPackAssertions.Shapes(pack).Select(shape => shape.Path));
     }
 
     private static string ManifestPath(string project)

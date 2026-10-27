@@ -35,8 +35,8 @@ public sealed class TexturePipelineTests
         Assert.Empty(result.Diagnostics);
         BakedTexture texture = Assert.Single(result.Textures);
         Assert.Equal("textures/player", texture.AssetPath);
-        Assert.Equal("textures/raw/player", texture.PayloadPath);
-        Assert.Equal("textures/raw/player", texture.Descriptor.Payload.Path);
+        Assert.Equal("textures/player-raw", texture.PayloadPath);
+        Assert.Equal("textures/player-raw", texture.Descriptor.Payload.Path);
         Assert.Equal(2u, texture.Descriptor.Width);
         Assert.Equal(2u, texture.Descriptor.Height);
         Assert.Equal("rgba8", texture.Descriptor.Format);
@@ -212,12 +212,12 @@ public sealed class TexturePipelineTests
         BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
 
         Assert.Equal("textures/ui/button", texture.AssetPath);
-        Assert.Equal("textures/raw/ui/button", texture.PayloadPath);
-        Assert.Equal("textures/raw/ui/button", texture.Descriptor.Payload.Path);
+        Assert.Equal("textures/ui/button-raw", texture.PayloadPath);
+        Assert.Equal("textures/ui/button-raw", texture.Descriptor.Payload.Path);
     }
 
     [Fact]
-    public void MissingTexturesDirectoryIsAnEmptyResult()
+    public void EmptyAssetsRootIsAnEmptyResult()
     {
         using var project = TextureTestProject.Create();
 
@@ -229,11 +229,12 @@ public sealed class TexturePipelineTests
     }
 
     [Fact]
-    public void NonAssetFilesUnderTexturesAreIgnored()
+    public void NonAssetFilesAnywhereUnderTheRootAreIgnored()
     {
         using var project = TextureTestProject.Create();
         project.WriteText("textures/readme.txt", "not an asset");
         project.WriteImage("textures/layers.psd", [1, 2, 3, 4]);
+        project.WriteText("art/readme.txt", "not an asset");
 
         TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
 
@@ -611,20 +612,86 @@ public sealed class TexturePipelineTests
     }
 
     [Fact]
-    public void SourceUnderTheReservedRawPathIsAnError()
+    public void TextureUnderArbitraryArtPathMapsToDescriptorAndRawPaths()
     {
         using var project = TextureTestProject.Create();
-        project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
-        project.WriteImage("textures/raw/player.png", TextureImageFactory.RgbaPng());
+        project.WriteImage("art/player.png", TextureImageFactory.RgbaPng());
+
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+
+        Assert.Equal("art/player", texture.AssetPath);
+        Assert.Equal("art/player-raw", texture.PayloadPath);
+        Assert.Equal("art/player-raw", texture.Descriptor.Payload.Path);
+    }
+
+    [Fact]
+    public void SourceNamedLikeARawPayloadStillMapsToItsOwnDescriptorAndRawPath()
+    {
+        using var project = TextureTestProject.Create();
+        project.WriteImage("art/player.png", TextureImageFactory.RgbaPng());
+        project.WriteImage("art/player-raw.png", TextureImageFactory.RgbaPng());
 
         TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
 
+        Assert.Empty(result.Diagnostics);
+        Assert.Equal(
+            new[] { "art/player", "art/player-raw" },
+            result.Textures.Select(texture => texture.AssetPath));
+        Assert.Equal(
+            new[] { "art/player-raw", "art/player-raw-raw" },
+            result.Textures.Select(texture => texture.PayloadPath));
+    }
+
+    [Fact]
+    public void TypedTomlUnderTexturesIsDataAndIgnoredByTheTexturePipeline()
+    {
+        using var project = TextureTestProject.Create();
+        project.WriteText(
+            "textures/notes.toml",
+            """
+            [bork2d]
+            type = "Type.Notes"
+            """);
+        project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
+
+        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+
+        Assert.Empty(result.Diagnostics);
         BakedTexture texture = Assert.Single(result.Textures);
         Assert.Equal("textures/player", texture.AssetPath);
+        Assert.Null(texture.Settings.SidecarPath);
+    }
 
-        BakeDiagnostic error = Assert.Single(result.Diagnostics);
-        Assert.Equal(TextureDiagnosticCodes.TextureReservedPath, error.Code);
-        Assert.Equal("Assets/textures/raw/player.png", error.FilePath);
+    [Fact]
+    public void TypedTomlNamedLikeASidecarIsDataAndNotASidecar()
+    {
+        using var project = TextureTestProject.Create();
+        project.WriteImage("art/player.png", TextureImageFactory.RgbaPng());
+        project.WriteText(
+            "art/player.png.toml",
+            """
+            [bork2d]
+            type = "Type.Player"
+            """);
+
+        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+
+        Assert.Empty(result.Diagnostics);
+        BakedTexture texture = Assert.Single(result.Textures);
+        Assert.Equal("art/player", texture.AssetPath);
+        Assert.Null(texture.Settings.SidecarPath);
+    }
+
+    [Fact]
+    public void TypeLessNonSidecarTomlIsIgnoredByTheTexturePipeline()
+    {
+        using var project = TextureTestProject.Create();
+        project.WriteText("textures/notes.toml", "filter = \"nearest\"\n");
+
+        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Empty(result.Textures);
     }
 
     [Fact]

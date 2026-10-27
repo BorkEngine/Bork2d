@@ -6,12 +6,12 @@ namespace Bork2d.Bake.Project;
 /// <remarks>
 /// <para>
 /// All paths are absolute. Descriptor-relative paths were resolved against the descriptor's
-/// directory, never the process current directory. The type list preserves descriptor order;
-/// duplicate exact prefixes are rejected by the parser.
+/// directory, never the process current directory.
 /// </para>
 /// <para>
-/// Mapped type existence and shape validation belong to the generated host (WP2); this model only
-/// records the declared mapping.
+/// The descriptor no longer declares types: every custom-data TOML declares its own type in its
+/// reserved <c>[bork2d]</c> table (D-M4-13). Mapped type existence and shape validation belong to the
+/// generated host, which scans the sources first.
 /// </para>
 /// </remarks>
 internal sealed class ProjectDescriptor
@@ -26,7 +26,6 @@ internal sealed class ProjectDescriptor
     /// <param name="hostPath">The absolute generated-host directory.</param>
     /// <param name="textureFilter">The default texture filter.</param>
     /// <param name="textureWrap">The default texture wrap mode.</param>
-    /// <param name="types">The path-prefix to type mappings.</param>
     internal ProjectDescriptor(
         string descriptorPath,
         string? name,
@@ -34,14 +33,12 @@ internal sealed class ProjectDescriptor
         string packPath,
         string hostPath,
         BakeTextureFilter textureFilter,
-        BakeTextureWrap textureWrap,
-        IReadOnlyList<ProjectTypeMapping> types)
+        BakeTextureWrap textureWrap)
     {
         ArgumentNullException.ThrowIfNull(descriptorPath);
         ArgumentNullException.ThrowIfNull(assetsRoot);
         ArgumentNullException.ThrowIfNull(packPath);
         ArgumentNullException.ThrowIfNull(hostPath);
-        ArgumentNullException.ThrowIfNull(types);
 
         DescriptorPath = descriptorPath;
         Name = name;
@@ -50,7 +47,6 @@ internal sealed class ProjectDescriptor
         HostPath = hostPath;
         TextureFilter = textureFilter;
         TextureWrap = textureWrap;
-        Types = [.. types];
     }
 
     /// <summary>Gets the absolute descriptor file path.</summary>
@@ -79,7 +75,4 @@ internal sealed class ProjectDescriptor
 
     /// <summary>Gets the default sampler wrap mode for texture imports.</summary>
     internal BakeTextureWrap TextureWrap { get; }
-
-    /// <summary>Gets the declared prefix-to-type mappings in descriptor order.</summary>
-    internal IReadOnlyList<ProjectTypeMapping> Types { get; }
 }

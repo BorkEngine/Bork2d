@@ -23,11 +23,11 @@ three things:
 The design also includes a data-only editor (`Planned`, M5): no scene editing, only texture
 slicing and editing of custom serializable classes.
 
-The M4 tooling completes the source pipeline: a committed `bork2d.project.toml` maps source prefixes
-to CLR types, and the JIT `Bork2d.Bake`/`Bork2d.Bake.Cli` bake custom-data TOML and imported
-textures into `assets.pck` through a generated bake host and the unchanged `PackBuilder`. The
-runtime still reads MessagePack only, with compiled `[GenerateShape]` shapes and no TOML or
-reflection. See [Assets and tooling](assets-and-tooling.md#11-build-pipeline) and the
+The M4 tooling completes the source pipeline: each data TOML declares its CLR type in `[bork2d]`,
+and the JIT `Bork2d.Bake`/`Bork2d.Bake.Cli` bake custom-data TOML and imported textures (anywhere
+under the asset root) into `assets.pck` through a generated bake host and the unchanged
+`PackBuilder`. The runtime still reads MessagePack only, with compiled `[GenerateShape]` shapes and
+no TOML or reflection. See [Assets and tooling](assets-and-tooling.md#11-build-pipeline) and the
 [M4 spec](../specs/m4-serialization-and-bake.md).
 
 ## 2. Goals

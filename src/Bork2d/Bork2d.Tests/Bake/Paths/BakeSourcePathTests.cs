@@ -22,6 +22,8 @@ public sealed class BakeSourcePathTests
 
     [Theory]
     [InlineData("textures/player.png", "textures/player")]
+    [InlineData("art/player.png", "art/player")]
+    [InlineData("art/ui/button.png", "art/ui/button")]
     [InlineData("textures/UI/Button.PNG", "textures/ui/button")]
     [InlineData("textures/ui/button.jpg", "textures/ui/button")]
     [InlineData("textures/ui/button.jpeg", "textures/ui/button")]

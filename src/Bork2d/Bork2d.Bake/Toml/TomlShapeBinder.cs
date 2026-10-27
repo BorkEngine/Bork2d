@@ -45,6 +45,8 @@ internal static class TomlShapeBinder
 {
     private static readonly ShapeVisitor _visitor = new();
 
+    private const string ReservedMetadataTable = "bork2d";
+
     /// <summary>Binds a parsed document into the mapped type.</summary>
     /// <typeparam name="T">The mapped type, which must carry a compiled shape.</typeparam>
     /// <param name="context">The per-source binding context.</param>
@@ -53,7 +55,39 @@ internal static class TomlShapeBinder
         where T : IShapeable<T>
     {
         ArgumentNullException.ThrowIfNull(context);
-        return BindShape(T.GetTypeShape(), context, BakeBindNode.Root(context.Root));
+        return BindShape(
+            T.GetTypeShape(),
+            context,
+            BakeBindNode.Root(CreateBindRoot(context.Root)));
+    }
+
+    /// <summary>
+    /// Removes the reserved top-level <c>bork2d</c> metadata table from the root a mapped type sees.
+    /// </summary>
+    /// <remarks>
+    /// The reserved table is metadata (D-M4-13): it is neither an unknown key nor a bindable member.
+    /// A mapped type therefore cannot receive a root <c>Bork2d</c> member from it; a required member
+    /// with that name reports a missing key. Nested tables named <c>bork2d</c> are ordinary member
+    /// tables and are unaffected because only the root is filtered.
+    /// </remarks>
+    private static object CreateBindRoot(object root)
+    {
+        if (root is not TomlTable table
+            || !table.ContainsKey(ReservedMetadataTable))
+        {
+            return root;
+        }
+
+        var filtered = new TomlTable();
+        foreach (KeyValuePair<string, object> pair in table)
+        {
+            if (!string.Equals(pair.Key, ReservedMetadataTable, StringComparison.Ordinal))
+            {
+                filtered[pair.Key] = pair.Value;
+            }
+        }
+
+        return filtered;
     }
 
     /// <summary>A typed setter that applies one bound member value to an argument state.</summary>

@@ -16,6 +16,7 @@ internal static class BakeHostGenerationStateJson
     private const string GeneratorVersionProperty = "generatorVersion";
     private const string DescriptorHashProperty = "descriptorHash";
     private const string CommonAssemblyHashProperty = "commonAssemblyHash";
+    private const string SourceTypesHashProperty = "sourceTypesHash";
     private const string ConfigurationProperty = "configuration";
     private const string OutputDirectoryProperty = "outputDirectory";
     private const string ProjectPathProperty = "projectPath";
@@ -43,6 +44,7 @@ internal static class BakeHostGenerationStateJson
             writer.WriteString(GeneratorVersionProperty, state.GeneratorVersion);
             writer.WriteString(DescriptorHashProperty, state.DescriptorHash);
             writer.WriteString(CommonAssemblyHashProperty, state.CommonAssemblyHash);
+            writer.WriteString(SourceTypesHashProperty, state.SourceTypesHash);
             writer.WriteString(ConfigurationProperty, state.Configuration);
             writer.WriteString(OutputDirectoryProperty, state.OutputDirectory);
             writer.WriteString(ProjectPathProperty, state.ProjectPath);
@@ -73,6 +75,7 @@ internal static class BakeHostGenerationStateJson
             || !TryGetString(root, GeneratorVersionProperty, out string? generatorVersion)
             || !TryGetString(root, DescriptorHashProperty, out string? descriptorHash)
             || !TryGetString(root, CommonAssemblyHashProperty, out string? commonAssemblyHash)
+            || !TryGetString(root, SourceTypesHashProperty, out string? sourceTypesHash)
             || !TryGetString(root, ConfigurationProperty, out string? configuration)
             || !TryGetString(root, OutputDirectoryProperty, out string? outputDirectory)
             || !TryGetString(root, ProjectPathProperty, out string? projectPath)
@@ -87,6 +90,7 @@ internal static class BakeHostGenerationStateJson
             generatorVersion!,
             descriptorHash!,
             commonAssemblyHash!,
+            sourceTypesHash!,
             configuration!,
             outputDirectory!,
             projectPath!,

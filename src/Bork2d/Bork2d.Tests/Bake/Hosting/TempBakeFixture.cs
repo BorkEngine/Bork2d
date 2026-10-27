@@ -160,26 +160,6 @@ public sealed class TempBakeFixture : IDisposable
 
         [bake]
         host = "host"
-
-        [[types]]
-        prefix = "data"
-        type = "BakeFixture.Common.GameConfig"
-
-        [[types]]
-        prefix = "roots"
-        type = "BakeFixture.Common.StatsRoot"
-
-        [[types]]
-        prefix = "hidden"
-        type = "BakeFixture.Common.HiddenConfig"
-
-        [[types]]
-        prefix = "weapons"
-        type = "Game.Data.Weapon"
-
-        [[types]]
-        prefix = "sprites"
-        type = "Bork2d.Api.Assets.SpriteAsset"
         """;
 
     private static readonly (string RelativePath, string Content)[] _assets =
@@ -195,17 +175,29 @@ public sealed class TempBakeFixture : IDisposable
             [stats]
             attack = 1
             defense = 2
+
+            [bork2d]
+            type = "BakeFixture.Common.GameConfig"
             """),
         ("roots/stats.toml", """
             attack = 7
             defense = 9
+
+            [bork2d]
+            type = "BakeFixture.Common.StatsRoot"
             """),
         ("hidden/secret.toml", """
             value = 5
+
+            [bork2d]
+            type = "BakeFixture.Common.HiddenConfig"
             """),
         ("weapons/sword.toml", """
             name = "sword"
             damage = 12
+
+            [bork2d]
+            type = "Game.Data.Weapon"
             """),
         ("sprites/player.toml", """
             texture = "textures/player"
@@ -214,6 +206,9 @@ public sealed class TempBakeFixture : IDisposable
             pivot = [0.5, 0.5]
             topology = "triangles"
             indices = [0, 1, 2, 0, 2, 3]
+
+            [bork2d]
+            type = "Bork2d.Api.Assets.SpriteAsset"
             """),
         ("textures/player.png.toml", """
             filter = "nearest"
@@ -317,6 +312,15 @@ public sealed class TempBakeFixture : IDisposable
 
     /// <summary>Gets the descriptor text used by the fixture, for copied projects.</summary>
     internal static string DescriptorText => Descriptor;
+
+    /// <summary>
+    /// Creates an independent project directory containing every fixture source, so the shared
+    /// fixture host's type manifest matches the discovered declarations.
+    /// </summary>
+    /// <param name="name">A folder-name fragment that identifies the test.</param>
+    /// <returns>The new project directory.</returns>
+    internal string CreateStandardProject(string name)
+        => CreateProjectCopy(name, _assets);
 
     /// <summary>
     /// Creates an independent project directory with the fixture mappings so a CLI test can mutate

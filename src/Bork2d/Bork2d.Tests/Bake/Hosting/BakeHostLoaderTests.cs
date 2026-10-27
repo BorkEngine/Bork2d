@@ -5,6 +5,7 @@ using Bork2d.Assets.Pack;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Hosting;
 using Bork2d.Bake.Project;
+using Bork2d.Bake.Sources;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Hosting;
@@ -85,34 +86,88 @@ public sealed class BakeHostLoaderTests
 
             [assets]
             root = "Assets"
+            """,
+            "data/config.toml",
+            """
+            name = "campaign"
+            health = 1
+            must = "m"
 
-            [[types]]
-            prefix = "data"
+            [bork2d]
             type = "BakeFixture.Common.GameConfig"
             """);
         var diagnostics = new BakeDiagnostics();
         ProjectDescriptor descriptor = ProjectDescriptorParser.Parse(
             Path.Combine(directory, TempBakeFixture.DescriptorFileName),
             diagnostics)!;
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
 
-        bool valid = BakeHostManifestValidator.Validate(descriptor, _fixture.Manifest, diagnostics);
+        bool valid = BakeHostManifestValidator.Validate(
+            descriptor,
+            sources,
+            _fixture.Manifest,
+            diagnostics);
 
         Assert.False(valid);
         BakeDiagnostic[] stale = [.. diagnostics
             .GetSorted()
             .Where(diagnostic => diagnostic.Code == BakeDiagnosticCodes.HostStale)];
         Assert.NotEmpty(stale);
-        Assert.Contains(stale, diagnostic => diagnostic.Message.Contains("roots", StringComparison.Ordinal));
-        Assert.Contains(stale, diagnostic => diagnostic.Message.Contains("sprites", StringComparison.Ordinal));
+        Assert.Contains(
+            stale,
+            diagnostic => diagnostic.Message.Contains("StatsRoot", StringComparison.Ordinal));
+        Assert.Contains(
+            stale,
+            diagnostic => diagnostic.Message.Contains("SpriteAsset", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void StaleHostWithAnUndeclaredRegistrationIsReported()
+    {
+        string directory = CreateDescriptorProject(
+            """
+            schema = 1
+
+            [assets]
+            root = "Assets"
+            """,
+            "data/config.toml",
+            """
+            value = 1
+
+            [bork2d]
+            type = "BakeFixture.Common.MissingFromHost"
+            """);
+        var diagnostics = new BakeDiagnostics();
+        ProjectDescriptor descriptor = ProjectDescriptorParser.Parse(
+            Path.Combine(directory, TempBakeFixture.DescriptorFileName),
+            diagnostics)!;
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+
+        bool valid = BakeHostManifestValidator.Validate(
+            descriptor,
+            sources,
+            _fixture.Manifest,
+            diagnostics);
+
+        Assert.False(valid);
+        Assert.Contains(
+            diagnostics.GetSorted(),
+            diagnostic => diagnostic.Code == BakeDiagnosticCodes.HostStale
+                && diagnostic.Message.Contains("MissingFromHost", StringComparison.Ordinal));
     }
 
     [Fact]
     public void MatchingDescriptorValidatesAgainstTheHostManifest()
     {
         var diagnostics = new BakeDiagnostics();
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            _fixture.DescriptorDescriptor,
+            diagnostics);
 
         bool valid = BakeHostManifestValidator.Validate(
             _fixture.DescriptorDescriptor,
+            sources,
             _fixture.Manifest,
             diagnostics);
 
@@ -120,11 +175,17 @@ public sealed class BakeHostLoaderTests
         Assert.Empty(diagnostics.GetSorted());
     }
 
-    private static string CreateDescriptorProject(string descriptor)
+    private static string CreateDescriptorProject(
+        string descriptor,
+        string relativeSourcePath,
+        string source)
     {
         string directory = Path.Combine(Path.GetTempPath(), $"bork2d-bake-stale-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(directory, "Assets"));
+        Directory.CreateDirectory(
+            Path.GetDirectoryName(
+                Path.Combine(directory, "Assets", relativeSourcePath))!);
         File.WriteAllText(Path.Combine(directory, TempBakeFixture.DescriptorFileName), descriptor);
+        File.WriteAllText(Path.Combine(directory, "Assets", relativeSourcePath), source);
         return directory;
     }
 }

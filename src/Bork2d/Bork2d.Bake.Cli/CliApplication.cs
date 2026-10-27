@@ -20,14 +20,15 @@ namespace Bork2d.Bake.Cli;
 /// unexpected internal failure.
 /// </para>
 /// <para>
-/// <c>generate-host</c> writes the generated host project and manifest, and skips when its recorded
-/// inputs and generated content are unchanged. <c>bake</c> runs the complete pipeline (descriptor,
-/// host, custom-data binding, textures, reference validation, pack) unless the incremental manifest
-/// shows that the pack is current, and writes the pack and manifest atomically. <c>--check</c>
-/// validates everything and writes nothing, and never skips. <c>validate</c> without a host checks
-/// the descriptor, the reachable texture sources, and custom-data TOML syntax; with <c>--host</c> it
-/// runs the same validation pipeline as <c>bake --check</c> but never writes a pack. <c>--force</c>
-/// bypasses both incremental skips.
+/// <c>generate-host</c> scans the sources for <c>[bork2d].type</c>, writes the generated host project
+/// and manifest, and skips when its recorded inputs (including source types) and generated content
+/// are unchanged. <c>bake</c> runs the complete pipeline (descriptor, sources, host, custom-data
+/// binding, textures, reference validation, pack) unless the incremental manifest shows that the pack
+/// is current, and writes the pack and manifest atomically. <c>--check</c> validates everything and
+/// writes nothing, and never skips. <c>validate</c> without a host checks the descriptor, the source
+/// type metadata and TOML syntax, and the reachable texture sources; with <c>--host</c> it runs the
+/// same validation pipeline as <c>bake --check</c> but never writes a pack. <c>--force</c> bypasses
+/// both incremental skips.
 /// </para>
 /// </remarks>
 internal static class CliApplication
@@ -250,7 +251,7 @@ internal static class CliApplication
             {
                 output.WriteLine(
                     $"{ProgramName}: generated '{result.ProjectPath}' "
-                        + $"({result.Types.Count} mapped type(s), {result.References.Count} "
+                        + $"({result.Types.Count} distinct mapped type(s), {result.References.Count} "
                         + "assembly reference(s)).");
             }
             else
@@ -263,7 +264,7 @@ internal static class CliApplication
         {
             foreach (BakeMappedType mapping in result.Types)
             {
-                output.WriteLine($"  {mapping.SourcePrefix} -> {mapping.TypeName}");
+                output.WriteLine($"  mapped type {mapping.TypeName}");
             }
 
             foreach (BakeHostReference reference in result.References)
@@ -553,7 +554,8 @@ internal static class CliApplication
             diagnostics.Add(diagnostic);
         }
 
-        int sourceCount = BakeSourceBinder.ValidateSyntax(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        int sourceCount = BakeSourceBinder.ValidateSyntax(descriptor, sources, diagnostics);
 
         if (diagnostics.HasErrors)
         {
@@ -573,14 +575,15 @@ internal static class CliApplication
             output.WriteLine(
                 $"{ProgramName}: '{descriptor.DescriptorPath}' is valid: "
                     + $"{sourceCount} custom-data source(s), {textures.Textures.Count} texture(s), "
-                    + $"{descriptor.Types.Count} type mapping(s); no pack written.");
+                    + $"{sources.Select(source => source.TypeName).Distinct(StringComparer.Ordinal).Count()} "
+                    + "declared type(s); no pack written.");
         }
 
         if (verbose)
         {
-            foreach (ProjectTypeMapping mapping in descriptor.Types)
+            foreach (BakeSource source in sources)
             {
-                output.WriteLine($"  {mapping.Prefix} -> {mapping.TypeName}");
+                output.WriteLine($"  {source.AssetPath} -> {source.TypeName}");
             }
         }
 
@@ -820,7 +823,7 @@ internal static class CliApplication
             "  validate --project <bork2d.project.toml> [--host <BakeHost.dll>] "
                 + "[--verbose|--quiet]");
         writer.WriteLine(
-            "               without --host: descriptor, texture sources, and TOML syntax;");
+            "               without --host: descriptor, source [bork2d] types, TOML syntax, textures;");
         writer.WriteLine(
             "               with --host: the full bake validation (binding + references), no pack");
         writer.WriteLine(

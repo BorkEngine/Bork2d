@@ -6,8 +6,8 @@ namespace Bork2d.Bake.Textures;
 /// <remarks>
 /// Mutable only while one import pass runs; the baked result exposes <see cref="BakedTexture"/>
 /// instead. <see cref="AssetPath"/> and <see cref="PayloadPath"/> stay <see langword="null"/> when
-/// the source path is invalid or reserved, so the pipeline can still associate a sidecar and report
-/// a precise diagnostic before skipping the source.
+/// the source path is invalid, so the pipeline can still associate a sidecar and report a precise
+/// diagnostic before skipping the source.
 /// </remarks>
 internal sealed class TextureSourceEntry
 {

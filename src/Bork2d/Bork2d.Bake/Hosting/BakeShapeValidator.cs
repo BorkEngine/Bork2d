@@ -18,13 +18,11 @@ internal static class BakeShapeValidator
     /// <summary>Validates that a mapped root has a supported shape kind.</summary>
     /// <typeparam name="T">The mapped root type.</typeparam>
     /// <param name="typeName">The mapped type's full name, used in the diagnostic.</param>
-    /// <param name="prefix">The mapped source prefix, used in the diagnostic.</param>
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
-    internal static void ValidateRoot<T>(string typeName, string prefix, BakeDiagnostics diagnostics)
+    internal static void ValidateRoot<T>(string typeName, BakeDiagnostics diagnostics)
         where T : IShapeable<T>
     {
         ArgumentNullException.ThrowIfNull(typeName);
-        ArgumentNullException.ThrowIfNull(prefix);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
         ITypeShape<T> shape = T.GetTypeShape();
@@ -36,8 +34,8 @@ internal static class BakeShapeValidator
         diagnostics.Add(
             BakeSeverity.Error,
             BakeDiagnosticCodes.HostShapeUnsupported,
-            $"Mapped type '{typeName}' (prefix '{prefix}') has the unsupported root shape kind "
+            $"Mapped type '{typeName}' has the unsupported root shape kind "
                 + $"'{shape.Kind}'; a custom-data root must be a class or struct.",
-            assetPath: prefix);
+            assetPath: typeName);
     }
 }

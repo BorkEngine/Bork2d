@@ -1,7 +1,8 @@
 # Contributing
 
 > **Status:** current through M3 plus the D-035 asset-reference refactor (merged, PR #6) and M4
-> serialization/bake (implementation complete on `m-4/common`, PR pending). The
+> serialization/bake (implementation complete on `m-4/common`; the owner D-M4-13 revision is in
+> progress on `m-4/fix-1`; PR pending). The
 > warning/style/format/AOT gates and the docs link check are active. CI runs docs link check, build,
 > tests, and format verification on PRs to `develop` and pushes to `develop`; the NativeAOT
 > publish/run smoke (headless loading the **baked fixture pack**, and windowed) is a required local
@@ -32,7 +33,7 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **871 tests**: 859 deterministic tests run in CI; 12 opt-in/conditional tests are
+The suite is **890 tests**: 878 deterministic tests run in CI; 12 opt-in/conditional tests are
 skipped unless the environment variable or capability is present (9 `[WindowFact]` real-window tests
 and 3 reparse-point capability tests). The deterministic set includes the M3 pack-format/writer
 tests, the path/VFS/browse/contract tests, the loader/threading and error-contract tests, generic

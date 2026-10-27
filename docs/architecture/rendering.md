@@ -119,7 +119,7 @@ tints. `VkPipelineRenderingCreateInfo` carries the color format and no depth/ste
 ## 6. Texture pages and bindless textures
 
 - A **texture page** is one GPU texture described by a MessagePack descriptor (`textures/<name>`)
-  and a raw payload (`textures/raw/<name>`).
+  and a raw payload (`textures/<name>-raw`).
 - The bindless array holds combined image samplers, one per resident descriptor; `TextureIndex`
   selects the page. The shader sees a runtime-sized, partially bound `uniform sampler2D textures[]`;
   only resident pages have valid descriptors.

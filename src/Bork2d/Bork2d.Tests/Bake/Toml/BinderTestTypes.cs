@@ -103,6 +103,8 @@ public sealed partial class Inner
     public string? Icon { get; set; }
 
     public int Weight { get; set; }
+
+    public string? Bork2d { get; set; }
 }
 
 /// <summary>A readonly record struct with a primary constructor.</summary>
@@ -250,4 +252,16 @@ public sealed partial class RefNode
     public AssetRef<TextureDescriptor> Icon { get; set; }
 
     public DataRef Payload { get; set; }
+}
+
+/// <summary>
+/// A root with a member whose key collides with the reserved <c>[bork2d]</c> metadata table. The
+/// binder must ignore the reserved table, so this member never receives it.
+/// </summary>
+[GenerateShape]
+public sealed partial class ReservedMetadataRoot
+{
+    public int Value { get; set; }
+
+    public string? Bork2d { get; set; }
 }

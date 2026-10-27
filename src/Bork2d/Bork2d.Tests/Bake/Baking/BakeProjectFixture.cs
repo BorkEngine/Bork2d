@@ -42,7 +42,7 @@ public sealed class BakeProjectFixture : IDisposable
     internal const string TexturePath = "textures/player";
 
     /// <summary>The canonical raw texture payload path.</summary>
-    internal const string TexturePayloadPath = "textures/raw/player";
+    internal const string TexturePayloadPath = "textures/player-raw";
 
     /// <summary>The exact RGBA8 payload the generated PNG decodes to.</summary>
     internal static readonly byte[] ExpectedTexturePayload =
@@ -67,18 +67,6 @@ public sealed class BakeProjectFixture : IDisposable
         [textures]
         filter = "linear"
         wrap = "clamp"
-
-        [[types]]
-        prefix = "data"
-        type = "Bork2d.BakeFixture.GameConfig"
-
-        [[types]]
-        prefix = "roots"
-        type = "Bork2d.BakeFixture.StatsRoot"
-
-        [[types]]
-        prefix = "sprites"
-        type = "Bork2d.Api.Assets.SpriteAsset"
         """;
 
     private const string GameConfigToml = """
@@ -92,11 +80,17 @@ public sealed class BakeProjectFixture : IDisposable
         [stats]
         attack = 3
         defense = 7
+
+        [bork2d]
+        type = "Bork2d.BakeFixture.GameConfig"
         """;
 
     private const string StatsToml = """
         attack = 11
         defense = 13
+
+        [bork2d]
+        type = "Bork2d.BakeFixture.StatsRoot"
         """;
 
     private const string SpriteToml = """
@@ -106,6 +100,20 @@ public sealed class BakeProjectFixture : IDisposable
         pivot = [0.5, 0.5]
         topology = "triangles"
         indices = [0, 1, 2, 0, 2, 3]
+
+        [bork2d]
+        type = "Bork2d.Api.Assets.SpriteAsset"
+        """;
+
+    private const string EmptyDescriptor = """
+        schema = 1
+        name = "EmptyFixture"
+
+        [assets]
+        root = "Assets"
+
+        [bake]
+        host = "host"
         """;
 
     private readonly string _rootPath;
@@ -161,6 +169,36 @@ public sealed class BakeProjectFixture : IDisposable
             ?? throw new InvalidOperationException(
                 "The bake fixture descriptor is invalid:" + Environment.NewLine
                     + RenderDiagnostics(descriptorDiagnostics));
+
+        EmptyProjectDirectory = Path.Combine(_rootPath, "empty-project");
+        Directory.CreateDirectory(Path.Combine(EmptyProjectDirectory, "Assets"));
+        File.WriteAllText(
+            Path.Combine(EmptyProjectDirectory, DescriptorFileName),
+            EmptyDescriptor);
+
+        var emptyGenerationDiagnostics = new BakeDiagnostics();
+        HostGenerationResult? emptyGeneration = HostGenerator.Generate(
+            new HostGenerationOptions(
+                Path.Combine(EmptyProjectDirectory, DescriptorFileName),
+                CommonAssemblyPath,
+                Path.Combine(EmptyProjectDirectory, "host"),
+                "Debug",
+                force: true),
+            emptyGenerationDiagnostics)
+            ?? throw new InvalidOperationException(
+                "The empty bake fixture host could not be generated:" + Environment.NewLine
+                    + RenderDiagnostics(emptyGenerationDiagnostics));
+
+        TempProcessRunner.Result emptyHostBuild = TempProcessRunner.Run(
+            "dotnet",
+            ["build", emptyGeneration.ProjectPath, "-c", "Debug", "-warnaserror", "-nologo"],
+            EmptyProjectDirectory);
+        if (emptyHostBuild.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                "The empty bake fixture host did not build:" + Environment.NewLine
+                    + emptyHostBuild.Output);
+        }
     }
 
     /// <summary>Gets the fixture project root.</summary>
@@ -178,6 +216,19 @@ public sealed class BakeProjectFixture : IDisposable
     /// <summary>Gets the built generated host assembly path.</summary>
     internal string HostAssemblyPath
         => Path.Combine(HostDirectory, "bin", "Debug", "net11.0", "Bork2d.BakeHost.dll");
+
+    /// <summary>Gets an independent project directory with no data sources.</summary>
+    internal string EmptyProjectDirectory { get; }
+
+    /// <summary>Gets the generated host assembly for the empty project.</summary>
+    internal string EmptyHostAssemblyPath
+        => Path.Combine(
+            EmptyProjectDirectory,
+            "host",
+            "bin",
+            "Debug",
+            "net11.0",
+            "Bork2d.BakeHost.dll");
 
     /// <summary>Gets the built <c>Bork2d.BakeFixture</c> assembly the host references.</summary>
     internal string CommonAssemblyPath
@@ -252,6 +303,22 @@ public sealed class BakeProjectFixture : IDisposable
     /// <param name="projectDirectory">The project copy returned by <see cref="CreateProject"/>.</param>
     internal static void WriteTexture(string projectDirectory)
         => WriteAssetBytes(projectDirectory, "textures/player.png", TextureImageFactory.RgbaPng());
+
+    /// <summary>Writes every standard fixture data source and sidecar into a project copy.</summary>
+    /// <param name="projectDirectory">The project copy returned by <see cref="CreateProject"/>.</param>
+    internal static void WriteStandardAssets(string projectDirectory)
+    {
+        WriteAsset(projectDirectory, "data/game.toml", GameConfigToml);
+        WriteAsset(projectDirectory, "roots/stats.toml", StatsToml);
+        WriteAsset(projectDirectory, "sprites/player.toml", SpriteToml);
+        WriteAsset(
+            projectDirectory,
+            "textures/player.png.toml",
+            """
+            filter = "nearest"
+            wrap = "repeat"
+            """);
+    }
 
     /// <inheritdoc/>
     public void Dispose()

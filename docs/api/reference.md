@@ -409,8 +409,9 @@ the JIT tooling; the runtime has no TOML parser, reflection serializer, or bake 
   declared `partial`. `partial` is **PolyType's** rule, not a Bork2d attribute or generator
   requirement: on .NET 8+ `[GenerateShape]` injects `IShapeable<T>` through the partial declaration.
   There is no `[Bork2dSerializable]` attribute, no Bork2d source generator, and no assembly scan.
-  Registration is the project descriptor's `[[types]]` list (canonical prefix → CLR full name); a
-  mapped type must implement `IShapeable<T>`.
+  Registration is the source TOML's own reserved `[bork2d]` table (D-M4-13):
+  `[bork2d] type = "Full.Type.Name"`. The project descriptor has no type list; the value is a full
+  CLR name without assembly qualification, and a mapped type must implement `IShapeable<T>`.
 - **TOML authoring.** Keys are camelCase; `[JsonPropertyName]`, `[JsonIgnore]`, and `[JsonRequired]`
   are honored. Supported leaves are booleans, integers, floats, strings, camelCase enum names,
   `Guid`, offset date-times, `Vector2/3/4` (`[x, y]`), `Color` (`[r, g, b, a]`),
@@ -433,7 +434,7 @@ the JIT tooling; the runtime has no TOML parser, reflection serializer, or bake 
   [Assets and tooling §11](../architecture/assets-and-tooling.md#11-build-pipeline), the TOML model
   and leaves in [Assets and tooling §10](../architecture/assets-and-tooling.md#10-toml-source-model),
   and the as-built evidence in the
-  [M4 spec §22](../specs/m4-serialization-and-bake.md#22-as-built-evidence-m-4common-pr-pending).
+  [M4 spec §22](../specs/m4-serialization-and-bake.md#22-as-built-evidence-m-4fix-1-revision).
 
 ## 8. `ICamera<TLayer>`
 
@@ -664,7 +665,7 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 using Bork2d.Assets.Pack;
 
 var builder = new PackBuilder(PackCompressionMode.Release);
-builder.AddRaw("textures/raw/player", rgba8Bytes);
+builder.AddRaw("textures/player-raw", rgba8Bytes);
 builder.AddMessagePack("data/config", new GameConfig { /* generated shape on GameConfig */ });
 builder.Write("assets.pck");   // overwrites; relative to the current directory
 ```

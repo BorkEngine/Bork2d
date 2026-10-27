@@ -38,6 +38,7 @@ public sealed class GenerateHostIncrementalTests
         Assert.Equal(BakeToolInfo.Version, state.GeneratorVersion);
         Assert.Equal(BakeHash.HashFile(_fixture.DescriptorPath), state.DescriptorHash);
         Assert.Equal(BakeHash.HashFile(_fixture.ProjectCommonAssemblyPath), state.CommonAssemblyHash);
+        Assert.False(string.IsNullOrEmpty(state.SourceTypesHash));
         Assert.Equal("Debug", state.Configuration);
         Assert.Equal(Path.GetFullPath(output), state.OutputDirectory);
         Assert.Equal(
@@ -124,14 +125,30 @@ public sealed class GenerateHostIncrementalTests
     }
 
     [Fact]
-    public void DescriptorChangeRewritesTheGeneratedManifest()
+    public void SourceTypeAddChangeRemoveRewritesTheGeneratedManifest()
     {
         string project = Path.Combine(
             Path.GetTempPath(),
             $"bork2d-bake-host-inc-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(project, "Assets"));
+        Directory.CreateDirectory(Path.Combine(project, "Assets", "data"));
         string descriptorPath = Path.Combine(project, TempBakeFixture.DescriptorFileName);
-        File.WriteAllText(descriptorPath, TempBakeFixture.DescriptorText);
+        File.WriteAllText(
+            descriptorPath,
+            """
+            schema = 1
+
+            [assets]
+            root = "Assets"
+            """);
+        string sourcePath = Path.Combine(project, "Assets", "data", "source.toml");
+        File.WriteAllText(
+            sourcePath,
+            """
+            value = 1
+
+            [bork2d]
+            type = "BakeFixture.Common.GameConfig"
+            """);
         string output = CreateOutputDirectory();
 
         Result first = Generate(descriptorPath, _fixture.ProjectCommonAssemblyPath, output);
@@ -139,18 +156,53 @@ public sealed class GenerateHostIncrementalTests
         Assert.Equal(CliApplication.SuccessExitCode, first.ExitCode);
         Assert.Contains("generated '", first.Output, StringComparison.Ordinal);
         string manifestPath = Path.Combine(output, "BakeManifest.g.cs");
-        Assert.DoesNotContain("\"more\"", File.ReadAllText(manifestPath), StringComparison.Ordinal);
+        Assert.Contains(
+            "\"BakeFixture.Common.GameConfig\"",
+            File.ReadAllText(manifestPath),
+            StringComparison.Ordinal);
+
+        string otherSource = Path.Combine(project, "Assets", "weapons", "sword.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(otherSource)!);
+        File.WriteAllText(
+            otherSource,
+            """
+            name = "sword"
+            damage = 1
+
+            [bork2d]
+            type = "Game.Data.Weapon"
+            """);
+
+        Result added = Generate(descriptorPath, _fixture.ProjectCommonAssemblyPath, output);
+
+        Assert.Equal(CliApplication.SuccessExitCode, added.ExitCode);
+        Assert.Contains("\"Game.Data.Weapon\"", File.ReadAllText(manifestPath), StringComparison.Ordinal);
 
         File.WriteAllText(
-            descriptorPath,
-            TempBakeFixture.DescriptorText
-                + "\n[[types]]\nprefix = \"more\"\ntype = \"Game.Data.Weapon\"\n");
+            sourcePath,
+            """
+            attack = 1
+            defense = 2
+
+            [bork2d]
+            type = "BakeFixture.Common.StatsRoot"
+            """);
 
         Result changed = Generate(descriptorPath, _fixture.ProjectCommonAssemblyPath, output);
 
         Assert.Equal(CliApplication.SuccessExitCode, changed.ExitCode);
-        Assert.Contains("generated '", changed.Output, StringComparison.Ordinal);
-        Assert.Contains("\"more\"", File.ReadAllText(manifestPath), StringComparison.Ordinal);
+        string changedManifest = File.ReadAllText(manifestPath);
+        Assert.Contains("\"BakeFixture.Common.StatsRoot\"", changedManifest, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"BakeFixture.Common.GameConfig\"", changedManifest, StringComparison.Ordinal);
+
+        File.Delete(sourcePath);
+
+        Result removed = Generate(descriptorPath, _fixture.ProjectCommonAssemblyPath, output);
+
+        Assert.Equal(CliApplication.SuccessExitCode, removed.ExitCode);
+        string removedManifest = File.ReadAllText(manifestPath);
+        Assert.DoesNotContain("\"BakeFixture.Common.StatsRoot\"", removedManifest, StringComparison.Ordinal);
+        Assert.Contains("\"Game.Data.Weapon\"", removedManifest, StringComparison.Ordinal);
     }
 
     [Fact]

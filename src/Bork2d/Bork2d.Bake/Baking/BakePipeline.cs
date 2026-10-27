@@ -56,6 +56,19 @@ internal static class BakePipeline
 
         string packPath = options.OutputPath ?? descriptor.PackPath;
 
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        if (diagnostics.HasErrors)
+        {
+            return Failure(
+                BakeStatus.DiagnosticsError,
+                BakeFailureStage.Sources,
+                packPath,
+                assetCount: 0,
+                textureCount: 0,
+                referenceCount: 0,
+                diagnostics);
+        }
+
         BakeHostHandle? handle = BakeHostLoader.TryLoad(options.HostPath, diagnostics);
         if (handle is null)
         {
@@ -69,7 +82,7 @@ internal static class BakePipeline
                 diagnostics);
         }
 
-        if (!BakeHostManifestValidator.Validate(descriptor, handle.Manifest, diagnostics)
+        if (!BakeHostManifestValidator.Validate(descriptor, sources, handle.Manifest, diagnostics)
             || diagnostics.HasErrors)
         {
             return Failure(
@@ -84,6 +97,7 @@ internal static class BakePipeline
 
         IReadOnlyList<BoundAsset> assets = BakeSourceBinder.BindAll(
             descriptor,
+            sources,
             handle.Manifest,
             diagnostics);
         if (diagnostics.HasErrors)

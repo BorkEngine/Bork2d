@@ -36,14 +36,8 @@ internal static class TextureDiagnosticCodes
     /// <summary>Two texture sources map to the same canonical asset path.</summary>
     internal const string TexturePathCollision = "BK4006";
 
-    /// <summary>A texture source lives under the reserved <c>textures/raw/</c> path.</summary>
-    internal const string TextureReservedPath = "BK4007";
-
     /// <summary>A <c>&lt;source&gt;.toml</c> sidecar has no matching source file.</summary>
     internal const string TextureSidecarWithoutSource = "BK4008";
-
-    /// <summary>A <c>.toml</c> file under <c>textures/</c> is not a <c>&lt;source&gt;.toml</c> sidecar.</summary>
-    internal const string TextureStrayToml = "BK4009";
 
     /// <summary>A texture sidecar could not be read.</summary>
     internal const string TextureSidecarRead = "BK4010";

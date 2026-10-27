@@ -112,7 +112,7 @@ public sealed class CliApplicationTests
     }
 
     [Fact]
-    public void VerboseListsTheTypeMappings()
+    public void VerboseListsTheDeclaredSourceTypes()
     {
         using var directory = TempBakeDirectory.Create();
         directory.CreateDirectory("Assets");
@@ -123,22 +123,30 @@ public sealed class CliApplicationTests
 
             [assets]
             root = "Assets"
+            """);
+        directory.WriteFile(
+            "Assets/data/game.toml",
+            """
+            value = 1
 
-            [[types]]
-            prefix = "data"
+            [bork2d]
             type = "MyGame.Data.GameConfig"
+            """);
+        directory.WriteFile(
+            "Assets/sprites/player.toml",
+            """
+            value = 1
 
-            [[types]]
-            prefix = "sprites"
+            [bork2d]
             type = "Bork2d.Api.Assets.SpriteAsset"
             """);
 
         var result = Run("validate", "--project", descriptorPath, "--verbose");
 
         Assert.Equal(CliApplication.SuccessExitCode, result.ExitCode);
-        Assert.Contains("data -> MyGame.Data.GameConfig", result.Output, StringComparison.Ordinal);
+        Assert.Contains("data/game -> MyGame.Data.GameConfig", result.Output, StringComparison.Ordinal);
         Assert.Contains(
-            "sprites -> Bork2d.Api.Assets.SpriteAsset",
+            "sprites/player -> Bork2d.Api.Assets.SpriteAsset",
             result.Output,
             StringComparison.Ordinal);
     }

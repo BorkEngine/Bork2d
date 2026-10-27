@@ -1,7 +1,9 @@
 using System.Text;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Incremental;
+using Bork2d.Bake.Paths;
 using Bork2d.Bake.Project;
+using Bork2d.Bake.Sources;
 
 namespace Bork2d.Bake.Hosting;
 
@@ -10,19 +12,22 @@ namespace Bork2d.Bake.Hosting;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The generator parses the descriptor, resolves every mapped type from <c>Project.Common</c>
-/// metadata (never loading the game assemblies into the tooling process), validates the shape and
-/// visibility contract, then writes the host project and manifest. It reports diagnostics and
-/// returns <see langword="null"/> rather than throwing for expected failures.
+/// The generator parses the descriptor, scans the sources for their <c>[bork2d].type</c>
+/// declarations (D-M4-13), resolves every distinct type from <c>Project.Common</c> metadata (never
+/// loading the game assemblies into the tooling process), validates the shape and visibility
+/// contract, then writes the host project and manifest. A source TOML syntax or metadata failure
+/// fails generation before any host file is written. It reports diagnostics and returns
+/// <see langword="null"/> rather than throwing for expected failures.
 /// </para>
 /// <para>
 /// Files are only rewritten when their content changes (or <c>--force</c> is passed), so an unchanged
-/// descriptor and <c>Project.Common</c> leave timestamps and downstream incremental builds alone.
-/// The generator additionally records its inputs and the content hash of both generated files in
-/// <c>obj/bork2d/bake/host-generation.json</c>. When that state, the descriptor, the
-/// <c>Project.Common</c> assembly, the generator version, the configuration, and the output directory
-/// are unchanged and both files still match the recorded content, generation returns
-/// <see cref="HostGenerationResult.Changed"/> false without reading <c>Project.Common</c> metadata.
+/// descriptor, <c>Project.Common</c>, and source-type set leave timestamps and downstream incremental
+/// builds alone. The generator additionally records its inputs and the content hash of both generated
+/// files in <c>obj/bork2d/bake/host-generation.json</c>. When that state, the descriptor, the
+/// <c>Project.Common</c> assembly, the discovered source-type declarations, the generator version,
+/// the configuration, and the output directory are unchanged and both files still match the recorded
+/// content, generation returns <see cref="HostGenerationResult.Changed"/> false without reading
+/// <c>Project.Common</c> metadata.
 /// </para>
 /// </remarks>
 internal static class HostGenerator
@@ -55,6 +60,17 @@ internal static class HostGenerator
             return null;
         }
 
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            descriptor,
+            diagnostics,
+            validateSidecarSyntax: true);
+        if (diagnostics.HasErrors)
+        {
+            return null;
+        }
+
+        string sourceTypesHash = HashSourceTypes(sources);
+
         string commonPath;
         try
         {
@@ -85,6 +101,7 @@ internal static class HostGenerator
                 options,
                 descriptorHash,
                 commonHash,
+                sourceTypesHash,
                 directory,
                 projectPath,
                 manifestPath,
@@ -105,17 +122,27 @@ internal static class HostGenerator
 
         using (resolver)
         {
-            var mapped = new List<BakeMappedType>(descriptor.Types.Count);
-            foreach (ProjectTypeMapping mapping in descriptor.Types)
+            var mapped = new List<BakeMappedType>();
+            var seenTypes = new HashSet<string>(StringComparer.Ordinal);
+            foreach (BakeSource source in sources)
             {
+                if (!seenTypes.Add(source.TypeName))
+                {
+                    continue;
+                }
+
+                string diagnosticPath = BakeDiagnosticPath.ForSource(
+                    descriptor.DescriptorDirectory,
+                    source.FullPath);
+
                 if (!resolver.TryResolve(
-                    mapping.TypeName,
-                    descriptor.DescriptorPath,
+                    source.TypeName,
+                    diagnosticPath,
                     diagnostics,
                     out Type? type,
                     out string? assemblyPath,
-                    mapping.TypeLine,
-                    mapping.TypeColumn))
+                    source.TypeLine,
+                    source.TypeColumn))
                 {
                     continue;
                 }
@@ -123,23 +150,22 @@ internal static class HostGenerator
                 if (!BakeTypeResolver.TryGetCSharpName(
                     type!,
                     diagnostics,
-                    descriptor.DescriptorPath,
+                    diagnosticPath,
                     out string csharpName,
-                    mapping.TypeLine,
-                    mapping.TypeColumn))
+                    source.TypeLine,
+                    source.TypeColumn))
                 {
                     continue;
                 }
 
                 mapped.Add(new BakeMappedType(
-                    mapping.TypeName,
-                    mapping.Prefix,
+                    source.TypeName,
                     csharpName,
                     assemblyPath!,
                     BakeAssetKind.MessagePack));
             }
 
-            if (mapped.Count != descriptor.Types.Count)
+            if (mapped.Count != seenTypes.Count)
             {
                 return null;
             }
@@ -198,6 +224,7 @@ internal static class HostGenerator
                     statePath,
                     descriptorHash,
                     commonHash,
+                    sourceTypesHash,
                     options.Configuration,
                     directory,
                     projectPath,
@@ -220,6 +247,7 @@ internal static class HostGenerator
         HostGenerationOptions options,
         string descriptorHash,
         string commonAssemblyHash,
+        string sourceTypesHash,
         string directory,
         string projectPath,
         string manifestPath,
@@ -237,6 +265,7 @@ internal static class HostGenerator
                 state.CommonAssemblyHash,
                 commonAssemblyHash,
                 StringComparison.Ordinal)
+            || !string.Equals(state.SourceTypesHash, sourceTypesHash, StringComparison.Ordinal)
             || !string.Equals(
                 state.Configuration,
                 options.Configuration,
@@ -267,6 +296,7 @@ internal static class HostGenerator
         string statePath,
         string descriptorHash,
         string commonAssemblyHash,
+        string sourceTypesHash,
         string configuration,
         string directory,
         string projectPath,
@@ -284,6 +314,7 @@ internal static class HostGenerator
             BakeToolInfo.Version,
             descriptorHash,
             commonAssemblyHash,
+            sourceTypesHash,
             configuration,
             directory,
             projectPath,
@@ -291,6 +322,17 @@ internal static class HostGenerator
             generatedHash);
 
         BakeHostGenerationStore.TryWrite(statePath, state, diagnostics);
+    }
+
+    private static string HashSourceTypes(IReadOnlyList<BakeSource> sources)
+    {
+        string[] declarations = new string[sources.Count];
+        for (int i = 0; i < sources.Count; i++)
+        {
+            declarations[i] = sources[i].AssetPath + "=" + sources[i].TypeName;
+        }
+
+        return BakeHash.HashTextFields(declarations);
     }
 
     private static string? TryHashFile(string path)

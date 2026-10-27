@@ -22,21 +22,7 @@ public sealed class ValidateHostCliTests
     [Fact]
     public void ValidSourcesBindWithExitZeroAndNoPack()
     {
-        string project = _fixture.CreateProjectCopy(
-            "valid",
-            ("data/config.toml", """
-                name = "campaign"
-                health = 1
-                must = "m"
-                texture = "textures/player"
-                """),
-            ("sprites/player.toml", """
-                texture = "textures/player"
-                uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
-                scale = 16.0
-                pivot = [0.5, 0.5]
-                topology = "quad"
-                """));
+        string project = _fixture.CreateStandardProject("valid");
 
         string texturePath = Path.Combine(project, "Assets", "textures", "player.png");
         Directory.CreateDirectory(Path.GetDirectoryName(texturePath)!);
@@ -52,7 +38,7 @@ public sealed class ValidateHostCliTests
 
         Assert.Equal(CliApplication.SuccessExitCode, result.ExitCode);
         Assert.Equal(string.Empty, result.Error);
-        Assert.Contains("2 asset(s) bound", result.Output, StringComparison.Ordinal);
+        Assert.Contains("5 asset(s) bound", result.Output, StringComparison.Ordinal);
         Assert.Contains("2 reference site(s)", result.Output, StringComparison.Ordinal);
         Assert.Contains("data/config -> BakeFixture.Common.GameConfig", result.Output, StringComparison.Ordinal);
         Assert.Contains("sprites/player -> Bork2d.Api.Assets.SpriteAsset", result.Output, StringComparison.Ordinal);
@@ -62,9 +48,17 @@ public sealed class ValidateHostCliTests
     [Fact]
     public void SourceErrorsUseExitOneAndTheCanonicalLine()
     {
-        string project = _fixture.CreateProjectCopy(
-            "source-errors",
-            ("data/config.toml", "name = \"campaign\"\nhealth = \"many\"\nbogus = true\n"));
+        string project = _fixture.CreateStandardProject("source-errors");
+        File.WriteAllText(
+            Path.Combine(project, "Assets", "data", "config.toml"),
+            """
+            name = "campaign"
+            health = "many"
+            bogus = true
+
+            [bork2d]
+            type = "BakeFixture.Common.GameConfig"
+            """);
 
         Result result = Run(
             "validate",
@@ -113,10 +107,6 @@ public sealed class ValidateHostCliTests
 
             [assets]
             root = "Assets"
-
-            [[types]]
-            prefix = "data"
-            type = "BakeFixture.Common.GameConfig"
             """);
 
         Result result = Run(
@@ -134,9 +124,16 @@ public sealed class ValidateHostCliTests
     [Fact]
     public void QuietSuppressesTheSummaryButNotDiagnostics()
     {
-        string project = _fixture.CreateProjectCopy(
-            "quiet",
-            ("data/config.toml", "name = \"campaign\"\nhealth = \"many\"\n"));
+        string project = _fixture.CreateStandardProject("quiet");
+        File.WriteAllText(
+            Path.Combine(project, "Assets", "data", "config.toml"),
+            """
+            name = "campaign"
+            health = "many"
+
+            [bork2d]
+            type = "BakeFixture.Common.GameConfig"
+            """);
 
         Result invalid = Run(
             "validate",
@@ -150,9 +147,8 @@ public sealed class ValidateHostCliTests
         Assert.Equal(string.Empty, invalid.Output);
         Assert.Contains("error BK2004:", invalid.Error, StringComparison.Ordinal);
 
-        string validProject = _fixture.CreateProjectCopy(
-            "quiet-valid",
-            ("data/config.toml", "name = \"campaign\"\nhealth = 1\nmust = \"m\"\n"));
+        string validProject = _fixture.CreateStandardProject("quiet-valid");
+        Bork2d.Tests.Bake.Baking.BakeProjectFixture.WriteTexture(validProject);
 
         Result valid = Run(
             "validate",
@@ -186,6 +182,23 @@ public sealed class ValidateHostCliTests
     }
 
     [Fact]
+    public void WithoutAHostMissingSourceTypeIsReported()
+    {
+        string project = _fixture.CreateProjectCopy(
+            "descriptor-missing-type",
+            ("data/notes.toml", "value = 1\n"));
+
+        Result result = Run(
+            "validate",
+            "--project",
+            Path.Combine(project, TempBakeFixture.DescriptorFileName));
+
+        Assert.Equal(CliApplication.DiagnosticsExitCode, result.ExitCode);
+        Assert.Contains("error BK1030:", result.Error, StringComparison.Ordinal);
+        Assert.Contains("Assets/data/notes.toml", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WithoutAHostAbsentReferencesAndValidSyntaxPass()
     {
         string project = _fixture.CreateProjectCopy(
@@ -194,6 +207,9 @@ public sealed class ValidateHostCliTests
                 name = "campaign"
                 health = 1
                 must = "m"
+
+                [bork2d]
+                type = "BakeFixture.Common.GameConfig"
                 """));
 
         Result result = Run(

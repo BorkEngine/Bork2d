@@ -45,7 +45,7 @@ public sealed class ReferenceValidationTests
                 "data/game",
                 "sprites/player",
                 "textures/player",
-                "textures/raw/player",
+                "textures/player-raw",
             },
             index.Entries.Select(entry => entry.Path));
 
@@ -72,7 +72,7 @@ public sealed class ReferenceValidationTests
                 "data/game",
                 _gameConfigType,
                 Reference("texture", "textures/player", target: _textureType),
-                Reference("payload", "textures/raw/player", isData: true),
+                Reference("payload", "textures/player-raw", isData: true),
                 Reference("stats", "roots/stats", target: _statsRootType)),
             Custom("data/absent", _gameConfigType),
             Custom("roots/stats", _statsRootType),
@@ -119,7 +119,7 @@ public sealed class ReferenceValidationTests
     public void AssetReferenceToARawPayloadIsBK3003()
     {
         BakeDiagnostic diagnostic = ValidateSingleError(
-            Reference("texture", "textures/raw/player", target: _textureType),
+            Reference("texture", "textures/player-raw", target: _textureType),
             BakeDiagnosticCodes.ReferenceWrongKind);
 
         Assert.Contains("a MessagePack asset", diagnostic.Message, StringComparison.Ordinal);
@@ -193,14 +193,14 @@ public sealed class ReferenceValidationTests
         var diagnostics = new BakeDiagnostics();
 
         _ = BakedAssetIndex.Build(
-            [Custom("textures/raw/player", _gameConfigType)],
+            [Custom("textures/player-raw", _gameConfigType)],
             [Texture("textures/player")],
             _projectDirectory,
             diagnostics);
 
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
         Assert.Equal(BakeDiagnosticCodes.AssetPathCollision, diagnostic.Code);
-        Assert.Equal("textures/raw/player", diagnostic.AssetPath);
+        Assert.Equal("textures/player-raw", diagnostic.AssetPath);
         Assert.Contains("raw payload", diagnostic.Message, StringComparison.Ordinal);
         Assert.Contains("MessagePack asset", diagnostic.Message, StringComparison.Ordinal);
     }
@@ -283,8 +283,7 @@ public sealed class ReferenceValidationTests
 
     private static BakedTexture Texture(string assetPath)
     {
-        string suffix = assetPath["textures/".Length..];
-        string payloadPath = "textures/raw/" + suffix;
+        string payloadPath = assetPath + "-raw";
         var descriptor = new TextureDescriptor
         {
             Payload = payloadPath,
@@ -300,7 +299,7 @@ public sealed class ReferenceValidationTests
             descriptor,
             payloadPath,
             new byte[16],
-            Path.Combine(_projectDirectory, "Assets", "textures", suffix + ".png"),
+            Path.Combine(_projectDirectory, "Assets", "textures", Path.GetFileName(assetPath) + ".png"),
             TextureImportSettings.Defaults(BakeTextureFilter.Linear, BakeTextureWrap.Clamp));
     }
 }

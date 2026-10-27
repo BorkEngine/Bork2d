@@ -6,13 +6,16 @@ namespace Bork2d.Bake.Incremental;
 /// <remarks>
 /// The state lives next to the bake manifest under <c>obj/bork2d/bake/</c>. It is internal and never
 /// committed. A match requires the descriptor hash, the <c>Project.Common</c> assembly hash, the
-/// generator version, the configuration, the output directory, and the content hash of both generated
-/// files to be unchanged; the caller additionally requires both files to exist.
+/// discovered source-type declaration hash, the generator version, the configuration, the output
+/// directory, and the content hash of both generated files to be unchanged; the caller additionally
+/// requires both files to exist. The source-type hash makes a source path/type addition, removal, or
+/// change regenerate the host even when the descriptor and <c>Project.Common</c> are untouched
+/// (D-M4-13).
 /// </remarks>
 internal sealed class BakeHostGenerationState
 {
     /// <summary>The current state schema version.</summary>
-    internal const int CurrentVersion = 1;
+    internal const int CurrentVersion = 2;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BakeHostGenerationState"/> class.
@@ -21,6 +24,7 @@ internal sealed class BakeHostGenerationState
     /// <param name="generatorVersion">The host generator (tooling) version.</param>
     /// <param name="descriptorHash">The descriptor file hash.</param>
     /// <param name="commonAssemblyHash">The <c>Project.Common</c> assembly hash.</param>
+    /// <param name="sourceTypesHash">The discovered source-type declaration hash.</param>
     /// <param name="configuration">The generated project's default configuration.</param>
     /// <param name="outputDirectory">The absolute host output directory.</param>
     /// <param name="projectPath">The absolute generated project path.</param>
@@ -31,6 +35,7 @@ internal sealed class BakeHostGenerationState
         string generatorVersion,
         string descriptorHash,
         string commonAssemblyHash,
+        string sourceTypesHash,
         string configuration,
         string outputDirectory,
         string projectPath,
@@ -40,6 +45,7 @@ internal sealed class BakeHostGenerationState
         ArgumentNullException.ThrowIfNull(generatorVersion);
         ArgumentNullException.ThrowIfNull(descriptorHash);
         ArgumentNullException.ThrowIfNull(commonAssemblyHash);
+        ArgumentNullException.ThrowIfNull(sourceTypesHash);
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(outputDirectory);
         ArgumentNullException.ThrowIfNull(projectPath);
@@ -50,6 +56,7 @@ internal sealed class BakeHostGenerationState
         GeneratorVersion = generatorVersion;
         DescriptorHash = descriptorHash;
         CommonAssemblyHash = commonAssemblyHash;
+        SourceTypesHash = sourceTypesHash;
         Configuration = configuration;
         OutputDirectory = outputDirectory;
         ProjectPath = projectPath;
@@ -68,6 +75,9 @@ internal sealed class BakeHostGenerationState
 
     /// <summary>Gets the <c>Project.Common</c> assembly hash.</summary>
     internal string CommonAssemblyHash { get; }
+
+    /// <summary>Gets the discovered source-type declaration hash.</summary>
+    internal string SourceTypesHash { get; }
 
     /// <summary>Gets the generated project's default configuration.</summary>
     internal string Configuration { get; }

@@ -43,9 +43,7 @@ public sealed class BakeHostContractTests
 
         var registration = new BakeTypeRegistration(
             "MyGame.Data.GameConfig",
-            "data",
             BakeAssetKind.MessagePack);
-        Assert.Equal("data", registration.SourcePrefix);
         Assert.Equal(BakeAssetKind.MessagePack, registration.Kind);
 
         var site = new BakeReferenceSite(
