@@ -165,8 +165,12 @@ shapes the NativeAOT runtime uses.
   sidecars (`<source>.toml`) remain the minimal authoring-only settings file (D-M4-15). The fixture
   gains `DLC1/data/dlc.toml`, and the AOT smoke mounts the main pack plus `dlc1.pck` and verifies a
   DLC → main texture reference.
-- **Build.** `build/Bork2d.Bake.targets` runs `generate-host` → host build → `bake` after `Build`,
-  copies every declared pack on `Publish`, and cleans the generated host/manifest/packs.
+- **Build (historical, replaced by the post-M4 task).** `build/Bork2d.Bake.targets` ran
+  `generate-host` → host build → `bake` after `Build`, copied every declared pack on `Publish`, and
+  cleaned the generated host/manifest/packs. D-036/D-037/D-038 replaced it with
+  `build/Bork2d.Assets.targets` (assets executable bake/clean) and
+  `build/Bork2d.Assets.Copy.targets` (out-of-process assets build + pack copy); there is no
+  generated host or host state in the current flow.
 
 Exit (demonstrated): a source tree bakes and packs; the header is compressed/checksummed; invalid
 source fails with file/line diagnostics and does not replace the pack; the runtime loads with

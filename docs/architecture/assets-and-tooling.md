@@ -357,13 +357,13 @@ and pivot.
   path. v1 draws `Quad` only; non-Quad assets are never silently treated as quads.
 - **Public shape.** `SpriteAsset` is a public `[GenerateShape]` class in `Bork2d.Api.Assets`.
   `PackBuilder` validates a non-null `Texture` reference exists and targets a MessagePack entry.
-  The loader does not validate UVs, scale, pivot, topology, or indices, and neither does the M4
-  baker: a data TOML declaring `type = "Bork2d.Api.Assets.SpriteAsset"` in `[bork2d]` is baked as
-  ordinary custom data, so an invalid sprite value can bake in M4. M5 adds sprite field validation
-  and slicing (D-M4-06).
-- M4 bakes the MessagePack form from TOML; the M5 editor writes TOML and adds slicing. The renderer
-  resolves sprite asset → descriptor → payload → GPU page; tint, layer, z-index, and transform stay
-  on the renderable. `ISpriteRender.Sprite` holds a loaded `SpriteAsset?` directly.
+  The loader does not validate UVs, scale, pivot, topology, or indices, and the bake tooling does
+  not either: a data TOML declaring `type = "Bork2d.Api.Assets.SpriteAsset"` in `[bork2d]` is baked
+  as ordinary custom data, so an invalid sprite value can bake. M5 adds sprite field validation and
+  slicing (D-M4-06).
+- The bake tooling bakes the MessagePack form from TOML; the M5 editor writes TOML and adds slicing.
+  The renderer resolves sprite asset → descriptor → payload → GPU page; tint, layer, z-index, and
+  transform stay on the renderable. `ISpriteRender.Sprite` holds a loaded `SpriteAsset?` directly.
 
 ## 10. TOML source model
 

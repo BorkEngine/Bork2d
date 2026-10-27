@@ -615,7 +615,7 @@ These naming/mechanical choices were settled in WP1–WP5; they do not change th
 
 - [File-processors implementation spec](../specs/file-processors.md) — locked scope, API,
   work packages, tests, and acceptance criteria.
-- [Assets and tooling](assets-and-tooling.md) — pack, VFS, asset model, current M4 bake text.
+- [Assets and tooling](assets-and-tooling.md) — pack, VFS, asset model, as-built bake text.
 - [Projects and dependencies](projects.md) — project graph and game layout.
 - [API guide](../api/guide.md) and [API reference](../api/reference.md) — builder/processor usage.
 - [M4 spec](../specs/m4-serialization-and-bake.md) — historical M4 record and as-built evidence.
