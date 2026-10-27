@@ -1,4 +1,4 @@
-texture = "textures/player"
+texture = "art/player"
 uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
 scale = 16.0
 pivot = [0.5, 0.5]

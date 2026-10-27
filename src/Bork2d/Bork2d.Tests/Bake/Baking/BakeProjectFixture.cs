@@ -20,9 +20,10 @@ public sealed class BakeProjectFixtureCollection : ICollectionFixture<BakeProjec
 /// <summary>
 /// A complete temporary game project whose <c>Project.Common</c> is the real
 /// <c>Bork2d.BakeFixture.dll</c>: a class root with a <c>Color</c>, a nested struct, and a texture
-/// reference; a <c>StatsRoot</c> struct root; a <c>SpriteAsset</c>; and a generated PNG with an
-/// import sidecar. The generated host is built with the pinned SDK and loaded through the production
-/// loader. No binary fixture is committed.
+/// reference; a <c>StatsRoot</c> struct root; a <c>SpriteAsset</c>; and a test-written PNG under the
+/// arbitrary <c>art/</c> folder with an import sidecar. The generated host is built with the pinned
+/// SDK and loaded through the production loader. The image is generated in the temp project; no
+/// binary test fixture is committed.
 /// </summary>
 public sealed class BakeProjectFixture : IDisposable
 {
@@ -38,13 +39,13 @@ public sealed class BakeProjectFixture : IDisposable
     /// <summary>The canonical sprite asset path.</summary>
     internal const string SpritePath = "sprites/player";
 
-    /// <summary>The canonical texture descriptor path.</summary>
-    internal const string TexturePath = "textures/player";
+    /// <summary>The canonical texture descriptor path (arbitrary <c>art/</c> location).</summary>
+    internal const string TexturePath = "art/player";
 
     /// <summary>The canonical raw texture payload path.</summary>
-    internal const string TexturePayloadPath = "textures/player-raw";
+    internal const string TexturePayloadPath = "art/player-raw";
 
-    /// <summary>The exact RGBA8 payload the generated PNG decodes to.</summary>
+    /// <summary>The exact RGBA8 payload the test-generated PNG decodes to.</summary>
     internal static readonly byte[] ExpectedTexturePayload =
     [
         255, 0, 0, 255,
@@ -75,7 +76,7 @@ public sealed class BakeProjectFixture : IDisposable
         max_players = 4
         must = "present"
         tint = [1.0, 0.5, 0.25, 1.0]
-        texture = "textures/player"
+        texture = "art/player"
 
         [stats]
         attack = 3
@@ -94,7 +95,7 @@ public sealed class BakeProjectFixture : IDisposable
         """;
 
     private const string SpriteToml = """
-        texture = "textures/player"
+        texture = "art/player"
         uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
         scale = 16.0
         pivot = [0.5, 0.5]
@@ -129,12 +130,12 @@ public sealed class BakeProjectFixture : IDisposable
         WriteFile("Assets/roots/stats.toml", StatsToml);
         WriteFile("Assets/sprites/player.toml", SpriteToml);
         WriteFile(
-            "Assets/textures/player.png.toml",
+            "Assets/art/player.png.toml",
             """
             filter = "nearest"
             wrap = "repeat"
             """);
-        WriteBytes("Assets/textures/player.png", TextureImageFactory.RgbaPng());
+        WriteBytes("Assets/art/player.png", TextureImageFactory.RgbaPng());
 
         var generationDiagnostics = new BakeDiagnostics();
         var options = new HostGenerationOptions(
@@ -299,10 +300,10 @@ public sealed class BakeProjectFixture : IDisposable
         File.WriteAllBytes(fullPath, bytes);
     }
 
-    /// <summary>Writes the generated fixture texture into a project copy.</summary>
+    /// <summary>Writes the test-generated fixture texture into a project copy.</summary>
     /// <param name="projectDirectory">The project copy returned by <see cref="CreateProject"/>.</param>
     internal static void WriteTexture(string projectDirectory)
-        => WriteAssetBytes(projectDirectory, "textures/player.png", TextureImageFactory.RgbaPng());
+        => WriteAssetBytes(projectDirectory, "art/player.png", TextureImageFactory.RgbaPng());
 
     /// <summary>Writes every standard fixture data source and sidecar into a project copy.</summary>
     /// <param name="projectDirectory">The project copy returned by <see cref="CreateProject"/>.</param>
@@ -313,7 +314,7 @@ public sealed class BakeProjectFixture : IDisposable
         WriteAsset(projectDirectory, "sprites/player.toml", SpriteToml);
         WriteAsset(
             projectDirectory,
-            "textures/player.png.toml",
+            "art/player.png.toml",
             """
             filter = "nearest"
             wrap = "repeat"

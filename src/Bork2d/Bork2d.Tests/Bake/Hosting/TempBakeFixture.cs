@@ -170,7 +170,7 @@ public sealed class TempBakeFixture : IDisposable
             max_players = 4
             must = "present"
             tint = [1.0, 0.5, 0.25, 1.0]
-            texture = "textures/player"
+            texture = "art/player"
 
             [stats]
             attack = 1
@@ -200,7 +200,7 @@ public sealed class TempBakeFixture : IDisposable
             type = "Game.Data.Weapon"
             """),
         ("sprites/player.toml", """
-            texture = "textures/player"
+            texture = "art/player"
             uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
             scale = 16.0
             pivot = [0.5, 0.5]
@@ -210,7 +210,7 @@ public sealed class TempBakeFixture : IDisposable
             [bork2d]
             type = "Bork2d.Api.Assets.SpriteAsset"
             """),
-        ("textures/player.png.toml", """
+        ("art/player.png.toml", """
             filter = "nearest"
             """),
     ];

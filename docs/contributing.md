@@ -1,8 +1,8 @@
 # Contributing
 
 > **Status:** current through M3 plus the D-035 asset-reference refactor (merged, PR #6) and M4
-> serialization/bake (implementation complete on `m-4/common`; the owner D-M4-13 revision is in
-> progress on `m-4/fix-1`; PR pending). The
+> serialization/bake (implementation complete on `m-4/common`; the owner D-M4-13 revision is
+> complete on `m-4/fix-2`; PR #7 is open and not merged). The
 > warning/style/format/AOT gates and the docs link check are active. CI runs docs link check, build,
 > tests, and format verification on PRs to `develop` and pushes to `develop`; the NativeAOT
 > publish/run smoke (headless loading the **baked fixture pack**, and windowed) is a required local
@@ -40,7 +40,10 @@ tests, the path/VFS/browse/contract tests, the loader/threading and error-contra
 pack-time reference validation, the public asset-reference/pack-build contracts, the runtime asset
 lifecycle/error-matrix tests, the M4 bake pipeline (descriptor, host generation/load, TOML binder,
 textures, references, pack composition, determinism), and the M4 incremental/MSBuild tests. They
-build packs in memory or in temp files and use **no committed binary fixtures**. Run only the
+build packs in memory or in temp files, generate their own test images, and use **no committed
+binary test/pack fixtures**. The only committed image is the bake fixture's
+`Bork2d.BakeFixture/Assets/art/player.png` source asset, which the MSBuild targets copy and bake and
+which is not a test pack or generated output. Run only the
 asset/pack tests with:
 
 ```powershell
@@ -78,12 +81,14 @@ $smoke = 'src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.
 ```
 
 The publish must report zero AOT/trim warnings and contain `assets.pck` and `SDL2.dll`. The AOT smoke
-imports [`build/Bork2d.Bake.targets`](../build/Bork2d.Bake.targets), so its build generates the bake
-host and bakes the prepared `Bork2d.BakeFixture` pack to `$(TargetDir)assets.pck` and copies it next
-to the published executable. The default headless run mounts that pack from
-`AppContext.BaseDirectory` (not the process CWD) and exits `0` only when the scene, the baked class
-root (nested struct/`Color`/texture reference), the `StatsRoot` through `AssetRef<StatsRoot>`, the
-sprite, the descriptor, the exact raw payload, browse/exists, and the 5-entry count all pass. The
+imports [`build/Bork2d.Bake.targets`](../build/Bork2d.Bake.targets), so its build copies the
+committed `Bork2d.BakeFixture` `Assets/**` tree (including the fixture source PNG
+`Assets/art/player.png`), generates the bake host, bakes the prepared fixture pack to
+`$(TargetDir)assets.pck`, and copies it next to the published executable. The default headless run
+mounts that pack from `AppContext.BaseDirectory` (not the process CWD) and exits `0` only when the
+scene, the baked class root (nested struct/`Color`/texture reference), the `StatsRoot` through
+`AssetRef<StatsRoot>`, the sprite referencing `art/player`, the `art/player` descriptor, the exact
+`art/player-raw` payload, browse/exists, and the 5-entry count all pass. The
 windowed run uses `WithoutAssets()`, so it needs a desktop session but no pack; it asserts one
 `Setup`, exactly `N` ticks, and one `Teardown`. The interactive `--windowed` run is the manual
 visibility/input check. Inspect the publish directory: it is a NativeAOT single-file output plus
@@ -140,9 +145,11 @@ public API; do not remove it.
 
 - Add unit tests with behavior changes; pack/format tests for asset changes; threading tests for
   handoff changes; GPU/visual tests for renderer changes. Asset/pack tests build packs in memory or
-  in temp files (`PackBuilder`/`TempPackDirectory`) and never commit binary fixtures; the bake tests
-  generate their own source trees and textures, and the default AOT smoke loads the pack baked by
-  the targets (no committed binary fixture). Asset-loader tests are deterministic: they use a narrow
+  in temp files (`PackBuilder`/`TempPackDirectory`) and never commit binary **test/pack** fixtures;
+  the bake tests generate their own source trees and textures in temp directories, and the default
+  AOT smoke loads the pack baked by the targets. The one committed image is the bake fixture's
+  `Assets/art/player.png` source asset (an authoring input, not a test pack or generated output).
+  Asset-loader tests are deterministic: they use a narrow
   internal hook plus bounded signals/joins (no sleeps, retries, or timing assertions) to prove FIFO
   order, asynchronous completion, and shutdown cancellation.
 - Real-window tests use `[WindowFact]`, are skipped without `BORK2D_RUN_WINDOW_TESTS=1`, share the

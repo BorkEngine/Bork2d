@@ -22,7 +22,7 @@ public sealed class BakeIncrementalCliTests
         max_players = 4
         must = "present"
         tint = [1.0, 0.5, 0.25, 1.0]
-        texture = "textures/player"
+        texture = "art/player"
 
         [stats]
         attack = 3
@@ -41,7 +41,7 @@ public sealed class BakeIncrementalCliTests
         """;
 
     private const string SpriteToml = """
-        texture = "textures/player"
+        texture = "art/player"
         uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
         scale = 16.0
         pivot = [0.5, 0.5]
@@ -59,20 +59,20 @@ public sealed class BakeIncrementalCliTests
 
     private static readonly string[] _expectedInputs =
     [
+        "Assets/art/player.png",
+        "Assets/art/player.png.toml",
         "Assets/data/game.toml",
         "Assets/roots/stats.toml",
         "Assets/sprites/player.toml",
-        "Assets/textures/player.png",
-        "Assets/textures/player.png.toml",
     ];
 
     private static readonly string[] _expectedEntries =
     [
+        BakeProjectFixture.TexturePath,
+        BakeProjectFixture.TexturePayloadPath,
         BakeProjectFixture.GamePath,
         BakeProjectFixture.StatsPath,
         BakeProjectFixture.SpritePath,
-        BakeProjectFixture.TexturePath,
-        BakeProjectFixture.TexturePayloadPath,
     ];
 
     private readonly BakeProjectFixture _fixture;
@@ -163,7 +163,7 @@ public sealed class BakeIncrementalCliTests
 
         BakeProjectFixture.WriteAssetBytes(
             project,
-            "textures/player.png",
+            "art/player.png",
             TextureImageFactory.GrayscalePng());
 
         Result result = Bake(project, pack);
@@ -407,7 +407,7 @@ public sealed class BakeIncrementalCliTests
         BakeProjectFixture.WriteAsset(project, "data/game.toml", GameToml);
         BakeProjectFixture.WriteAsset(project, "roots/stats.toml", StatsToml);
         BakeProjectFixture.WriteAsset(project, "sprites/player.toml", SpriteToml);
-        BakeProjectFixture.WriteAsset(project, "textures/player.png.toml", SidecarToml);
+        BakeProjectFixture.WriteAsset(project, "art/player.png.toml", SidecarToml);
         BakeProjectFixture.WriteTexture(project);
         return (project, Path.Combine(project, "out", "assets.pck"));
     }

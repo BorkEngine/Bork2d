@@ -58,14 +58,14 @@ public sealed class BakeSourceBinderTests
         Assert.Equal("BakeFixture.Common.GameConfig", gameConfig.GetType().FullName);
         BakeReferenceSite texture = Assert.Single(config.References);
         Assert.Equal("texture", texture.MemberPath);
-        Assert.Equal("textures/player", texture.ReferencePath);
+        Assert.Equal("art/player", texture.ReferencePath);
         Assert.False(texture.IsData);
         Assert.Equal(typeof(TextureDescriptor).FullName, texture.TargetTypeName);
         Assert.Equal(6, texture.Line);
 
         BoundAsset sprite = assets.Single(asset => asset.AssetPath == "sprites/player");
         var spriteAsset = Assert.IsType<SpriteAsset>(sprite.Value);
-        Assert.Equal("textures/player", spriteAsset.Texture.Path);
+        Assert.Equal("art/player", spriteAsset.Texture.Path);
         Assert.Equal(16f, spriteAsset.Scale);
         Assert.Equal(SpriteTopology.Triangles, spriteAsset.Topology);
         Assert.Equal(new ushort[] { 0, 1, 2, 0, 2, 3 }, spriteAsset.Indices);
@@ -162,12 +162,12 @@ public sealed class BakeSourceBinderTests
     {
         string project = _fixture.CreateProjectCopy(
             "sidecar",
-            ("textures/player.png.toml", "filter = \"nearest\"\n"),
+            ("art/player.png.toml", "filter = \"nearest\"\n"),
             ("data/config.toml", """
                 name = "campaign"
                 health = 1
                 must = "m"
-                texture = "textures/player"
+                texture = "art/player"
 
                 [bork2d]
                 type = "BakeFixture.Common.GameConfig"

@@ -10,13 +10,15 @@ namespace Bork2d.AotSmoke.Smoke;
 /// default NativeAOT smoke run loads.
 /// </summary>
 /// <remarks>
-/// The pack is produced by the imported <c>build/Bork2d.Bake.targets</c> from the committed
-/// <c>Bork2d.BakeFixture</c> asset tree and contains exactly five entries: <c>data/game</c>, the
-/// <c>roots/stats</c> struct root, <c>sprites/player</c>, <c>textures/player</c>, and the raw
-/// <c>textures/player-raw</c> payload. The smoke opens it with
+/// The pack is produced by the imported <c>build/Bork2d.Bake.targets</c> from the fixture's
+/// committed <c>Bork2d.BakeFixture</c> asset tree and contains exactly five entries:
+/// <c>data/game</c>, the <c>roots/stats</c> struct root, <c>sprites/player</c>, <c>art/player</c>,
+/// and the raw <c>art/player-raw</c> payload. The smoke opens it with
 /// <see cref="Path.Combine(string, string)"/> on <see cref="AppContext.BaseDirectory"/>, so the
 /// published executable reads the pack next to itself instead of building a temporary pack or
-/// depending on the process current directory. No binary fixture is committed.
+/// depending on the process current directory. The fixture's <c>Assets/art/player.png</c> is a
+/// committed fixture <em>source asset</em>; test packs and test images stay generated in temp
+/// directories (no committed test/pack binary fixture).
 /// </remarks>
 internal static class AssetSmoke
 {
@@ -33,10 +35,10 @@ internal static class AssetSmoke
     internal const string SpritePath = "sprites/player";
 
     /// <summary>The canonical path of the baked texture descriptor.</summary>
-    internal const string TexturePath = "textures/player";
+    internal const string TexturePath = "art/player";
 
     /// <summary>The canonical path of the baked raw texture payload.</summary>
-    internal const string TexturePayloadPath = "textures/player-raw";
+    internal const string TexturePayloadPath = "art/player-raw";
 
     /// <summary>The exact entry count of the baked fixture pack.</summary>
     internal const int EntryCount = 5;
@@ -105,7 +107,7 @@ internal static class AssetSmoke
     internal const string TextureWrap = "repeat";
 
     /// <summary>
-    /// The exact 2x2 RGBA8 payload the baked <c>textures/player-raw</c> entry stores: red opaque,
+    /// The exact 2x2 RGBA8 payload the baked <c>art/player-raw</c> entry stores: red opaque,
     /// green half transparent, blue quarter transparent, white fully transparent.
     /// </summary>
     internal static ReadOnlySpan<byte> TexturePayload =>

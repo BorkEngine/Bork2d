@@ -374,7 +374,7 @@ IReadOnlyList<AssetInfo> sprites = _engine.Assets.Browse("sprites");
 // Typed assets need a compiled shape; raw bytes use LoadData.
 GameConfig config = await _engine.Assets.LoadAsset<GameConfig>("data/config");
 LevelTuning tuning = await _engine.Assets.LoadAsset<LevelTuning>("data/level-tuning");
-byte[] pixels = await _engine.Assets.LoadData("textures/player-raw");
+byte[] pixels = await _engine.Assets.LoadData("art/player-raw");
 
 // Sprites are normal public assets; reference links are typed path values.
 SpriteAsset player = await _engine.Assets.LoadAsset<SpriteAsset>("sprites/player/idle");
@@ -478,7 +478,7 @@ health = 120
 max_players = 4          # [JsonPropertyName("max_players")]
 must = "present"         # [JsonRequired]
 tint = [1.0, 0.5, 0.25, 1.0]
-texture = "textures/player"
+texture = "art/player"
 
 [bork2d]
 type = "MyGame.Data.GameConfig"
@@ -514,7 +514,7 @@ the editor use it to produce the runtime packs the app loads. Game code must not
 using Bork2d.Assets.Pack;
 
 var builder = new PackBuilder(PackCompressionMode.Release);
-builder.AddRaw("textures/player-raw", rgba8Bytes);
+builder.AddRaw("art/player-raw", rgba8Bytes);
 builder.AddMessagePack("data/config", new GameConfig { /* [GenerateShape] type */ });
 builder.Write("assets.pck"); // overwrites; relative paths resolve against the current directory
 ```
