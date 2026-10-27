@@ -143,8 +143,8 @@ public interface IAssetProcessor
 {
     string Name { get; }                          // stable; defaults to the CLR full name
     IReadOnlyList<string> Extensions { get; }     // "png" / ".PNG" both accepted
-    SidecarPolicy SidecarPolicy { get; }          // None | Optional | Required
-    ITypeShape? SidecarShape { get; }             // null when SidecarPolicy is None
+    SidecarPolicy Policy { get; }                 // None | Optional | Required
+    ITypeShape? SidecarShape { get; }             // null when Policy is None
     void Process(AssetProcessorContext context);
 }
 
@@ -152,7 +152,7 @@ public abstract class AssetProcessor<TSidecar> : IAssetProcessor
     where TSidecar : IShapeable<TSidecar>
 {
     public ITypeShape SidecarShape => TSidecar.GetTypeShape();
-    public abstract SidecarPolicy SidecarPolicy { get; }   // Optional or Required
+    public abstract SidecarPolicy Policy { get; }   // Optional or Required
     protected abstract void Process(AssetProcessorContext context, TSidecar sidecar);
     protected virtual TSidecar CreateDefaultSidecar(AssetProcessorContext context)
         => throw new NotSupportedException("This processor has no default sidecar.");

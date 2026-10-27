@@ -561,7 +561,7 @@ public sealed partial class UnitSidecar
 public sealed class UnitProcessor : AssetProcessor<UnitSidecar>
 {
     public override IReadOnlyList<string> Extensions => ["unit"];
-    public override SidecarPolicy SidecarPolicy => SidecarPolicy.Optional;
+    public override SidecarPolicy Policy => SidecarPolicy.Optional;
 
     protected override void Process(AssetProcessorContext context, UnitSidecar sidecar)
     {
