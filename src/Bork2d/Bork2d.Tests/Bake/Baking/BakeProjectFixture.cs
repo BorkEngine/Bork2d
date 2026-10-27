@@ -1,6 +1,5 @@
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Builder;
-using Bork2d.Bake.Builder.Processors;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Textures;
 using Xunit;

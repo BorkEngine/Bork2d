@@ -1,7 +1,6 @@
 using System.Reflection;
 using Bork2d.Assets.Pack;
 using Bork2d.Bake.Builder;
-using Bork2d.Bake.Builder.Processors;
 using Bork2d.Tests.TestSupport;
 using Xunit;
 
@@ -200,14 +199,14 @@ public sealed class DependencyMatrixTests
         Assert.Equal(
             new[]
             {
+                "Bork2d.Bake.Builder.AssetProcessorContext",
+                "Bork2d.Bake.Builder.AssetProcessor`1",
                 "Bork2d.Bake.Builder.BakeApplication",
                 "Bork2d.Bake.Builder.BakeApplicationBuilder",
-                "Bork2d.Bake.Builder.Processors.AssetProcessorContext",
-                "Bork2d.Bake.Builder.Processors.AssetProcessor`1",
-                "Bork2d.Bake.Builder.Processors.IAssetOutputSink",
-                "Bork2d.Bake.Builder.Processors.IAssetProcessor",
-                "Bork2d.Bake.Builder.Processors.IAssetProcessorDiagnostics",
-                "Bork2d.Bake.Builder.Processors.SidecarPolicy",
+                "Bork2d.Bake.Builder.IAssetOutputSink",
+                "Bork2d.Bake.Builder.IAssetProcessor",
+                "Bork2d.Bake.Builder.IAssetProcessorDiagnostics",
+                "Bork2d.Bake.Builder.SidecarPolicy",
                 "Bork2d.Bake.Builder.TextureFilter",
                 "Bork2d.Bake.Builder.TextureWrap",
             },
@@ -239,7 +238,7 @@ public sealed class DependencyMatrixTests
 
                 string ns = type.Namespace ?? string.Empty;
                 Assert.True(
-                    ns is "Bork2d.Bake.Builder" or "Bork2d.Bake.Builder.Processors",
+                    ns is "Bork2d.Bake.Builder",
                     $"'{exported.FullName}' exposes the internal type '{type.FullName}'.");
             }
         }

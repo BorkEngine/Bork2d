@@ -1,6 +1,6 @@
 using PolyType;
 
-namespace Bork2d.Bake.Builder.Processors;
+namespace Bork2d.Bake.Builder;
 
 /// <summary>
 /// The public processor contract: a source type with an extension set, an optional settings sidecar,

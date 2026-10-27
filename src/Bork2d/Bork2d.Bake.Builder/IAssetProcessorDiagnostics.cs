@@ -1,4 +1,4 @@
-namespace Bork2d.Bake.Builder.Processors;
+namespace Bork2d.Bake.Builder;
 
 /// <summary>
 /// The diagnostic sink a processor uses while processing one source.

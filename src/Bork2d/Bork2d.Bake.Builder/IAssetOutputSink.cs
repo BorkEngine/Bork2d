@@ -1,4 +1,4 @@
-namespace Bork2d.Bake.Builder.Processors;
+namespace Bork2d.Bake.Builder;
 
 /// <summary>
 /// The sink a processor uses to emit its outputs for one source.

@@ -1,7 +1,8 @@
+using Bork2d.Bake.Builder.Processors;
 using Bork2d.Bake.Processors;
 using PolyType;
 
-namespace Bork2d.Bake.Builder.Processors;
+namespace Bork2d.Bake.Builder;
 
 /// <summary>
 /// The required-sidecar processor base: a processor whose settings are bound from

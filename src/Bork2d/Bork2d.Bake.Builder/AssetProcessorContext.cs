@@ -1,4 +1,4 @@
-namespace Bork2d.Bake.Builder.Processors;
+namespace Bork2d.Bake.Builder;
 
 /// <summary>
 /// The per-source state handed to a processor: the resolved paths and the output/diagnostic sinks.
