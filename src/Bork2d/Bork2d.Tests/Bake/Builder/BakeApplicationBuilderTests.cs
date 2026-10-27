@@ -1,7 +1,7 @@
-using Bork2d.Api.Assets;
-using Bork2d.Bake.Builder;
+using Bork2d.Bake;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Textures;
+using Bork2d.Engine.Assets;
 using PolyType;
 using Xunit;
 
@@ -50,7 +50,7 @@ public sealed class BakeApplicationBuilderTests
         Assert.Equal(2, project.Processors.Count);
         Assert.Equal("texture", project.Processors[0].Name);
         Assert.Equal("fake", project.Processors[1].Name);
-        Assert.Contains("Bork2d.Api.Assets.SpriteAsset", project.AssetTypes.Keys);
+        Assert.Contains("Bork2d.Engine.Assets.SpriteAsset", project.AssetTypes.Keys);
         Assert.Contains("Bork2d.BakeFixture.GameConfig", project.AssetTypes.Keys);
         Assert.Contains("Bork2d.BakeFixture.StatsRoot", project.AssetTypes.Keys);
     }
@@ -170,7 +170,7 @@ public sealed class BakeApplicationBuilderTests
 
         Assert.NotNull(project);
         Assert.Empty(diagnostics.GetSorted());
-        Assert.Contains("Bork2d.Api.Assets.SpriteAsset", project.AssetTypes.Keys);
+        Assert.Contains("Bork2d.Engine.Assets.SpriteAsset", project.AssetTypes.Keys);
     }
 
     [Fact]
@@ -182,7 +182,7 @@ public sealed class BakeApplicationBuilderTests
             .WithProjectRoot(directory.RootPath)
             .WithPack("assets.pck", "Assets")
             .UseDefaultAssets()
-            .RegisterAsset<Bork2d.Api.Assets.SpriteAsset>();
+            .RegisterAsset<Bork2d.Engine.Assets.SpriteAsset>();
 
         AssertConfigError(builder, BakeDiagnosticCodes.AssetTypeDuplicate);
     }

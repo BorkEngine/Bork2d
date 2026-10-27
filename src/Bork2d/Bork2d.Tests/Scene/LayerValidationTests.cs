@@ -1,5 +1,5 @@
-using Bork2d.Api;
-using Bork2d.Common.Scene;
+using Bork2d.Engine;
+using Bork2d.Engine.Scene;
 using Bork2d.Tests.TestDoubles;
 using Xunit;
 
@@ -61,7 +61,7 @@ public sealed class LayerValidationTests
     {
         var exception = Assert.Throws<Bork2dException>(() =>
         {
-            _ = new Engine<CompositeLayers>(
+            _ = new GameEngine<CompositeLayers>(
                 new FakeTime(),
                 new FakeWindow(),
                 new FakeAssets());

@@ -14,7 +14,7 @@ internal static class RepositoryPaths
 
     /// <summary>Gets the fixture assets executable project directory.</summary>
     internal static string FixtureAssetsProjectDirectory
-        => Path.Combine(Root, "src", "Bork2d", "Bork2d.BakeFixture.Assets");
+        => Path.Combine(Root, "examples", "Bork2d.BakeFixture.Assets");
 
     /// <summary>Gets the built fixture assets executable assembly path.</summary>
     internal static string FixtureAssetsExecutable

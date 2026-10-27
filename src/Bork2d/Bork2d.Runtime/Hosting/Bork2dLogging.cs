@@ -26,10 +26,10 @@ internal static class Bork2dLogging
     internal const string RuntimeCategory = "Bork2d.Runtime";
 
     /// <summary>The category for entities, snapshots, and time messages.</summary>
-    internal const string CommonCategory = "Bork2d.Common";
+    internal const string CommonCategory = "Bork2d.Engine";
 
     /// <summary>The category for pack, decompression, and loading messages.</summary>
-    internal const string AssetsCategory = "Bork2d.Assets";
+    internal const string AssetsCategory = "Bork2d.Engine.Assets";
 
     /// <summary>The category for device, swapchain, pipeline, and frame messages.</summary>
     internal const string RenderCategory = "Bork2d.Render";

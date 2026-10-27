@@ -1,7 +1,7 @@
-using Bork2d.Api.Assets;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Processors;
 using Bork2d.Bake.Textures;
+using Bork2d.Engine.Assets;
 using PolyType;
 
 namespace Bork2d.Bake.Baking;
@@ -86,7 +86,7 @@ internal sealed class BakeProjectDefinition
                 + "RegisterAsset<T>() exactly once per type.");
     }
 
-    /// <summary>Registers <c>Bork2d.Api.Assets.SpriteAsset</c>; idempotent.</summary>
+    /// <summary>Registers <c>Bork2d.Engine.Assets.SpriteAsset</c>; idempotent.</summary>
     internal void UseDefaultAssets()
     {
         string spriteTypeName = typeof(SpriteAsset).FullName

@@ -1,12 +1,6 @@
 <Solution>
-  <Project Path="Bork2d.Api/Bork2d.Api.csproj" />
-  <Project Path="Bork2d.AotSmoke/Bork2d.AotSmoke.csproj" />
-  <Project Path="Bork2d.Assets/Bork2d.Assets.csproj" />
   <Project Path="Bork2d.Bake/Bork2d.Bake.csproj" />
-  <Project Path="Bork2d.Bake.Builder/Bork2d.Bake.Builder.csproj" />
-  <Project Path="Bork2d.BakeFixture/Bork2d.BakeFixture.csproj" />
-  <Project Path="Bork2d.BakeFixture.Assets/Bork2d.BakeFixture.Assets.csproj" />
-  <Project Path="Bork2d.Common/Bork2d.Common.csproj" />
+  <Project Path="Bork2d.Engine/Bork2d.Engine.csproj" />
   <Project Path="Bork2d.Render/Bork2d.Render.csproj" />
   <Project Path="Bork2d.Runtime/Bork2d.Runtime.csproj" />
   <Project Path="Bork2d.Tests/Bork2d.Tests.csproj" />

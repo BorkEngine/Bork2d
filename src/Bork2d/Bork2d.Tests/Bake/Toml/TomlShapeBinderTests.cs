@@ -1,8 +1,8 @@
 using System.Numerics;
-using Bork2d.Api.Assets;
-using Bork2d.Api.Rendering;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Sources;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Rendering;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Toml;

@@ -1,5 +1,5 @@
-using Bork2d.Api.Assets;
-using Bork2d.Common.Scene;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Scene;
 
 namespace Bork2d.Render;
 
@@ -12,5 +12,5 @@ internal static class AssemblyReferenceAnchor
 
     internal static Type CommonImplementation => typeof(Transform);
 
-    internal static Type AssetsImplementation => typeof(Bork2d.Assets.Pack.PackBuilder);
+    internal static Type AssetsImplementation => typeof(Bork2d.Engine.Assets.Pack.PackBuilder);
 }

@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Bork2d.Common.Time;
+using Bork2d.Engine.Time;
 using Xunit;
 
 namespace Bork2d.Tests.Runtime;

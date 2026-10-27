@@ -1,5 +1,5 @@
-using Bork2d.Api.Rendering;
-using Bork2d.Common.Serialization;
+using Bork2d.Engine.Rendering;
+using Nerdbank.MessagePack;
 using PolyType;
 using Xunit;
 
@@ -7,10 +7,12 @@ namespace Bork2d.Tests.Runtime;
 
 public sealed class MessagePackShapeTests
 {
+    private static readonly MessagePackSerializer _serializer = new();
+
     [Fact]
     public void GeneratedShapeRoundTripsTheSmokeDocument()
     {
-        var original = new MessagePackSmokeData
+        var original = new SmokeShapeData
         {
             Name = "generated-shape",
             Value = 42,
@@ -18,8 +20,10 @@ public sealed class MessagePackShapeTests
             Tint = new Color(1f, 0.5f, 0.25f, 1f),
         };
 
-        var roundTripped = MessagePackSmokeSerializer.RoundTrip(original);
+        byte[] payload = _serializer.Serialize(original);
+        var roundTripped = _serializer.Deserialize<SmokeShapeData>(payload);
 
+        Assert.NotNull(roundTripped);
         Assert.NotSame(original, roundTripped);
         Assert.Equal(original.Name, roundTripped.Name);
         Assert.Equal(original.Value, roundTripped.Value);
@@ -30,7 +34,7 @@ public sealed class MessagePackShapeTests
     [Fact]
     public void SmokeTypeCarriesTheSourceGeneratedShape()
     {
-        var shapeable = typeof(MessagePackSmokeData).GetInterfaces()
+        var shapeable = typeof(SmokeShapeData).GetInterfaces()
             .Where(candidate => candidate.IsGenericType)
             .Select(candidate => candidate.GetGenericTypeDefinition())
             .ToArray();
@@ -41,8 +45,8 @@ public sealed class MessagePackShapeTests
     [Fact]
     public void ColorMemberUsesTheMarshalerSurrogate()
     {
-        byte[] payload = MessagePackSmokeSerializer.Serialize(
-            new MessagePackSmokeData
+        byte[] payload = _serializer.Serialize(
+            new SmokeShapeData
             {
                 Name = "surrogate",
                 Tint = new Color(1f, 0.5f, 0.25f, 1f),
@@ -57,8 +61,8 @@ public sealed class MessagePackShapeTests
     [Fact]
     public void SerializedPayloadIsANonEmptyMessagePackValue()
     {
-        var payload = MessagePackSmokeSerializer.Serialize(
-            new MessagePackSmokeData { Name = "payload", Value = 7, Scale = 2f });
+        byte[] payload = _serializer.Serialize(
+            new SmokeShapeData { Name = "payload", Value = 7, Scale = 2f });
 
         Assert.NotEmpty(payload);
         Assert.NotEqual(0, payload[0] & 0x80);

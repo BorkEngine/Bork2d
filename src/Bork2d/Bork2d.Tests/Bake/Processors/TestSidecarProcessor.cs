@@ -1,4 +1,4 @@
-using Bork2d.Bake.Builder;
+using Bork2d.Bake;
 
 namespace Bork2d.Tests.Bake.Processors;
 

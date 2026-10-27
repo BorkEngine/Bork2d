@@ -1,9 +1,9 @@
 using System.Reflection;
-using Bork2d.Api;
-using Bork2d.Api.Assets;
-using Bork2d.Assets.Loading;
-using Bork2d.Assets.Pack;
-using Bork2d.Assets.Vfs;
+using Bork2d.Engine;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Assets.Loading;
+using Bork2d.Engine.Assets.Pack;
+using Bork2d.Engine.Assets.Vfs;
 using Xunit;
 
 namespace Bork2d.Tests.Assets.Service;
@@ -110,7 +110,7 @@ public sealed class AssetExceptionContractTests
             .Select(type => type.FullName ?? type.Name)
             .ToArray();
 
-        Assert.Contains("Bork2d.Api.Assets.AssetException", exported);
-        Assert.Contains("Bork2d.Api.Assets.AssetErrorKind", exported);
+        Assert.Contains("Bork2d.Engine.Assets.AssetException", exported);
+        Assert.Contains("Bork2d.Engine.Assets.AssetErrorKind", exported);
     }
 }

@@ -7,11 +7,11 @@ namespace Bork2d.Runtime;
 // the emitted references.
 internal static class AssemblyReferenceAnchor
 {
-    internal static Type ApiContract => typeof(Bork2d.Api.IEngine<>);
+    internal static Type ApiContract => typeof(Bork2d.Engine.IEngine<>);
 
-    internal static Type CommonImplementation => typeof(Bork2d.Common.Scene.Transform);
+    internal static Type CommonImplementation => typeof(Bork2d.Engine.Scene.Transform);
 
-    internal static Type AssetsImplementation => typeof(Bork2d.Assets.Pack.PackBuilder);
+    internal static Type AssetsImplementation => typeof(Bork2d.Engine.Assets.Pack.PackBuilder);
 
     internal static Type RenderImplementation => typeof(Bork2d.Render.AssemblyReferenceAnchor);
 }

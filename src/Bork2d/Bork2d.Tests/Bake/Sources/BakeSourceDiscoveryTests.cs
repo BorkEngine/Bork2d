@@ -33,7 +33,7 @@ public sealed class BakeSourceDiscoveryTests
             value = 2
 
             [bork2d]
-            type = "Bork2d.Api.Assets.SpriteAsset"
+            type = "Bork2d.Engine.Assets.SpriteAsset"
             """);
 
         var diagnostics = new BakeDiagnostics();
@@ -53,7 +53,7 @@ public sealed class BakeSourceDiscoveryTests
         BakeSource underTextures = Assert.Single(
             sources,
             source => source.AssetPath == "textures/ui/button");
-        Assert.Equal("Bork2d.Api.Assets.SpriteAsset", underTextures.TypeName);
+        Assert.Equal("Bork2d.Engine.Assets.SpriteAsset", underTextures.TypeName);
     }
 
     [Fact]
@@ -293,7 +293,7 @@ public sealed class BakeSourceDiscoveryTests
             "sprites/player.toml",
             """
             [bork2d]
-            type = "Bork2d.Api.Assets.SpriteAsset"
+            type = "Bork2d.Engine.Assets.SpriteAsset"
             """);
 
         var diagnostics = new BakeDiagnostics();

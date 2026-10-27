@@ -1,6 +1,6 @@
 using System.Numerics;
-using Bork2d.Api.Rendering;
-using Bork2d.Common.Scene;
+using Bork2d.Engine.Rendering;
+using Bork2d.Engine.Scene;
 using Bork2d.Tests.TestDoubles;
 using Bork2d.Tests.TestSupport;
 using Xunit;

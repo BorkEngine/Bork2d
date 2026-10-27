@@ -1,8 +1,8 @@
 using System.ComponentModel;
 using System.Numerics;
 using System.Text.Json.Serialization;
-using Bork2d.Api.Assets;
-using Bork2d.Api.Rendering;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Rendering;
 using PolyType;
 
 namespace Bork2d.Tests.Bake.Toml;

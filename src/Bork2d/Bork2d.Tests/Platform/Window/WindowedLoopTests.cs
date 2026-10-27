@@ -1,6 +1,6 @@
-using Bork2d.Api;
-using Bork2d.Api.Input;
-using Bork2d.Common.Scene;
+using Bork2d.Engine;
+using Bork2d.Engine.Input;
+using Bork2d.Engine.Scene;
 using Bork2d.Runtime.Hosting;
 using Bork2d.Runtime.Sdl;
 using Bork2d.Tests.TestDoubles;
@@ -357,7 +357,7 @@ public sealed class WindowedLoopTests
 
         AppTestSupport.RunToCompletion(app);
 
-        var engine = Assert.IsType<Engine<GameLayer>>(game.Engine);
+        var engine = Assert.IsType<GameEngine<GameLayer>>(game.Engine);
         var window = engine.Window;
         var input = engine.Input;
 
@@ -397,7 +397,7 @@ public sealed class WindowedLoopTests
 
         AppTestSupport.RunToCompletion(app);
 
-        var engine = Assert.IsType<Engine<GameLayer>>(game.Engine);
+        var engine = Assert.IsType<GameEngine<GameLayer>>(game.Engine);
         Assert.False(engine.ExitRequested);
 
         engine.Exit();

@@ -1,7 +1,7 @@
-using Bork2d.Api.Assets;
+using Bork2d.Bake;
 using Bork2d.Bake.Baking;
-using Bork2d.Bake.Builder;
 using Bork2d.Bake.Diagnostics;
+using Bork2d.Engine.Assets;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Baking;
@@ -82,7 +82,7 @@ public static class BakeProjectFixture
         indices = [0, 1, 2, 0, 2, 3]
 
         [bork2d]
-        type = "Bork2d.Api.Assets.SpriteAsset"
+        type = "Bork2d.Engine.Assets.SpriteAsset"
         """;
 
     /// <summary>The standard texture sidecar.</summary>

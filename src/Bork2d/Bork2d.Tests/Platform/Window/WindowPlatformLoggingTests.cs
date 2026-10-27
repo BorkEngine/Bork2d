@@ -115,7 +115,7 @@ public sealed class WindowPlatformLoggingTests
         };
         var platform = new SdlWindowPlatform(WindowTestSupport.Options(), () => sdl, logger);
 
-        Assert.Throws<Bork2d.Api.Bork2dException>(platform.Start);
+        Assert.Throws<Bork2d.Engine.Bork2dException>(platform.Start);
         platform.Dispose();
 
         var entry = Assert.Single(

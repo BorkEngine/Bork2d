@@ -1,7 +1,7 @@
-using Bork2d.Api.Assets;
+using Bork2d.Bake;
 using Bork2d.Bake.Baking;
-using Bork2d.Bake.Builder;
 using Bork2d.Bake.Diagnostics;
+using Bork2d.Engine.Assets;
 
 namespace Bork2d.Tests.Bake.Textures;
 

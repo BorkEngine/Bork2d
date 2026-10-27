@@ -1,10 +1,9 @@
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
-using Bork2d.Api;
-using Bork2d.Api.Scene;
-using Bork2d.Assets.Loading;
-using Bork2d.Common.Scene;
-using Bork2d.Common.Time;
+using Bork2d.Engine;
+using Bork2d.Engine.Assets.Loading;
+using Bork2d.Engine.Scene;
+using Bork2d.Engine.Time;
 using Bork2d.Runtime.Input;
 using Bork2d.Runtime.Sdl;
 using Bork2d.Runtime.Window;
@@ -44,7 +43,7 @@ namespace Bork2d.Runtime.Hosting;
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
 internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, Enum
 {
-    private readonly Engine<TLayer> _engine;
+    private readonly GameEngine<TLayer> _engine;
     private readonly IGame<TLayer> _game;
     private readonly IFrameTime _time;
     private readonly ILoggerFactory _loggerFactory;
@@ -57,7 +56,7 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
     private bool _disposed;
 
     internal AppRuntime(
-        Engine<TLayer> engine,
+        GameEngine<TLayer> engine,
         IGame<TLayer> game,
         IFrameTime time,
         ILoggerFactory loggerFactory,

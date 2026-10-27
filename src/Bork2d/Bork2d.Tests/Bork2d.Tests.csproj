@@ -15,20 +15,16 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\Bork2d.Api\Bork2d.Api.csproj" />
-        <ProjectReference Include="..\Bork2d.Common\Bork2d.Common.csproj" />
-        <ProjectReference Include="..\Bork2d.Assets\Bork2d.Assets.csproj" />
+        <ProjectReference Include="..\Bork2d.Engine\Bork2d.Engine.csproj" />
         <ProjectReference Include="..\Bork2d.Bake\Bork2d.Bake.csproj" />
-        <ProjectReference Include="..\Bork2d.Bake.Builder\Bork2d.Bake.Builder.csproj" />
-        <ProjectReference Include="..\Bork2d.BakeFixture\Bork2d.BakeFixture.csproj" />
+        <ProjectReference Include="..\..\..\examples\Bork2d.BakeFixture\Bork2d.BakeFixture.csproj" />
         <!-- The fixture assets executable is build-time only, but the tests reference it normally so
              they can instantiate its internal PPM/Unit acceptance processors through the public
              builder (InternalsVisibleTo Bork2d.Tests). It is still never referenced by the runtime or
              the AOT publish graph. -->
-        <ProjectReference Include="..\Bork2d.BakeFixture.Assets\Bork2d.BakeFixture.Assets.csproj" />
+        <ProjectReference Include="..\..\..\examples\Bork2d.BakeFixture.Assets\Bork2d.BakeFixture.Assets.csproj" />
         <ProjectReference Include="..\Bork2d.Render\Bork2d.Render.csproj" />
         <ProjectReference Include="..\Bork2d.Runtime\Bork2d.Runtime.csproj" />
-        <ProjectReference Include="..\Bork2d.AotSmoke\Bork2d.AotSmoke.csproj" />
     </ItemGroup>
 
 </Project>

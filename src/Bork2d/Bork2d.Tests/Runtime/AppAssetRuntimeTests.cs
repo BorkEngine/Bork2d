@@ -1,9 +1,9 @@
-using Bork2d.Api;
-using Bork2d.Api.Assets;
-using Bork2d.Api.Input;
-using Bork2d.Assets.Loading;
-using Bork2d.Common.Scene;
-using Bork2d.Common.Time;
+using Bork2d.Engine;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Assets.Loading;
+using Bork2d.Engine.Input;
+using Bork2d.Engine.Scene;
+using Bork2d.Engine.Time;
 using Bork2d.Runtime;
 using Bork2d.Runtime.Hosting;
 using Bork2d.Runtime.Input;
@@ -121,7 +121,7 @@ public sealed class AppAssetRuntimeTests
         var time = new StopwatchTime(0.25);
         var window = new WindowProxy();
         var input = new InputProxy();
-        var engine = new Engine<GameLayer>(time, window, service, input);
+        var engine = new GameEngine<GameLayer>(time, window, service, input);
         var options = new Bork2dAppOptions<GameLayer>
         {
             Game = game,
@@ -414,7 +414,7 @@ public sealed class AppAssetRuntimeTests
         var time = new StopwatchTime(0.25);
         var window = new WindowProxy();
         var input = new InputProxy();
-        var engine = new Engine<GameLayer>(time, window, service, input);
+        var engine = new GameEngine<GameLayer>(time, window, service, input);
         var options = new Bork2dAppOptions<GameLayer>
         {
             Game = game,
@@ -522,7 +522,7 @@ public sealed class AppAssetRuntimeTests
         var time = new StopwatchTime(0.25);
         var window = new WindowProxy();
         var input = new InputProxy();
-        var engine = new Engine<GameLayer>(time, window, service, input);
+        var engine = new GameEngine<GameLayer>(time, window, service, input);
         var options = new Bork2dAppOptions<GameLayer>
         {
             Game = game,
