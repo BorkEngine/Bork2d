@@ -1,10 +1,9 @@
 # NativeAOT
 
 > **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4) and the post-M3
-> asset-reference refactor (D-035, merged PR #6); **M4 bake is implementation complete on
-> `m-4/common`, the owner D-M4-13 revision (including the committed fixture source PNG) is
-> complete on `m-4/fix-2`, and the D-M4-14/D-M4-15 multi-pack revision is complete on `m-4/fix-3`
-> (PR #7 open, not merged)**. `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`,
+> asset-reference refactor (D-035, merged PR #6); **M4 bake is merged into `develop`
+> (2026-10-27, PR #7), including D-M4-13 (plus the committed fixture source PNG) and the
+> D-M4-14/D-M4-15 multi-pack revision**. `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`,
 > and `Bork2d.Runtime` compile with `IsAotCompatible` plus the trim and AOT analyzers, and
 > `Bork2d.AotSmoke` publishes and runs with zero AOT/trim warnings. The default smoke loads the
 > **baked fixture pack** (produced by the imported MSBuild bake targets from `Bork2d.BakeFixture`),

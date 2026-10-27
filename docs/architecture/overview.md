@@ -2,9 +2,8 @@
 
 > **Status:** M1, M2, and M3 (pack, VFS, runtime integration) are merged into
 > `develop` (2026-10-26, PR #4); the post-M3 asset-reference refactor (D-035) is merged (PR #6);
-> **M4 serialization and bake is implementation complete on `m-4/common`; the owner D-M4-13 revision
-> (including the committed fixture source PNG) is complete on `m-4/fix-2`, and the D-M4-14/D-M4-15
-> multi-pack revision is complete on `m-4/fix-3` (PR #7 open, not merged)**. The builder, validation, windowed SDL host (window/input/time/loop), one-tick
+> **M4 serialization and bake is merged into `develop` (2026-10-27, PR #7), including D-M4-13
+> (plus the committed fixture source PNG) and the D-M4-14/D-M4-15 multi-pack revision.** The builder, validation, windowed SDL host (window/input/time/loop), one-tick
 > headless/offscreen host, scene graph, logging, asset pipeline, M4 bake tooling, and AOT baseline
 > are `Current`; the editor (M5), Vulkan and frame handoff (M6/M7), and the sprite renderer (M8) are
 > `Planned`. Status detail is in [the roadmap](../roadmap.md).

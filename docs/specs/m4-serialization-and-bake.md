@@ -1,17 +1,14 @@
 # M4 — Serialization and Bake (spec)
 
-> **Status:** **implementation complete on `m-4/common`; the owner revisions are complete on
-> `m-4/fix-3`; final PR #7 is open and not merged.** WP0–WP6 are implemented and verified on the
-> milestone branch, and the breaking pre-release revisions are complete on the fix branches against
-> the open PR #7: D-M4-13 (per-source `[bork2d].type`, no descriptor `[[types]]`, location-free
-> data/textures, `-raw` payload paths) and the committed-fixture-PNG revision on `m-4/fix-2`;
-> D-M4-14 (ordered multi-pack `[[assets]]`, main-only cross-pack references, overlay-legal duplicates
-> across packs, no project `name`/`[bake].pack`, `--output-root`) and D-M4-15 (texture sidecars
-> retained) on `m-4/fix-3`. The PR to `develop` is **not merged** and M4 is **not merged**. The owner
-> decisions D-M4-01…D-M4-15 in §2 were approved during the M4 spec review on 2026-10-26 and the
-> owner revisions on 2026-10-27, and the §18 questions are resolved as recorded in the
+> **Status:** **Merged into `develop` on 2026-10-27 (PR #7, merge commit `8039587`).** WP0–WP6 and
+> the pre-release revisions are landed: D-M4-13 (per-source `[bork2d].type`, no descriptor
+> `[[types]]`, location-free data/textures, `-raw` payload paths), D-M4-14 (ordered multi-pack
+> `[[assets]]`, main-only cross-pack references, overlay-legal duplicates across packs, no project
+> `name`/`[bake].pack`, `--output-root`), and D-M4-15 (texture sidecars retained). The owner
+> decisions D-M4-01…D-M4-12 were approved during the M4 spec review on 2026-10-26; D-M4-13…15 are the
+> owner revisions on 2026-10-27. The §18 questions are resolved as recorded in the
 > [decision log](../decisions.md#m4-serialization-and-bake-decisions-approved-2026-10-26). This is
-> the first forward-looking milestone spec; the M1–M3 files under [`docs/specs/`](.) are historical
+> the M4 record; the M1–M3 files under [`docs/specs/`](.) are historical
 > records. When this spec and another document disagree, this spec wins for M4 scope; the accepted
 > architecture and API documents win for inherited contracts. The WP0 feasibility report is
 > [M4 WP0 — Serialization and Bake Feasibility Spike](m4-wp0-spike.md); as-built commands, results,
@@ -812,7 +809,7 @@ files/areas disjoint; otherwise run them sequentially and record why in the mile
 | WP5 | Incremental + MSBuild: hash manifest, skip/force/clean, `.targets`, host build invocation, fixture project, `dotnet build` integration test, output/publish layout. | WP4 | 4 |
 | WP6 | AOT proof + docs + gates: AOT bake step, smoke loads baked pack, docs (assets/tooling, projects, nativeaot, API guide/reference, README, roadmap, decisions, contributing), full gates, acceptance evidence. | WP5 | 5 |
 
-**Owner revision (post-WP6).** `m-4/fix-1` applied D-M4-13 against the open PR: descriptor/type-model
+**Owner revision (post-WP6).** `m-4/fix-1` applied D-M4-13 as the pre-merge revision: descriptor/type-model
 removal, per-source `[bork2d]` metadata, host scanning and source-type hash, location-free
 data/textures, `-raw` payload paths, fixture/test/doc updates, and the same gates. `m-4/fix-2`
 completes the revision: it commits the deterministic 2x2 fixture **source** PNG at
@@ -823,8 +820,8 @@ now copies the committed `Assets/**`), and re-runs the full gates including AOT 
 committed image is a fixture authoring source, not a test/pack binary fixture; test images and packs
 are still generated in temp directories.
 
-**Owner multi-pack revision (post-fix-2).** `m-4/fix-3` applies D-M4-14 and D-M4-15 against the open
-PR: the descriptor becomes an ordered `[[assets]]` list (first is main; no `name`; no `[bake].pack`),
+**Owner multi-pack revision (post-fix-2).** `m-4/fix-3` applied D-M4-14 and D-M4-15 as the pre-merge
+revision: the descriptor becomes an ordered `[[assets]]` list (first is main; no `name`; no `[bake].pack`),
 one host scans all roots, the bake validates and writes per pack with main-only external references,
 `PackBuilder` gains only the internal external-main seam, the CLI gains `--output-root` and loses
 `--output`, the incremental manifest (schema 2) records every output, the MSBuild targets
@@ -1063,12 +1060,13 @@ marshaler.
   asset model; D-035's field-validation sentence is adjusted by D-M4-06.
 
 
-## 22. As-built evidence (m-4/fix-3 revision)
+## 22. As-built evidence (M4, merged to develop)
 
-**Status:** implementation complete on `m-4/common`; the D-M4-13/committed-PNG revisions are complete
-on `m-4/fix-2` and the D-M4-14/D-M4-15 multi-pack revision is complete on `m-4/fix-3` against open
-PR #7; the final PR to `develop` is **not merged** and M4 is **not merged**. All work packages
-(WP0–WP6) are landed on the milestone branch. The current revision replaces the single root/pack
+**Status:** **Merged into `develop` on 2026-10-27 (PR #7, merge commit `8039587`).** All work
+packages (WP0–WP6) and the D-M4-13/14/15 revisions are landed. The final CI run
+[40455684420](https://github.com/BorkEngine/Bork2d/actions/runs/40455684420) succeeded with 914
+passed and 9 skipped; the local gate is 911 passed and 12 skipped (the 3 reparse-point tests require
+symlink capability). The current revision replaces the single root/pack
 descriptor with ordered `[[assets]]` multi-pack entries, main-only cross-pack references, per-pack
 incremental outputs, and the multi-pack MSBuild/AOT fixture; texture sidecars are retained. The WP0
 feasibility report is

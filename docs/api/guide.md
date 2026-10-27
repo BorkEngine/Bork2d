@@ -1,9 +1,8 @@
 # API Guide
 
 > **Status:** implemented M3 plus the D-035 asset-reference refactor (merged, PR #6); **M4
-> serialization and bake is implementation complete on `m-4/common`; the D-M4-13 revision is on
-> `m-4/fix-2` and the D-M4-14/D-M4-15 multi-pack revision is on `m-4/fix-3` (final PR pending, not
-> merged)**. M1 (foundation), M2 (SDL windowed host), and M3 (pack, VFS, runtime integration) exist
+> serialization and bake is merged into `develop` (2026-10-27, PR #7), including the D-M4-13
+> revision and the D-M4-14/D-M4-15 multi-pack revision**. M1 (foundation), M2 (SDL windowed host), and M3 (pack, VFS, runtime integration) exist
 > in `Bork2d.Runtime`/`Bork2d.Assets` and are merged into `develop`. `Build()` validates and `Run()`
 > runs the uncapped windowed loop (window, input, time) or the one-tick headless/offscreen sequence,
 > opening the base pack (or the `WithoutAssets()` empty filesystem) before the window and `Setup`.

@@ -442,7 +442,7 @@ the JIT tooling; the runtime has no TOML parser, reflection serializer, or bake 
   [Assets and tooling §11](../architecture/assets-and-tooling.md#11-build-pipeline), the TOML model
   and leaves in [Assets and tooling §10](../architecture/assets-and-tooling.md#10-toml-source-model),
   and the as-built evidence in the
-  [M4 spec §22](../specs/m4-serialization-and-bake.md#22-as-built-evidence-m-4fix-3-revision).
+  [M4 spec §22](../specs/m4-serialization-and-bake.md#22-as-built-evidence-m4-merged-to-develop).
 
 ## 8. `ICamera<TLayer>`
 

@@ -1,9 +1,8 @@
 # Contributing
 
 > **Status:** current through M3 plus the D-035 asset-reference refactor (merged, PR #6) and M4
-> serialization/bake (implementation complete on `m-4/common`; the owner D-M4-13 revision is
-> complete on `m-4/fix-2` and the D-M4-14/D-M4-15 multi-pack revision on `m-4/fix-3`; PR #7 is
-> open and not merged). The
+> serialization/bake (merged into `develop` 2026-10-27, PR #7, including the D-M4-13 revision and
+> the D-M4-14/D-M4-15 multi-pack revision). The
 > warning/style/format/AOT gates and the docs link check are active. CI runs docs link check, build,
 > tests, and format verification on PRs to `develop` and pushes to `develop`; the NativeAOT
 > publish/run smoke (headless loading the **baked fixture pack**, and windowed) is a required local

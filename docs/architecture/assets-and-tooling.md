@@ -1,10 +1,10 @@
 # Assets, Bake, and Editor Tooling
 
 > **Status:** M3 and the post-M3 asset-reference refactor (D-035) are merged into `develop`
-> (2026-10-26, PR #4 and PR #6); **M4 serialization and bake is implementation complete on
-> `m-4/common`, the owner D-M4-13 revision (per-source `[bork2d].type`, location-free
-> data/textures, `-raw` payload paths) is complete on `m-4/fix-2`, and the D-M4-14/D-M4-15
-> multi-pack revision is complete on `m-4/fix-3` (PR #7 open, not merged)**.
+> (2026-10-26, PR #4 and PR #6); **M4 serialization and bake is merged into `develop`
+> (2026-10-27, PR #7), including D-M4-13 (per-source `[bork2d].type`, location-free
+> data/textures, `-raw` payload paths) and D-M4-14/D-M4-15 (ordered multi-pack `[[assets]]`,
+> main-only cross-pack references, retained texture sidecars)**.
 > `Bork2d.Assets` provides the v1 pack
 > reader/writer and the public `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode` tooling
 > surface, canonical paths, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, one
@@ -760,7 +760,7 @@ that in exchange for no arbitrary caps, and fails cleanly rather than reading ou
 | Sprite assets (UVs/scale/pivot/topology/indices) | `Current` (M3/D-035; data bake M4): public `SpriteAsset` model with an `AssetRef<TextureDescriptor>` link, loaded via `LoadAsset<SpriteAsset>` and baked as ordinary custom data when a TOML declares its type in `[bork2d]`. No runtime or bake-time field validation; UV/pivot/scale/topology/indices validation and slicing are M5 (D-M4-06). Drawing is M8 |
 | CPU resource table (descriptors/sprites) | Removed by D-035; the loader caches no resolved sprite/texture resources |
 | Runtime asset lifecycle | `Current` (M3): `WithoutAssets()`, base pack at `Run()` before the window/`Setup`, start/stop/error order, post-shutdown `ObjectDisposedException`, app disposal |
-| TOML model, baker, deterministic bake | `Current` (M4) on `m-4/common`; D-M4-13, D-M4-14, and D-M4-15 revisions complete on `m-4/fix-3` (PR #7 open, not merged): multi-pack `bork2d.project.toml` (ordered `[[assets]]`, first is main; no name, no `[bake].pack`), per-source `[bork2d].type`, one generated host over all roots, shape-driven Tomlyn DOM binder, per-pack location-free texture import, local + main cross-pack reference validation, structural determinism, all-pack incremental manifest/host state, atomic per-pack writes, CLI, MSBuild targets. Sprite field validation/slicing are M5 |
+| TOML model, baker, deterministic bake | `Current` (M4, merged 2026-10-27, PR #7); D-M4-13, D-M4-14, and D-M4-15 revisions landed: multi-pack `bork2d.project.toml` (ordered `[[assets]]`, first is main; no name, no `[bake].pack`), per-source `[bork2d].type`, one generated host over all roots, shape-driven Tomlyn DOM binder, per-pack location-free texture import, local + main cross-pack reference validation, structural determinism, all-pack incremental manifest/host state, atomic per-pack writes, CLI, MSBuild targets. Sprite field validation/slicing are M5 |
 | `Bork2d.Bake` / `Bork2d.Bake.Cli` | `Current` (M4/D-M4-13/D-M4-14): internal JIT tooling; no public types; `generate-host` (all-root source scan + type resolution), `bake` (every pack, `--output-root`), `validate` (every pack) with exit codes `0`–`3` |
 | `build/Bork2d.Bake.targets` | `Current` (M4/D-M4-14): build/publish/clean integration for every declared pack, fixture preparation (`Assets` + `DLC1`), property overrides |
 | `Bork2d.BakeFixture` | `Current` (M4, Q-16/D-M4-14; committed source PNG): game-side `Project.Common`-like fixture with `[GenerateShape] partial` types, a main `Assets/` tree, and a `DLC1/` tree whose `data/dlc.toml` references the main `art/player`; referenced by tests and the AOT smoke, never by the runtime |

@@ -2,12 +2,11 @@
 
 > **Status:** **M0 complete; M1 merged into `develop` (2026-10-25, PR #1); M2 merged into `develop`
 > (2026-10-26, PR #2); M3 (assets: pack, VFS, descriptors) merged into `develop` (2026-10-26,
-> PR #4); the post-M3 asset-reference refactor (D-035) is merged (PR #6); M4 (serialization and
-> bake) is implementation complete on `m-4/common` — PR #7 is open and M4 is not
-> merged, and the owner-requested revisions (D-M4-13: per-source `[bork2d].type`,
-> location-free data/textures, `-raw` payload paths, plus the committed fixture source PNG) are
-> complete on `m-4/fix-2`; D-M4-14/D-M4-15 (ordered multi-pack `[[assets]]`, main-only cross-pack
-> references, retained texture sidecars) are complete on `m-4/fix-3`.** The repository contains the
+> PR #4); the post-M3 asset-reference refactor (D-035) is merged (PR #6); **M4 (serialization and
+> bake) is merged into `develop` (2026-10-27, PR #7), including D-M4-13 (per-source
+> `[bork2d].type`, location-free data/textures, `-raw` payload paths, and the committed fixture
+> source PNG) and D-M4-14/D-M4-15 (ordered multi-pack `[[assets]]`, main-only cross-pack references,
+> retained texture sidecars).** The repository contains the
 > M1 build/quality baseline, public contracts, root-owned
 > scene tree, builder, logging, the NativeAOT smoke app, the M2 SDL windowed host (window, input,
 > time, uncapped loop), the M3 asset pipeline (pack reader/writer, VFS, loader, public

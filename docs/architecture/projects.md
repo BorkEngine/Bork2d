@@ -2,9 +2,9 @@
 
 > **Status:** the project graph is `Current` and enforced by the dependency test. M1, M2, and M3
 > are implemented and merged into `develop` (2026-10-26, PR #4), and the post-M3 asset-reference
-> refactor (D-035) is merged (PR #6). **M4 WP1–WP6 are implementation complete on `m-4/common`
-> (PR #7 open, not merged); the owner-requested `m-4/fix-2` revision (D-M4-13 plus the committed
-> fixture source PNG) and the `m-4/fix-3` D-M4-14/D-M4-15 multi-pack revision are complete:** `Bork2d.Bake` contains the descriptor, diagnostics, path safety,
+> refactor (D-035) is merged (PR #6). **M4 WP1–WP6 are merged into `develop` (2026-10-27, PR #7),
+> including the D-M4-13 revision (per-source `[bork2d].type` and the committed fixture source PNG)
+> and the D-M4-14/D-M4-15 multi-pack revision:** `Bork2d.Bake` contains the descriptor, diagnostics, path safety,
 > host/incremental contracts, XXH3 hashing, a `MetadataLoadContext`-based host generator, the
 > non-collectible host loader, source discovery/binding with per-source `[bork2d].type` metadata
 > (D-M4-13), the generic shape-driven Tomlyn DOM binder,
