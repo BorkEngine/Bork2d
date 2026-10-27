@@ -1,0 +1,83 @@
+using Bork2d.Api.Assets;
+using Bork2d.Bake.Builder;
+using Bork2d.BakeFixture.Assets.Processors;
+using Bork2d.Tests.Assets.Service;
+using Bork2d.Tests.Bake.Baking;
+using Xunit;
+
+namespace Bork2d.Tests.Bake.Processors;
+
+/// <summary>
+/// The fixture acceptance processors through the public assets application (<c>BakeApplication.Run</c>):
+/// a real <c>bake</c> command writes one pack and the runtime service loads both the PPM descriptor and
+/// payload and the Unit custom-data value.
+/// </summary>
+public sealed class FixtureProcessorsApplicationTests
+{
+    [Fact]
+    public async Task BakeAndLoadBothAcceptanceProcessorsThroughTheAssetsApplication()
+    {
+        IAssetProcessor[] processors =
+        [
+            new PpmProcessor(TextureFilter.Nearest, TextureWrap.Repeat),
+            new UnitProcessor(),
+        ];
+
+        using var project = TestBakeProject.Create(
+            "fixture-processors-application",
+            registerFixtureTypes: false,
+            processors: processors);
+        project.WriteAssetBytes(
+            "art/checker.ppm",
+            [
+                .. "P6\n2 2\n255\n"u8.ToArray(),
+                255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255,
+            ]);
+        project.WriteAsset("art/checker.ppm.toml", "filter = \"nearest\"\nwrap = \"repeat\"\n");
+        project.WriteAsset("data/archer.unit", """{"Health": 50, "Attack": 20}""");
+        project.WriteAsset("data/archer.unit.toml", "name = \"archer\"\n");
+        using var output = TempBakeDirectory.Create();
+
+        BakeApplication application = BakeProjectFixture.CreateApplication(
+            project.RootPath,
+            [("assets.pck", "Assets")],
+            registerFixtureTypes: false,
+            processors: processors);
+
+        var standardOutput = new StringWriter();
+        var standardError = new StringWriter();
+        int exitCode = application.Run(
+            ["bake", "--project-root", project.RootPath, "--output-root", output.RootPath],
+            standardOutput,
+            standardError,
+            "fixture-assets");
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(string.Empty, standardError.ToString());
+        Assert.Contains("baked '", standardOutput.ToString(), StringComparison.Ordinal);
+
+        using var host = new AssetServiceHost(output.FullPath("assets.pck"));
+        host.Start();
+
+        TextureDescriptor ppm = await host.Service.LoadAsset<TextureDescriptor>("art/checker");
+        Assert.Equal("art/checker-raw", ppm.Payload.Path);
+        Assert.Equal(2u, ppm.Width);
+        Assert.Equal(2u, ppm.Height);
+        Assert.Equal("rgba8", ppm.Format);
+        Assert.Equal("nearest", ppm.Filter);
+        Assert.Equal("repeat", ppm.Wrap);
+        Assert.Equal(
+            new byte[]
+            {
+                255, 0, 0, 255,
+                0, 255, 0, 255,
+                0, 0, 255, 255,
+                255, 255, 255, 255,
+            },
+            await host.Service.LoadData("art/checker-raw"));
+
+        Bork2d.BakeFixture.Unit unit =
+            await host.Service.LoadAsset<Bork2d.BakeFixture.Unit>("data/archer");
+        Assert.Equal(new Bork2d.BakeFixture.Unit("archer", 50, 20), unit);
+    }
+}
