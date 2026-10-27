@@ -160,7 +160,7 @@ zNdc = 0
 ```
 
 The negation is the only place the Y-up API meets Vulkan clip space. `ScreenToWorld`/`WorldToScreen`
-are `Planned` (not declared in `Bork2d.Api` yet); camera and sprite property defaults are owned by
+are `Planned` (not declared in `Bork2d.Engine` yet); camera and sprite property defaults are owned by
 [API reference defaults](../api/reference.md#13-defaults) and applied in M8.
 ## 8. Sorting, layers, and clears
 ### 8.1 Sort order

@@ -7,7 +7,9 @@
 > with ticks and elapsed time, and the asset service logs start/overlay/error/stop events; there is
 > no per-frame or per-asset-per-tick logging. Configuration is identical in all modes, and the
 > default path runs in the AOT smoke (headless with a pack and `--windowed`) with zero trim/AOT
-> warnings. The suite is 528 tests (519 deterministic plus 9 opt-in real-window tests).
+> warnings. The suite is 954 tests (942 deterministic plus 12 opt-in/conditional). The
+> project-consolidation refactor (D-041/D-042) renamed the engine categories to `Bork2d.Engine` and
+> `Bork2d.Engine.Assets`; `Bork2d.Runtime` and `Bork2d.Render` are unchanged.
 
 ## 1. Surface
 
@@ -29,7 +31,7 @@ public void Setup(IEngine<GameLayer> engine)
   factory (tests).
 - The factory is created by `Build()` and owned by the app; `Bork2dApp.Dispose()` disposes it
   idempotently. Do not dispose it yourself while the app is alive.
-- `Bork2d.Api` uses `Microsoft.Extensions.Logging.Abstractions` from the .NET 11 shared
+- `Bork2d.Engine` uses `Microsoft.Extensions.Logging.Abstractions` from the .NET 11 shared
   framework; `Bork2d.Runtime` pins the logging packages and owns provider configuration.
 - Logging is thread-safe, and the factory is available in every mode.
 
@@ -73,7 +75,7 @@ app.Run();
 | --- | --- | --- |
 | `Microsoft.Extensions.Logging` | `11.0.0-rc.1.26425.128` | `Bork2d.Runtime` |
 | `ZLogger` | `2.5.10` | `Bork2d.Runtime` |
-| `Microsoft.Extensions.Logging.Abstractions` | .NET 11 shared framework | `Bork2d.Api` (no package reference) |
+| `Microsoft.Extensions.Logging.Abstractions` | .NET 11 shared framework | `Bork2d.Engine` (no package reference) |
 
 - ZLogger console provider (`AddZLoggerConsole`) with the plain-text formatter
   (`UsePlainTextFormatter`);
@@ -102,8 +104,8 @@ game code creates its own categories.
 | Category | Source |
 | --- | --- |
 | `Bork2d.Runtime` | builder, modes, lifecycle, windowing |
-| `Bork2d.Common` | reserved for scene/time/snapshot diagnostics; no current log sites |
-| `Bork2d.Assets` | pack parsing, decompression, loading |
+| `Bork2d.Engine` | reserved for scene/time/snapshot diagnostics; no current log sites |
+| `Bork2d.Engine.Assets` | pack parsing, decompression, loading |
 | `Bork2d.Render` | target renderer diagnostics (M6/M8); no current log sites |
 | game-defined | `CreateLogger("MyGame")` or `CreateLogger<T>()` |
 Startup logs use `Bork2d.Runtime` and one structured message after validation:
@@ -146,7 +148,7 @@ Information-level events (they occur on a transition, never once per frame).
 
 ### 5.2 Asset service (M3)
 
-The app-scoped asset service logs from `Bork2d.Assets`. The runtime starts it at `Run()` before the
+The app-scoped asset service logs from `Bork2d.Engine.Assets`. The runtime starts it at `Run()` before the
 window/`Setup` and stops it after `Teardown`; every event is one-shot and none is emitted per frame,
 per tick, or per sprite.
 
@@ -162,9 +164,9 @@ per tick, or per sprite.
 A default headless run with a five-entry pack looks like:
 
 ```text
-2026-10-26 16:11:58.721 [Information] Bork2d.Assets: Asset service started: mode Pack, configured pack C:\Temp\bork2d-aot-….pck, resolved path C:\Temp\bork2d-aot-….pck, version 1, entries 5, stored bytes 275.
-2026-10-26 16:11:58.721 [Debug] Bork2d.Assets: Asset loaded: path data/smoke, kind data.
-2026-10-26 16:11:58.721 [Information] Bork2d.Assets: Asset service stopped: pending 0, canceled 0, mounted packs 1.
+2026-10-26 16:11:58.721 [Information] Bork2d.Engine.Assets: Asset service started: mode Pack, configured pack C:\Temp\bork2d-aot-….pck, resolved path C:\Temp\bork2d-aot-….pck, version 1, entries 5, stored bytes 275.
+2026-10-26 16:11:58.721 [Debug] Bork2d.Engine.Assets: Asset loaded: path data/smoke, kind data.
+2026-10-26 16:11:58.721 [Information] Bork2d.Engine.Assets: Asset service stopped: pending 0, canceled 0, mounted packs 1.
 ```
 
 The `WithoutAssets()` mode logs `mode Empty` with zero entries and the same start/stop lines. The

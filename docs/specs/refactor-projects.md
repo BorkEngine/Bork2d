@@ -239,5 +239,32 @@ git diff --check
 
 ## 12. As-built evidence
 
-Filled in when the task is ready for review: commits, gates, test count, AOT publish contents,
-and any deviations.
+- Branch: `task/project-consolidation`. Process-doc commit: `f5c4e68` (AGENTS.md, docs-only on
+  `develop`); spec commit: `00ae614`; implementation commit: `03a0358`; the documentation update
+  that includes this section follows on the same branch.
+- Engine solution: exactly five projects (`Bork2d.Engine`, `Bork2d.Bake`, `Bork2d.Render`,
+  `Bork2d.Runtime`, `Bork2d.Tests`); examples solution has the three example projects. No
+  `src/Bork2d/Bork2d.{Api,Common,Assets,Bake.Builder,AotSmoke,BakeFixture,BakeFixture.Assets}`
+  directory remains, and the stale `Bork2d.Bake.Cli` artifacts are gone. The root `.gitignore` now
+  covers both `src/` and `examples/`.
+- Builds: Debug and Release of the engine solution succeed with 0 warnings and 0 errors; the
+  examples solution builds with 0 warnings and 0 errors.
+- Tests: `942 passed, 12 skipped, 954 total` (`dotnet test src/Bork2d/Bork2d.slnx -c Debug
+  --no-build`), including the new `EngineSolutionContainsOnlyTheFiveProjects` and
+  `BakeReferencesOnlyTheAllowedEngineNamespaces` guards.
+- Format: `dotnet format --verify-no-changes` exits 0 for both `Bork2d.slnx` and
+  `Bork2d.Examples.slnx`.
+- AOT: `dotnet publish examples/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64`
+  reports zero AOT/trim warnings; the published headless run exits 0 with `mainEntries=8` /
+  `mergedEntries=9`, and `--windowed --ticks 120` exits 0 after exactly 120 ticks. A clean publish
+  directory contains `Bork2d.Engine.pdb`, `Bork2d.Runtime.pdb`, `Bork2d.Render.pdb`,
+  `Bork2d.BakeFixture.pdb`, `Bork2d.AotSmoke.exe`, `assets.pck`, `dlc1.pck`, and `SDL2.dll`, and
+  no `Bork2d.Bake`, `Bork2d.BakeFixture.Assets`, Tomlyn, or StbImageSharp assembly.
+- Docs: `scripts/check-docs.ps1` passes (26 files, 432 local links); `git diff --check` is clean.
+- Deviations from the phase plan: the engine, bake, and examples changes landed as one
+  implementation commit because the file moves and namespace rewrites are entangled across all
+  three; the examples keep their existing project/assembly names; the fixture assets executable and
+  tests keep their names. The `Bork2d.Engine.csproj` file is recorded by git as a rename of the old
+  `Bork2d.Assets.csproj`, and the builder files as renames from `Bork2d.Bake.Builder`.
+  The examples solution is deliberately not a CI job (owner decision); the local AOT gate covers
+  the smoke.

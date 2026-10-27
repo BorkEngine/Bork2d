@@ -64,7 +64,7 @@ The guarantees are deliberately precise:
 
 `Planned` for M7; camera ordering is M8. A snapshot is the renderer's complete input for one
 tick: immutable after publication, free of live entity references, and internal (never
-`Bork2d.Api`). It is built by an unordered traversal of the rooted tree with workers joined.
+`Bork2d.Engine`). It is built by an unordered traversal of the rooted tree with workers joined.
 `FrameSnapshot` holds sequence/time/delta plus camera and sprite arrays; `CameraSnapshot` holds
 `ZIndex`, world matrix, size, viewport, culling mask, and clear kind/color; `SpriteSnapshot`
 holds a loaded `SpriteAsset?` reference, world matrix, tint, layer, `ZIndex`, and flip flags.

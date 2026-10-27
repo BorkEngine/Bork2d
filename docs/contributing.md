@@ -6,12 +6,15 @@
 > pushes to `develop`; the NativeAOT publish/run smoke (headless loading the **baked fixture packs**,
 > and windowed) is a required local gate.
 >
-> The docs and gates cover `Bork2d.Bake.Builder`, the build-time
+> The docs and gates cover `Bork2d.Bake`, the build-time
 > `MyGame.Assets`/`Bork2d.BakeFixture.Assets` executables, explicit `RegisterAsset<T>()`
 > registrations, the PPM/Unit processors, and the schema-3 incremental bake. There is no project
 > descriptor, generated host, or `Bork2d.Bake.Cli`. The local AOT gate loads packs baked by the
 > fixture assets executable; no builder/processor assembly enters the publish. Implementation scope:
-> [file-processors spec](specs/file-processors.md).
+> [file-processors spec](specs/file-processors.md). The project-consolidation refactor
+> (D-041/D-042, [spec](specs/refactor-projects.md)) moved the engine contract/implementation into
+> `Bork2d.Engine`, merged the bake tooling into `Bork2d.Bake`, and moved the smoke/fixture projects
+> to `examples/Bork2d.Examples.slnx`; CI does not build that examples solution.
 
 ## 1. Prerequisites
 
@@ -35,10 +38,15 @@ dotnet build src/Bork2d/Bork2d.slnx -c Debug
 dotnet build src/Bork2d/Bork2d.slnx -c Release
 dotnet test src/Bork2d/Bork2d.slnx -c Debug
 dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
+dotnet build examples/Bork2d.Examples.slnx -c Debug
+dotnet format examples/Bork2d.Examples.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **958 tests**: 946 deterministic tests run in CI; 12 opt-in/conditional tests are
+The examples solution is not a CI job; build and format it locally when the smoke or fixture
+projects change.
+
+The suite is **954 tests**: 942 deterministic tests run in CI; 12 opt-in/conditional tests are
 skipped unless the environment variable or capability is present (9 `[WindowFact]` real-window tests
 and 3 reparse-point capability tests). The deterministic set includes the pack-format/writer tests,
 the path/VFS/browse/contract tests, the loader/threading and error-contract tests, generic pack-time
@@ -83,8 +91,8 @@ Remove-Item Env:BORK2D_RUN_WINDOW_TESTS
 NativeAOT publish/run is required for runtime-affecting changes (both runs are local, never CI):
 
 ```powershell
-dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
-$smoke = 'src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe'
+dotnet publish examples/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
+$smoke = 'examples/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe'
 & $smoke                                  # headless: scene + baked fixture pack load/assertions
 & $smoke --windowed --ticks 120           # windowed gate: exit 0 after exactly 120 ticks
 ```
@@ -105,10 +113,10 @@ windowed run uses `WithoutAssets()`, so it needs a desktop session but no pack; 
 `Setup`, exactly `N` ticks, and one `Teardown`. The interactive `--windowed` run is the manual
 visibility/input check. Inspect the publish directory: it is a NativeAOT single-file output plus
 PDBs, so the managed assemblies are linked in. It must contain `assets.pck`, `dlc1.pck`, `SDL2.dll`,
-and the game-side `Bork2d.BakeFixture` PDB, and must not contain a `Bork2d.Bake.dll`,
-`Bork2d.Bake.Builder.dll`, `Bork2d.BakeFixture.Assets*`, `Tomlyn*`, or `StbImageSharp*` file.
-`dotnet clean src/Bork2d/Bork2d.slnx` removes the fixture packs and the incremental state under the
-assets project's `obj/bork2d/bake`.
+the engine/runtime/render/fixture PDBs, and must not contain a `Bork2d.Bake.dll`,
+`Bork2d.BakeFixture.Assets*`, `Tomlyn*`, or `StbImageSharp*` file.
+`dotnet clean src/Bork2d/Bork2d.slnx` and `dotnet clean examples/Bork2d.Examples.slnx` remove the
+fixture packs and the incremental state under the assets project's `obj/bork2d/bake`.
 
 ## 3. Build, style, and warnings
 
@@ -126,7 +134,7 @@ assets project's `obj/bork2d/bake`.
 
 File-scoped namespaces; nullable enabled; explicit accessibility; `var` only when the type is
 obvious; braces for control flow; one type per file; a file's namespace is the project namespace
-plus its folder path (`Bork2d.Assets/Loading/AssetService.cs` → `Bork2d.Assets.Loading`; IDE0130
+plus its folder path (`Bork2d.Engine/Assets/Loading/AssetService.cs` → `Bork2d.Engine.Assets.Loading`; IDE0130
 is an error, D-034); `_camelCase` private fields; `PascalCase` constants; `I`-prefixed interfaces;
 `Async` suffix and no `async void` outside handlers; guard clauses; no regions except generated
 code; no commented-out code; XML docs on public API.
@@ -138,22 +146,23 @@ documented. The rule applies to every new public API; do not remove it.
 
 ## 5. Architecture boundaries
 
-- Runtime game code references `Bork2d.Api`/`Bork2d.Runtime` only; implementation projects are
-  internal. The public tooling exceptions are the pack writer in `Bork2d.Assets` and
-  `Bork2d.Bake.Builder` for the build-time `MyGame.Assets` executable. Data types are registered
-  explicitly with `RegisterAsset<T>()`; there is no generated host or reflection. The builder is
-  never referenced by the runtime app or AOT publish.
-- `Bork2d.AotSmoke` takes a build-only dependency on the fixture assets executable (through
-  `Bork2dAssetsProjectFile`, not a `ProjectReference`); it loads the baked packs through the public
-  `IAssets` API and does not reference the pack tooling, builder, processor assemblies, or
-  `Bork2d.Assets` directly (Assets remains in the publish through `Bork2d.Runtime`). It updates the
-  dependency test/docs when the graph changes.
+- Runtime game code references `Bork2d.Engine`/`Bork2d.Runtime` only; implementation types are
+  internal. The public tooling exceptions are the pack writer in `Bork2d.Engine.Assets.Pack` and the
+  builder/processor surface in `Bork2d.Bake` for the build-time `MyGame.Assets` executable. Data
+  types are registered explicitly with `RegisterAsset<T>()`; there is no generated host or
+  reflection. The builder is never referenced by the runtime app or AOT publish.
+- The example `Bork2d.AotSmoke` takes a build-only dependency on the fixture assets executable
+  (through `Bork2dAssetsProjectFile`, not a `ProjectReference`); it loads the baked packs through
+  the public `IAssets` API and does not reference the pack tooling, builder, processor assemblies,
+  or the assets executable. Tests reference only the two example fixture projects, not the smoke. It
+  updates the dependency test/docs when the graph changes.
 - Editor/tooling stays JIT; no Avalonia, TOML, or reflection in runtime projects.
 - Runtime stays NativeAOT/trim-safe: no runtime reflection, assembly scanning, runtime TOML,
   dynamic code, or unregistered Nerdbank shapes.
-- `Bork2d.Api` references the BCL plus `Microsoft.Extensions.Logging.Abstractions` and PolyType
-  `1.4.1` for the `IShapeable<T>` constraint only. It must not reference Nerdbank.MessagePack,
-  Zstd/`System.IO.Compression`, `System.IO.Hashing`, or file I/O; no Vulkan/SDL types either.
+- `Bork2d.Engine` references the BCL plus `Microsoft.Extensions.Logging.Abstractions`, PolyType
+  `1.4.1` (the `IShapeable<T>` contract and public shapes), `Nerdbank.MessagePack` `1.4.95`
+  (generated shapes only), and `System.IO.Hashing` `11.0.0-rc.1.26425.128` (pack checksums). The
+  public contract must not expose MessagePack or hashing types; no Vulkan/SDL types either.
 - Pack format changes are versioned and documented in
   [Assets and tooling](architecture/assets-and-tooling.md).
 
@@ -164,7 +173,7 @@ documented. The rule applies to every new public API; do not remove it.
   in temp files (`PackBuilder`/`TempPackDirectory`) and never commit binary **test/pack** fixtures;
   the bake tests generate their own source trees and textures in temp directories, and the default
   AOT smoke loads the fixture-baked packs. The committed fixture sources are
-  `Bork2d.BakeFixture.Assets/Assets/art/player.png`, `Assets/art/checker.ppm`, and
+  `examples/Bork2d.BakeFixture.Assets/Assets/art/player.png`, `Assets/art/checker.ppm`, and
   `Assets/data/archer.unit` (plus sidecars) — authoring inputs, not test packs or generated outputs.
   Processor tests must use the public builder/processor path (the PPM and Unit test processors),
   cover registration/override and sidecar policies, and assert exact baked payloads.
@@ -197,6 +206,7 @@ documented. The rule applies to every new public API; do not remove it.
 - [ ] `dotnet test` passes; the opt-in real-window tests pass locally with
       `BORK2D_RUN_WINDOW_TESTS=1` for window/runtime changes.
 - [ ] `dotnet format --verify-no-changes` and `scripts/check-docs.ps1` pass.
+- [ ] The examples solution builds and formats when the examples changed.
 - [ ] Dependency matrix respected; no unintended public types.
 - [ ] Files sit in the area folder and the namespace matches it (IDE0130).
 - [ ] No runtime reflection/TOML/dynamic code.

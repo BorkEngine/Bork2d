@@ -18,7 +18,7 @@
 Bork2d is a small, opinionated 2D engine, not a general-purpose scene toolkit. It optimises for
 three things:
 
-1. **A small public contract.** Game code writes against `Bork2d.Api` and `Bork2d.Runtime` and
+1. **A small public contract.** Game code writes against `Bork2d.Engine` and `Bork2d.Runtime` and
    never sees SDL, Vulkan, Silk.NET, the pack filesystem, or renderer internals.
 2. **Predictable frame behavior.** Gameplay is tick-scoped and quiescent before capture;
    rendering consumes immutable snapshots and never touches live game state.
@@ -29,7 +29,7 @@ The design also includes a data-only editor (`Planned`, M5): no scene editing, o
 slicing and editing of custom serializable classes.
 
 The bake completes the source pipeline: each data TOML declares its CLR type in `[bork2d]`, and the
-JIT `Bork2d.Bake.Builder`/`MyGame.Assets` flow bakes custom-data TOML and processor sources (anywhere
+JIT `Bork2d.Bake`/`MyGame.Assets` flow bakes custom-data TOML and processor sources (anywhere
 under each declared pack root) into one main pack plus optional DLC/overlay packs through the
 unchanged `PackBuilder`. The runtime still reads MessagePack only, with compiled `[GenerateShape]`
 shapes and no TOML or reflection. See [Assets and tooling](assets-and-tooling.md#11-build-pipeline)
@@ -62,7 +62,7 @@ there is no descriptor and no generated host. See [asset processors](asset-proce
   version** (only the pack prefix version) and **no policy size caps** (intrinsic `uint32`/`uint64`
   field widths and streaming bounds). TOML is baked by the JIT bake tooling and never parsed at
   runtime; entities have no IDs. The
-  pack writer is the public tooling exception in `Bork2d.Assets`; it validates references at pack
+  pack writer is the public tooling exception in `Bork2d.Engine`; it validates references at pack
   build.
 - **Headless and offscreen modes.** Servers run with no window, GPU, or render thread; headless is
   one tick today and becomes timer-paced at a configured rate in M7. Offscreen rendering is
@@ -97,15 +97,13 @@ flowchart TB
   PD["Project.Desktop"] --> RT["Bork2d.Runtime"]
   PD --> PC["Project.Common"]
   PE["Project.Editor"] --> ED["Bork2d.Editor"]
-  PC --> API["Bork2d.Api"]
-  RT --> API
-  RT --> C["Bork2d.Common"]
-  RT --> A["Bork2d.Assets"]
+  PC --> EN["Bork2d.Engine"]
+  RT --> EN
   RT --> R["Bork2d.Render"]
 ```
 
 The developer-visible dependency chain is short: `Project.Common` references **only**
-`Bork2d.Api` (plus BCL/System.Numerics); `Project.Desktop` references **only** `Bork2d.Runtime`
+`Bork2d.Engine` (plus BCL/System.Numerics); `Project.Desktop` references **only** `Bork2d.Runtime`
 (plus `Project.Common`); `Project.Editor` references `Bork2d.Editor` plus `Project.Common`.
 Game code never references an engine project directly. Exact rules: [Projects](projects.md).
 
@@ -136,8 +134,8 @@ only when the ring is full; headless has no ring and is timer-paced. The state m
 These rules bind the implementation and every future change. Violating one is an architecture
 bug, not a style preference.
 
-1. **Only `Bork2d.Api` and `Bork2d.Runtime` are public surfaces for game code**; internal projects may change or disappear between releases. The one exception is the **tooling-only** pack writer (`PackBuilder`/`PackCompressionMode`) in `Bork2d.Assets.Pack` (D-001, D-M3-04, D-034). The public contracts are grouped by area namespace (`Bork2d.Api.Scene`, `.Rendering`, `.Input`, `.Platform`, `.Assets`); see [Projects §4](projects.md#4-source-layout-and-namespaces).
-2. **`Bork2d.Api` contains no GPU, OS, or renderer types**; it uses BCL types, `Microsoft.Extensions.Logging.Abstractions` for `ILoggerFactory`, and `PolyType` 1.4.1 for the `IShapeable<T>` shape constraint only (D-M3-22), with no other third party.
+1. **Only `Bork2d.Engine` and `Bork2d.Runtime` are public surfaces for game code**; implementation types may change or disappear between releases. The one exception is the **tooling-only** pack writer (`PackBuilder`/`PackCompressionMode`) in `Bork2d.Engine.Assets.Pack` (D-001, D-M3-04, D-034). The public contracts are grouped by area namespace (`Bork2d.Engine.Scene`, `.Rendering`, `.Input`, `.Platform`, `.Assets`); see [Projects §4](projects.md#4-source-layout-and-namespaces).
+2. **`Bork2d.Engine` contains no GPU, OS, or renderer types**; the public contract uses BCL types, `Microsoft.Extensions.Logging.Abstractions` for `ILoggerFactory`, and `PolyType` 1.4.1 for the `IShapeable<T>` shape constraint (D-M3-22). The merged pack implementation also uses Nerdbank.MessagePack and `System.IO.Hashing`; the public signatures must not expose them (the dependency test enforces this).
 3. **Scene mutation is tick-scoped and quiescent at capture**: mutation happens only during `Setup`/`Tick`/`Teardown`, workers join before `Tick` returns, structural and per-object access use `System.Threading.Lock` (composite updates still need game synchronization), and the tree is unordered.
 4. **Snapshots are immutable after publication**: the render thread never reads a live entity, mutates snapshot memory, or blocks the tick on a specific frame.
 5. **Snapshots carry immutable asset data, not live entities**: sprite renderables hold a loaded

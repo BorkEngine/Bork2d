@@ -1067,7 +1067,7 @@ marshaler.
   [publish gate](../architecture/nativeaot.md#7-testing-and-ci).
 - [API reference §7](../api/reference.md#7-iassets) — `IAssets`; [API guide §10](../api/guide.md#10-assets)
   — asset usage.
-- [Pack tooling §13](../api/reference.md#13-pack-tooling-bork2dassetspack-tooling-only) — `PackBuilder`.
+- [Pack tooling §13](../api/reference.md#13-pack-tooling-bork2dengineassetspack-tooling-only) — `PackBuilder`.
 - [Contributing](../contributing.md#2-build-test-and-local-gates) — gates and tests.
 - [M3 record](m3-assets.md) and [asset-reference refactor](refactor-asset-references.md) — inherited
   asset model; D-035's field-validation sentence is adjusted by D-M4-06.

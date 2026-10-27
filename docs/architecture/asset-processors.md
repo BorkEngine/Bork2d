@@ -56,7 +56,7 @@ a required sidecar).
 ```text
 MyGame/
   src/
-    Project.Common/            runtime-safe data types ([GenerateShape]); references Bork2d.Api only
+    Project.Common/            runtime-safe data types ([GenerateShape]); references Bork2d.Engine only
     MyGame.Assets/             executable, JIT, build-time only; owns assets and processors
       Assets/                  main pack root
         data/*.toml            custom data ([bork2d].type)
@@ -75,10 +75,9 @@ MyGame/
   build-time only; it is never referenced by `Project.Desktop`'s runtime output and never enters
   the AOT publish graph. `Project.Desktop` references it only as a build dependency so the packs
   exist before the app is copied/published.
-- **`Bork2d.Bake.Builder` is the new public tooling project.** It contains the builder, explicit
+- **`Bork2d.Bake` is the tooling project.** It contains both the public builder, explicit
   data-type registration, processor contracts, sidecar policy, output sink, and CLI command
-  handling. It references the internal `Bork2d.Bake` implementation, which keeps
-  Tomlyn/StbImageSharp internals hidden.
+  handling, and the internal Tomlyn/StbImageSharp implementation they hide.
 - `Bork2d.Bake.Cli` is retired as the game-facing CLI. The builder's command handling is the CLI;
   `MyGame.Assets` is the executable that hosts it. The engine fixture gets a build-only
   `Bork2d.BakeFixture.Assets` executable with the same shape.
@@ -89,8 +88,8 @@ MyGame/
 
 ```csharp
 // MyGame.Assets/Program.cs
-using Bork2d.Api.Assets;
-using Bork2d.Bake.Builder;
+using Bork2d.Engine.Assets;
+using Bork2d.Bake;
 
 return await new BakeApplicationBuilder()
     .WithProjectRoot(".")                      // MSBuild passes $(MSBuildProjectDirectory)
@@ -145,7 +144,7 @@ An illustrative project file (engine distribution path is finalized by the M9 te
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Project.Common\Project.Common.csproj" />
-    <ProjectReference Include="..\..\engine\src\Bork2d\Bork2d.Bake.Builder\Bork2d.Bake.Builder.csproj" />
+    <ProjectReference Include="..\..\engine\src\Bork2d\Bork2d.Bake\Bork2d.Bake.csproj" />
   </ItemGroup>
   <Import Project="..\..\engine\build\Bork2d.Assets.targets" />
 </Project>
@@ -153,7 +152,7 @@ An illustrative project file (engine distribution path is finalized by the M9 te
 
 ## 5. Processor contract
 
-The public contract lives in `Bork2d.Bake.Builder` and is JIT tooling only.
+The public contract lives in `Bork2d.Bake` and is JIT tooling only.
 
 ```csharp
 public interface IAssetProcessor
@@ -405,7 +404,7 @@ The existing texture behavior moves behind the same contract; it does not keep a
   `BaseAssetPath + "-raw"`; `Payload` points at the raw path. The engine serializes the descriptor;
   this preserves the M3/M4 runtime contract.
 - The descriptor's `filter`/`wrap` values come from the sidecar or the builder defaults and are
-  written as the `Bork2d.Api.Assets` `TextureFilter`/`TextureWrap` enums; `Format` is always
+  written as the `Bork2d.Engine.Assets` `TextureFilter`/`TextureWrap` enums; `Format` is always
   `TextureFormat.Rgba8` (D-040). There is no `[textures]` table and no descriptor parser.
 - `TexturePipeline`, `TextureSidecarParser`, `BakedTexture`, `TextureSourceEntry`, and the
   texture-specific `BakedAssetEntry`/`PackComposer` branches are removed or become private
@@ -555,7 +554,7 @@ the skip; `--check` validates without writing.
 
 Delivered on `task/file-processors`:
 
-1. **Builder / no descriptor / no host.** Added `Bork2d.Bake.Builder` with
+1. **Builder / no descriptor / no host.** Added `Bork2d.Bake` with
    `BakeApplicationBuilder`/`BakeApplication`, explicit `RegisterAsset<T>()`,
    `UseDefaultAssets()`/`UseDefaultProcessors()`, configuration validation, commands, and
    output/copy targets. Removed `ProjectDescriptor`, the generated host, host generation/loading, and
@@ -596,7 +595,7 @@ Delivered on `task/file-processors`:
 
 These naming/mechanical choices were settled in WP1–WP5; they do not change the approved semantics.
 
-- Project/API names are final: `Bork2d.Bake.Builder`, `BakeApplicationBuilder`, `BakeApplication`,
+- Project/API names are final: `Bork2d.Bake`, `BakeApplicationBuilder`, `BakeApplication`,
   `RegisterAsset<T>`, `UseDefaultAssets`, `UseDefaultProcessors`, `IAssetProcessor`/
   `AssetProcessor<TSidecar>`, `SidecarPolicy`, and `IAssetOutputSink`. `MyGame.Assets` and
   `Bork2d.BakeFixture.Assets` follow D-037.

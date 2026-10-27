@@ -13,30 +13,34 @@ that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets sh
 > `MyGame.Assets` executable registers explicit data types and asset processors, bakes on build, and
 > records a schema-3 incremental manifest; PPM and Unit are the acceptance processors. There is still
 > no renderer (M8), and headless/offscreen keep the one-tick `Setup` → `Tick` → `Teardown` sequence.
+> The project-consolidation refactor (D-041/D-042,
+> [spec](docs/specs/refactor-projects.md)) reduces the engine solution to five projects: the public
+> contract and engine implementation live in `Bork2d.Engine`, and the bake tooling lives in
+> `Bork2d.Bake`; the smoke and fixture projects live in the separate examples solution.
 > See the [roadmap](docs/roadmap.md), the
 > [file-processors spec](docs/specs/file-processors.md), and the
 > [asset-processors architecture](docs/architecture/asset-processors.md).
 
 ## Projects
 
+The engine solution is `src/Bork2d/Bork2d.slnx`; the examples (smoke and fixture) live in
+`examples/Bork2d.Examples.slnx`.
+
 | Project | Role |
 | --- | --- |
-| [`Bork2d.Api`](src/Bork2d/Bork2d.Api) | Public contracts and value types used by game code. |
-| [`Bork2d.Runtime`](src/Bork2d/Bork2d.Runtime) | Public builder/host; logging, validation, SDL window/input/time, windowed loop, one-tick modes. |
-| [`Bork2d.Common`](src/Bork2d/Bork2d.Common) | Engine, root-owned unordered scene tree, transforms, time. |
+| [`Bork2d.Engine`](src/Bork2d/Bork2d.Engine) | Public contract (`Bork2d.Engine.*`) plus the engine implementation: root-owned unordered scene tree, transforms, time, pack reader/writer, VFS, loader, and asset service. Public tooling is `Bork2d.Engine.Assets.Pack`. |
+| [`Bork2d.Bake`](src/Bork2d/Bork2d.Bake) | Public JIT builder/processor/command surface plus the internal bake implementation (TOML binder, processors, texture pipeline, pack composition, schema-3 incremental planner). |
 | [`Bork2d.Render`](src/Bork2d/Bork2d.Render) | Vulkan renderer; reference-wired and empty until M6/M8. |
-| [`Bork2d.Assets`](src/Bork2d/Bork2d.Assets) | Pack reader/writer, VFS, loader, descriptors, sprite assets; public tooling is `Bork2d.Assets.Pack`. |
-| [`Bork2d.Bake`](src/Bork2d/Bork2d.Bake) | Internal JIT bake implementation: TOML binder, processor framework, texture processor, pack composition, schema-3 incremental planner. |
-| [`Bork2d.Bake.Builder`](src/Bork2d/Bork2d.Bake.Builder) | Public JIT builder/processor/CLI surface used by game and fixture assets executables. |
-| [`Bork2d.BakeFixture`](src/Bork2d/Bork2d.BakeFixture) | AOT-safe game-side fixture data types (`GameConfig`, `Stats`, `StatsRoot`, `Unit`). |
-| [`Bork2d.BakeFixture.Assets`](src/Bork2d/Bork2d.BakeFixture.Assets) | Build-only fixture assets executable; owns `Assets/`/`DLC1/`, PPM/Unit processors, and bakes on build. |
-| [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite and dependency-matrix test (958 tests: 946 deterministic, 12 opt-in/conditional). |
-| [`Bork2d.AotSmoke`](src/Bork2d/Bork2d.AotSmoke) | NativeAOT smoke executable: headless one-tick run loading the baked fixture packs (8 main / 9 merged entries) plus `--windowed [--ticks N]` SDL demo; local publish/run gate. |
-| `Bork2d.Editor` | Planned Avalonia editor library/app (M5); JIT, not in the solution. |
+| [`Bork2d.Runtime`](src/Bork2d/Bork2d.Runtime) | Public builder/host; logging, validation, SDL window/input/time, windowed loop, one-tick modes. |
+| [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite, dependency-matrix/public-surface tests, and the Q-20 metadata guard. |
+| [`Bork2d.AotSmoke`](examples/Bork2d.AotSmoke) | Example NativeAOT smoke: headless one-tick run loading the baked fixture packs (8 main / 9 merged entries) plus `--windowed [--ticks N]` SDL demo; local publish/run gate. |
+| [`Bork2d.BakeFixture`](examples/Bork2d.BakeFixture) | AOT-safe game-side fixture data types (`GameConfig`, `Stats`, `StatsRoot`, `Unit`). |
+| [`Bork2d.BakeFixture.Assets`](examples/Bork2d.BakeFixture.Assets) | Build-only fixture assets executable; owns `Assets/`/`DLC1/`, PPM/Unit processors, and bakes on build. |
+| `Bork2d.Editor` | Planned Avalonia editor library/app (M5); JIT, not in either solution. |
 
-Game developers consume only `Bork2d.Api` and `Bork2d.Runtime`. `Bork2d.Api` is grouped by area
-(`Bork2d.Api.Scene`, `.Rendering`, `.Input`, `.Platform`, `.Assets`); the tooling pack writer lives
-in `Bork2d.Assets.Pack` and the builder/processor surface in `Bork2d.Bake.Builder`. A game solution
+Game developers consume only `Bork2d.Engine` and `Bork2d.Runtime`. `Bork2d.Engine` is grouped by area
+(`Bork2d.Engine.Scene`, `.Rendering`, `.Input`, `.Platform`, `.Assets`); the tooling pack writer lives
+in `Bork2d.Engine.Assets.Pack` and the builder/processor surface in `Bork2d.Bake`. A game solution
 adds `Project.Common`, `MyGame.Assets`, `Project.Desktop`, and `Project.Editor`; those templates are
 M9. `MyGame.Assets` is build-time only and never enters the runtime or AOT publish graph.
 
@@ -47,16 +51,18 @@ dotnet build src/Bork2d/Bork2d.slnx -c Debug
 dotnet build src/Bork2d/Bork2d.slnx -c Release
 dotnet test src/Bork2d/Bork2d.slnx -c Debug
 dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
+dotnet build examples/Bork2d.Examples.slnx -c Debug
+dotnet format examples/Bork2d.Examples.slnx --verify-no-changes --no-restore
 ```
 
 Requires the .NET SDK pinned by `global.json` (`11.0.100-rc.1`, target `net11.0`) on Windows.
-Warnings and C# style violations are build errors. The NativeAOT publish/run smoke is a required
-local gate, not a CI job:
+Warnings and C# style violations are build errors. The examples solution is not a CI job; the local
+AOT gate exercises its smoke app. The NativeAOT publish/run smoke is a required local gate:
 
 ```powershell
-dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
-& src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe
-& src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed --ticks 120
+dotnet publish examples/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
+& examples/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe
+& examples/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed --ticks 120
 ```
 
 The windowed run needs a desktop session; `--windowed` without `--ticks` is interactive
