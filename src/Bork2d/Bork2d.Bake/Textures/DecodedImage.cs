@@ -4,8 +4,8 @@ namespace Bork2d.Bake.Textures;
 /// A decoder result: straight-alpha RGBA8 pixels, row-major, top-left origin.
 /// </summary>
 /// <remarks>
-/// The pipeline validates dimensions and payload length; this type is only a carrier. It does not
-/// copy the pixel array.
+/// <see cref="TextureSourceReader"/> validates dimensions and payload length; this type is only a
+/// carrier. It does not copy the pixel array.
 /// </remarks>
 internal sealed class DecodedImage
 {

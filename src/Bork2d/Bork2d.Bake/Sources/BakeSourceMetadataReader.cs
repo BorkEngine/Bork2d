@@ -14,18 +14,12 @@ namespace Bork2d.Bake.Sources;
 /// <c>[bork2d] type = "Full.Type.Name"</c>. The table is reserved top-level metadata. Only
 /// <c>type</c> is accepted in v1; unknown keys, a non-table <c>bork2d</c> root value, a missing
 /// <c>type</c>, and a non-string or empty <c>type</c> are diagnostics with the source line/column.
-/// The declared type value span is returned for host-generation resolution diagnostics.
+/// The declared type value span is returned for explicit-registration diagnostics.
 /// </para>
 /// <para>
-/// The reader is shared by discovery, host generation, <c>validate</c>, and the texture pipeline's
-/// sidecar discrimination. It uses the same <see cref="TomlDocument"/> parser as binding, so a syntax
-/// or duplicate-key failure is reported once by the caller that owns the source.
-/// </para>
-/// <para>
-/// <see cref="TryHasBork2dTable"/> is the silent classification probe: it never reports diagnostics
-/// and answers only whether a root <c>bork2d</c> key exists (a valid, malformed, or inline/dotted
-/// table all count). Callers use it before deciding whether a <c>.toml</c> file is data or a texture
-/// sidecar.
+/// The reader is used by discovery and <c>validate</c>. It uses the same <see cref="TomlDocument"/>
+/// parser as binding, so a syntax or duplicate-key failure is reported once by the caller that owns
+/// the source.
 /// </para>
 /// </remarks>
 internal static class BakeSourceMetadataReader
@@ -122,23 +116,6 @@ internal static class BakeSourceMetadataReader
                 GetValueLine(syntax),
                 GetValueColumn(syntax))
             : new BakeSourceMetadata(BakeSourceMetadataKind.Invalid, null, null, null);
-    }
-
-    /// <summary>
-    /// Silently classifies a document by whether it has a root <c>bork2d</c> key.
-    /// </summary>
-    /// <param name="text">The TOML source.</param>
-    /// <returns>
-    /// <see langword="true"/> when the document parses and has a root <c>bork2d</c> key; otherwise
-    /// <see langword="false"/>. The probe never reports diagnostics.
-    /// </returns>
-    internal static bool TryHasBork2dTable(string text)
-    {
-        ArgumentNullException.ThrowIfNull(text);
-
-        var scratch = new BakeDiagnostics();
-        return TomlDocument.TryParse(text, filePath: null, scratch, out TomlTable root, out _)
-            && root.ContainsKey(TableName);
     }
 
     private static int? GetValueLine(TomlSyntaxIndex syntax)

@@ -8,8 +8,8 @@ namespace Bork2d.Tests.Bake.Processors;
 
 /// <summary>
 /// Processor-aware discovery: non-TOML processor sources, exact required sidecars, ordinary TOML next
-/// to a sidecar-less processor, orphan sidecars, invalid base paths, and the WP2 legacy image-sidecar
-/// bridge.
+/// to a sidecar-less processor, orphan sidecars, invalid base paths, and the built-in texture
+/// processor's filename-driven sidecar classification.
 /// </summary>
 public sealed class BakeProcessorDiscoveryTests
 {
@@ -64,7 +64,7 @@ public sealed class BakeProcessorDiscoveryTests
         using var project = TestBakeProject.Create(
             "processor-unregistered",
             processors: [new TestProcessor("test-stats", "stats")]);
-        project.WriteAssetBytes("art/player.png", [1]);
+        project.WriteAssetBytes("art/player.psd", [1]);
 
         var diagnostics = new BakeDiagnostics();
         BakeDiscoveredSources discovered = BakeSourceDiscovery.Discover(project.Project, diagnostics);
@@ -208,11 +208,9 @@ public sealed class BakeProcessorDiscoveryTests
     }
 
     [Fact]
-    public void LegacyImageSidecarIsStillLeftToTheTexturePipeline()
+    public void TextureSidecarIsAttachedToTheBuiltInTextureProcessor()
     {
-        using var project = TestBakeProject.Create(
-            "processor-legacy-bridge",
-            processors: [new TestProcessor("test-stats", "stats")]);
+        using var project = TestBakeProject.Create("processor-texture-sidecar");
         project.WriteAssetBytes("art/player.png", [1, 2, 3]);
         project.WriteAsset("art/player.png.toml", "filter = \"nearest\"\n");
 
@@ -221,15 +219,16 @@ public sealed class BakeProcessorDiscoveryTests
 
         Assert.Empty(diagnostics.GetSorted());
         Assert.Empty(discovered.DataSources);
-        Assert.Empty(discovered.ProcessorSources);
+        BakeProcessorSource source = Assert.Single(discovered.ProcessorSources);
+        Assert.Equal("texture", source.Processor.Name);
+        Assert.Equal("art/player.png.toml", source.SidecarRelativePath);
+        Assert.Equal(project.FullPath("Assets/art/player.png.toml"), source.SidecarPath);
     }
 
     [Fact]
-    public void TypedLegacyImageSidecarRemainsADataSource()
+    public void TypedTomlNamedLikeATextureSidecarIsItsSidecar()
     {
-        using var project = TestBakeProject.Create(
-            "processor-legacy-typed",
-            processors: [new TestProcessor("test-stats", "stats")]);
+        using var project = TestBakeProject.Create("processor-texture-typed");
         project.WriteAssetBytes("art/player.png", [1, 2, 3]);
         project.WriteAsset(
             "art/player.png.toml",
@@ -241,9 +240,10 @@ public sealed class BakeProcessorDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         BakeDiscoveredSources discovered = BakeSourceDiscovery.Discover(project.Project, diagnostics);
 
+        Assert.Empty(diagnostics.GetSorted());
         Assert.Empty(discovered.DataSources);
-        BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
-        Assert.Equal(BakeDiagnosticCodes.SourceInvalidAssetPath, diagnostic.Code);
+        BakeProcessorSource source = Assert.Single(discovered.ProcessorSources);
+        Assert.Equal("art/player.png.toml", source.SidecarRelativePath);
     }
 
     private static TestSidecarProcessor RequiredUnitProcessor()

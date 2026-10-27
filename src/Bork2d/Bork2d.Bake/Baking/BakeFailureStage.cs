@@ -17,9 +17,6 @@ internal enum BakeFailureStage
     /// <summary>A processor source, output, required sidecar, or processor call failed.</summary>
     Processors,
 
-    /// <summary>A texture source, sidecar, or payload failed.</summary>
-    Textures,
-
     /// <summary>The asset index or a reference failed validation.</summary>
     References,
 

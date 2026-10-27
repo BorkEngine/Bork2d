@@ -2,7 +2,6 @@ using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Paths;
 using Bork2d.Bake.Processors;
-using Bork2d.Bake.Toml;
 
 namespace Bork2d.Bake.Sources;
 
@@ -15,7 +14,8 @@ namespace Bork2d.Bake.Sources;
 /// Discovery walks every pack root in builder order and, within a root, the whole tree in ordinal
 /// path order (skipping reparse points so a link cannot leave the root). Non-TOML files are matched
 /// against the project's immutable processor registry by their longest registered compound suffix;
-/// everything else is ignored. <see cref="BakeSourcePath"/> remains the only path grammar.
+/// everything else is ignored. <see cref="BakeSourcePath"/> remains the only path grammar. There is no
+/// per-format extension list here: a source type exists only because a processor registered it.
 /// </para>
 /// <para>
 /// A <c>.toml</c> whose exact pack-relative path is <c>&lt;source relative path&gt;.toml</c> for a
@@ -23,9 +23,8 @@ namespace Bork2d.Bake.Sources;
 /// sidecar. Filename and registration decide classification; the file is never read for
 /// classification, so a <c>[bork2d]</c> table inside it is an unknown sidecar key at binding time.
 /// Every other <c>.toml</c> follows the data rules: a typed document is a custom-data source, and an
-/// untyped document is a missing-type error unless it is an orphan sidecar, an ordinary TOML next to
-/// a <see cref="BakeSidecarPolicy.None"/> processor, or the legacy image sidecar left to
-/// the texture pipeline (removed in WP3).
+/// untyped document is a missing-type error unless it is an orphan sidecar or an ordinary TOML next
+/// to a <see cref="BakeSidecarPolicy.None"/> processor.
 /// </para>
 /// <para>
 /// The returned data and processor sources are each ordered by pack index and then canonical path.
@@ -33,10 +32,6 @@ namespace Bork2d.Bake.Sources;
 /// </remarks>
 internal static class BakeSourceDiscovery
 {
-    private static readonly HashSet<string> _imageExtensions = new(
-        [".png", ".jpg", ".jpeg", ".bmp", ".tga"],
-        StringComparer.OrdinalIgnoreCase);
-
     private const string TomlSuffix = ".toml";
 
     /// <summary>Discovers and classifies the sources of every configured pack.</summary>
@@ -76,22 +71,6 @@ internal static class BakeSourceDiscovery
         });
 
         return new BakeDiscoveredSources(dataSources, processorSources);
-    }
-
-    /// <summary>Tests whether a <c>.toml</c> name has the legacy texture-sidecar shape.</summary>
-    /// <param name="relativePath">The pack-root-relative TOML path.</param>
-    /// <returns><see langword="true"/> when it is <c>&lt;image extension&gt;.toml</c>.</returns>
-    internal static bool IsSidecarShaped(string relativePath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
-
-        if (!relativePath.EndsWith(TomlSuffix, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        string sourceName = relativePath[..^TomlSuffix.Length];
-        return _imageExtensions.Contains(Path.GetExtension(sourceName));
     }
 
     private static void DiscoverPack(
@@ -196,18 +175,6 @@ internal static class BakeSourceDiscovery
                 continue;
             }
 
-            if (IsLegacyImageSidecar(project, relativePath, stem))
-            {
-                // The texture pipeline owns a legacy sidecar-shaped document unless it declares a
-                // root [bork2d] table. Leave a read or syntax failure to that pipeline so the same
-                // file is not reported twice. WP3 removes this bridge.
-                string? candidate = TryReadSilently(file);
-                if (candidate is null || !BakeSourceMetadataReader.TryHasBork2dTable(candidate))
-                {
-                    continue;
-                }
-            }
-
             if (!BakeSourceText.TryRead(
                     file,
                     relativePath,
@@ -259,7 +226,7 @@ internal static class BakeSourceDiscovery
 
             if (!BakeSourcePath.TryToAssetPath(
                 relativePath,
-                BakeSourceKind.DataToml,
+                "toml",
                 out string assetPath,
                 out string? pathReason))
             {
@@ -324,13 +291,6 @@ internal static class BakeSourceDiscovery
         source.SidecarRelativePath = relativePath;
     }
 
-    private static bool IsLegacyImageSidecar(
-        BakeProject project,
-        string relativePath,
-        string stem)
-        => IsSidecarShaped(relativePath)
-            && !project.ProcessorRegistry.TryMatch(stem, out _);
-
     private static void ReportUntypedToml(
         BakeProject project,
         BakePack pack,
@@ -367,18 +327,5 @@ internal static class BakeSourceDiscovery
                 + "'[bork2d]' table; every custom-data TOML must declare its full CLR "
                 + "type name as [bork2d] type = \"Full.Type.Name\".",
             diagnosticPath);
-    }
-
-    private static string? TryReadSilently(string fullPath)
-    {
-        try
-        {
-            return File.ReadAllText(fullPath);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
-            or NotSupportedException or ArgumentException)
-        {
-            return null;
-        }
     }
 }

@@ -347,7 +347,7 @@ public sealed class BakeProcessorOutputTests
     }
 
     [Fact]
-    public void ACustomPngProcessorTakesOverFromTheLegacyTexturePipeline()
+    public void ACustomPngProcessorRegisteredAfterDefaultsOverridesTheBuiltInOne()
     {
         var processor = new TestSidecarProcessor(
             "test-png",
@@ -356,22 +356,39 @@ public sealed class BakeProcessorOutputTests
             (context, sidecar) => context.Outputs.AddAsset(
                 context.BaseAssetPath,
                 new Bork2d.BakeFixture.StatsRoot(sidecar.Value, 0)));
-        using var project = TestBakeProject.Create("outputs-png-takeover", processors: [processor]);
-        project.WriteAssetBytes("art/player.png", [1, 2, 3]);
         using var directory = TempBakeDirectory.Create();
+        string sourceDirectory = directory.CreateDirectory("Assets/art");
+        File.WriteAllBytes(Path.Combine(sourceDirectory, "player.png"), [1, 2, 3]);
+        using var output = TempBakeDirectory.Create();
 
-        BakeResult result = RunBake(project, directory.RootPath);
+        var diagnostics = new BakeDiagnostics();
+        BakeProject? project = BakeProjectFixture.CreateBuilder(
+                directory.RootPath,
+                [("assets.pck", "Assets")],
+                registerFixtureTypes: false,
+                processors: [processor])
+            .CreateProject(diagnostics);
+        Assert.NotNull(project);
+        BakeDiagnostic overrideInfo = Assert.Single(diagnostics.GetSorted());
+        Assert.Equal(BakeDiagnosticCodes.ProcessorExtensionOverride, overrideInfo.Code);
+        Assert.Equal(BakeSeverity.Info, overrideInfo.Severity);
+        Assert.Contains("texture", overrideInfo.Message, StringComparison.Ordinal);
+        Assert.Contains("test-png", overrideInfo.Message, StringComparison.Ordinal);
+
+        BakeResult result = BakePipeline.Run(
+            project,
+            new BakeOptions(output.RootPath, BakeMode.Debug, check: false, force: false),
+            new BakeDiagnostics());
 
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.Equal(1, result.AssetCount);
+        Assert.Equal(0, result.TextureCount);
         Assert.Contains(
             result.Entries,
             entry => entry.Path == "art/player" && entry.Kind == BakedAssetEntryKind.ProcessorAsset);
         Assert.DoesNotContain(
             result.Entries,
-            entry => entry.Kind is BakedAssetEntryKind.TextureDescriptor
-                or BakedAssetEntryKind.TexturePayload);
-        Assert.Equal(0, result.TextureCount);
+            entry => entry.TypeName == typeof(TextureDescriptor).FullName);
     }
 
     private static IReadOnlyList<BakeProcessorOutput> Run(

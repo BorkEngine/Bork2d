@@ -1,7 +1,7 @@
 namespace Bork2d.Bake.Textures;
 
 /// <summary>
-/// The default sampler wrap mode for texture imports when a sidecar omits <c>wrap</c>.
+/// The sampler wrap mode used by the built-in texture processor when it creates a default sidecar.
 /// </summary>
 internal enum BakeTextureWrap
 {

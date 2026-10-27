@@ -14,74 +14,67 @@ public sealed class BakeSourcePathTests
     public void DataTomlSourcesStripTheSuffix(string sourcePath, string expected)
     {
         Assert.True(
-            BakeSourcePath.TryToAssetPath(sourcePath, BakeSourceKind.DataToml, out string assetPath, out string? reason),
+            BakeSourcePath.TryToAssetPath(sourcePath, "toml", out string assetPath, out string? reason),
             reason);
 
         Assert.Equal(expected, assetPath);
     }
 
     [Theory]
-    [InlineData("textures/player.png", "textures/player")]
-    [InlineData("art/player.png", "art/player")]
-    [InlineData("art/ui/button.png", "art/ui/button")]
-    [InlineData("textures/UI/Button.PNG", "textures/ui/button")]
-    [InlineData("textures/ui/button.jpg", "textures/ui/button")]
-    [InlineData("textures/ui/button.jpeg", "textures/ui/button")]
-    [InlineData("textures/ui/button.bmp", "textures/ui/button")]
-    [InlineData("textures/ui/button.tga", "textures/ui/button")]
-    public void TextureSourcesStripTheImageExtension(string sourcePath, string expected)
-    {
-        Assert.True(
-            BakeSourcePath.TryToAssetPath(
-                sourcePath,
-                BakeSourceKind.TextureSource,
-                out string assetPath,
-                out string? reason),
-            reason);
-
-        Assert.Equal(expected, assetPath);
-    }
-
-    [Theory]
-    [InlineData("textures/player.png.toml", "textures/player")]
-    [InlineData("textures/UI/Button.JPG.TOML", "textures/ui/button")]
-    [InlineData("textures/ui/button.bmp.toml", "textures/ui/button")]
-    public void TextureSidecarsStripBothSuffixes(string sourcePath, string expected)
-    {
-        Assert.True(
-            BakeSourcePath.TryToAssetPath(
-                sourcePath,
-                BakeSourceKind.TextureSidecar,
-                out string assetPath,
-                out string? reason),
-            reason);
-
-        Assert.Equal(expected, assetPath);
-    }
-
-    [Theory]
-    [InlineData("", (int)BakeSourceKind.DataToml)]
-    [InlineData("   ", (int)BakeSourceKind.DataToml)]
-    [InlineData("/data/foo.toml", (int)BakeSourceKind.DataToml)]
-    [InlineData("C:\\data\\foo.toml", (int)BakeSourceKind.DataToml)]
-    [InlineData("../data/foo.toml", (int)BakeSourceKind.DataToml)]
-    [InlineData("data/../foo.toml", (int)BakeSourceKind.DataToml)]
-    [InlineData("data//foo.toml", (int)BakeSourceKind.DataToml)]
-    [InlineData("data/foo.txt", (int)BakeSourceKind.DataToml)]
-    [InlineData("data/foo bar.toml", (int)BakeSourceKind.DataToml)]
-    [InlineData("data/.toml", (int)BakeSourceKind.DataToml)]
-    [InlineData("textures/player", (int)BakeSourceKind.TextureSource)]
-    [InlineData("textures/player.toml", (int)BakeSourceKind.TextureSource)]
-    [InlineData("textures/player.png", (int)BakeSourceKind.TextureSidecar)]
-    [InlineData("textures/player.txt.toml", (int)BakeSourceKind.TextureSidecar)]
-    public void UnsafeOrUnsupportedSourcePathsAreRejected(
+    [InlineData("art/player.png", "png", "art/player")]
+    [InlineData("textures/UI/Button.PNG", "png", "textures/ui/button")]
+    [InlineData("photos/Photo.JpEg", "jpeg", "photos/photo")]
+    [InlineData("art/archive.tar.gz", "tar.gz", "art/archive")]
+    [InlineData("art/Archive.TAR.GZ", "tar.gz", "art/archive")]
+    public void ProcessorSourcesStripTheMatchedExtension(
         string sourcePath,
-        int kindValue)
+        string matchedExtension,
+        string expected)
     {
-        var kind = (BakeSourceKind)kindValue;
+        Assert.True(
+            BakeSourcePath.TryToAssetPath(
+                sourcePath,
+                matchedExtension,
+                out string assetPath,
+                out string? reason),
+            reason);
 
+        Assert.Equal(expected, assetPath);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("/data/foo.toml")]
+    [InlineData("C:\\data\\foo.toml")]
+    [InlineData("../data/foo.toml")]
+    [InlineData("data/../foo.toml")]
+    [InlineData("data//foo.toml")]
+    [InlineData("data/foo.txt")]
+    [InlineData("data/foo bar.toml")]
+    [InlineData("data/.toml")]
+    public void UnsafeOrUnsupportedSourcePathsAreRejected(string sourcePath)
+    {
         Assert.False(
-            BakeSourcePath.TryToAssetPath(sourcePath, kind, out string assetPath, out string? reason));
+            BakeSourcePath.TryToAssetPath(sourcePath, "toml", out string assetPath, out string? reason));
+
+        Assert.Equal(string.Empty, assetPath);
+        Assert.False(string.IsNullOrWhiteSpace(reason));
+    }
+
+    [Theory]
+    [InlineData("data/foo.toml", "")]
+    [InlineData("data/foo.toml", "   ")]
+    [InlineData("data/foo.png", "toml")]
+    [InlineData("art/archive.gz", "tar.gz")]
+    public void AnEmptyOrUnmatchedExtensionIsRejected(string sourcePath, string matchedExtension)
+    {
+        Assert.False(
+            BakeSourcePath.TryToAssetPath(
+                sourcePath,
+                matchedExtension,
+                out string assetPath,
+                out string? reason));
 
         Assert.Equal(string.Empty, assetPath);
         Assert.False(string.IsNullOrWhiteSpace(reason));

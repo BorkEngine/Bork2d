@@ -2,8 +2,8 @@ using Bork2d.Api.Assets;
 using Bork2d.Assets.Pack;
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
+using Bork2d.Bake.Processors;
 using Bork2d.Bake.Sources;
-using Bork2d.Bake.Textures;
 using Bork2d.Tests.Assets.Service;
 using Bork2d.Tests.Bake.Baking;
 using Xunit;
@@ -36,9 +36,10 @@ public sealed class PackCompositionTests
 
         BakedAssetIndex index = BakedAssetIndex.Build(
             [Custom("data/game", game)],
-            [],
-            [Texture(payload, directory.RootPath)],
-            directory.RootPath,
+            [
+                TextureDescriptorOutput(),
+                RawPayloadOutput(payload),
+            ],
             diagnostics);
         Assert.Empty(diagnostics.GetSorted());
 
@@ -143,8 +144,6 @@ public sealed class PackCompositionTests
         BakedAssetIndex index = BakedAssetIndex.Build(
             [Custom("Bad Path", value)],
             [],
-            [],
-            directory.RootPath,
             diagnostics);
         Assert.Empty(diagnostics.GetSorted());
 
@@ -170,20 +169,31 @@ public sealed class PackCompositionTests
             $"{assetPath}.toml",
             []);
 
-    private static BakedTexture Texture(byte[] payload, string projectDirectory)
-        => new(
+    private static BakeProcessorOutput TextureDescriptorOutput()
+    {
+        var descriptor = new TextureDescriptor
+        {
+            Payload = PayloadPath,
+            Width = 2,
+            Height = 2,
+            Format = "rgba8",
+            Filter = "linear",
+            Wrap = "clamp",
+        };
+
+        return BakeProcessorOutput.ForAsset(
             TexturePath,
-            new TextureDescriptor
-            {
-                Payload = PayloadPath,
-                Width = 2,
-                Height = 2,
-                Format = "rgba8",
-                Filter = "linear",
-                Wrap = "clamp",
-            },
+            typeof(TextureDescriptor).FullName!,
+            (builder, path) => builder.AddMessagePack(path, descriptor),
+            [],
+            "Assets/textures/player.png",
+            "texture");
+    }
+
+    private static BakeProcessorOutput RawPayloadOutput(byte[] payload)
+        => BakeProcessorOutput.ForData(
             PayloadPath,
             payload,
-            Path.Combine(projectDirectory, "Assets", "textures", "player.png"),
-            TextureImportSettings.Defaults(BakeTextureFilter.Linear, BakeTextureWrap.Clamp));
+            "Assets/textures/player.png",
+            "texture");
 }

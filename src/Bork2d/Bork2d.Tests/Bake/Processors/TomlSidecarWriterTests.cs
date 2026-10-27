@@ -72,6 +72,38 @@ public sealed class TomlSidecarWriterTests
     }
 
     [Fact]
+    public void WritesNonNullNullableScalarAndEnumMembers()
+    {
+        var sidecar = new NullableSidecar { Count = 7, Mode = TestSidecarMode.Slow };
+
+        Assert.True(
+            TomlSidecarWriter.TryWrite(
+                ShapeOf<NullableSidecar>(),
+                sidecar,
+                out string text,
+                out string? reason),
+            reason);
+
+        Assert.Equal("count = 7\nmode = \"slow\"\n", text);
+    }
+
+    [Fact]
+    public void SkipsAbsentNullableMembers()
+    {
+        var sidecar = new NullableSidecar { Count = 3 };
+
+        Assert.True(
+            TomlSidecarWriter.TryWrite(
+                ShapeOf<NullableSidecar>(),
+                sidecar,
+                out string text,
+                out string? reason),
+            reason);
+
+        Assert.Equal("count = 3\n", text);
+    }
+
+    [Fact]
     public void UnsupportedMemberTypesFail()
     {
         var sidecar = new UnsupportedSidecar { Values = [1, 2] };

@@ -8,7 +8,7 @@ namespace Bork2d.Bake.Textures;
 /// <para>
 /// PNG is identified by its signature and IHDR chunk, BMP by <c>BM</c> plus a known DIB header, and
 /// TGA by a plausible 18-byte header (TGA has no magic). JPG and unknown formats are left to the
-/// decoder for dimensions: a decoder failure is reported by the pipeline.
+/// decoder for dimensions: a decoder failure is reported by <see cref="TextureSourceReader"/>.
 /// </para>
 /// <para>
 /// The 16-bit policy is the approved Q-12 default: explicit 16-bit PNGs are rejected, while 8-bit

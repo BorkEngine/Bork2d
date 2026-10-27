@@ -46,7 +46,9 @@ public sealed class BakeApplicationBuilderTests
         Assert.Equal(BakeTextureFilter.Linear, project.TextureFilter);
         Assert.Equal(BakeTextureWrap.Repeat, project.TextureWrap);
         Assert.True(project.UseDefaultProcessors);
-        Assert.Single(project.Processors);
+        Assert.Equal(2, project.Processors.Count);
+        Assert.Equal("texture", project.Processors[0].Name);
+        Assert.Equal("fake", project.Processors[1].Name);
         Assert.Contains("Bork2d.Api.Assets.SpriteAsset", project.AssetTypes.Keys);
         Assert.Contains("Bork2d.BakeFixture.GameConfig", project.AssetTypes.Keys);
         Assert.Contains("Bork2d.BakeFixture.StatsRoot", project.AssetTypes.Keys);
@@ -185,7 +187,7 @@ public sealed class BakeApplicationBuilderTests
     }
 
     [Fact]
-    public void UseDefaultProcessorsIsIdempotentAndRecordsTheRequest()
+    public void UseDefaultProcessorsIsIdempotentAndRegistersTheTextureProcessor()
     {
         using var directory = TempDirectory.Create("builder-default-processors");
         directory.CreateDirectory("Assets");
@@ -199,8 +201,43 @@ public sealed class BakeApplicationBuilderTests
         Bork2d.Bake.Baking.BakeProject? project = builder.CreateProject(diagnostics);
 
         Assert.NotNull(project);
+        Assert.Empty(diagnostics.GetSorted());
         Assert.True(project.UseDefaultProcessors);
-        Assert.Empty(project.Processors);
+        Bork2d.Bake.Processors.IBakeAssetProcessor processor =
+            Assert.Single(project.Processors);
+        Assert.Equal("texture", processor.Name);
+        Assert.Equal(
+            new[] { "bmp", "jpeg", "jpg", "png", "tga" },
+            processor.Extensions.Order(StringComparer.Ordinal));
+        Assert.Equal(Bork2d.Bake.Processors.BakeSidecarPolicy.Required, processor.Policy);
+        Assert.NotNull(processor.SidecarShape);
+    }
+
+    [Fact]
+    public void DefaultsRegisteredBeforeACustomProcessorLetTheCustomOneOverrideAnExtension()
+    {
+        using var directory = TempDirectory.Create("builder-default-override");
+        directory.CreateDirectory("Assets");
+        BakeApplicationBuilder builder = new BakeApplicationBuilder()
+            .WithProjectRoot(directory.RootPath)
+            .WithPack("assets.pck", "Assets")
+            .UseDefaultProcessors()
+            .AddProcessor(new FakePngProcessor());
+
+        var diagnostics = new BakeDiagnostics();
+        Bork2d.Bake.Baking.BakeProject? project = builder.CreateProject(diagnostics);
+
+        Assert.NotNull(project);
+        BakeDiagnostic info = Assert.Single(diagnostics.GetSorted());
+        Assert.Equal(BakeDiagnosticCodes.ProcessorExtensionOverride, info.Code);
+        Assert.Equal(BakeSeverity.Info, info.Severity);
+        Assert.Contains("texture", info.Message, StringComparison.Ordinal);
+        Assert.Contains("fake-png", info.Message, StringComparison.Ordinal);
+        Assert.True(
+            project.ProcessorRegistry.TryMatch(
+                "art/player.png",
+                out Bork2d.Bake.Processors.BakeProcessorMatch match));
+        Assert.Equal("fake-png", match.Processor.Name);
     }
 
     [Fact]
@@ -280,6 +317,21 @@ public sealed class BakeApplicationBuilderTests
         public string Name => "fake";
 
         public IReadOnlyList<string> Extensions => ["fake"];
+
+        public SidecarPolicy Policy => SidecarPolicy.None;
+
+        public ITypeShape? SidecarShape => null;
+
+        public void Process(AssetProcessorContext context)
+        {
+        }
+    }
+
+    private sealed class FakePngProcessor : IAssetProcessor
+    {
+        public string Name => "fake-png";
+
+        public IReadOnlyList<string> Extensions => ["png"];
 
         public SidecarPolicy Policy => SidecarPolicy.None;
 

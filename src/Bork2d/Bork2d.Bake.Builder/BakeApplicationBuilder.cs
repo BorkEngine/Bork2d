@@ -79,16 +79,29 @@ public sealed class BakeApplicationBuilder
         return this;
     }
 
-    /// <summary>Records that the built-in processor registration was requested; idempotent.</summary>
+    /// <summary>Registers the built-in texture processor for png/jpg/jpeg/bmp/tga; idempotent.</summary>
     /// <remarks>
-    /// In WP2 this only records the request; there is no built-in processor yet. WP3 registers the
-    /// built-in texture processor here. Until then the legacy texture pipeline remains the producer
-    /// for image sources that no custom processor claims.
+    /// <para>
+    /// The processor is added at this call position, so a later <see cref="AddProcessor(IAssetProcessor)"/>
+    /// registration overrides it for a shared extension (with an informational diagnostic), and the
+    /// defaults stay first when this call precedes the custom registrations.
+    /// </para>
+    /// <para>
+    /// <see cref="WithTextureDefaults(TextureFilter, TextureWrap)"/> supplies the sampler values of the
+    /// canonical sidecar created for a texture that has none, even when it is called after this
+    /// method: the processor reads the builder's shared defaults at bake time.
+    /// </para>
     /// </remarks>
     /// <returns>This builder.</returns>
     public BakeApplicationBuilder UseDefaultProcessors()
     {
-        _definition.RequestDefaultProcessors();
+        if (!_definition.UseDefaultProcessors)
+        {
+            _definition.RequestDefaultProcessors();
+            _definition.AddProcessor(
+                new BakeProcessorAdapter(new TextureProcessor(_definition.TextureDefaults)));
+        }
+
         return this;
     }
 
