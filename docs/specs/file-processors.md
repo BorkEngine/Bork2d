@@ -1,10 +1,17 @@
 # File Processors and `MyGame.Assets` — Implementation Spec
 
-> **Status:** **Locked implementation baseline (D-036/D-037/D-038/D-039, 2026-10-27).** This spec is
-> the implementation authority for `task/file-processors`; the architecture is recorded in
-> [Asset processors and `MyGame.Assets`](../architecture/asset-processors.md). The current tree is
-> still M4 and does not implement this spec. Nothing in this spec is as-built until the work
-> packages land.
+> **Status:** **Implemented as-built on `task/file-processors` (D-036/D-037/D-038/D-039,
+> 2026-10-27).** WP1–WP5 are landed on the task branch: the public `Bork2d.Bake.Builder`
+> builder/processor API, explicit `RegisterAsset<T>()`, no project descriptor/generated host/CLI,
+> the processor registry and sidecars, the built-in texture processor, the PPM/Unit fixture
+> processors, the build-only fixture assets executable, schema-3 incremental bake, the final
+> `build/Bork2d.Assets*.targets`, and the local AOT fixture flow. The locked decisions, API text, and
+> semantics below remain the implementation authority; WP5 added the incremental manifest, build
+> targets, AOT proof, and this as-built record. Local verification: Debug/Release zero-warning
+> builds, 945 deterministic plus 12 opt-in/conditional tests (957 total), `dotnet format`,
+> `scripts/check-docs.ps1`, `git diff --check`, and the local AOT publish/run. CI runs only on pull
+> requests targeting `develop` and pushes to `develop`, so the task branch is verified by those local
+> gates.
 
 ## 1. Goal
 
@@ -369,14 +376,18 @@ MyGame.Assets --help | --version
 
 - Manifest: `<project root>/obj/bork2d/bake/manifest.json`, schema 3 (bump from M4 schema 2).
 - Records:
-  - builder configuration hash: packs/roots/output paths, texture defaults, registered type
-    names, processor identities, and processor assembly hash;
+  - builder configuration hash: project root, every pack (index, pack path, relative root, absolute
+    root), texture defaults, sorted registered type names with their assembly simple names, and
+    processor identities (registration order, name, CLR type, policy, sorted normalized extensions);
   - sorted tracked inputs: every `.toml` plus every file whose suffix is in the registered
-    extension set;
-  - derived shape-assembly closure hash (registered types plus assets executable references);
-  - tool version, mode, every output path/hash, aggregate counts.
+    extension set, with a content hash;
+  - derived shape-assembly closure hash (registered data-type and processor assemblies plus their
+    non-tooling, non-framework referenced assemblies);
+  - tool version, mode, every output path/hash in pack order, and aggregate counts.
 - Skip only when every field matches and every output exists with its recorded hash. No per-pack
   cache. `--force` bypasses; `--check` never skips and writes nothing.
+- A full bake re-collects the tracked inputs after processing so a `Required` sidecar created during
+  that bake is recorded immediately; the next bake skips instead of running one extra full bake.
 - A changed registration, processor, extension set, sidecar policy, source, pack path, common
   assembly, tool, or mode invalidates the bake. No host-generation state exists.
 

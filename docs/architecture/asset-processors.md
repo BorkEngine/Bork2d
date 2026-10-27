@@ -1,19 +1,20 @@
 # Asset Processors and `MyGame.Assets`
 
-> **Status:** **Locked implementation baseline (D-036/D-037/D-038/D-039, 2026-10-27); implementation
-> follows [`docs/specs/file-processors.md`](../specs/file-processors.md) on `task/file-processors`;
-> the current tree is still M4.** The M4 code hardcodes image extensions,
-> has a texture-specific sidecar parser and texture-specific baked-index entries, reads
-> `bork2d.project.toml`, and uses a generated host for data-type binding. This document defines the
-> replacement: every non-TOML source type is an asset processor registered in a game-owned executable
-> (`MyGame.Assets`), the project descriptor is removed, all bake configuration is builder
-> configuration in that executable, and data types are registered explicitly with no generated host
-> and no reflection. Until the task lands, the M4 as-built rules in the
+> **Status:** **Implemented as-built on `task/file-processors` (D-036/D-037/D-038/D-039,
+> 2026-10-27).** This document is the architecture of the shipped processor model: every non-TOML
+> source type is an asset processor registered in a game-owned executable (`MyGame.Assets`), the
+> project descriptor is removed, all bake configuration is builder configuration in that executable,
+> and data types are registered explicitly with no generated host and no reflection. The built-in
+> texture importer is one processor; the PPM and Unit processors prove the extension point end to
+> end. Schema-3 incremental bake, `build/Bork2d.Assets.targets`/`Bork2d.Assets.Copy.targets`, the
+> build-only `Bork2d.BakeFixture.Assets` executable, and the local AOT fixture flow are in place. The
+> implementation scope and acceptance record live in the
+> [file-processors spec](../specs/file-processors.md); the M4 material in the
 > [M4 spec](../specs/m4-serialization-and-bake.md) and [assets and tooling](assets-and-tooling.md)
-> remain the description of the tree; the sections here are the target contract. This document
-> supersedes the texture-specific discovery/sidecar wording of D-M4-05, D-M4-13, D-M4-15, the
-> descriptor parts of D-M4-14 and Q-03/Q-10/Q-11, and the generated-host parts of D-M4-02/Q-07/Q-08;
-> D-036/D-037/D-038 record the decisions.
+> is historical where this document supersedes it. This document supersedes the texture-specific
+> discovery/sidecar wording of D-M4-05, D-M4-13, D-M4-15, the descriptor parts of D-M4-14 and
+> Q-03/Q-10/Q-11, and the generated-host parts of D-M4-02/Q-07/Q-08; D-036/D-037/D-038 record the
+> decisions.
 
 ## 1. Goal
 
@@ -484,22 +485,29 @@ the skip; `--check` validates without writing.
 
 ### 12.3 Build integration
 
-- `MyGame.Assets` imports `build/Bork2d.Assets.targets` (name to be finalized). After `Build`, the
-  target runs the freshly built executable with `bake`, passing the project root, configuration
-  mode, and output root. The build fails with the canonical `BKxxxx` lines on bake errors.
-- `MyGame.Assets` is the CLI, so it also supports `validate`, `clean`, and a pack-copy command.
-  There is no `generate-host` command.
-- `Project.Desktop` references `MyGame.Assets` **for build order only** (`ReferenceOutputAssembly`
-  false) and imports a thin copy target: after `Build` it asks `MyGame.Assets` to copy its packs to
-  `$(TargetDir)`; after `Publish` to `$(PublishDir)`; on `Clean` it asks the assets executable to
-  clean. MSBuild never needs a pack-path list; the builder config owns the paths.
+- `MyGame.Assets` imports `build/Bork2d.Assets.targets`. After `Build`, the target runs the freshly
+  built executable with `bake`, passing the project root and configuration mode; the executable's own
+  directory is the default output root. The build fails with the canonical `BKxxxx` lines on bake
+  errors. A second build with unchanged inputs/outputs/config is a no-op through the schema-3
+  manifest and prints an up-to-date summary.
+- `MyGame.Assets` is the CLI, so it also supports `validate`, `clean`, and `copy-packs`. There is no
+  `generate-host` command.
+- A desktop `Project.Desktop` may reference `MyGame.Assets` **for build order only**
+  (`ReferenceOutputAssembly` false) and imports a thin copy target: after `Build` it asks
+  `MyGame.Assets` to copy its packs to `$(TargetDir)`; after `Publish` to `$(PublishDir)`; on
+  `Clean` it asks the assets executable to clean. A self-contained AOT app cannot take that
+  executable reference safely (the SDK copies the apphost/deps/runtimeconfig and rejects a JIT
+  executable reference), so it sets `Bork2dAssetsProjectFile` and the copy target builds the assets
+  executable out of process. Either way MSBuild never needs a pack-path list; the builder config owns
+  the paths.
 - There is no `bork2d.project.toml`, no `Bork2dBakePackPaths`, no `[bake].host`, no `[textures]`
   table, and no `obj/bork2d/bakehost` directory. The old `build/Bork2d.Bake.targets` descriptor
   properties are removed.
 - The engine fixture uses `Bork2d.BakeFixture.Assets` (same pattern) so bake tests, the MSBuild
   integration test, and the AOT smoke exercise the real game flow. `Bork2d.AotSmoke` takes a
-  build-only reference to it; the AOT publish still contains only the fixture data types and the
-  baked packs, never the assets executable or builder.
+  build-only dependency on it (the copy target builds it out of process; it is not a
+  `ProjectReference`); the AOT publish still contains only the fixture data types and the baked
+  packs, never the assets executable or builder.
 
 ## 13. Diagnostics
 
@@ -540,23 +548,24 @@ the skip; `--check` validates without writing.
 - Reparse points are still skipped by discovery. Required-sidecar creation writes only next to the
   source and only when absent.
 
-## 15. Migration and work packages
+## 15. Delivered work packages
 
-Planned sequence on `task/file-processors`:
+Delivered on `task/file-processors`:
 
-1. **Builder / no descriptor / no host.** Add `Bork2d.Bake.Builder` with
+1. **Builder / no descriptor / no host.** Added `Bork2d.Bake.Builder` with
    `BakeApplicationBuilder`/`BakeApplication`, explicit `RegisterAsset<T>()`,
    `UseDefaultAssets()`/`UseDefaultProcessors()`, configuration validation, commands, and
-   output/copy targets. Remove `ProjectDescriptor`, the generated host, host generation/loading, and
-   `MetadataLoadContext`; migrate tests/fixtures. Add `Bork2d.BakeFixture.Assets`.
-2. **Processor framework.** Add the processor contract, explicit data-type registry, registry override
-   rules, base-path output validation, sidecar policy, sidecar binder entry point, `BK7xxx`, and
-   generic baked-index entries. Remove hardcoded extension lists from discovery/path/incremental.
-3. **Texture processor.** Move the existing texture pipeline behind `TextureProcessor`, keep all
-   behavior/tests, retire `TextureSidecarParser` and texture-specific index/composer branches.
-4. **PPM and Unit.** Add the two test processors, fixture sources, and end-to-end tests.
-5. **Build/AOT/docs.** Wire `MyGame.Assets`-style build targets, fixture assets executable, AOT
-   fixture flow, and finalize these docs.
+   output/copy targets. Removed `ProjectDescriptor`, the generated host, host generation/loading, and
+   `MetadataLoadContext`; migrated tests/fixtures. Added `Bork2d.BakeFixture.Assets`.
+2. **Processor framework.** Added the processor contract, explicit data-type registry, registry
+   override rules, base-path output validation, sidecar policy, sidecar binder entry point,
+   `BK7xxx`, and generic baked-index entries. Removed hardcoded extension lists from
+   discovery/path/incremental.
+3. **Texture processor.** Moved the existing texture pipeline behind `TextureProcessor`, kept all
+   behavior/tests, retired `TextureSidecarParser` and texture-specific index/composer branches.
+4. **PPM and Unit.** Added the two test processors, fixture sources, and end-to-end tests.
+5. **Build/AOT/docs.** Wired the assets build targets, fixture assets executable, schema-3
+   incremental manifest, AOT fixture flow, and finalized these docs.
 
 ## 16. Acceptance criteria
 
@@ -580,31 +589,33 @@ Planned sequence on `task/file-processors`:
   `BK4xxx`.
 - Debug/Release builds, tests, format, docs link check, and the local AOT publish/run gate pass.
 
-## 17. Implementation choices to confirm
+## 17. Settled implementation choices
 
-These are naming/mechanical choices made in this design; they do not change the approved semantics
-and are settled during WP1/WP2.
+These naming/mechanical choices were settled in WP1–WP5; they do not change the approved semantics.
 
-- Final project/API names: `Bork2d.Bake.Builder`, `BakeApplicationBuilder`, `BakeApplication`,
+- Project/API names are final: `Bork2d.Bake.Builder`, `BakeApplicationBuilder`, `BakeApplication`,
   `RegisterAsset<T>`, `UseDefaultAssets`, `UseDefaultProcessors`, `IAssetProcessor`/
-  `AssetProcessor<TSidecar>`, `SidecarPolicy`, and `IAssetOutputSink` are proposed. The
-  `MyGame.Assets` and `Bork2d.BakeFixture.Assets` names are from D-037.
-- MSBuild file name/properties: `build/Bork2d.Assets.targets` and the copy target are proposed; the
-  assets executable owns the pack paths, so no pack-path property is required and there is no host
-  build step.
-- Default-sidecar TOML writer: the builder may use a small canonical writer or Tomlyn serialization;
-  it must be deterministic and must not overwrite an existing file.
-- Sidecar reference values: this task treats sidecars as settings-only. If a processor needs an
-  `AssetRef`/`DataRef` in its sidecar, that is a follow-up decision; data TOML remains the place for
-  references.
-- The exact `AssetProcessorContext` helper names (e.g. `SourceFileNameWithoutExtension`) are
-  illustrative.
+  `AssetProcessor<TSidecar>`, `SidecarPolicy`, and `IAssetOutputSink`. `MyGame.Assets` and
+  `Bork2d.BakeFixture.Assets` follow D-037.
+- MSBuild files are final: `build/Bork2d.Assets.targets` for the assets executable and
+  `build/Bork2d.Assets.Copy.targets` for a consuming desktop/AOT app. The assets executable owns the
+  pack paths, so no pack-path property and no host build step exist.
+- The default-sidecar TOML writer is the small canonical `TomlSidecarWriter`; it is deterministic,
+  uses LF/UTF-8 without BOM, and never overwrites an existing file.
+- Sidecars are settings-only in this task. `AssetRef`/`DataRef` sidecar members are unsupported; data
+  TOML remains the place for references.
+- The incremental manifest is schema 3 at `<project root>/obj/bork2d/bake/manifest.json`. It records
+  the tool version, builder configuration hash, shape-assembly closure hash, sorted tracked input
+  hashes, mode, ordered output hashes, and aggregate counts. `bake --check` never skips and writes no
+  manifest; `bake --force` bypasses the skip; `clean` removes the packs and the manifest directory.
+- `AssetProcessorContext` helper names are final (`SourcePath`, `RelativePath`, `BaseAssetPath`,
+  `SourceFileName`, `SourceFileNameWithoutExtension`, `Outputs`, `Diagnostics`).
 
 ## 18. Related documents
 
 - [File-processors implementation spec](../specs/file-processors.md) — locked scope, API,
   work packages, tests, and acceptance criteria.
-- [Assets and tooling](assets-and-tooling.md) — pack, VFS, asset model, current M4 bake text.
+- [Assets and tooling](assets-and-tooling.md) — pack, VFS, asset model, as-built bake text.
 - [Projects and dependencies](projects.md) — project graph and game layout.
 - [API guide](../api/guide.md) and [API reference](../api/reference.md) — builder/processor usage.
 - [M4 spec](../specs/m4-serialization-and-bake.md) — historical M4 record and as-built evidence.

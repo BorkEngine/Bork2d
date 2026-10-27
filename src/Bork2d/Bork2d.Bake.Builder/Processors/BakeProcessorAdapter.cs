@@ -32,6 +32,9 @@ internal sealed class BakeProcessorAdapter : IBakeAssetProcessor
     public string Name => _processor.Name;
 
     /// <inheritdoc/>
+    public Type ProcessorType => _processor.GetType();
+
+    /// <inheritdoc/>
     public IReadOnlyList<string> Extensions => _processor.Extensions;
 
     /// <inheritdoc/>

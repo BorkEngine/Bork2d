@@ -13,6 +13,13 @@
         root is the executable's own directory (AppContext.BaseDirectory), so the packs sit next to
         the assets executable and a desktop/AOT app copies them with Bork2d.Assets.Copy.targets.
 
+        `bake` is incremental: the schema-3 manifest at `<project root>/obj/bork2d/bake/manifest.json`
+        records the configuration, every tracked input, the processor/type assembly closure, the mode,
+        and every output hash. A second build with no changed input/output/config prints "up to date:
+        ...; no inputs changed." and rewrites nothing. Running `bake` with the force switch (or any
+        changed source, registration, processor, pack path, mode, tool version, or output) runs the
+        full bake again.
+
         On Clean the target asks the executable to delete every configured pack output. Clean runs
         before the SDK deletes the executable, because the executable is the only component that
         knows the configured pack paths.

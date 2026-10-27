@@ -1,5 +1,6 @@
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
+using Bork2d.Bake.Incremental;
 
 namespace Bork2d.Bake.Builder.Commands;
 
@@ -14,11 +15,13 @@ namespace Bork2d.Bake.Builder.Commands;
 /// source diagnostics, <c>2</c> usage/configuration error, and <c>3</c> an unexpected internal failure.
 /// </para>
 /// <para>
-/// <c>bake</c> writes every configured pack atomically under the output root (default
-/// <see cref="AppContext.BaseDirectory"/>); <c>--check</c> validates and writes nothing; <c>--force</c>
-/// is accepted and reserved for the WP5 incremental skip. <c>validate</c> runs the same pipeline in
-/// check mode without writing. <c>clean</c> deletes the configured pack outputs. <c>copy-packs</c>
-/// copies each configured pack from next to the assets executable to <c>--output-root</c>.
+/// <c>bake</c> runs the incremental planner: it writes every configured pack atomically under the
+/// output root (default <see cref="AppContext.BaseDirectory"/>) or skips the bake as up to date when
+/// the schema-3 manifest and every output match. <c>--check</c> always validates and writes nothing;
+/// <c>--force</c> bypasses the skip. <c>validate</c> runs the same pipeline in check mode without
+/// writing or skipping. <c>clean</c> deletes the configured pack outputs and the incremental bake
+/// state. <c>copy-packs</c> copies each configured pack from next to the assets executable to
+/// <c>--output-root</c>.
 /// </para>
 /// </remarks>
 internal static class BakeCommandLine
@@ -122,7 +125,8 @@ internal static class BakeCommandLine
             allowOutputRoot: true,
             allowMode: true,
             requireOutputRoot: false,
-            forceCheck: false);
+            forceCheck: false,
+            incremental: true);
 
     private static int RunValidate(
         BakeProjectDefinition definition,
@@ -142,7 +146,8 @@ internal static class BakeCommandLine
             allowOutputRoot: false,
             allowMode: true,
             requireOutputRoot: false,
-            forceCheck: true);
+            forceCheck: true,
+            incremental: false);
 
     private static int RunPipeline(
         BakeProjectDefinition definition,
@@ -156,7 +161,8 @@ internal static class BakeCommandLine
         bool allowOutputRoot,
         bool allowMode,
         bool requireOutputRoot,
-        bool forceCheck)
+        bool forceCheck,
+        bool incremental)
     {
         if (!TryParse(
             args,
@@ -200,7 +206,9 @@ internal static class BakeCommandLine
 
         bool check = forceCheck || options.Check;
         var bakeOptions = new BakeOptions(outputRoot, options.Mode, check, options.Force);
-        BakeResult result = BakePipeline.Run(project, bakeOptions, diagnostics);
+        BakeResult result = incremental
+            ? BakeIncrementalPlanner.Run(project, bakeOptions, diagnostics)
+            : BakePipeline.Run(project, bakeOptions, diagnostics);
         WriteDiagnostics(error, result.Diagnostics);
 
         if (result.Status is BakeStatus.Success or BakeStatus.UpToDate)
@@ -309,6 +317,19 @@ internal static class BakeCommandLine
             }
         }
 
+        bool hadIncrementalState = Directory.Exists(
+            BakeManifestPaths.Directory(project.ProjectRoot));
+        if (!TryDeleteIncrementalState(project.ProjectRoot, diagnostics))
+        {
+            if (!options.Quiet)
+            {
+                output.WriteLine($"{programName}: failed to clean the incremental bake state.");
+            }
+
+            WriteDiagnostics(error, diagnostics);
+            return DiagnosticsExitCode;
+        }
+
         if (diagnostics.HasErrors)
         {
             WriteDiagnostics(error, diagnostics);
@@ -322,11 +343,41 @@ internal static class BakeCommandLine
 
         if (!options.Quiet)
         {
+            string state = hadIncrementalState
+                ? "and the incremental manifest directory"
+                : "(no incremental manifest was present)";
             output.WriteLine(
-                $"{programName}: cleaned {deleted} pack(s) under '{root}'.");
+                $"{programName}: cleaned {deleted} pack(s) under '{root}' {state}.");
         }
 
         return SuccessExitCode;
+    }
+
+    private static bool TryDeleteIncrementalState(
+        string projectRoot,
+        BakeDiagnostics diagnostics)
+    {
+        string directory = BakeManifestPaths.Directory(projectRoot);
+        if (!Directory.Exists(directory))
+        {
+            return true;
+        }
+
+        try
+        {
+            Directory.Delete(directory, recursive: true);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or NotSupportedException or ArgumentException)
+        {
+            diagnostics.Add(
+                BakeSeverity.Error,
+                BakeDiagnosticCodes.PackWriteFailed,
+                $"Failed to delete the incremental bake state '{directory}': {exception.Message}",
+                directory);
+            return false;
+        }
     }
 
     private static int RunCopyPacks(
@@ -624,7 +675,15 @@ internal static class BakeCommandLine
         bool check)
     {
         string packs = DescribePacks(result.Packs);
-        string modeName = mode == BakeMode.Release ? "release" : "debug";
+
+        if (result.Status == BakeStatus.UpToDate)
+        {
+            output.WriteLine(
+                $"{programName}: up to date: {packs}; no inputs changed.");
+            return;
+        }
+
+        string modeName = mode.ToName();
 
         if (check)
         {
@@ -734,6 +793,5 @@ internal static class BakeCommandLine
             "exit codes: 0 success, 1 source diagnostics, 2 usage/configuration error, 3 internal error");
     }
 
-    private static string ToolVersion
-        => typeof(BakeCommandLine).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+    private static string ToolVersion => BakeToolInfo.Version;
 }

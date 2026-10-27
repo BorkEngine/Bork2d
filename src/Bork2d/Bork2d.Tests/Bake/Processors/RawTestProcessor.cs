@@ -30,6 +30,9 @@ internal sealed class RawTestProcessor : IBakeAssetProcessor
     public string Name { get; }
 
     /// <inheritdoc/>
+    public Type ProcessorType => typeof(RawTestProcessor);
+
+    /// <inheritdoc/>
     public IReadOnlyList<string> Extensions { get; }
 
     /// <inheritdoc/>
