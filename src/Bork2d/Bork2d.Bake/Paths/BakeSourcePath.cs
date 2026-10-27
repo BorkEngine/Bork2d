@@ -9,32 +9,33 @@ namespace Bork2d.Bake.Paths;
 /// <remarks>
 /// <para>
 /// There is one path grammar: <see cref="AssetPath"/> is the canonical rules engine. This helper
-/// only strips source suffixes before handing the result to it, so the baker cannot drift from the
-/// runtime's lookup keys.
+/// only strips the matched source suffix before handing the result to it, so the baker cannot drift
+/// from the runtime's lookup keys.
 /// </para>
 /// <para>
-/// A source-relative <c>.toml</c> path loses the suffix; a texture source loses its image
-/// extension; a <c>&lt;source&gt;.toml</c> sidecar loses both. Rooted paths, empty paths, and
-/// <c>.</c>/<c>..</c> segments are rejected. Discovery sorts paths ordinal and skips reparse points,
-/// so a linked directory can never be walked outside the asset root.
+/// A data <c>.toml</c> source removes the <c>toml</c> extension; a processor source removes the
+/// extension its processor registered. There is no per-format extension list here. Rooted paths,
+/// empty paths, and <c>.</c>/<c>..</c> segments are rejected. Discovery sorts paths ordinal and skips
+/// reparse points, so a linked directory can never be walked outside the asset root.
 /// </para>
 /// </remarks>
 internal static class BakeSourcePath
 {
-    private static readonly string[] _textureExtensions =
-        [".png", ".jpg", ".jpeg", ".bmp", ".tga"];
-
     /// <summary>
-    /// Converts a source-relative path to a canonical asset path.
+    /// Converts a source-relative path to a canonical asset path by removing one matched registered
+    /// processor extension.
     /// </summary>
-    /// <param name="relativeSourcePath">The path relative to the asset root.</param>
-    /// <param name="kind">The source-file kind that selects the suffix rule.</param>
+    /// <param name="relativeSourcePath">The path relative to the pack root.</param>
+    /// <param name="matchedExtension">
+    /// The normalized extension the processor registry matched (or <c>toml</c> for a data source),
+    /// without a leading dot; a compound extension such as <c>tar.gz</c> removes both segments.
+    /// </param>
     /// <param name="assetPath">The canonical asset path when successful.</param>
     /// <param name="reason">The failure reason when unsuccessful.</param>
     /// <returns><see langword="true"/> when a canonical asset path was produced.</returns>
     internal static bool TryToAssetPath(
         string relativeSourcePath,
-        BakeSourceKind kind,
+        string matchedExtension,
         out string assetPath,
         out string? reason)
     {
@@ -52,13 +53,21 @@ internal static class BakeSourcePath
             return false;
         }
 
-        string normalized = relativeSourcePath.Replace('\\', '/').ToLowerInvariant();
-
-        if (!TryStripSourceSuffix(normalized, kind, out string withoutSuffix, out reason))
+        if (string.IsNullOrWhiteSpace(matchedExtension))
         {
+            reason = "the matched processor extension is empty";
             return false;
         }
 
+        string normalized = relativeSourcePath.Replace('\\', '/').ToLowerInvariant();
+        string suffix = "." + matchedExtension.ToLowerInvariant();
+        if (!normalized.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            reason = $"the path does not end with the matched extension '{suffix}'";
+            return false;
+        }
+
+        string withoutSuffix = normalized[..^suffix.Length];
         if (!AssetPath.TryValidateCanonical(withoutSuffix, out reason))
         {
             return false;
@@ -290,66 +299,6 @@ internal static class BakeSourcePath
 
         files.Sort(StringComparer.Ordinal);
         return files;
-    }
-
-    private static bool TryStripSourceSuffix(
-        string normalizedPath,
-        BakeSourceKind kind,
-        out string withoutSuffix,
-        out string? reason)
-    {
-        withoutSuffix = normalizedPath;
-        reason = null;
-
-        switch (kind)
-        {
-            case BakeSourceKind.DataToml:
-                if (!withoutSuffix.EndsWith(".toml", StringComparison.Ordinal))
-                {
-                    reason = "a data source must end with '.toml'";
-                    return false;
-                }
-
-                withoutSuffix = withoutSuffix[..^".toml".Length];
-                return true;
-
-            case BakeSourceKind.TextureSource:
-                return TryStripTextureExtension(normalizedPath, out withoutSuffix, out reason);
-
-            case BakeSourceKind.TextureSidecar:
-                if (!withoutSuffix.EndsWith(".toml", StringComparison.Ordinal))
-                {
-                    reason = "a texture sidecar must end with '.toml'";
-                    return false;
-                }
-
-                string sourcePath = withoutSuffix[..^".toml".Length];
-                return TryStripTextureExtension(sourcePath, out withoutSuffix, out reason);
-
-            default:
-                reason = "the source kind is unknown";
-                return false;
-        }
-    }
-
-    private static bool TryStripTextureExtension(
-        string path,
-        out string withoutSuffix,
-        out string? reason)
-    {
-        foreach (string extension in _textureExtensions)
-        {
-            if (path.EndsWith(extension, StringComparison.Ordinal))
-            {
-                withoutSuffix = path[..^extension.Length];
-                reason = null;
-                return true;
-            }
-        }
-
-        withoutSuffix = path;
-        reason = "a texture source must be a .png, .jpg, .jpeg, .bmp, or .tga file";
-        return false;
     }
 
     private static bool IsPathFailure(Exception exception)

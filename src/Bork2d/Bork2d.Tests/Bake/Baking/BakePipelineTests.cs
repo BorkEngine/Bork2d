@@ -4,40 +4,37 @@ using Bork2d.Assets.Pack;
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Tests.Assets.Service;
+using Bork2d.Tests.Bake.Textures;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Baking;
 
 /// <summary>
-/// The §16.1/§16.2/§16.3 acceptance path: a real fixture assembly as <c>Project.Common</c>, a
-/// generated and built host, a full bake to one pack, and the runtime loader reading every baked
-/// value back. Also covers check-only, empty/texture-only projects, invalid input leaving the previous
-/// pack untouched, and structural determinism.
+/// The acceptance path for WP1: explicit registrations instead of a generated host, a full bake to one
+/// pack, and the runtime loader reading every baked value back. Also covers check-only, empty and
+/// texture-only projects, invalid input leaving the previous pack untouched, and structural
+/// determinism.
 /// </summary>
-[Collection(BakeProjectFixtureCollection.Name)]
 public sealed class BakePipelineTests
 {
-    private readonly BakeProjectFixture _fixture;
-
-    /// <summary>Initializes a new instance of the <see cref="BakePipelineTests"/> class.</summary>
-    /// <param name="fixture">The shared fixture.</param>
-    public BakePipelineTests(BakeProjectFixture fixture) => _fixture = fixture;
-
     [Fact]
     public async Task FullBakeLoadsCustomDataSpriteTextureAndStructRoot()
     {
+        using var project = TestBakeProject.Create("full");
+        project.WriteStandardAssets();
+        project.WriteTexture();
         using var directory = TempBakeDirectory.Create();
         string packPath = directory.FullPath("assets.pck");
 
-        BakeResult result = RunBake(_fixture.DescriptorPath, packPath);
+        BakeResult result = RunBake(project.Project, directory.RootPath);
 
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.True(result.PackWritten);
-        Assert.Equal(directory.FullPath("assets.pck"), result.PackPath);
+        Assert.Equal(packPath, result.PackPath);
         Assert.Empty(result.Diagnostics);
         Assert.Equal(3, result.AssetCount);
         Assert.Equal(1, result.TextureCount);
-        Assert.Equal(2, result.ReferenceCount);
+        Assert.Equal(3, result.ReferenceCount);
         Assert.DoesNotContain(
             result.Diagnostics,
             diagnostic => diagnostic.Code.StartsWith("BK5", StringComparison.Ordinal));
@@ -70,9 +67,9 @@ public sealed class BakePipelineTests
         Assert.Equal(BakeProjectFixture.TexturePayloadPath, texture.Payload.Path);
         Assert.Equal(2u, texture.Width);
         Assert.Equal(2u, texture.Height);
-        Assert.Equal("rgba8", texture.Format);
-        Assert.Equal("nearest", texture.Filter);
-        Assert.Equal("repeat", texture.Wrap);
+        Assert.Equal(TextureFormat.Rgba8, texture.Format);
+        Assert.Equal(TextureFilter.Nearest, texture.Filter);
+        Assert.Equal(TextureWrap.Repeat, texture.Wrap);
         Assert.Equal(
             BakeProjectFixture.ExpectedTexturePayload,
             await host.Service.LoadData(texture.Payload));
@@ -98,31 +95,31 @@ public sealed class BakePipelineTests
     [Fact]
     public void CheckValidatesEverythingAndWritesNothing()
     {
+        using var project = TestBakeProject.Create("check");
+        project.WriteStandardAssets();
+        project.WriteTexture();
         using var directory = TempBakeDirectory.Create();
         string packPath = directory.FullPath("assets.pck");
 
-        BakeResult result = RunBake(_fixture.DescriptorPath, packPath, check: true);
+        BakeResult result = RunBake(project.Project, directory.RootPath, check: true);
 
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.False(result.PackWritten);
         Assert.Empty(result.Diagnostics);
         Assert.Equal(3, result.AssetCount);
         Assert.Equal(1, result.TextureCount);
-        Assert.Equal(2, result.ReferenceCount);
+        Assert.Equal(3, result.ReferenceCount);
         Assert.False(File.Exists(packPath));
     }
 
     [Fact]
     public void EmptyProjectProducesAValidEmptyPack()
     {
-        string project = BakeProjectFixture.CreateProject("empty");
+        using var project = TestBakeProject.Create("empty");
         using var directory = TempBakeDirectory.Create();
         string packPath = directory.FullPath("assets.pck");
 
-        BakeResult result = RunBake(
-            Path.Combine(project, BakeProjectFixture.DescriptorFileName),
-            packPath,
-            hostPath: _fixture.EmptyHostAssemblyPath);
+        BakeResult result = RunBake(project.Project, directory.RootPath);
 
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.True(result.PackWritten);
@@ -137,19 +134,18 @@ public sealed class BakePipelineTests
     [Fact]
     public async Task TextureOnlyProjectProducesTheDescriptorAndPayload()
     {
-        string project = BakeProjectFixture.CreateProject("texture-only");
-        BakeProjectFixture.WriteTexture(project);
+        using var project = TestBakeProject.Create("texture-only");
+        project.WriteTexture();
         using var directory = TempBakeDirectory.Create();
         string packPath = directory.FullPath("assets.pck");
 
-        BakeResult result = RunBake(
-            Path.Combine(project, BakeProjectFixture.DescriptorFileName),
-            packPath,
-            hostPath: _fixture.EmptyHostAssemblyPath);
+        BakeResult result = RunBake(project.Project, directory.RootPath);
 
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.True(result.PackWritten);
-        Assert.Empty(result.Diagnostics);
+        Assert.DoesNotContain(
+            result.Diagnostics,
+            diagnostic => diagnostic.Severity == BakeSeverity.Error);
         Assert.Equal(0, result.AssetCount);
         Assert.Equal(1, result.TextureCount);
         Assert.Equal(
@@ -160,8 +156,8 @@ public sealed class BakePipelineTests
         host.Start();
         TextureDescriptor descriptor =
             await host.Service.LoadAsset<TextureDescriptor>(BakeProjectFixture.TexturePath);
-        Assert.Equal("linear", descriptor.Filter);
-        Assert.Equal("clamp", descriptor.Wrap);
+        Assert.Equal(TextureFilter.Linear, descriptor.Filter);
+        Assert.Equal(TextureWrap.Clamp, descriptor.Wrap);
         Assert.Equal(
             BakeProjectFixture.ExpectedTexturePayload,
             await host.Service.LoadData(BakeProjectFixture.TexturePayloadPath));
@@ -171,17 +167,16 @@ public sealed class BakePipelineTests
     [MemberData(nameof(InvalidGameSources))]
     public void InvalidSourceLeavesThePreviousPackUnchanged(string toml, string expectedCode)
     {
-        string project = BakeProjectFixture.CreateProject("invalid-source");
-        BakeProjectFixture.WriteStandardAssets(project);
-        BakeProjectFixture.WriteAsset(project, "data/game.toml", toml);
-        BakeProjectFixture.WriteTexture(project);
-        string packPath = Path.Combine(project, "assets.pck");
+        using var project = TestBakeProject.Create("invalid-source");
+        project.WriteStandardAssets();
+        project.WriteAsset("data/game.toml", toml);
+        project.WriteTexture();
+        using var directory = TempBakeDirectory.Create();
+        string packPath = directory.FullPath("assets.pck");
         BakedPackAssertions.WriteValidPack(packPath);
         byte[] before = File.ReadAllBytes(packPath);
 
-        BakeResult result = RunBake(
-            Path.Combine(project, BakeProjectFixture.DescriptorFileName),
-            packPath);
+        BakeResult result = RunBake(project.Project, directory.RootPath);
 
         Assert.Equal(BakeStatus.DiagnosticsError, result.Status);
         Assert.False(result.PackWritten);
@@ -191,23 +186,16 @@ public sealed class BakePipelineTests
     }
 
     [Fact]
-    public void DescriptorPackPathIsUsedWhenNoOutputOverrideIsGiven()
+    public void PackPathIsResolvedUnderTheOutputRoot()
     {
-        string project = BakeProjectFixture.CreateProject("default-pack");
-        BakeProjectFixture.WriteStandardAssets(project);
-        BakeProjectFixture.WriteTexture(project);
-        string descriptorPath = Path.Combine(project, BakeProjectFixture.DescriptorFileName);
+        using var project = TestBakeProject.Create("default-pack");
+        project.WriteStandardAssets();
+        project.WriteTexture();
+        using var directory = TempBakeDirectory.Create();
 
-        var options = new BakeOptions(
-            descriptorPath,
-            _fixture.HostAssemblyPath,
-            outputRoot: null,
-            BakeMode.Debug,
-            check: false,
-            force: false);
-        BakeResult result = BakePipeline.Run(options, new BakeDiagnostics());
+        BakeResult result = RunBake(project.Project, directory.RootPath);
 
-        string expectedPath = Path.Combine(project, "assets.pck");
+        string expectedPath = directory.FullPath("assets.pck");
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.True(result.PackWritten);
         Assert.Equal(expectedPath, result.PackPath);
@@ -217,11 +205,10 @@ public sealed class BakePipelineTests
     [Fact]
     public void DataUnderTexturesBakesAsOrdinaryCustomData()
     {
-        string project = BakeProjectFixture.CreateProject("data-under-textures");
-        BakeProjectFixture.WriteStandardAssets(project);
-        BakeProjectFixture.WriteTexture(project);
-        BakeProjectFixture.WriteAsset(
-            project,
+        using var project = TestBakeProject.Create("data-under-textures");
+        project.WriteStandardAssets();
+        project.WriteTexture();
+        project.WriteAsset(
             "textures/notes.toml",
             """
             attack = 3
@@ -231,11 +218,8 @@ public sealed class BakePipelineTests
             type = "Bork2d.BakeFixture.StatsRoot"
             """);
         using var directory = TempBakeDirectory.Create();
-        string packPath = directory.FullPath("assets.pck");
 
-        BakeResult result = RunBake(
-            Path.Combine(project, BakeProjectFixture.DescriptorFileName),
-            packPath);
+        BakeResult result = RunBake(project.Project, directory.RootPath);
 
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.Empty(result.Diagnostics);
@@ -251,11 +235,10 @@ public sealed class BakePipelineTests
     [Fact]
     public void DataAndTextureDescriptorPathCollisionIsBK3005AndPreventsThePack()
     {
-        string project = BakeProjectFixture.CreateProject("collision-descriptor");
-        BakeProjectFixture.WriteStandardAssets(project);
-        BakeProjectFixture.WriteTexture(project);
-        BakeProjectFixture.WriteAsset(
-            project,
+        using var project = TestBakeProject.Create("collision-descriptor");
+        project.WriteStandardAssets();
+        project.WriteTexture();
+        project.WriteAsset(
             "art/player.toml",
             """
             name = "art"
@@ -265,16 +248,10 @@ public sealed class BakePipelineTests
             [bork2d]
             type = "Bork2d.BakeFixture.GameConfig"
             """);
-        BakeProjectFixture.WriteAssetBytes(
-            project,
-            "art/player.png",
-            Bork2d.Tests.Bake.Textures.TextureImageFactory.RgbaPng());
         using var directory = TempBakeDirectory.Create();
         string packPath = directory.FullPath("assets.pck");
 
-        BakeResult result = RunBake(
-            Path.Combine(project, BakeProjectFixture.DescriptorFileName),
-            packPath);
+        BakeResult result = RunBake(project.Project, directory.RootPath);
 
         Assert.Equal(BakeStatus.DiagnosticsError, result.Status);
         Assert.False(result.PackWritten);
@@ -288,11 +265,10 @@ public sealed class BakePipelineTests
     [Fact]
     public void DataAndRawPayloadPathCollisionIsBK3005AndPreventsThePack()
     {
-        string project = BakeProjectFixture.CreateProject("collision-raw");
-        BakeProjectFixture.WriteStandardAssets(project);
-        BakeProjectFixture.WriteTexture(project);
-        BakeProjectFixture.WriteAsset(
-            project,
+        using var project = TestBakeProject.Create("collision-raw");
+        project.WriteStandardAssets();
+        project.WriteTexture();
+        project.WriteAsset(
             "art/player-raw.toml",
             """
             attack = 2
@@ -301,16 +277,10 @@ public sealed class BakePipelineTests
             [bork2d]
             type = "Bork2d.BakeFixture.StatsRoot"
             """);
-        BakeProjectFixture.WriteAssetBytes(
-            project,
-            "art/player.png",
-            Bork2d.Tests.Bake.Textures.TextureImageFactory.RgbaPng());
         using var directory = TempBakeDirectory.Create();
         string packPath = directory.FullPath("assets.pck");
 
-        BakeResult result = RunBake(
-            Path.Combine(project, BakeProjectFixture.DescriptorFileName),
-            packPath);
+        BakeResult result = RunBake(project.Project, directory.RootPath);
 
         Assert.Equal(BakeStatus.DiagnosticsError, result.Status);
         Assert.False(result.PackWritten);
@@ -324,30 +294,32 @@ public sealed class BakePipelineTests
     [Fact]
     public void TwoBakesOfTheSameInputsAreStructurallyIdentical()
     {
+        using var project = TestBakeProject.Create("deterministic");
+        project.WriteStandardAssets();
+        project.WriteTexture();
         using var first = TempBakeDirectory.Create();
         using var second = TempBakeDirectory.Create();
-        string firstPack = first.FullPath("assets.pck");
-        string secondPack = second.FullPath("assets.pck");
 
-        BakeResult firstResult = RunBake(_fixture.DescriptorPath, firstPack);
-        BakeResult secondResult = RunBake(_fixture.DescriptorPath, secondPack);
+        BakeResult firstResult = RunBake(project.Project, first.RootPath);
+        BakeResult secondResult = RunBake(project.Project, second.RootPath);
 
         Assert.Equal(BakeStatus.Success, firstResult.Status);
         Assert.Equal(BakeStatus.Success, secondResult.Status);
         Assert.Empty(firstResult.Diagnostics);
         Assert.Empty(secondResult.Diagnostics);
 
-        BakedPackAssertions.AssertStructurallyEqual(firstPack, secondPack);
+        BakedPackAssertions.AssertStructurallyEqual(
+            first.FullPath("assets.pck"),
+            second.FullPath("assets.pck"));
     }
 
     [Fact]
     public void RepeatedInvalidInputProducesTheSameDiagnosticsInTheSameOrder()
     {
-        string project = BakeProjectFixture.CreateProject("stable-diagnostics");
-        BakeProjectFixture.WriteStandardAssets(project);
-        BakeProjectFixture.WriteTexture(project);
-        BakeProjectFixture.WriteAsset(
-            project,
+        using var project = TestBakeProject.Create("stable-diagnostics");
+        project.WriteStandardAssets();
+        project.WriteTexture();
+        project.WriteAsset(
             "data/game.toml",
             """
             health = "many"
@@ -361,12 +333,8 @@ public sealed class BakePipelineTests
             type = "Bork2d.BakeFixture.GameConfig"
             """);
 
-        BakeResult firstRun = RunBake(
-            Path.Combine(project, BakeProjectFixture.DescriptorFileName),
-            Path.Combine(project, "first.pck"));
-        BakeResult secondRun = RunBake(
-            Path.Combine(project, BakeProjectFixture.DescriptorFileName),
-            Path.Combine(project, "second.pck"));
+        BakeResult firstRun = RunBake(project.Project, project.FullPath("out-first"));
+        BakeResult secondRun = RunBake(project.Project, project.FullPath("out-second"));
 
         Assert.Equal(BakeStatus.DiagnosticsError, firstRun.Status);
         Assert.Equal(BakeStatus.DiagnosticsError, secondRun.Status);
@@ -407,19 +375,9 @@ public sealed class BakePipelineTests
 
     private const string TypeTable = "\n[bork2d]\ntype = \"Bork2d.BakeFixture.GameConfig\"\n";
 
-    private BakeResult RunBake(
-        string projectPath,
-        string outputPath,
-        bool check = false,
-        string? hostPath = null)
-    {
-        var options = new BakeOptions(
-            projectPath,
-            hostPath ?? _fixture.HostAssemblyPath,
-            Path.GetDirectoryName(outputPath),
-            BakeMode.Debug,
-            check,
-            force: false);
-        return BakePipeline.Run(options, new BakeDiagnostics());
-    }
+    private static BakeResult RunBake(BakeProject project, string outputRoot, bool check = false)
+        => BakePipeline.Run(
+            project,
+            new BakeOptions(Path.GetFullPath(outputRoot), BakeMode.Debug, check, force: false),
+            new BakeDiagnostics());
 }

@@ -1,4 +1,7 @@
 using System.Reflection;
+using Bork2d.Assets.Pack;
+using Bork2d.Bake.Builder;
+using Bork2d.Tests.TestSupport;
 using Xunit;
 
 namespace Bork2d.Tests.Architecture;
@@ -11,6 +14,7 @@ public sealed class DependencyMatrixTests
     private const string Hashing = "System.IO.Hashing";
     private const string Tomlyn = "Tomlyn";
     private const string StbImageSharp = "StbImageSharp";
+    private const string MetadataLoadContext = "System.Reflection.MetadataLoadContext";
 
     private static readonly string[] _forbiddenApiReferencePrefixes =
     [
@@ -105,7 +109,7 @@ public sealed class DependencyMatrixTests
     public void AssetsReferencesOnlyApiAndCommon()
     {
         AssertReferenceMatrix(
-            typeof(Bork2d.Assets.Pack.PackBuilder).Assembly,
+            typeof(PackBuilder).Assembly,
             "Bork2d.Api",
             "Bork2d.Common");
     }
@@ -113,7 +117,7 @@ public sealed class DependencyMatrixTests
     [Fact]
     public void AssetsExposesOnlyThePackToolingSurface()
     {
-        var exported = typeof(Bork2d.Assets.Pack.PackBuilder).Assembly
+        var exported = typeof(PackBuilder).Assembly
             .GetExportedTypes()
             .Select(type => type.FullName ?? type.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
@@ -131,7 +135,7 @@ public sealed class DependencyMatrixTests
     [Fact]
     public void AssetFileSystemStaysInternal()
     {
-        var assembly = typeof(Bork2d.Assets.Pack.PackBuilder).Assembly;
+        var assembly = typeof(PackBuilder).Assembly;
         var type = typeof(Bork2d.Assets.Vfs.AssetFileSystem);
 
         Assert.False(type.IsPublic);
@@ -161,6 +165,7 @@ public sealed class DependencyMatrixTests
 
         Assert.Contains(Tomlyn, references);
         Assert.Contains(Hashing, references);
+        Assert.DoesNotContain(MetadataLoadContext, references);
         Assert.DoesNotContain("Bork2d.Common", references);
         Assert.DoesNotContain("Bork2d.Runtime", references);
         Assert.DoesNotContain("Bork2d.Render", references);
@@ -173,17 +178,81 @@ public sealed class DependencyMatrixTests
     }
 
     [Fact]
-    public void CliReferencesOnlyBake()
+    public void BakeBuilderReferencesBakeApiAndAssets()
     {
         AssertReferenceMatrix(
-            typeof(Bork2d.Bake.Cli.CliApplication).Assembly,
+            typeof(BakeApplicationBuilder).Assembly,
+            "Bork2d.Api",
+            "Bork2d.Assets",
             "Bork2d.Bake");
     }
 
     [Fact]
-    public void CliExposesNoPublicTypes()
+    public void BakeBuilderExposesTheDocumentedPublicSurface()
     {
-        Assert.Empty(typeof(Bork2d.Bake.Cli.CliApplication).Assembly.GetExportedTypes());
+        var exported = typeof(BakeApplicationBuilder).Assembly
+            .GetExportedTypes()
+            .Select(type => type.FullName ?? type.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "Bork2d.Bake.Builder.AssetProcessorContext",
+                "Bork2d.Bake.Builder.AssetProcessor`1",
+                "Bork2d.Bake.Builder.BakeApplication",
+                "Bork2d.Bake.Builder.BakeApplicationBuilder",
+                "Bork2d.Bake.Builder.IAssetOutputSink",
+                "Bork2d.Bake.Builder.IAssetProcessor",
+                "Bork2d.Bake.Builder.IAssetProcessorDiagnostics",
+                "Bork2d.Bake.Builder.SidecarPolicy",
+            },
+            exported);
+    }
+
+    [Fact]
+    public void BakeBuilderPublicSignaturesExposeNoImplementationTypes()
+    {
+        Assembly assembly = typeof(BakeApplicationBuilder).Assembly;
+
+        foreach (Type exported in assembly.GetExportedTypes())
+        {
+            foreach (Type signatureType in PublicSignatureTypes(exported).SelectMany(Flatten))
+            {
+                Type type = signatureType.IsByRef ? signatureType.GetElementType()! : signatureType;
+                if (type.IsGenericParameter)
+                {
+                    continue;
+                }
+
+                if (type.Assembly != assembly)
+                {
+                    Assert.NotEqual(typeof(PackBuilder), type);
+                    Assert.NotEqual(Tomlyn, type.Assembly.GetName().Name);
+                    Assert.NotEqual(StbImageSharp, type.Assembly.GetName().Name);
+                    continue;
+                }
+
+                string ns = type.Namespace ?? string.Empty;
+                Assert.True(
+                    ns is "Bork2d.Bake.Builder",
+                    $"'{exported.FullName}' exposes the internal type '{type.FullName}'.");
+            }
+        }
+    }
+
+    [Fact]
+    public void BakeBuilderDoesNotExposeTheOldHostOrCliAssemblies()
+    {
+        var references = typeof(BakeApplicationBuilder).Assembly
+            .GetReferencedAssemblies()
+            .Select(reference => reference.Name ?? string.Empty)
+            .ToArray();
+
+        Assert.DoesNotContain("Bork2d.BakeHost", references);
+        Assert.DoesNotContain("Bork2d.Bake.Cli", references);
+        Assert.DoesNotContain(MetadataLoadContext, references);
     }
 
     [Fact]
@@ -193,7 +262,7 @@ public sealed class DependencyMatrixTests
         [
             typeof(Bork2d.Api.Assets.IAssets).Assembly,
             typeof(Bork2d.Common.Scene.Transform).Assembly,
-            typeof(Bork2d.Assets.Pack.PackBuilder).Assembly,
+            typeof(PackBuilder).Assembly,
             typeof(Bork2d.Render.AssemblyReferenceAnchor).Assembly,
             typeof(Bork2d.Runtime.Bork2dApp).Assembly,
             Assembly.Load("Bork2d.AotSmoke"),
@@ -201,9 +270,9 @@ public sealed class DependencyMatrixTests
 
         foreach (Assembly assembly in runtimeAssemblies)
         {
-            // Bork2d.BakeFixture is the game-side Project.Common-like fixture (Q-16), not tooling; the
-            // AOT smoke references it deliberately. Everything else must not reference any Bake*
-            // assembly, the fixture included.
+            // Bork2d.BakeFixture is the game-side Project.Common-like fixture, not tooling; the AOT
+            // smoke references it deliberately. The builder, the assets executable, and the internal
+            // bake implementation must never appear in a runtime or publish graph.
             bool isAotSmoke = string.Equals(
                 assembly.GetName().Name,
                 "Bork2d.AotSmoke",
@@ -213,7 +282,11 @@ public sealed class DependencyMatrixTests
             {
                 string name = reference.Name ?? string.Empty;
                 Assert.False(
-                    name is "Bork2d.Bake" or "Bork2d.Bake.Cli" or "Bork2d.BakeHost",
+                    name is "Bork2d.Bake"
+                        or "Bork2d.Bake.Builder"
+                        or "Bork2d.BakeFixture.Assets"
+                        or "Bork2d.BakeHost"
+                        or "Bork2d.Bake.Cli",
                     $"{assembly.GetName().Name} must not reference '{name}'.");
                 if (!isAotSmoke)
                 {
@@ -284,7 +357,8 @@ public sealed class DependencyMatrixTests
         Assert.DoesNotContain(Tomlyn, references);
         Assert.DoesNotContain(StbImageSharp, references);
         Assert.DoesNotContain("Bork2d.Bake", references);
-        Assert.DoesNotContain("Bork2d.Bake.Cli", references);
+        Assert.DoesNotContain("Bork2d.Bake.Builder", references);
+        Assert.DoesNotContain("Bork2d.BakeFixture.Assets", references);
     }
 
     [Fact]
@@ -302,8 +376,32 @@ public sealed class DependencyMatrixTests
                 "Bork2d.BakeFixture.GameConfig",
                 "Bork2d.BakeFixture.Stats",
                 "Bork2d.BakeFixture.StatsRoot",
+                "Bork2d.BakeFixture.Unit",
             },
             exported);
+    }
+
+    [Fact]
+    public void BakeFixtureAssetsReferencesOnlyApiBuilderAndFixture()
+    {
+        // The fixture assets executable is build-time only: it references the public builder and the
+        // game-side data-type fixture, plus Bork2d.Api for the TextureDescriptor its PPM acceptance
+        // processor emits. It is never referenced by the runtime or the AOT publish and exposes no
+        // public type of its own.
+        Assembly assembly = Assembly.LoadFrom(RepositoryPaths.FixtureAssetsExecutable);
+
+        AssertReferenceMatrix(
+            assembly,
+            "Bork2d.Api",
+            "Bork2d.Bake.Builder",
+            "Bork2d.BakeFixture");
+        Assert.Empty(assembly.GetExportedTypes());
+
+        var references = assembly.GetReferencedAssemblies()
+            .Select(reference => reference.Name ?? string.Empty)
+            .ToArray();
+        Assert.DoesNotContain(Tomlyn, references);
+        Assert.DoesNotContain(StbImageSharp, references);
     }
 
     [Fact]
@@ -312,11 +410,12 @@ public sealed class DependencyMatrixTests
         AssertReferenceMatrix(
             typeof(DependencyMatrixTests).Assembly,
             "Bork2d.Api",
-            "Bork2d.Common",
             "Bork2d.Assets",
             "Bork2d.Bake",
-            "Bork2d.Bake.Cli",
+            "Bork2d.Bake.Builder",
             "Bork2d.BakeFixture",
+            "Bork2d.BakeFixture.Assets",
+            "Bork2d.Common",
             "Bork2d.Render",
             "Bork2d.Runtime");
     }
@@ -325,12 +424,10 @@ public sealed class DependencyMatrixTests
     public void AotSmokeReferencesOnlyTheRuntimeSurfaceItUses()
     {
         // Tests references Bork2d.AotSmoke as a project so its assembly is copied next to the
-        // test assembly. No test type uses it, so it is loaded by name here. Since WP6 the default
-        // AOT run loads the pack baked by the imported targets instead of building one with the
-        // public pack tooling (D-M3-19 superseded by D-M4-09/Q-22), so the smoke no longer takes a
-        // direct Bork2d.Assets reference; Assets still reaches the publish transitively through
-        // Bork2d.Runtime. BakeFixture is the Project.Common-like fixture the M4 targets bake and
-        // the smoke loads; it is never the bake tooling itself.
+        // test assembly. No test type uses it, so it is loaded by name here. The smoke takes a
+        // build-only reference to the fixture assets executable: it never references the builder or
+        // the assets executable, and BakeFixture is only the game-side Project.Common-like fixture
+        // whose baked packs the default headless run loads.
         var assembly = Assembly.Load("Bork2d.AotSmoke");
 
         AssertReferenceMatrix(
@@ -357,6 +454,55 @@ public sealed class DependencyMatrixTests
             .Where(name => name.StartsWith("Bork2d.", StringComparison.Ordinal))
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static IEnumerable<Type> PublicSignatureTypes(Type exported)
+    {
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.Instance
+            | BindingFlags.Static | BindingFlags.DeclaredOnly;
+
+        foreach (MethodInfo method in exported.GetMethods(flags))
+        {
+            yield return method.ReturnType;
+            foreach (ParameterInfo parameter in method.GetParameters())
+            {
+                yield return parameter.ParameterType;
+            }
+        }
+
+        foreach (PropertyInfo property in exported.GetProperties(flags))
+        {
+            yield return property.PropertyType;
+        }
+
+        foreach (FieldInfo field in exported.GetFields(flags))
+        {
+            yield return field.FieldType;
+        }
+    }
+
+    private static IEnumerable<Type> Flatten(Type type)
+    {
+        yield return type;
+
+        if (type.IsArray)
+        {
+            foreach (Type element in Flatten(type.GetElementType()!))
+            {
+                yield return element;
+            }
+        }
+
+        if (type.IsGenericType)
+        {
+            foreach (Type argument in type.GetGenericArguments())
+            {
+                foreach (Type nested in Flatten(argument))
+                {
+                    yield return nested;
+                }
+            }
+        }
     }
 
     private static bool IsForbiddenApiReference(string? name)

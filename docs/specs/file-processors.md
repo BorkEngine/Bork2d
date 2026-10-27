@@ -1,10 +1,19 @@
 # File Processors and `MyGame.Assets` — Implementation Spec
 
-> **Status:** **Locked implementation baseline (D-036/D-037/D-038/D-039, 2026-10-27).** This spec is
-> the implementation authority for `task/file-processors`; the architecture is recorded in
-> [Asset processors and `MyGame.Assets`](../architecture/asset-processors.md). The current tree is
-> still M4 and does not implement this spec. Nothing in this spec is as-built until the work
-> packages land.
+> **Status:** **Implemented as-built on `task/file-processors` (D-036/D-037/D-038/D-039/D-040,
+> 2026-10-27).** WP1–WP5 are landed on the task branch: the public `Bork2d.Bake.Builder`
+> builder/processor API, explicit `RegisterAsset<T>()`, no project descriptor/generated host/CLI,
+> the processor registry and sidecars, the built-in texture processor, the PPM/Unit fixture
+> processors, the build-only fixture assets executable, schema-3 incremental bake, the final
+> `build/Bork2d.Assets*.targets`, and the local AOT fixture flow. The locked decisions, API text, and
+> semantics below remain the implementation authority; WP5 added the incremental manifest, build
+> targets, AOT proof, and this as-built record. The post-review D-040 fix (owner-approved) makes
+> `TextureDescriptor.Format`/`Filter`/`Wrap` non-null `Bork2d.Api.Assets` enums instead of nullable
+> strings; it leaves the rest of the locked task scope intact. Local verification: Debug/Release
+> zero-warning builds, 946 deterministic plus 12 opt-in/conditional tests (958 total), `dotnet format`,
+> `scripts/check-docs.ps1`, `git diff --check`, and the local AOT publish/run. CI runs only on pull
+> requests targeting `develop` and pushes to `develop`, so the task branch is verified by those local
+> gates.
 
 ## 1. Goal
 
@@ -26,6 +35,7 @@ Implement a game-owned, JIT, build-time asset pipeline with:
 | D-037 | `MyGame.Assets` owns assets/processors/configuration, is the CLI, and bakes on build. `Project.Common` remains the runtime data-type assembly. `Project.Desktop` takes a build-only reference and asks the assets executable to copy packs. No descriptor. |
 | D-038 | The generated host, host generation/loading/ALC/manifest/state/hash, `MetadataLoadContext`, `generate-host`, and `WithCommonAssembly` are removed. Data types are registered with `RegisterAsset<T>()`; `[bork2d].type` remains the per-source selector. No reflection. |
 | D-039 | This spec and the final design in [asset processors](../architecture/asset-processors.md) are the locked implementation variant; changes need a new owner decision. |
+| D-040 | Owner-approved exception to D-039 (2026-10-27): `TextureDescriptor.Format`/`Filter`/`Wrap` are the non-null `Bork2d.Api.Assets` enums `TextureFormat`/`TextureFilter`/`TextureWrap` (defaults `Rgba8`/`Linear`/`Clamp`), and the builder uses the same enums. |
 
 Default helpers:
 
@@ -54,8 +64,11 @@ Default helpers:
 
 ### 3.2 Out of scope
 
-- Runtime/API changes beyond removing host/tooling; `IAssets`, `TextureDescriptor`, `SpriteAsset`,
-  and the pack format are unchanged.
+- Runtime/API changes beyond removing host/tooling and the D-040 owner exception; `IAssets`,
+  `SpriteAsset`, and the pack format are unchanged. D-040 makes
+  `TextureDescriptor.Format`/`Filter`/`Wrap` non-null `Bork2d.Api.Assets` enums
+  (`TextureFormat`/`TextureFilter`/`TextureWrap`, defaults `Rgba8`/`Linear`/`Clamp`); nullable
+  descriptor strings are gone.
 - Reflection, assembly scanning, `MetadataLoadContext`, a generated host, or a source generator.
 - A TOML editor/writer beyond creating a missing `Required` sidecar.
 - Multi-input processors (atlas + metadata, font + glyph list).
@@ -115,7 +128,8 @@ public sealed class BakeApplication
 }
 ```
 
-`TextureFilter` is `Nearest`/`Linear`; `TextureWrap` is `Clamp`/`Repeat`.
+`TextureFilter` and `TextureWrap` are the `Bork2d.Api.Assets` enums: `TextureFilter` is
+`Linear` (default) or `Nearest`, and `TextureWrap` is `Clamp` (default) or `Repeat`.
 
 Builder rules:
 
@@ -276,7 +290,8 @@ for each file (sorted, reparse points skipped):
 
 - `TextureProcessor : AssetProcessor<TextureSidecar>`, extensions `png`, `jpg`, `jpeg`, `bmp`,
   `tga`.
-- `TextureSidecar` is a `[GenerateShape]` type with `filter`/`wrap`.
+- `TextureSidecar` is a `[GenerateShape]` type with `filter`/`wrap` members typed as the
+  `Bork2d.Api.Assets` `TextureFilter`/`TextureWrap` enums.
 - `CreateDefaultSidecar` returns the builder's `WithTextureDefaults` values. A texture without a
   sidecar gets one created on the first bake.
 - Decode with StbImageSharp to straight-alpha RGBA8; no premultiplication/gamma/ICC/flipping/
@@ -369,14 +384,18 @@ MyGame.Assets --help | --version
 
 - Manifest: `<project root>/obj/bork2d/bake/manifest.json`, schema 3 (bump from M4 schema 2).
 - Records:
-  - builder configuration hash: packs/roots/output paths, texture defaults, registered type
-    names, processor identities, and processor assembly hash;
+  - builder configuration hash: project root, every pack (index, pack path, relative root, absolute
+    root), texture defaults, sorted registered type names with their assembly simple names, and
+    processor identities (registration order, name, CLR type, policy, sorted normalized extensions);
   - sorted tracked inputs: every `.toml` plus every file whose suffix is in the registered
-    extension set;
-  - derived shape-assembly closure hash (registered types plus assets executable references);
-  - tool version, mode, every output path/hash, aggregate counts.
+    extension set, with a content hash;
+  - derived shape-assembly closure hash (registered data-type and processor assemblies plus their
+    non-tooling, non-framework referenced assemblies);
+  - tool version, mode, every output path/hash in pack order, and aggregate counts.
 - Skip only when every field matches and every output exists with its recorded hash. No per-pack
   cache. `--force` bypasses; `--check` never skips and writes nothing.
+- A full bake re-collects the tracked inputs after processing so a `Required` sidecar created during
+  that bake is recorded immediately; the next bake skips instead of running one extra full bake.
 - A changed registration, processor, extension set, sidecar policy, source, pack path, common
   assembly, tool, or mode invalidates the bake. No host-generation state exists.
 
@@ -526,5 +545,5 @@ git diff --check
 - [Assets and tooling](../architecture/assets-and-tooling.md) — pack/VFS and target pipeline.
 - [Projects and dependencies](../architecture/projects.md) — project graph and `MyGame.Assets`.
 - [API guide](../api/guide.md), [API reference](../api/reference.md) — builder/processor examples.
-- [Decision log](../decisions.md) — D-036/D-037/D-038/D-039.
+- [Decision log](../decisions.md) — D-036/D-037/D-038/D-039/D-040.
 - [M4 spec](m4-serialization-and-bake.md) — historical M4 record.

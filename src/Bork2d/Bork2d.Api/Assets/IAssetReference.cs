@@ -19,4 +19,10 @@ internal interface IAssetReference
     /// asset.
     /// </summary>
     bool IsData { get; }
+
+    /// <summary>
+    /// Gets the referenced CLR type's full name for a typed <c>AssetRef&lt;T&gt;</c>, or
+    /// <see langword="null"/> for a <c>DataRef</c>.
+    /// </summary>
+    string? TargetTypeName { get; }
 }

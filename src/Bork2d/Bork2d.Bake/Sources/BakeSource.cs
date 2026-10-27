@@ -1,12 +1,12 @@
-using Bork2d.Bake.Project;
+using Bork2d.Bake.Baking;
 
 namespace Bork2d.Bake.Sources;
 
 /// <summary>
 /// One discovered custom-data TOML source and its own <c>[bork2d].type</c> declaration (D-M4-13),
-/// together with the <c>[[assets]]</c> pack it was discovered under (D-M4-14).
+/// together with the configured pack it was discovered under.
 /// </summary>
-/// <param name="Pack">The owning descriptor pack entry.</param>
+/// <param name="Pack">The owning configured pack.</param>
 /// <param name="RelativePath">The source path relative to the pack's asset root, with <c>/</c> separators.</param>
 /// <param name="FullPath">The absolute source path.</param>
 /// <param name="AssetPath">The canonical asset path (lowercase, <c>/</c>, without <c>.toml</c>).</param>
@@ -14,7 +14,7 @@ namespace Bork2d.Bake.Sources;
 /// <param name="TypeLine">The optional 1-based line of the <c>type</c> value.</param>
 /// <param name="TypeColumn">The optional 1-based column of the <c>type</c> value.</param>
 internal sealed record BakeSource(
-    ProjectPack Pack,
+    BakePack Pack,
     string RelativePath,
     string FullPath,
     string AssetPath,

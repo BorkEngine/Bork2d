@@ -1,70 +1,69 @@
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Project;
 
 namespace Bork2d.Bake.Baking;
 
 /// <summary>
-/// One resolved pack output: its descriptor entry and the absolute path it is written to.
+/// One resolved pack output: its configured pack and the absolute path it is written to.
 /// </summary>
-/// <param name="Pack">The descriptor's <c>[[assets]]</c> entry.</param>
+/// <param name="Pack">The configured pack.</param>
 /// <param name="Path">The absolute pack output path under the output root.</param>
-internal readonly record struct BakePackOutput(ProjectPack Pack, string Path);
+internal readonly record struct BakePackOutput(BakePack Pack, string Path);
 
 /// <summary>
-/// Resolves every descriptor pack path against an output root (D-M4-14).
+/// Resolves every configured pack path against an output root.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The output root is the descriptor directory by default; <c>bake --output-root</c> and the MSBuild
-/// target override it (normally with <c>$(TargetDir)</c>). Pack paths are descriptor-authored relative
-/// paths, so they keep the same relative layout under any output root and may contain subdirectories.
-/// The parser already rejected rooted paths and <c>.</c>/<c>..</c> segments; this type joins the paths
-/// and reaffirms containment so a resolved output can never escape the root.
+/// The output root is an invocation input: the build target passes <c>$(TargetDir)</c> and the
+/// command handler defaults to <see cref="AppContext.BaseDirectory"/>; <c>--output-root</c> overrides
+/// it. It may be outside the project root because MSBuild writes into the app's output directory.
+/// Pack paths are configuration-relative paths, so they keep the same relative layout under any
+/// output root and may contain subdirectories.
 /// </para>
 /// <para>
-/// Resolution is deterministic and descriptor-ordered: index zero is the main pack and later entries
-/// are DLC packs.
+/// <see cref="BakeProjectFactory"/> already rejected rooted paths and empty/<c>.</c>/<c>..</c>
+/// segments; this type joins the paths and reaffirms containment so a resolved output can never escape
+/// the root.
 /// </para>
 /// </remarks>
 internal static class BakeOutputLayout
 {
     /// <summary>Resolves the output root and every pack output path.</summary>
-    /// <param name="descriptor">The parsed project descriptor.</param>
-    /// <param name="outputRoot">The requested output root, or <see langword="null"/> for the descriptor directory.</param>
+    /// <param name="project">The validated project configuration.</param>
+    /// <param name="outputRoot">The requested absolute or current-directory-relative output root.</param>
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
     /// <param name="root">The absolute output root.</param>
-    /// <param name="outputs">The resolved outputs in descriptor order.</param>
+    /// <param name="outputs">The resolved outputs in pack order.</param>
     /// <returns><see langword="true"/> when every output path resolved inside the output root.</returns>
     internal static bool TryResolve(
-        ProjectDescriptor descriptor,
-        string? outputRoot,
+        BakeProject project,
+        string outputRoot,
         BakeDiagnostics diagnostics,
         out string root,
         out IReadOnlyList<BakePackOutput> outputs)
     {
-        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
         root = string.Empty;
         outputs = [];
 
-        string requested = outputRoot ?? descriptor.DescriptorDirectory;
         try
         {
-            root = Path.GetFullPath(requested);
+            root = Path.GetFullPath(outputRoot);
         }
         catch (Exception exception) when (IsPathFailure(exception))
         {
             diagnostics.Add(
                 BakeSeverity.Error,
-                BakeDiagnosticCodes.DescriptorInvalidValue,
-                $"The output root '{requested}' is not a valid path: {exception.Message}",
-                requested);
+                BakeDiagnosticCodes.OutputRootInvalid,
+                $"The output root '{outputRoot}' is not a valid path: {exception.Message}",
+                outputRoot);
             return false;
         }
 
-        var resolved = new List<BakePackOutput>(descriptor.Packs.Count);
-        foreach (ProjectPack pack in descriptor.Packs)
+        var resolved = new List<BakePackOutput>(project.Packs.Count);
+        foreach (BakePack pack in project.Packs)
         {
             string path;
             try
@@ -77,10 +76,10 @@ internal static class BakeOutputLayout
             {
                 diagnostics.Add(
                     BakeSeverity.Error,
-                    BakeDiagnosticCodes.DescriptorInvalidValue,
+                    BakeDiagnosticCodes.OutputRootInvalid,
                     $"The pack path '{pack.PackPath}' cannot be resolved under the output root "
                         + $"'{root}': {exception.Message}",
-                    descriptor.DescriptorPath);
+                    pack.PackPath);
                 return false;
             }
 
@@ -88,9 +87,9 @@ internal static class BakeOutputLayout
             {
                 diagnostics.Add(
                     BakeSeverity.Error,
-                    BakeDiagnosticCodes.DescriptorInvalidValue,
+                    BakeDiagnosticCodes.OutputRootInvalid,
                     $"The pack path '{pack.PackPath}' resolves outside the output root '{root}'.",
-                    descriptor.DescriptorPath);
+                    pack.PackPath);
                 return false;
             }
 

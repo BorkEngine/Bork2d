@@ -1,18 +1,16 @@
 # Contributing
 
-> **Status:** current through M3 plus the D-035 asset-reference refactor (merged, PR #6) and M4
-> serialization/bake (merged into `develop` 2026-10-27, PR #7, including the D-M4-13 revision and
-> the D-M4-14/D-M4-15 multi-pack revision). The
-> warning/style/format/AOT gates and the docs link check are active. CI runs docs link check, build,
-> tests, and format verification on PRs to `develop` and pushes to `develop`; the NativeAOT
-> publish/run smoke (headless loading the **baked fixture pack**, and windowed) is a required local
-> gate.
+> **Status:** current through M4 and the D-036/D-037/D-038 asset-processor work on
+> `task/file-processors` (2026-10-27). The warning/style/format/AOT gates and the docs link check are
+> active. CI runs the docs link check, build, tests, and format verification on PRs to `develop` and
+> pushes to `develop`; the NativeAOT publish/run smoke (headless loading the **baked fixture packs**,
+> and windowed) is a required local gate.
 >
-> **Post-M4 target (D-036/D-037/D-038, Planned):** the docs and gates add `Bork2d.Bake.Builder`, the
-> build-time `MyGame.Assets`/`Bork2d.BakeFixture.Assets` executables, explicit
-> `RegisterAsset<T>()` registrations, and PPM/Unit processor tests. The generated host is removed.
-> The local AOT gate loads packs baked by the fixture assets executable; no builder/processor
-> assembly enters the publish. Implementation scope:
+> The docs and gates cover `Bork2d.Bake.Builder`, the build-time
+> `MyGame.Assets`/`Bork2d.BakeFixture.Assets` executables, explicit `RegisterAsset<T>()`
+> registrations, the PPM/Unit processors, and the schema-3 incremental bake. There is no project
+> descriptor, generated host, or `Bork2d.Bake.Cli`. The local AOT gate loads packs baked by the
+> fixture assets executable; no builder/processor assembly enters the publish. Implementation scope:
 > [file-processors spec](specs/file-processors.md).
 
 ## 1. Prerequisites
@@ -40,21 +38,19 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **923 tests**: 911 deterministic tests run in CI; 12 opt-in/conditional tests are
+The suite is **958 tests**: 946 deterministic tests run in CI; 12 opt-in/conditional tests are
 skipped unless the environment variable or capability is present (9 `[WindowFact]` real-window tests
-and 3 reparse-point capability tests). The deterministic set includes the M3 pack-format/writer
-tests, the path/VFS/browse/contract tests, the loader/threading and error-contract tests, generic
-pack-time reference validation, the public asset-reference/pack-build contracts, the runtime asset
-lifecycle/error-matrix tests, the M4 bake pipeline (descriptor, host generation/load, TOML binder,
-textures, references, pack composition, determinism), and the M4 incremental/MSBuild tests. The
-post-M4 target (D-036/D-037/D-038) adds builder/no-descriptor/no-host tests, explicit
-`RegisterAsset<T>()` and default-registration tests, processor registration/override, sidecar
-policies, PPM/Unit end-to-end bakes, and the `MyGame.Assets` build auto-bake flow. They
-build packs in memory or in temp files, generate their own test images, and use **no committed
-binary test/pack fixtures**. The only committed image is the bake fixture's
-`Bork2d.BakeFixture/Assets/art/player.png` source asset, which the MSBuild targets copy and bake and
-which is not a test pack or generated output. Run only the
-asset/pack tests with:
+and 3 reparse-point capability tests). The deterministic set includes the pack-format/writer tests,
+the path/VFS/browse/contract tests, the loader/threading and error-contract tests, generic pack-time
+reference validation, the public asset-reference/pack-build contracts, the runtime asset
+lifecycle/error-matrix tests, the builder/no-descriptor/no-host tests, explicit/default
+`RegisterAsset<T>()` tests, processor registration/override and sidecar policies, the shape-driven
+TOML binder, the texture/PPM/Unit processors, pack composition/determinism, schema-3
+incremental/MSBuild tests, and the 8-main/9-merged fixture pack proof. They build packs in memory or
+in temp files, generate their own test images, and use **no committed binary test/pack fixtures**.
+The committed images and processor sources (`Assets/art/player.png`, `Assets/art/checker.ppm`,
+`Assets/data/archer.unit`, and their sidecars) are fixture **source assets** that the executable
+bakes; they are not test packs or generated outputs. Run only the asset/pack tests with:
 
 ```powershell
 dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "FullyQualifiedName~Pack|FullyQualifiedName~Asset"
@@ -67,14 +63,14 @@ Run the bake tests (bake pipeline, incremental, explicit registration, CLI, and 
 dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "FullyQualifiedName~Bake"
 ```
 
-The M4 MSBuild integration test writes a temporary app project (two descriptor packs, sources, and a
-generated PNG in test code), references `Bork2d.BakeFixture`, imports
-[`build/Bork2d.Bake.targets`](../build/Bork2d.Bake.targets), and runs `dotnet build`, `dotnet publish`,
-and `dotnet clean` as child processes. **Target (D-037/D-038):** the test uses a temporary
-`MyGame.Assets`-style executable with builder configuration, explicit `RegisterAsset<T>()` entries,
-and the assets build target; the descriptor, host build, and pack-path properties are removed. It
-therefore needs a warmed repository build and adds a few seconds to the Debug pass; it is not marked
-slower and runs in the normal suite.
+The MSBuild integration test writes a temporary `MyGame.Assets`-style executable (builder
+configuration, explicit `RegisterAsset<T>()`, sources, and a generated PNG in test code), references
+`Bork2d.BakeFixture`, imports `build/Bork2d.Assets.targets`, writes a temporary desktop app that takes
+a build-only reference and imports `build/Bork2d.Assets.Copy.targets`, and runs `dotnet build`,
+`dotnet publish`, a second `dotnet build` (asserting the up-to-date no-op), and `dotnet clean` as
+child processes. There is no descriptor, host build, or pack-path property. It therefore needs a
+warmed repository build and adds a few seconds to the Debug pass; it is not marked slower and runs in
+the normal suite.
 
 On a desktop session run the whole suite (including the opt-in window tests) with:
 
@@ -94,27 +90,25 @@ $smoke = 'src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.
 ```
 
 The publish must report zero AOT/trim warnings and contain `assets.pck`, `dlc1.pck`, and `SDL2.dll`.
-Current M4: the AOT smoke imports [`build/Bork2d.Bake.targets`](../build/Bork2d.Bake.targets), so its
-build copies the committed `Bork2d.BakeFixture` `Assets/**` and `DLC1/**` trees (including the
-fixture source PNG `Assets/art/player.png`), bakes the prepared fixture packs to `$(TargetDir)`, and
-copies both next to the published executable. **Target (D-037/D-038):** the smoke takes a build-only
-dependency on `Bork2d.BakeFixture.Assets`, which owns the fixture roots, explicit type registrations,
-and builder configuration, bakes them, and copies the packs; there is no generated host, and the AOT
-publish never contains the builder/processor assemblies or the assets executable. The default headless run
-mounts the main pack from `AppContext.BaseDirectory` (not the process CWD), overlays `dlc1.pck` with
-`LoadPack`, and exits `0` only when the scene, the baked class root (nested struct/`Color`/texture
-reference), the `StatsRoot` through `AssetRef<StatsRoot>`, the sprite referencing `art/player`, the
-`art/player` descriptor, the exact `art/player-raw` payload, the DLC `data/dlc` (one entry) and its
-DLC → main texture reference, browse/exists (5 main, 6 merged), and exit 0 all pass. The
+The AOT smoke imports `build/Bork2d.Assets.Copy.targets` and sets `Bork2dAssetsProjectFile`, so its
+build builds the build-only `Bork2d.BakeFixture.Assets` executable out of process; that executable
+owns the fixture roots, explicit type registrations, PPM/Unit processors, and builder configuration,
+bakes the packs, and the copy target places them next to the built and published executable. There
+is no generated host, and the AOT publish never contains the builder/processor assemblies or the
+assets executable. The default headless run mounts the main pack from `AppContext.BaseDirectory`
+(not the process CWD), overlays `dlc1.pck` with `LoadPack`, and exits `0` only when the scene, the
+baked class root (nested struct/`Color`/texture reference), the `StatsRoot` through
+`AssetRef<StatsRoot>`, the sprite referencing `art/player`, the `art/player` descriptor and exact
+`art/player-raw` payload, the PPM `art/checker` descriptor/payload, the Unit `data/archer`, the DLC
+`data/dlc` and its DLC → main texture reference, and browse/exists (8 main, 9 merged) all pass. The
 windowed run uses `WithoutAssets()`, so it needs a desktop session but no pack; it asserts one
 `Setup`, exactly `N` ticks, and one `Teardown`. The interactive `--windowed` run is the manual
 visibility/input check. Inspect the publish directory: it is a NativeAOT single-file output plus
 PDBs, so the managed assemblies are linked in. It must contain `assets.pck`, `dlc1.pck`, `SDL2.dll`,
 and the game-side `Bork2d.BakeFixture` PDB, and must not contain a `Bork2d.Bake.dll`,
-`Bork2d.Bake.Builder.dll`, `Bork2d.BakeFixture.Assets*`, `Bork2d.Bake.Cli*`, `Bork2d.BakeHost*`
-(M4 only), `Tomlyn*`, or `StbImageSharp*` file. `dotnet clean src/Bork2d/Bork2d.slnx` removes the
-prepared fixture assets, the incremental state under the assets project's `obj/bork2d/bake`, and
-every configured pack.
+`Bork2d.Bake.Builder.dll`, `Bork2d.BakeFixture.Assets*`, `Tomlyn*`, or `StbImageSharp*` file.
+`dotnet clean src/Bork2d/Bork2d.slnx` removes the fixture packs and the incremental state under the
+assets project's `obj/bork2d/bake`.
 
 ## 3. Build, style, and warnings
 
@@ -138,20 +132,20 @@ is an error, D-034); `_camelCase` private fields; `PascalCase` constants; `I`-pr
 code; no commented-out code; XML docs on public API.
 
 M3 closed the former XML-doc gap: `IAssets`, `AssetInfo`, `AssetException`, `AssetErrorKind`,
-`AssetRef<T>`, `DataRef`, `SpriteAsset`, `TextureDescriptor`, `SpriteTopology`, `Color`,
-`ClearKind`, and `Bork2dAppBuilder.WithoutAssets()` are documented. The rule applies to every new
-public API; do not remove it.
+`AssetRef<T>`, `DataRef`, `SpriteAsset`, `TextureDescriptor`, `SpriteTopology`, `TextureFormat`,
+`TextureFilter`, `TextureWrap`, `Color`, `ClearKind`, and `Bork2dAppBuilder.WithoutAssets()` are
+documented. The rule applies to every new public API; do not remove it.
 
 ## 5. Architecture boundaries
 
 - Runtime game code references `Bork2d.Api`/`Bork2d.Runtime` only; implementation projects are
-  internal. The public tooling exceptions are the pack writer in `Bork2d.Assets` and (target
-  D-037/D-038) `Bork2d.Bake.Builder` for the build-time `MyGame.Assets` executable. Data types are
-  registered explicitly with `RegisterAsset<T>()`; there is no generated host or reflection. The
-  builder is never referenced by the runtime app or AOT publish.
-- `Bork2d.AotSmoke` takes a build-only dependency on the fixture assets executable (current M4:
-  imports the bake targets and references `Bork2d.BakeFixture`); it loads the baked pack through the
-  public `IAssets` API and does not reference the pack tooling, builder, processor assemblies, or
+  internal. The public tooling exceptions are the pack writer in `Bork2d.Assets` and
+  `Bork2d.Bake.Builder` for the build-time `MyGame.Assets` executable. Data types are registered
+  explicitly with `RegisterAsset<T>()`; there is no generated host or reflection. The builder is
+  never referenced by the runtime app or AOT publish.
+- `Bork2d.AotSmoke` takes a build-only dependency on the fixture assets executable (through
+  `Bork2dAssetsProjectFile`, not a `ProjectReference`); it loads the baked packs through the public
+  `IAssets` API and does not reference the pack tooling, builder, processor assemblies, or
   `Bork2d.Assets` directly (Assets remains in the publish through `Bork2d.Runtime`). It updates the
   dependency test/docs when the graph changes.
 - Editor/tooling stays JIT; no Avalonia, TOML, or reflection in runtime projects.
@@ -169,8 +163,9 @@ public API; do not remove it.
   handoff changes; GPU/visual tests for renderer changes. Asset/pack tests build packs in memory or
   in temp files (`PackBuilder`/`TempPackDirectory`) and never commit binary **test/pack** fixtures;
   the bake tests generate their own source trees and textures in temp directories, and the default
-  AOT smoke loads the fixture-baked packs. The one committed image is the bake fixture's
-  `Assets/art/player.png` source asset (an authoring input, not a test pack or generated output).
+  AOT smoke loads the fixture-baked packs. The committed fixture sources are
+  `Bork2d.BakeFixture.Assets/Assets/art/player.png`, `Assets/art/checker.ppm`, and
+  `Assets/data/archer.unit` (plus sidecars) — authoring inputs, not test packs or generated outputs.
   Processor tests must use the public builder/processor path (the PPM and Unit test processors),
   cover registration/override and sidecar policies, and assert exact baked payloads.
   Asset-loader tests are deterministic: they use a narrow

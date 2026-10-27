@@ -186,7 +186,8 @@ internal sealed class AssetReferenceCollector : TypeShapeVisitor
                 _sourcePath,
                 string.Join('.', _path),
                 reference.Path,
-                reference.IsData));
+                reference.IsData,
+                reference.TargetTypeName));
             return;
         }
 

@@ -1,7 +1,6 @@
 using Bork2d.Api;
 using Bork2d.Assets.Pack;
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Hosting;
 
 namespace Bork2d.Bake.Baking;
 
@@ -11,16 +10,16 @@ namespace Bork2d.Bake.Baking;
 /// <remarks>
 /// <para>
 /// This is the only place the pipeline calls <c>PackBuilder</c>. Entries are added in the index's
-/// ordinal path order: custom data through the generated host's typed <c>AddToPack</c>, texture
-/// descriptors through <c>AddMessagePack&lt;TextureDescriptor&gt;</c>, and payloads through
-/// <c>AddRaw</c>. The writer sorts the entry table independently, so this order only affects how
-/// deterministic the composition itself is.
+/// ordinal path order: custom data through its registered typed writer, processor shaped output
+/// through its stored engine write delegate, and processor data through <c>AddRaw</c>. The writer
+/// sorts the entry table independently, so this order only affects how deterministic the composition
+/// itself is.
 /// </para>
 /// <para>
-/// A DLC pack (D-M4-14) may reference an asset in the main pack. The main index is passed as the
-/// external asset set, which <see cref="PackBuilder"/> uses only for reference validation; it is
-/// never written into the DLC pack and the on-disk format is unchanged. The main pack passes
-/// <see langword="null"/>, so its references stay strictly local.
+/// A DLC pack may reference an asset in the main pack. The main index is passed as the external asset
+/// set, which <see cref="PackBuilder"/> uses only for reference validation; it is never written into
+/// the DLC pack and the on-disk format is unchanged. The main pack passes <see langword="null"/>, so
+/// its references stay strictly local.
 /// </para>
 /// <para>
 /// Reference and path validation already ran against the index, so a <see cref="Bork2dException"/>
@@ -32,7 +31,7 @@ internal static class PackComposer
 {
     /// <summary>Composes the pack builder from the baked entry set.</summary>
     /// <param name="index">The complete baked asset index for this pack.</param>
-    /// <param name="manifest">The loaded generated host manifest.</param>
+    /// <param name="project">The validated project configuration with its type registrations.</param>
     /// <param name="mode">The payload compression mode.</param>
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
     /// <param name="externalIndex">
@@ -42,13 +41,13 @@ internal static class PackComposer
     /// <returns>The populated builder, or <see langword="null"/> when composition failed.</returns>
     internal static PackBuilder? Compose(
         BakedAssetIndex index,
-        IBakeManifest manifest,
+        BakeProject project,
         PackCompressionMode mode,
         BakeDiagnostics diagnostics,
         BakedAssetIndex? externalIndex = null)
     {
         ArgumentNullException.ThrowIfNull(index);
-        ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
         var builder = new PackBuilder(mode);
@@ -69,15 +68,15 @@ internal static class PackComposer
                 switch (entry.Kind)
                 {
                     case BakedAssetEntryKind.CustomData:
-                        manifest.AddToPack(builder, entry.Asset!.TypeName, entry.Path, entry.Asset.Value);
+                        WriteCustomData(builder, project, entry);
                         break;
 
-                    case BakedAssetEntryKind.TextureDescriptor:
-                        builder.AddMessagePack(entry.Path, entry.Texture!.Descriptor);
+                    case BakedAssetEntryKind.ProcessorAsset:
+                        entry.ProcessorOutput!.Write!(builder, entry.Path);
                         break;
 
-                    case BakedAssetEntryKind.TexturePayload:
-                        builder.AddRaw(entry.Path, entry.Texture!.Payload);
+                    case BakedAssetEntryKind.ProcessorData:
+                        builder.AddRaw(entry.Path, entry.ProcessorOutput!.RawPayload);
                         break;
 
                     default:
@@ -88,15 +87,31 @@ internal static class PackComposer
 
             return builder;
         }
-        catch (Bork2dException exception)
+        catch (Exception exception) when (exception is Bork2dException or ArgumentException
+            or InvalidOperationException)
         {
             diagnostics.Add(
                 BakeSeverity.Error,
                 BakeDiagnosticCodes.PackComposeFailed,
-                $"Internal bake error: the pack writer rejected the baked entry "
-                    + $"'{(currentPath ?? "<none>")}': {exception.Message}",
+                $"Internal bake error: the baked entry '{(currentPath ?? "<none>")}' could not be "
+                    + $"written: {exception.Message}",
                 assetPath: currentPath);
             return null;
         }
+    }
+
+    private static void WriteCustomData(
+        PackBuilder builder,
+        BakeProject project,
+        BakedAssetEntry entry)
+    {
+        string typeName = entry.Asset!.TypeName;
+        if (!project.AssetTypes.TryGetValue(typeName, out BakeAssetTypeRegistration? registration))
+        {
+            throw new InvalidOperationException(
+                $"The data type '{typeName}' is not registered.");
+        }
+
+        registration.Write(builder, entry.Path, entry.Asset.Value);
     }
 }

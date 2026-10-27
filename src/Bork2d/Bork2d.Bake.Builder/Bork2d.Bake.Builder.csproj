@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <!-- The public JIT tooling surface references the internal bake implementation, the public
+             contracts, and the pack writer it hides behind its output sink. -->
+        <ProjectReference Include="..\Bork2d.Bake\Bork2d.Bake.csproj" />
+        <ProjectReference Include="..\Bork2d.Api\Bork2d.Api.csproj" />
+        <ProjectReference Include="..\Bork2d.Assets\Bork2d.Assets.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- PolyType is pinned explicitly because the public processor contract exposes ITypeShape
+             and constrains T to IShapeable<T>. Tomlyn, StbImageSharp, and MetadataLoadContext stay
+             implementation details of Bork2d.Bake. -->
+        <PackageReference Include="PolyType" Version="1.4.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Tests drive the public builder and, where they need internals, the immutable project. -->
+        <InternalsVisibleTo Include="Bork2d.Tests" />
+    </ItemGroup>
+
+</Project>

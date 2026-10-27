@@ -8,13 +8,13 @@
 > The sequence is dependency-ordered.
 > A milestone is done when its exit criterion is demonstrated, not merely when code is merged.
 >
-> **Post-M4 task (not a milestone): D-036/D-037/D-038/D-039 asset processors and `MyGame.Assets`.**
-> **Implementation baseline locked 2026-10-27**; implementation planned on `task/file-processors`. It
+> **Post-M4 task (not a milestone): D-036/D-037/D-038/D-039/D-040 asset processors and `MyGame.Assets`.**
+> **Implemented as-built on `task/file-processors` (2026-10-27) and awaiting human review/merge.** It
 > replaces the project descriptor with builder configuration, makes source file types registered
 > processors (built-in texture importer included), removes the generated host in favor of explicit
 > `RegisterAsset<T>()` registrations, and moves assets/processors to a game-owned executable that
-> bakes on build. The runtime model and milestone sequence are unchanged. Design:
-> [asset processors](architecture/asset-processors.md); implementation spec:
+> bakes on build with a schema-3 incremental manifest. The runtime model and milestone sequence are
+> unchanged. Design: [asset processors](architecture/asset-processors.md); implementation spec:
 > [file processors](specs/file-processors.md).
 
 ## 1. How to read this roadmap
@@ -30,15 +30,15 @@
 | Area | State | Notes |
 | --- | --- | --- |
 | Build | Green | SDK `11.0.100-rc.1`, `net11.0`, zero warnings/errors in Debug and Release; `dotnet format` clean. |
-| `Bork2d.Api` | Current | Contracts for engine, game, time, window, input, assets, camera, sprite, transform, root, `ZIndex`, `Bork2dException`, `AssetInfo`, `AssetException`/`AssetErrorKind`, the public asset model (`SpriteAsset`, `TextureDescriptor`, `SpriteTopology`, `AssetRef<T>`, `DataRef`), the full `KeyCode` scancode set, and five `MouseButton` members. Window/input are implemented for windowed mode; assets are implemented in M3 and the reference model in D-035. |
+| `Bork2d.Api` | Current | Contracts for engine, game, time, window, input, assets, camera, sprite, transform, root, `ZIndex`, `Bork2dException`, `AssetInfo`, `AssetException`/`AssetErrorKind`, the public asset model (`SpriteAsset`, `TextureDescriptor`, `TextureFormat`, `TextureFilter`, `TextureWrap`, `SpriteTopology`, `AssetRef<T>`, `DataRef`), the full `KeyCode` scancode set, and five `MouseButton` members. Window/input are implemented for windowed mode; assets are implemented in M3 and the reference model in D-035. |
 | `Bork2d.Common` | Partial | Root-owned unordered scene tree, transforms (degrees normalized), structural/per-object locks, time wrapper, layer validation, MessagePack shape policy. Snapshot structs are M7. |
 | `Bork2d.Runtime` | Current (M3) | Builder, validation, app-owned logging, SDL windowed host (window/input/time, uncapped loop), one-tick headless/offscreen host, `Exit`/`Dispose`/post-shutdown contract, and the app-scoped asset-service lifecycle. Renderer wiring is M6/M8. |
 | `Bork2d.Assets` | Current (M3/D-035) | v1 pack reader/writer, public `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`, canonical paths, base/overlay VFS, one loader thread with `LoadData`/`LoadAsset<T>`, and generic pack-time reference validation. |
-| `Bork2d.Bake` / `Bork2d.Bake.Cli` | Current (M4, merged 2026-10-27, PR #7); post-M4 target adds `Bork2d.Bake.Builder` | JIT tooling: multi-pack descriptor, one generated host over all roots, shape-driven Tomlyn DOM binder, per-pack texture import, local + main reference validation, structural determinism, all-pack incremental bake, per-pack atomic writes, MSBuild targets. Internal; never referenced by the runtime. **Post-M4 target (D-036/D-037/D-038):** public `Bork2d.Bake.Builder` + processor contract + explicit `RegisterAsset<T>()`; no descriptor and no generated host; `MyGame.Assets` executable is the CLI and bakes on build. Design: [asset processors](architecture/asset-processors.md). |
+| `Bork2d.Bake` / `Bork2d.Bake.Builder` | Implemented on `task/file-processors` (2026-10-27; D-036/D-037/D-038) | JIT tooling: builder-configured ordered packs, shape-driven Tomlyn binder, processor registry/sidecars, built-in texture processor, PPM/Unit acceptance processors, reference validation, structural determinism, schema-3 incremental bake, per-pack atomic writes, MSBuild targets. `Bork2d.Bake` is internal; `Bork2d.Bake.Builder` is the public JIT surface. No descriptor, generated host, host state, or `Bork2d.Bake.Cli`. |
 | `Bork2d.Render` | Empty | Reference-wired; no Vulkan implementation (M6/M8). |
-| `Bork2d.Editor` | Absent | Not in the solution (M5); target uses the public `Bork2d.Bake.Builder` (D-037). |
-| `Bork2d.Tests` | Current | 911 deterministic xUnit tests plus 12 opt-in/conditional tests (923 total): ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix, fake-SDL window/input/loop/time, pack/VFS/loader, asset references, runtime lifecycle, and the M4 bake/host/TOML/texture/multi-pack/incremental/MSBuild suites. |
-| NativeAOT | M4 baseline (merged 2026-10-27, PR #7) | Libraries use `IsAotCompatible` + trim/AOT analyzers; `Bork2d.AotSmoke` publishes/runs locally with zero warnings. The default headless run mounts the **baked main pack** (5 entries: `data/game`, `roots/stats`, `sprites/player`, `art/player`, `art/player-raw`) and overlays `dlc1.pck` (1 entry: `data/dlc`, whose texture resolves to main); `--windowed --ticks 120` uses `WithoutAssets()`. Local gate only. |
+| `Bork2d.Editor` | Absent | Not in the solution (M5); consumes the public `Bork2d.Bake.Builder` (D-037). |
+| `Bork2d.Tests` | Current | 946 deterministic xUnit tests plus 12 opt-in/conditional tests (958 total): ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix, fake-SDL window/input/loop/time, pack/VFS/loader, asset references, runtime lifecycle, the builder/processor/sidecar/bake suites, schema-3 incremental rules, and the MSBuild/AOT fixture flow. |
+| NativeAOT | Implemented on `task/file-processors` | Libraries use `IsAotCompatible` + trim/AOT analyzers; `Bork2d.AotSmoke` publishes/runs locally with zero warnings. The default headless run mounts the **baked main pack** (8 entries: `data/game`, `roots/stats`, `sprites/player`, `art/player`, `art/player-raw`, PPM `art/checker`/`art/checker-raw`, and Unit `data/archer`) and overlays `dlc1.pck` (1 entry: `data/dlc`, whose texture resolves to main), for 9 merged entries; `--windowed --ticks 120` uses `WithoutAssets()`. No tooling assembly is in the publish. Local gate only. |
 | CI | Current | GitHub Actions on PRs to `develop` and pushes to `develop`: restore, format verify, build, test. No AOT or real-window job. |
 | Runnable engine | Partial (windowed shell + assets) | A real window, input, time, and an uncapped tick loop plus the pack/VFS/loader/CPU descriptor pipeline; no renderer yet. |
 
@@ -116,7 +116,7 @@ Goal: load, overlay, browse, and describe packed assets without a renderer.
 
 Evidence at merge: 587 tests (578 deterministic + 9 opt-in); zero-warning Debug/Release and AOT
 publish; the default AOT run exited 0 with a **2-entry** pack (5 entries after D-035); crash-free
-overlay/corruption matrix. The current tree (M4) has 923 tests (911 deterministic + 12 conditional).
+overlay/corruption matrix. The current tree has 958 tests (946 deterministic + 12 conditional).
 See the [M3 record](specs/m3-assets.md).
 
 ### M4 — Serialization and bake
@@ -165,8 +165,12 @@ shapes the NativeAOT runtime uses.
   sidecars (`<source>.toml`) remain the minimal authoring-only settings file (D-M4-15). The fixture
   gains `DLC1/data/dlc.toml`, and the AOT smoke mounts the main pack plus `dlc1.pck` and verifies a
   DLC → main texture reference.
-- **Build.** `build/Bork2d.Bake.targets` runs `generate-host` → host build → `bake` after `Build`,
-  copies every declared pack on `Publish`, and cleans the generated host/manifest/packs.
+- **Build (historical, replaced by the post-M4 task).** `build/Bork2d.Bake.targets` ran
+  `generate-host` → host build → `bake` after `Build`, copied every declared pack on `Publish`, and
+  cleaned the generated host/manifest/packs. D-036/D-037/D-038 replaced it with
+  `build/Bork2d.Assets.targets` (assets executable bake/clean) and
+  `build/Bork2d.Assets.Copy.targets` (out-of-process assets build + pack copy); there is no
+  generated host or host state in the current flow.
 
 Exit (demonstrated): a source tree bakes and packs; the header is compressed/checksummed; invalid
 source fails with file/line diagnostics and does not replace the pack; the runtime loads with
@@ -175,10 +179,12 @@ assemblies, and its default run loads the baked pack and exits 0.
 
 **Post-M4 task (not a milestone).** D-036/D-037/D-038 replace the descriptor/texture-sidecar special
 cases with asset processors, explicit type registration, and a game-owned `MyGame.Assets`
-builder/CLI. The generated host is removed. D-039 locks the implementation baseline; implementation
-follows the [file-processors spec](specs/file-processors.md) on `task/file-processors` and does not
-change the M5–M10 sequence. See [asset processors](architecture/asset-processors.md) and
-[D-036/D-037/D-038/D-039](decisions.md#post-m4-asset-processors-approved-2026-10-27).
+builder/CLI. The generated host is removed. D-039 locks the implementation baseline and D-040 is the
+owner-approved exception that makes the `TextureDescriptor` sampler fields non-null enums; the task
+is implemented as-built on `task/file-processors` per the
+[file-processors spec](specs/file-processors.md) and awaits human review/merge. It does not change
+the M5–M10 sequence. See [asset processors](architecture/asset-processors.md) and
+[D-036/D-037/D-038/D-039/D-040](decisions.md#post-m4-asset-processors-approved-2026-10-27).
 
 ### M5 — Editor
 
@@ -347,7 +353,7 @@ approvals; only unresolved choices are listed here.
 | M3 Assets/pack | Merged (2026-10-26, PR #4) | 587 tests (578 deterministic + 9 opt-in real-window); Debug/Release zero warnings; format/docs clean; AOT publish zero AOT/trim warnings with `SDL2.dll`; default AOT run exit 0 loading a 2-entry temporary pack (raw + generated-shape MessagePack) and one tick; `--windowed --ticks 120` exit 0 with `WithoutAssets()`; crash-free pack/overlay failure matrix. [M3 record](specs/m3-assets.md). |
 | Asset-reference refactor | Merged (2026-10-26, PR #6, D-035) | 528 tests (519 deterministic + 9 opt-in real-window); Debug/Release zero warnings; format/docs/`git diff --check` clean; AOT publish zero AOT/trim warnings; default AOT run exit 0 with a 5-entry pack including the public `SpriteAsset`/`TextureDescriptor` shapes; `--windowed --ticks 120` exit 0. [Refactor record](specs/refactor-asset-references.md). |
 | M4 Serialization/bake | Merged (2026-10-27, PR #7) | WP0–WP6 landed: bake library + CLI, generated host, per-source `[bork2d]` metadata, descriptor/TOML binder, location-free texture pipeline, reference validation, structural determinism, incremental bake, MSBuild targets, `Bork2d.BakeFixture`, and the AOT baked-pack smoke. The fix-1 revision removed the descriptor `[[types]]`/prefix model, moved type metadata into each data TOML, allowed data/textures anywhere under the asset root, and changed raw payload paths to `<descriptor>-raw`. Fix-2 commits the fixture **source** PNG at `Bork2d.BakeFixture/Assets/art/player.png` (sidecar `art/player.png.toml`; data/sprite TOMLs reference `art/player`), removes the texture generator, and leaves test images/packs generated in temp directories. Fix-3 applies D-M4-14/D-M4-15: ordered `[[assets]]` multi-pack descriptors (first is main; no `name`/`[bake].pack`), one host over all roots, per-pack bake with main-only external references, internal `PackBuilder` external-main seam, `bake --output-root` (no `--output`), all-output incremental manifest schema 2, MSBuild bake/publish/clean for every declared pack, fixture `DLC1/data/dlc.toml`, and the AOT main + `dlc1.pck` overlay proof; texture sidecars are retained. The main fixture pack has 5 entries (ending in `art/player` and `art/player-raw`) and the DLC pack 1 (`data/dlc`). 911 deterministic + 12 conditional tests (923 total); Debug/Release zero warnings; format/docs/diff checks clean. Fix-3 AOT publish is zero-warning with `assets.pck`/`dlc1.pck`/`SDL2.dll` and no Bake/Tomlyn/StbImageSharp assemblies; the published headless run exits 0 with `mainEntries=5`, `mergedEntries=6`, the DLC → main texture reference, and 16 raw bytes; `--windowed --ticks 120` exits 0. Final CI run [40455684420](https://github.com/BorkEngine/Bork2d/actions/runs/40455684420) succeeded: 914 passed, 9 skipped (the 3 reparse tests ran with symlink capability; the local gate is 911 passed, 12 skipped). [M4 spec §22](specs/m4-serialization-and-bake.md#22-as-built-evidence-m4-merged-to-develop). |
-| Post-M4 asset processors | Locked; implementation planned (`task/file-processors`) | D-036/D-037/D-038/D-039 baseline locked; `MyGame.Assets` builder/no descriptor/no generated host, explicit `RegisterAsset<T>()` + defaults, processor extension point, PPM/Unit tests. Design: [asset processors](architecture/asset-processors.md); spec: [file processors](specs/file-processors.md). Not implemented. |
+| Post-M4 asset processors | Implemented on `task/file-processors` (2026-10-27; awaiting merge) | D-036/D-037/D-038/D-039/D-040 as-built: public `Bork2d.Bake.Builder`, build-time `MyGame.Assets`/`Bork2d.BakeFixture.Assets`, explicit `RegisterAsset<T>()` + defaults, processor extension point with PPM/Unit acceptance processors, no descriptor/generated host/`Bake.Cli`, schema-3 incremental manifest and build targets, and the AOT fixture flow (8 main / 9 merged entries, no tooling assemblies in publish). D-040 makes the `TextureDescriptor` sampler fields the non-null `TextureFormat`/`TextureFilter`/`TextureWrap` enums. 946 deterministic + 12 conditional tests (958 total); Debug/Release, format, docs, and AOT gates pass locally. Design: [asset processors](architecture/asset-processors.md); spec: [file processors](specs/file-processors.md). |
 | M5 Editor | Not started | — |
 | M6 Vulkan bring-up | Not started | — |
 | M7 Frame handoff/pacing | Not started | — |

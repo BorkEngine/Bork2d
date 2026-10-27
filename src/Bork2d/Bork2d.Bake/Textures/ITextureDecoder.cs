@@ -9,8 +9,9 @@ namespace Bork2d.Bake.Textures;
 /// The returned pixels are row-major with a top-left origin.
 /// </para>
 /// <para>
-/// The seam exists so tests can exercise the pipeline without a real image codec, and so a future
-/// codec (KTX2) can be added without changing discovery, sidecar, or payload logic.
+/// The seam exists so tests can exercise the probe/dimension/payload checks in
+/// <see cref="TextureSourceReader"/> without a real image codec, and so a future codec (KTX2) can be
+/// added without changing discovery, sidecar, or payload logic.
 /// </para>
 /// </remarks>
 internal interface ITextureDecoder

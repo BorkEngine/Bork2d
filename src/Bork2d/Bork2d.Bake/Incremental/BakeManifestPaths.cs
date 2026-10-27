@@ -1,39 +1,27 @@
 namespace Bork2d.Bake.Incremental;
 
 /// <summary>
-/// Computes the internal, non-committed incremental artifact paths under the descriptor directory.
+/// The fixed project-relative locations of the incremental bake state.
 /// </summary>
 /// <remarks>
-/// The M4 layout is <c>&lt;descriptor directory&gt;/obj/bork2d/bake/</c> for both the bake manifest
-/// and the host-generation state (M4 §5.4/§10.3). The paths are derived from the descriptor, never
-/// from the process current directory, so a CLI invocation from any directory uses one state.
+/// The manifest is internal build state: it lives under the project's <c>obj</c> directory, is never
+/// committed, and is removed by <c>clean</c>. Keeping the paths in one place means the planner, the
+/// command line, and the tests agree without a project-descriptor property.
 /// </remarks>
 internal static class BakeManifestPaths
 {
-    /// <summary>Gets the manifest file name.</summary>
-    internal const string ManifestFileName = "manifest.json";
-
-    /// <summary>Gets the host-generation state file name.</summary>
-    internal const string HostGenerationStateFileName = "host-generation.json";
-
-    /// <summary>Gets the incremental artifact directory for a descriptor directory.</summary>
-    /// <param name="descriptorDirectory">The directory that contains the project descriptor.</param>
+    /// <summary>Gets the incremental bake state directory under a project root.</summary>
+    /// <param name="projectRoot">The absolute project root.</param>
     /// <returns>The absolute <c>obj/bork2d/bake</c> directory.</returns>
-    internal static string DirectoryPath(string descriptorDirectory)
+    internal static string Directory(string projectRoot)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(descriptorDirectory);
-        return Path.Combine(Path.GetFullPath(descriptorDirectory), "obj", "bork2d", "bake");
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+        return Path.Combine(projectRoot, "obj", "bork2d", "bake");
     }
 
-    /// <summary>Gets the bake manifest path for a descriptor directory.</summary>
-    /// <param name="descriptorDirectory">The directory that contains the project descriptor.</param>
-    /// <returns>The absolute manifest path.</returns>
-    internal static string ManifestPath(string descriptorDirectory)
-        => Path.Combine(DirectoryPath(descriptorDirectory), ManifestFileName);
-
-    /// <summary>Gets the host-generation state path for a descriptor directory.</summary>
-    /// <param name="descriptorDirectory">The directory that contains the project descriptor.</param>
-    /// <returns>The absolute host-generation state path.</returns>
-    internal static string HostGenerationStatePath(string descriptorDirectory)
-        => Path.Combine(DirectoryPath(descriptorDirectory), HostGenerationStateFileName);
+    /// <summary>Gets the incremental manifest path under a project root.</summary>
+    /// <param name="projectRoot">The absolute project root.</param>
+    /// <returns>The absolute <c>obj/bork2d/bake/manifest.json</c> path.</returns>
+    internal static string ManifestPath(string projectRoot)
+        => Path.Combine(Directory(projectRoot), "manifest.json");
 }

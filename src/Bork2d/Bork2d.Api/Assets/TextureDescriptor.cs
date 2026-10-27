@@ -13,6 +13,13 @@ namespace Bork2d.Api.Assets;
 /// decompress, or upload it.
 /// </para>
 /// <para>
+/// The fields are non-null enums, not strings: <see cref="Format"/> selects the pixel format
+/// (<see cref="TextureFormat.Rgba8"/> is the only v1 format), and <see cref="Filter"/>/<see cref="Wrap"/>
+/// are sampler state. The defaults are the builder and processor defaults
+/// (<see cref="TextureFormat.Rgba8"/>, <see cref="TextureFilter.Linear"/>, and
+/// <see cref="TextureWrap.Clamp"/>).
+/// </para>
+/// <para>
 /// Load with <see cref="IAssets.LoadAsset{T}(string)"/> using the canonical texture path. The
 /// loader deserializes the packed asset as-is; it does not validate the fields or resolve
 /// <see cref="Payload"/>. Pack creation is responsible for reference integrity, and the bake
@@ -38,17 +45,20 @@ public sealed partial class TextureDescriptor
     public uint Height { get; set; }
 
     /// <summary>
-    /// Gets or sets the pixel format; <c>rgba8</c> is the runtime format in v1.
+    /// Gets or sets the pixel format. <see cref="TextureFormat.Rgba8"/> is the only v1 format and the
+    /// default.
     /// </summary>
-    public string? Format { get; set; }
+    public TextureFormat Format { get; set; } = TextureFormat.Rgba8;
 
     /// <summary>
-    /// Gets or sets the sampler filter, for example <c>nearest</c> or <c>linear</c>.
+    /// Gets or sets the sampler filter. This is sampler state, not decoded pixel data; the default is
+    /// <see cref="TextureFilter.Linear"/>.
     /// </summary>
-    public string? Filter { get; set; }
+    public TextureFilter Filter { get; set; } = TextureFilter.Linear;
 
     /// <summary>
-    /// Gets or sets the sampler wrap mode, for example <c>clamp</c> or <c>repeat</c>.
+    /// Gets or sets the sampler wrap mode. This is sampler state, not decoded pixel data; the default
+    /// is <see cref="TextureWrap.Clamp"/>.
     /// </summary>
-    public string? Wrap { get; set; }
+    public TextureWrap Wrap { get; set; } = TextureWrap.Clamp;
 }

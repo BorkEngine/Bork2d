@@ -55,10 +55,42 @@ internal static class TomlShapeBinder
         where T : IShapeable<T>
     {
         ArgumentNullException.ThrowIfNull(context);
-        return BindShape(
-            T.GetTypeShape(),
+        return Bind(T.GetTypeShape(), context);
+    }
+
+    /// <summary>Binds a parsed custom-data document into a type described by a compiled shape.</summary>
+    /// <remarks>
+    /// The non-generic data entry point: the generic overload forwards here. The reserved root
+    /// <c>bork2d</c> metadata table is filtered out. Processors bind their settings with
+    /// <see cref="BindSidecar"/>, which keeps the root table intact.
+    /// </remarks>
+    /// <param name="shape">The compiled shape of the type to bind.</param>
+    /// <param name="context">The per-source binding context.</param>
+    /// <returns>The bound value, or a default value when a diagnostic was reported.</returns>
+    internal static object? Bind(ITypeShape shape, BakeBindContext context)
+    {
+        ArgumentNullException.ThrowIfNull(shape);
+        ArgumentNullException.ThrowIfNull(context);
+        return BindCore(
+            shape,
             context,
             BakeBindNode.Root(CreateBindRoot(context.Root)));
+    }
+
+    /// <summary>Binds a sidecar document into its compiled shape.</summary>
+    /// <remarks>
+    /// A sidecar is settings-only TOML next to a processor source, so its root is bound as-is: the
+    /// reserved data-source table <c>[bork2d]</c> is an ordinary unknown key and is reported as a
+    /// binding error rather than filtered out.
+    /// </remarks>
+    /// <param name="shape">The compiled sidecar shape.</param>
+    /// <param name="context">The per-sidecar binding context.</param>
+    /// <returns>The bound value, or a default value when a diagnostic was reported.</returns>
+    internal static object? BindSidecar(ITypeShape shape, BakeBindContext context)
+    {
+        ArgumentNullException.ThrowIfNull(shape);
+        ArgumentNullException.ThrowIfNull(context);
+        return BindCore(shape, context, BakeBindNode.Root(context.Root));
     }
 
     /// <summary>
@@ -95,6 +127,16 @@ internal static class TomlShapeBinder
     /// <param name="state">The argument state.</param>
     /// <param name="value">The boxed member value.</param>
     private delegate void ArgumentSetter<TArgumentState>(ref TArgumentState state, object? value);
+
+    /// <summary>
+    /// Binds a root value with an already prepared bind node. Data binding filters the reserved
+    /// <c>bork2d</c> table before this call; sidecar binding passes the root table unchanged.
+    /// </summary>
+    private static object? BindCore(
+        ITypeShape shape,
+        BakeBindContext context,
+        in BakeBindNode node)
+        => BindShape(shape, context, node);
 
     private static object? BindShape(
         ITypeShape shape,

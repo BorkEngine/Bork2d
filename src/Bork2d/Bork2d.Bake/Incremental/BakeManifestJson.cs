@@ -1,202 +1,270 @@
+using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace Bork2d.Bake.Incremental;
 
 /// <summary>
-/// Serializes and parses <see cref="BakeIncrementalManifest"/> (the internal bake manifest JSON).
+/// Deterministic schema-3 JSON serialization for the incremental manifest.
 /// </summary>
 /// <remarks>
-/// The writer is explicit (no reflection) and fixes the property order, indentation, and LF newlines,
-/// so a manifest is byte-stable for the same model. The reader returns <see langword="null"/> for any
-/// structural mismatch; the caller treats that exactly like a missing manifest (a full bake).
-/// Version 2 records every pack output, so a version-1 manifest is a structural mismatch.
+/// <para>
+/// The writer is explicit: every field is written in a fixed order with a fixed name and type, and
+/// the text is indented with LF line endings and UTF-8 without a BOM. Two serializations of the same
+/// manifest therefore produce the same bytes without reflection-based serialization.
+/// </para>
+/// <para>
+/// The reader only queries the documented fields. Unknown extra properties are ignored for forward
+/// compatibility, while a missing or mistyped field (including a <c>schema</c> other than
+/// <see cref="BakeIncrementalManifest.CurrentVersion"/>) makes the manifest unusable: the caller then
+/// runs a full bake instead of failing.
+/// </para>
 /// </remarks>
 internal static class BakeManifestJson
 {
-    private const string VersionProperty = "version";
+    private const string SchemaProperty = "schema";
     private const string ToolVersionProperty = "toolVersion";
-    private const string DescriptorHashProperty = "descriptorHash";
-    private const string CommonAssemblyHashProperty = "commonAssemblyHash";
-    private const string HostHashProperty = "hostHash";
+    private const string ConfigurationHashProperty = "configurationHash";
+    private const string ShapeClosureHashProperty = "shapeClosureHash";
     private const string ModeProperty = "mode";
-    private const string OutputsProperty = "outputs";
     private const string AssetCountProperty = "assetCount";
     private const string TextureCountProperty = "textureCount";
     private const string ReferenceCountProperty = "referenceCount";
     private const string InputsProperty = "inputs";
+    private const string OutputsProperty = "outputs";
     private const string PathProperty = "path";
     private const string HashProperty = "hash";
 
-    /// <summary>Serializes a manifest to UTF-8 JSON bytes.</summary>
-    /// <param name="manifest">The manifest.</param>
-    /// <returns>The JSON bytes with a trailing LF.</returns>
+    private static readonly JsonWriterOptions _writerOptions = new()
+    {
+        Indented = true,
+        NewLine = "\n",
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// <summary>Serializes a manifest to deterministic UTF-8 JSON bytes.</summary>
+    /// <param name="manifest">The manifest to serialize.</param>
+    /// <returns>The UTF-8 JSON bytes without a BOM.</returns>
     internal static byte[] Serialize(BakeIncrementalManifest manifest)
     {
         ArgumentNullException.ThrowIfNull(manifest);
 
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(
-            stream,
-            new JsonWriterOptions
-            {
-                Indented = true,
-                NewLine = "\n",
-            }))
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer, _writerOptions))
         {
             writer.WriteStartObject();
-            writer.WriteNumber(VersionProperty, manifest.Version);
+            writer.WriteNumber(SchemaProperty, BakeIncrementalManifest.CurrentVersion);
             writer.WriteString(ToolVersionProperty, manifest.ToolVersion);
-            writer.WriteString(DescriptorHashProperty, manifest.DescriptorHash);
-            writer.WriteString(CommonAssemblyHashProperty, manifest.CommonAssemblyHash);
-            writer.WriteString(HostHashProperty, manifest.HostHash);
+            writer.WriteString(ConfigurationHashProperty, manifest.ConfigurationHash);
+            writer.WriteString(ShapeClosureHashProperty, manifest.ShapeClosureHash);
             writer.WriteString(ModeProperty, manifest.Mode);
             writer.WriteNumber(AssetCountProperty, manifest.AssetCount);
             writer.WriteNumber(TextureCountProperty, manifest.TextureCount);
             writer.WriteNumber(ReferenceCountProperty, manifest.ReferenceCount);
-
-            writer.WriteStartArray(OutputsProperty);
-            foreach (BakeOutputHash output in manifest.Outputs)
-            {
-                writer.WriteStartObject();
-                writer.WriteString(PathProperty, output.Path);
-                writer.WriteString(HashProperty, output.Hash);
-                writer.WriteEndObject();
-            }
-
-            writer.WriteEndArray();
-
-            writer.WriteStartArray(InputsProperty);
-            foreach (BakeInputHash input in manifest.Inputs)
-            {
-                writer.WriteStartObject();
-                writer.WriteString(PathProperty, input.Path);
-                writer.WriteString(HashProperty, input.Hash);
-                writer.WriteEndObject();
-            }
-
-            writer.WriteEndArray();
+            WriteInputs(writer, manifest.Inputs);
+            WriteOutputs(writer, manifest.Outputs);
             writer.WriteEndObject();
         }
 
-        stream.WriteByte((byte)'\n');
-        return stream.ToArray();
+        return buffer.WrittenSpan.ToArray();
     }
 
-    /// <summary>Parses a manifest from UTF-8 JSON bytes.</summary>
-    /// <param name="bytes">The JSON bytes.</param>
-    /// <returns>The manifest, or <see langword="null"/> when the file is not a valid manifest.</returns>
-    internal static BakeIncrementalManifest? TryDeserialize(byte[] bytes)
+    /// <summary>Tries to deserialize schema-3 manifest bytes.</summary>
+    /// <param name="bytes">The manifest bytes.</param>
+    /// <param name="manifest">The parsed manifest, or <see langword="null"/> when unusable.</param>
+    /// <returns><see langword="true"/> when every documented field has the expected type.</returns>
+    internal static bool TryDeserialize(
+        byte[] bytes,
+        out BakeIncrementalManifest? manifest)
     {
         ArgumentNullException.ThrowIfNull(bytes);
 
+        manifest = null;
         using JsonDocument? document = BakeJsonFile.TryParse(bytes);
-        if (document is null || document.RootElement.ValueKind != JsonValueKind.Object)
+        if (document is null)
         {
-            return null;
+            return false;
         }
 
         JsonElement root = document.RootElement;
-        if (!TryGetInt32(root, VersionProperty, out int version)
-            || !TryGetString(root, ToolVersionProperty, out string? toolVersion)
-            || !TryGetString(root, DescriptorHashProperty, out string? descriptorHash)
-            || !TryGetString(root, CommonAssemblyHashProperty, out string? commonAssemblyHash)
-            || !TryGetString(root, HostHashProperty, out string? hostHash)
-            || !TryGetString(root, ModeProperty, out string? mode)
-            || !TryGetInt32(root, AssetCountProperty, out int assetCount)
-            || !TryGetInt32(root, TextureCountProperty, out int textureCount)
-            || !TryGetInt32(root, ReferenceCountProperty, out int referenceCount)
-            || !TryGetOutputHashes(root, out List<BakeOutputHash>? outputs)
-            || !TryGetInputHashes(root, out List<BakeInputHash>? inputs))
+        if (root.ValueKind != JsonValueKind.Object)
         {
-            return null;
+            return false;
         }
 
-        return new BakeIncrementalManifest(
-            version,
-            toolVersion!,
-            descriptorHash!,
-            inputs!,
-            commonAssemblyHash!,
-            hostHash!,
-            mode!,
-            outputs!,
+        if (!TryReadInt32(root, SchemaProperty, out int schema)
+            || schema != BakeIncrementalManifest.CurrentVersion)
+        {
+            return false;
+        }
+
+        if (!TryReadString(root, ToolVersionProperty, out string? toolVersion)
+            || !TryReadString(root, ConfigurationHashProperty, out string? configurationHash)
+            || !TryReadString(root, ShapeClosureHashProperty, out string? shapeClosureHash)
+            || !TryReadString(root, ModeProperty, out string? mode)
+            || !TryReadInt32(root, AssetCountProperty, out int assetCount)
+            || !TryReadInt32(root, TextureCountProperty, out int textureCount)
+            || !TryReadInt32(root, ReferenceCountProperty, out int referenceCount))
+        {
+            return false;
+        }
+
+        if (!TryReadInputs(root, out IReadOnlyList<BakeInputHash>? inputs)
+            || !TryReadOutputs(root, out IReadOnlyList<BakeOutputHash>? outputs))
+        {
+            return false;
+        }
+
+        manifest = new BakeIncrementalManifest(
+            toolVersion,
+            configurationHash,
+            shapeClosureHash,
+            mode,
+            inputs,
+            outputs,
             assetCount,
             textureCount,
             referenceCount);
-    }
 
-    private static bool TryGetInputHashes(JsonElement element, out List<BakeInputHash>? hashes)
-    {
-        hashes = null;
-        if (!TryGetHashEntries(element, InputsProperty, out List<(string Path, string Hash)>? entries))
-        {
-            return false;
-        }
-
-        hashes = [.. entries!.Select(entry => new BakeInputHash(entry.Path, entry.Hash))];
         return true;
     }
 
-    private static bool TryGetOutputHashes(JsonElement element, out List<BakeOutputHash>? hashes)
+    private static void WriteInputs(Utf8JsonWriter writer, IReadOnlyList<BakeInputHash> inputs)
     {
-        hashes = null;
-        if (!TryGetHashEntries(element, OutputsProperty, out List<(string Path, string Hash)>? entries))
+        writer.WriteStartArray(InputsProperty);
+        foreach (BakeInputHash input in inputs)
         {
-            return false;
+            writer.WriteStartObject();
+            writer.WriteString(PathProperty, input.Path);
+            writer.WriteString(HashProperty, input.Hash);
+            writer.WriteEndObject();
         }
 
-        hashes = [.. entries!.Select(entry => new BakeOutputHash(entry.Path, entry.Hash))];
-        return true;
+        writer.WriteEndArray();
     }
 
-    private static bool TryGetHashEntries(
-        JsonElement element,
-        string property,
-        out List<(string Path, string Hash)>? entries)
+    private static void WriteOutputs(Utf8JsonWriter writer, IReadOnlyList<BakeOutputHash> outputs)
     {
-        entries = null;
-        if (!element.TryGetProperty(property, out JsonElement arrayElement)
-            || arrayElement.ValueKind != JsonValueKind.Array)
+        writer.WriteStartArray(OutputsProperty);
+        foreach (BakeOutputHash output in outputs)
+        {
+            writer.WriteStartObject();
+            writer.WriteString(PathProperty, output.Path);
+            writer.WriteString(HashProperty, output.Hash);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+    }
+
+    private static bool TryReadInputs(
+        JsonElement root,
+        [NotNullWhen(true)] out IReadOnlyList<BakeInputHash>? inputs)
+    {
+        inputs = null;
+        if (!TryReadArray(root, InputsProperty, out JsonElement array))
         {
             return false;
         }
 
-        var result = new List<(string Path, string Hash)>(arrayElement.GetArrayLength());
-        foreach (JsonElement item in arrayElement.EnumerateArray())
+        var values = new List<BakeInputHash>(array.GetArrayLength());
+        foreach (JsonElement element in array.EnumerateArray())
         {
-            if (item.ValueKind != JsonValueKind.Object
-                || !TryGetString(item, PathProperty, out string? path)
-                || !TryGetString(item, HashProperty, out string? hash))
+            if (!TryReadPathAndHash(element, out string? path, out string? hash))
             {
                 return false;
             }
 
-            result.Add((path!, hash!));
+            values.Add(new BakeInputHash(path, hash));
         }
 
-        entries = result;
+        inputs = values;
         return true;
     }
 
-    private static bool TryGetString(JsonElement element, string property, out string? value)
+    private static bool TryReadOutputs(
+        JsonElement root,
+        [NotNullWhen(true)] out IReadOnlyList<BakeOutputHash>? outputs)
     {
-        value = null;
-        if (!element.TryGetProperty(property, out JsonElement propertyElement)
-            || propertyElement.ValueKind != JsonValueKind.String)
+        outputs = null;
+        if (!TryReadArray(root, OutputsProperty, out JsonElement array))
         {
             return false;
         }
 
-        value = propertyElement.GetString();
-        return !string.IsNullOrEmpty(value);
+        var values = new List<BakeOutputHash>(array.GetArrayLength());
+        foreach (JsonElement element in array.EnumerateArray())
+        {
+            if (!TryReadPathAndHash(element, out string? path, out string? hash))
+            {
+                return false;
+            }
+
+            values.Add(new BakeOutputHash(path, hash));
+        }
+
+        outputs = values;
+        return true;
     }
 
-    private static bool TryGetInt32(JsonElement element, string property, out int value)
+    private static bool TryReadPathAndHash(
+        JsonElement element,
+        [NotNullWhen(true)] out string? path,
+        [NotNullWhen(true)] out string? hash)
+    {
+        path = null;
+        hash = null;
+
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!TryReadString(element, PathProperty, out path)
+            || !TryReadString(element, HashProperty, out hash))
+        {
+            return false;
+        }
+
+        return path.Length > 0 && hash.Length > 0;
+    }
+
+    private static bool TryReadString(
+        JsonElement element,
+        string propertyName,
+        [NotNullWhen(true)] out string? value)
+    {
+        value = null;
+        if (!element.TryGetProperty(propertyName, out JsonElement property)
+            || property.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        value = property.GetString();
+        return value is not null;
+    }
+
+    private static bool TryReadInt32(
+        JsonElement element,
+        string propertyName,
+        out int value)
     {
         value = 0;
-        return element.TryGetProperty(property, out JsonElement propertyElement)
-            && propertyElement.ValueKind == JsonValueKind.Number
-            && propertyElement.TryGetInt32(out value)
+        return element.TryGetProperty(propertyName, out JsonElement property)
+            && property.ValueKind == JsonValueKind.Number
+            && property.TryGetInt32(out value)
             && value >= 0;
+    }
+
+    private static bool TryReadArray(
+        JsonElement element,
+        string propertyName,
+        out JsonElement array)
+    {
+        array = default;
+        return element.TryGetProperty(propertyName, out array)
+            && array.ValueKind == JsonValueKind.Array;
     }
 }

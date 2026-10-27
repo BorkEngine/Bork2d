@@ -1,112 +1,99 @@
 namespace Bork2d.Bake.Incremental;
 
 /// <summary>
-/// The hashed inputs and every pack output recorded by the incremental bake manifest.
+/// The schema-3 incremental bake manifest: the tool version, the configuration and shape-closure
+/// hashes, every tracked input hash, the mode, every written pack output hash, and the aggregate
+/// counts.
 /// </summary>
 /// <remarks>
 /// <para>
-/// This is the internal, versioned model behind <c>obj/bork2d/bake/manifest.json</c> (M4 §10.3,
-/// Q-09). It is never committed and never packed. <see cref="Inputs"/> is sorted ordinal by path and
-/// <see cref="Outputs"/> follows descriptor order (main first), so a manifest is structurally
-/// deterministic; every hash is XXH3-128 (32 uppercase hex characters) with explicit field framing
-/// (Q-09).
+/// The manifest is a pure data model. <see cref="BakeManifestJson"/> owns its deterministic
+/// serialization, <see cref="BakeManifestStore"/> owns the atomic read/write, and
+/// <see cref="BakeIncrementalPlanner"/> owns the skip decision. Inputs are kept in ordinal display-path
+/// order; outputs keep their configured pack order.
 /// </para>
 /// <para>
-/// The manifest records everything the skip decision compares: the descriptor, every tracked source
-/// across every pack root, the game-side assembly closure next to the generated host, the generated
-/// host assembly, the tool version, the mode, every output pack path with its hash, and the aggregate
-/// counts so an up-to-date run can report the same summary without baking.
+/// A manifest is all-or-nothing: there is no per-pack cache. Any different field, a missing output,
+/// or an output whose content hash changed forces a full bake. Schema 2 (the M4 shape) is not
+/// readable by this model and therefore also forces a full bake.
 /// </para>
 /// </remarks>
 internal sealed class BakeIncrementalManifest
 {
-    /// <summary>The current manifest schema version.</summary>
-    internal const int CurrentVersion = 2;
+    /// <summary>The manifest schema version this build writes and reads.</summary>
+    internal const int CurrentVersion = 3;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BakeIncrementalManifest"/> class.
     /// </summary>
-    /// <param name="version">The manifest schema version.</param>
-    /// <param name="toolVersion">The bake tool version.</param>
-    /// <param name="descriptorHash">The descriptor file hash.</param>
-    /// <param name="inputs">The hashed source inputs; sorted ordinal by path.</param>
-    /// <param name="commonAssemblyHash">
-    /// The hash of the game-side assembly closure next to the generated host (Project.Common and any
-    /// data libraries it references).
-    /// </param>
-    /// <param name="hostHash">The generated bake-host assembly hash.</param>
-    /// <param name="mode">The pack compression mode name (<c>debug</c> or <c>release</c>).</param>
-    /// <param name="outputs">The produced pack paths and hashes in descriptor order.</param>
-    /// <param name="assetCount">The aggregate number of bound custom-data assets.</param>
-    /// <param name="textureCount">The aggregate number of baked textures.</param>
-    /// <param name="referenceCount">The aggregate number of reference sites validated.</param>
+    /// <param name="toolVersion">The bake tool informational version.</param>
+    /// <param name="configurationHash">The builder-configuration hash.</param>
+    /// <param name="shapeClosureHash">The registered type/processor assembly closure hash.</param>
+    /// <param name="mode">The bake mode name (<c>debug</c> or <c>release</c>).</param>
+    /// <param name="inputs">The tracked inputs; sorted by display path here.</param>
+    /// <param name="outputs">The written pack outputs in configured pack order.</param>
+    /// <param name="assetCount">The aggregate shaped asset count.</param>
+    /// <param name="textureCount">The aggregate texture count.</param>
+    /// <param name="referenceCount">The aggregate reference-site count.</param>
     internal BakeIncrementalManifest(
-        int version,
         string toolVersion,
-        string descriptorHash,
-        IEnumerable<BakeInputHash> inputs,
-        string commonAssemblyHash,
-        string hostHash,
+        string configurationHash,
+        string shapeClosureHash,
         string mode,
-        IEnumerable<BakeOutputHash> outputs,
+        IReadOnlyList<BakeInputHash> inputs,
+        IReadOnlyList<BakeOutputHash> outputs,
         int assetCount,
         int textureCount,
         int referenceCount)
     {
-        ArgumentNullException.ThrowIfNull(toolVersion);
-        ArgumentNullException.ThrowIfNull(descriptorHash);
+        ArgumentException.ThrowIfNullOrWhiteSpace(toolVersion);
+        ArgumentException.ThrowIfNullOrWhiteSpace(configurationHash);
+        ArgumentException.ThrowIfNullOrWhiteSpace(shapeClosureHash);
+        ArgumentException.ThrowIfNullOrWhiteSpace(mode);
         ArgumentNullException.ThrowIfNull(inputs);
-        ArgumentNullException.ThrowIfNull(commonAssemblyHash);
-        ArgumentNullException.ThrowIfNull(hostHash);
-        ArgumentNullException.ThrowIfNull(mode);
         ArgumentNullException.ThrowIfNull(outputs);
         ArgumentOutOfRangeException.ThrowIfNegative(assetCount);
         ArgumentOutOfRangeException.ThrowIfNegative(textureCount);
         ArgumentOutOfRangeException.ThrowIfNegative(referenceCount);
 
-        Version = version;
         ToolVersion = toolVersion;
-        DescriptorHash = descriptorHash;
-        Inputs = [.. inputs.OrderBy(input => input.Path, StringComparer.Ordinal)];
-        CommonAssemblyHash = commonAssemblyHash;
-        HostHash = hostHash;
+        ConfigurationHash = configurationHash;
+        ShapeClosureHash = shapeClosureHash;
         Mode = mode;
+        Inputs = [.. inputs.OrderBy(input => input.Path, StringComparer.Ordinal)];
         Outputs = [.. outputs];
         AssetCount = assetCount;
         TextureCount = textureCount;
         ReferenceCount = referenceCount;
     }
 
-    /// <summary>Gets the manifest schema version.</summary>
-    internal int Version { get; }
+    /// <summary>Gets the manifest schema version (<see cref="CurrentVersion"/>).</summary>
+    internal int Version => CurrentVersion;
 
-    /// <summary>Gets the bake tool version.</summary>
+    /// <summary>Gets the bake tool informational version that wrote the manifest.</summary>
     internal string ToolVersion { get; }
 
-    /// <summary>Gets the descriptor file hash.</summary>
-    internal string DescriptorHash { get; }
+    /// <summary>Gets the builder-configuration hash.</summary>
+    internal string ConfigurationHash { get; }
 
-    /// <summary>Gets the hashed source inputs, sorted ordinal by path.</summary>
-    internal IReadOnlyList<BakeInputHash> Inputs { get; }
+    /// <summary>Gets the registered type and processor assembly closure hash.</summary>
+    internal string ShapeClosureHash { get; }
 
-    /// <summary>Gets the hash of the game-side assembly closure next to the generated host.</summary>
-    internal string CommonAssemblyHash { get; }
-
-    /// <summary>Gets the generated bake-host assembly hash.</summary>
-    internal string HostHash { get; }
-
-    /// <summary>Gets the pack compression mode name (<c>debug</c> or <c>release</c>).</summary>
+    /// <summary>Gets the bake mode name.</summary>
     internal string Mode { get; }
 
-    /// <summary>Gets the produced pack paths and hashes in descriptor order.</summary>
+    /// <summary>Gets the tracked inputs in ordinal display-path order.</summary>
+    internal IReadOnlyList<BakeInputHash> Inputs { get; }
+
+    /// <summary>Gets the written pack outputs in configured pack order.</summary>
     internal IReadOnlyList<BakeOutputHash> Outputs { get; }
 
-    /// <summary>Gets the aggregate number of bound custom-data assets.</summary>
+    /// <summary>Gets the aggregate shaped asset count.</summary>
     internal int AssetCount { get; }
 
-    /// <summary>Gets the aggregate number of baked textures.</summary>
+    /// <summary>Gets the aggregate texture count.</summary>
     internal int TextureCount { get; }
 
-    /// <summary>Gets the aggregate number of reference sites validated.</summary>
+    /// <summary>Gets the aggregate reference-site count.</summary>
     internal int ReferenceCount { get; }
 }

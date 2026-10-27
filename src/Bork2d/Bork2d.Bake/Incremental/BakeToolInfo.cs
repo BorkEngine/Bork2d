@@ -3,12 +3,12 @@ using System.Reflection;
 namespace Bork2d.Bake.Incremental;
 
 /// <summary>
-/// The bake tool identity recorded by the incremental manifest and the host-generation state.
+/// Identifies the bake tool version recorded in the incremental manifest.
 /// </summary>
 /// <remarks>
-/// The version is the tooling assembly's informational version (which includes the pinned SDK's
-/// source revision when available). A tool upgrade therefore invalidates both skips, so a manifest or
-/// state file written by an older tool is never trusted.
+/// The version is the <see cref="AssemblyInformationalVersionAttribute"/> of the
+/// <c>Bork2d.Bake</c> assembly, falling back to the assembly version and then to <c>0.0.0</c>.
+/// A tool change therefore invalidates every manifest written by an earlier build.
 /// </remarks>
 internal static class BakeToolInfo
 {
@@ -18,8 +18,15 @@ internal static class BakeToolInfo
     private static string ResolveVersion()
     {
         Assembly assembly = typeof(BakeToolInfo).Assembly;
-        return assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?? assembly.GetName().Version?.ToString()
-            ?? "0.0.0";
+        string? informational = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion;
+
+        if (!string.IsNullOrWhiteSpace(informational))
+        {
+            return informational;
+        }
+
+        return assembly.GetName().Version?.ToString() ?? "0.0.0";
     }
 }

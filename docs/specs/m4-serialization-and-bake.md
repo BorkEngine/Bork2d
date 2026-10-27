@@ -552,12 +552,13 @@ For `art/ui/button` (from `Assets/art/ui/button.png`):
 
 | Asset | Kind | Value |
 | --- | --- | --- |
-| `art/ui/button` | MessagePack | `TextureDescriptor { Payload = "art/ui/button-raw", Width, Height, Format = "rgba8", Filter, Wrap }` |
+| `art/ui/button` | MessagePack | `TextureDescriptor { Payload = "art/ui/button-raw", Width, Height, Format = Rgba8, Filter, Wrap }` |
 | `art/ui/button-raw` | Raw | `width × height × 4` bytes, row-major, top-left origin, straight alpha, sRGB values unchanged |
 
 The descriptor is created in code by the texture pipeline and added with
 `PackBuilder.AddMessagePack<TextureDescriptor>`; the payload is added with `AddRaw`. Authors do not
-hand-write texture descriptors in M4 (Q-29).
+hand-write texture descriptors in M4 (Q-29). Under D-040 the three settings are the non-null
+`TextureFormat`/`TextureFilter`/`TextureWrap` enums instead of nullable strings.
 
 ### 8.4 Validation
 
@@ -954,7 +955,7 @@ behavior. They are no longer open; the remaining rows are.
 | ID | Question | Suggested default | Blocks |
 | --- | --- | --- | --- |
 | Q-12 | Texture edge policy: 16-bit sources (accept/downsample vs reject); raw RGBA sources in M4; sidecar required/optional; source dir reservation; symlinks; max dimension/OOM guard. | Accept 8-bit and decoder-normalized sources, reject explicit 16-bit PNGs; raw RGBA deferred; sidecars optional and next to any source anywhere under the asset root; no reserved `textures/raw/` folder (raw path is descriptor + `-raw`); skip reparse points; fail cleanly on OOM without a new policy cap. | WP3 |
-| Q-24 | Are texture sidecars allowed to override `format` or declare source-specific fields? | Only `filter`/`wrap` in v1; `format` fixed `rgba8`. | WP3 |
+| Q-24 | Are texture sidecars allowed to override `format` or declare source-specific fields? | Only `filter`/`wrap` in v1; `Format` fixed `TextureFormat.Rgba8`. | WP3 |
 | Q-29 | May authors hand-write `TextureDescriptor` TOML, or is it generated only? | Generated only; no descriptor TOML path in M4. | WP3 |
 
 ### 18.4 Paths, discovery, and diagnostics
@@ -1116,7 +1117,7 @@ The targets bake the main pack with **5 entries** from `Bork2d.BakeFixture/Asset
 | `data/game` | `Bork2d.BakeFixture.GameConfig` | `Name "campaign"`, `Health 120`, `MaxPlayers 4`, `Must "present"`, `Stats(3,7)`, `Tint Color(1,0.5,0.25,1)`, `Texture art/player` |
 | `roots/stats` | `Bork2d.BakeFixture.StatsRoot` | `(11,13)` |
 | `sprites/player` | `Bork2d.Api.Assets.SpriteAsset` | texture `art/player`, UVs `[[0,0],[1,0],[1,1],[0,1]]`, scale `16`, pivot `(0.5,0.5)`, topology `Triangles`, indices `[0,1,2,0,2,3]` |
-| `art/player` | `Bork2d.Api.Assets.TextureDescriptor` | payload `art/player-raw`, `2x2`, format `rgba8`, filter `nearest`, wrap `repeat` |
+| `art/player` | `Bork2d.Api.Assets.TextureDescriptor` | payload `art/player-raw`, `2x2`, format `Rgba8`, filter `Nearest`, wrap `Repeat` |
 | `art/player-raw` | raw payload | 16 bytes `255,0,0,255, 0,255,0,128, 0,0,255,64, 255,255,255,0` |
 
 The DLC pack has **1 entry** from `Bork2d.BakeFixture/DLC1`:

@@ -7,8 +7,13 @@ namespace Bork2d.Assets.Pack;
 /// <param name="PropertyPath">The property path inside <paramref name="SourcePath"/>.</param>
 /// <param name="Path">The referenced path, or <see langword="null"/> for an absent reference.</param>
 /// <param name="IsData">Whether the reference targets raw data rather than a MessagePack asset.</param>
+/// <param name="TargetTypeName">
+/// The referenced CLR type's full name for an <c>AssetRef&lt;T&gt;</c>, or <see langword="null"/> for
+/// a <c>DataRef</c>.
+/// </param>
 internal readonly record struct AssetReferenceInfo(
     string SourcePath,
     string PropertyPath,
     string? Path,
-    bool IsData);
+    bool IsData,
+    string? TargetTypeName);
