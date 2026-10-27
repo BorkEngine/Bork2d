@@ -1,7 +1,8 @@
 # File Processors and `MyGame.Assets` — Implementation Spec
 
-> **Status:** **Implemented as-built on `task/file-processors` (D-036/D-037/D-038/D-039/D-040,
-> 2026-10-27).** WP1–WP5 are landed on the task branch: the public `Bork2d.Bake.Builder`
+> **Status:** **Merged into `develop` (2026-10-27, PR #8, merge commit `a98e0ab`;
+> D-036/D-037/D-038/D-039/D-040).** WP1–WP5 were delivered on `task/file-processors`: the public
+> `Bork2d.Bake.Builder`
 > builder/processor API, explicit `RegisterAsset<T>()`, no project descriptor/generated host/CLI,
 > the processor registry and sidecars, the built-in texture processor, the PPM/Unit fixture
 > processors, the build-only fixture assets executable, schema-3 incremental bake, the final
@@ -460,8 +461,8 @@ Add/replace:
 
 ## 18. Work packages
 
-Implementation runs on `task/file-processors`. Each WP is a reviewable commit series; do not merge
-to `develop` without human review. WP boundaries:
+Implementation was delivered on `task/file-processors`; each WP was a reviewable commit series. The
+task is merged into `develop` (PR #8, merge commit `a98e0ab`). WP boundaries:
 
 | WP | Scope | Depends | Acceptance |
 | --- | --- | --- | --- |

@@ -1,7 +1,8 @@
 # Bork2d Documentation
 
-> **Status:** **M0–M4 are merged into `develop`; D-036/D-037/D-038/D-039/D-040 are implemented
-> as-built on `task/file-processors` (2026-10-27).** The repository contains the M1 build/quality
+> **Status:** **M0–M4 are merged into `develop`; the post-M4 asset-processor task
+> (D-036/D-037/D-038/D-039/D-040) is merged (2026-10-27, PR #8).** The repository contains the M1
+> build/quality
 > baseline, public contracts, root-owned scene tree, builder, logging, the NativeAOT smoke app, the
 > M2 SDL windowed host (window, input, time, uncapped loop), the M3 asset pipeline (pack reader/writer,
 > VFS, loader, public `SpriteAsset`/`TextureDescriptor`, typed `AssetRef<T>`/`DataRef` links,

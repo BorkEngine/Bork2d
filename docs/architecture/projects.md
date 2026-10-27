@@ -1,9 +1,9 @@
 # Projects and Dependencies
 
-> **Status:** `Current`, implemented as-built on `task/file-processors` (2026-10-27; D-036/D-037/
+> **Status:** `Current`, merged into `develop` (2026-10-27, PR #8; D-036/D-037/
 > D-038/D-039/D-040) and enforced by the dependency test. M1–M3 and M4 are merged into `develop`; the
 > post-M3 asset-reference refactor (D-035) and the M4 serialization/bake work are merged.
-> **D-036/D-037/D-038 are implemented:** the public JIT `Bork2d.Bake.Builder` hosts the
+> **D-036/D-037/D-038 are merged:** the public JIT `Bork2d.Bake.Builder` hosts the
 > builder/processor contract over the internal `Bork2d.Bake`; `Bork2d.BakeFixture.Assets` is the
 > build-only fixture executable; `Bork2d.Bake.Cli`, the project descriptor, the generated host, and
 > `MetadataLoadContext` are removed. The game-owned `MyGame.Assets` executable owns assets,

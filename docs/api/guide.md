@@ -1,7 +1,7 @@
 # API Guide
 
-> **Status:** implemented through M4 and the D-036/D-037/D-038 asset-processor work on
-> `task/file-processors` (2026-10-27). M1 (foundation), M2 (SDL windowed host), and M3 (pack, VFS,
+> **Status:** implemented through M4 and the D-036/D-037/D-038 asset-processor task merged into
+> `develop` (2026-10-27, PR #8). M1 (foundation), M2 (SDL windowed host), and M3 (pack, VFS,
 > runtime integration) exist in `Bork2d.Runtime`/`Bork2d.Assets` and are merged into `develop`.
 > `Build()` validates and `Run()` runs the uncapped windowed loop (window, input, time) or the
 > one-tick headless/offscreen sequence, opening the base pack (or the `WithoutAssets()` empty

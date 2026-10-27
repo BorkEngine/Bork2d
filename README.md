@@ -5,7 +5,9 @@ windowing through **Silk.NET**, with gameplay on a tick thread and rendering on 
 that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets ship in
 **`assets.pck`**, and windowed, offscreen, and headless modes are the target design.
 
-> **Status: pre-alpha.** M0–M4 are merged into `develop`. Windowed mode opens a real SDL window and
+> **Status: pre-alpha.** M0–M4 are merged into `develop`, and the post-M4 asset-processor task
+> (D-036/D-037/D-038/D-039/D-040) is merged (2026-10-27, PR #8). Windowed mode opens a real SDL
+> window and
 > runs an uncapped loop; the runtime loads and browses `assets.pck` through the app-scoped asset
 > service. The bake is the game-owned builder flow (D-036/D-037/D-038): a build-time
 > `MyGame.Assets` executable registers explicit data types and asset processors, bakes on build, and

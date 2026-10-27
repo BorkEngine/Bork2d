@@ -1,7 +1,7 @@
 # Contributing
 
-> **Status:** current through M4 and the D-036/D-037/D-038 asset-processor work on
-> `task/file-processors` (2026-10-27). The warning/style/format/AOT gates and the docs link check are
+> **Status:** current through M4 and the merged D-036/D-037/D-038 asset-processor task
+> (2026-10-27, PR #8). The warning/style/format/AOT gates and the docs link check are
 > active. CI runs the docs link check, build, tests, and format verification on PRs to `develop` and
 > pushes to `develop`; the NativeAOT publish/run smoke (headless loading the **baked fixture packs**,
 > and windowed) is a required local gate.

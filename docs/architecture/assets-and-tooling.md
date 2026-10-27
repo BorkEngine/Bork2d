@@ -1,7 +1,8 @@
 # Assets, Bake, and Editor Tooling
 
-> **Status:** **Implemented as-built through `task/file-processors` (2026-10-27; D-036/D-037/D-038/
-> D-039/D-040).** `Bork2d.Assets` provides the v1 pack reader/writer and the public
+> **Status:** **Current; implemented through M4 and the asset-processor task merged into `develop`
+> (2026-10-27, PR #8; D-036/D-037/D-038/D-039/D-040).** `Bork2d.Assets` provides the v1 pack
+> reader/writer and the public
 > `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode` tooling surface, canonical paths, the
 > internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, one loader thread with
 > `LoadData`/`LoadAsset<T>`, generic `AssetRef<T>`/`DataRef` reference validation at pack build, and

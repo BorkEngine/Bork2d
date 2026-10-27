@@ -14,7 +14,8 @@
 > [M4 WP0 — Serialization and Bake Feasibility Spike](m4-wp0-spike.md); as-built commands, results,
 > and the acceptance mapping are in §22.
 >
-> **Post-M4 revision (D-036/D-037/D-038, Planned on `task/file-processors`, 2026-10-27).** This
+> **Post-M4 revision (D-036/D-037/D-038; delivered on `task/file-processors` and merged into
+> `develop` 2026-10-27, PR #8; historical).** This
 > document is the historical M4 record. The target replaces the project descriptor with a builder in
 > the game-owned `MyGame.Assets` executable, makes every non-TOML source type a registered asset
 > processor with a `[GenerateShape]` sidecar when settings are required (the built-in texture

@@ -1,7 +1,8 @@
 # Asset Processors and `MyGame.Assets`
 
-> **Status:** **Implemented as-built on `task/file-processors` (D-036/D-037/D-038/D-039/D-040,
-> 2026-10-27).** This document is the architecture of the shipped processor model: every non-TOML
+> **Status:** **Merged into `develop` (2026-10-27, PR #8, merge commit `a98e0ab`;
+> D-036/D-037/D-038/D-039/D-040).** This document is the architecture of the shipped processor
+> model: every non-TOML
 > source type is an asset processor registered in a game-owned executable (`MyGame.Assets`), the
 > project descriptor is removed, all bake configuration is builder configuration in that executable,
 > and data types are registered explicitly with no generated host and no reflection. The built-in

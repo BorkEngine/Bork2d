@@ -1,7 +1,7 @@
 # NativeAOT
 
-> **Status:** `Current` through M3 and M4 (merged into `develop`) and **implemented as-built through
-> `task/file-processors` (D-036/D-037/D-038, 2026-10-27).** `Bork2d.Api`, `Bork2d.Common`,
+> **Status:** `Current` through M3 and M4 and the merged asset-processor task
+> (D-036/D-037/D-038, 2026-10-27, PR #8). `Bork2d.Api`, `Bork2d.Common`,
 > `Bork2d.Assets`, `Bork2d.Render`, and `Bork2d.Runtime` compile with `IsAotCompatible` plus the trim
 > and AOT analyzers, and `Bork2d.AotSmoke` publishes and runs with zero AOT/trim warnings. The
 > default smoke loads the **baked fixture packs** produced by the build-only

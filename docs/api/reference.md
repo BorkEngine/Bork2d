@@ -1,7 +1,7 @@
 # API Reference
 
-> **Status:** the implemented M2/M3/M4 contract plus the D-036/D-037/D-038 asset-processor work on
-> `task/file-processors` (2026-10-27). M1 (foundation), M2 (SDL windowed host), M3 (pack, VFS,
+> **Status:** the implemented M2/M3/M4 contract plus the D-036/D-037/D-038 asset-processor task
+> merged into `develop` (2026-10-27, PR #8). M1 (foundation), M2 (SDL windowed host), M3 (pack, VFS,
 > runtime integration), and M4 (serialization/bake) are implemented and merged into `develop`.
 > `Current` means implemented in this tree and covered by tests; `Partial` means the declaration
 > exists but behavior is stubbed, unwired, or incomplete; `Planned` means an agreed target that is
