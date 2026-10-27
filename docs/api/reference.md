@@ -13,9 +13,10 @@
 > document and the code disagree, treat it as a defect and reconcile it in the owning docs
 > ([AGENTS.md §10](../../AGENTS.md)) instead of assuming the code is automatically right.
 >
-> **Post-M4 target (D-036/D-037, Planned):** the build-time `MyGame.Assets` executable uses the
-> public `Bork2d.Bake.Builder` surface for builder config, asset processors, and sidecars; the
-> project descriptor is removed. Runtime `Bork2d.Api`/`Bork2d.Runtime` contracts are unchanged.
+> **Post-M4 target (D-036/D-037/D-038, Planned):** the build-time `MyGame.Assets` executable uses
+> the public `Bork2d.Bake.Builder` surface for builder config, explicit `RegisterAsset<T>()` data
+> types, asset processors, and sidecars; the project descriptor and generated host are removed.
+> Runtime `Bork2d.Api`/`Bork2d.Runtime` contracts are unchanged.
 
 ## 1. Contract-wide rules
 
@@ -83,11 +84,13 @@ reference Nerdbank.MessagePack, `System.IO.Hashing`, Zstd, or file I/O. See
 
 The only other public surface is the tooling-only pack writer in `Bork2d.Assets.Pack` (§13). Game
 **runtime** code still references only `Bork2d.Api` and `Bork2d.Runtime`. The post-M4 target
-(D-036/D-037, planned) adds a public JIT tooling surface, `Bork2d.Bake.Builder`
-(`BakeApplicationBuilder`, `BakeApplication`, `IAssetProcessor`, `AssetProcessor<TSidecar>`,
-`SidecarPolicy`, `AssetProcessorContext`, output sink/diagnostics), referenced only by the
-build-time `MyGame.Assets`/fixture assets executables. It is never in the runtime or AOT publish
-graph; the design is in [asset processors](../architecture/asset-processors.md).
+(D-036/D-037/D-038, planned) adds a public JIT tooling surface, `Bork2d.Bake.Builder`
+(`BakeApplicationBuilder`, `BakeApplication`, `RegisterAsset<T>()`, `UseDefaultAssets()`,
+`UseDefaultProcessors()`, `IAssetProcessor`, `AssetProcessor<TSidecar>`, `SidecarPolicy`,
+`AssetProcessorContext`, output sink/diagnostics), referenced only by the build-time
+`MyGame.Assets`/fixture assets executables. Data types are registered explicitly; there is no
+generated host and no reflection. It is never in the runtime or AOT publish graph; the design is in
+[asset processors](../architecture/asset-processors.md).
 
 Rows marked **`Planned` (not declared)** in §8–§10 describe a target member that does not exist in
 the interface yet. They are listed for planning only; game code cannot call them and no status
@@ -410,9 +413,9 @@ public sealed class AssetException : Bork2dException
 
 ### 7.2 Data serialization and bake
 
-`Status: Current (M4) for custom data and sprite-as-data; the post-M4 target (D-036/D-037, planned)
-replaces the project descriptor with a builder in `MyGame.Assets`; sprite field validation and
-slicing are M5.` The runtime deserializes packed MessagePack only. A game authors data as TOML and
+`Status: Current (M4) for custom data and sprite-as-data; the post-M4 target (D-036/D-037/D-038,
+planned) replaces the project descriptor with a builder in `MyGame.Assets`, removes the generated
+host, and registers data types explicitly; sprite field validation and slicing are M5.` The runtime deserializes packed MessagePack only. A game authors data as TOML and
 bakes it with the JIT tooling; the runtime has no TOML parser, reflection serializer, or bake
 reference.
 
@@ -420,9 +423,12 @@ reference.
   declared `partial`. `partial` is **PolyType's** rule, not a Bork2d attribute or generator
   requirement: on .NET 8+ `[GenerateShape]` injects `IShapeable<T>` through the partial declaration.
   There is no `[Bork2dSerializable]` attribute, no Bork2d source generator, and no assembly scan.
-  Registration is the source TOML's own reserved `[bork2d]` table (D-M4-13):
-  `[bork2d] type = "Full.Type.Name"`. There is no type list; the value is a full CLR name without
-  assembly qualification, and a mapped type must implement `IShapeable<T>`.
+  Registration is explicit (D-038): the builder calls `RegisterAsset<T>()` for every authorable type
+  (`UseDefaultAssets()` supplies `SpriteAsset`), and the data TOML selects one with
+  `[bork2d] type = "Full.Type.Name"` (D-M4-13). There is no generated host, no reflection, and no
+  type lookup: the type name is the key into the registered entry dictionary. A type name that is
+  not registered is a `BK1xxx` error. A registered internal type needs `InternalsVisibleTo` to the
+  assets executable.
 - **TOML authoring.** Keys are camelCase; `[JsonPropertyName]`, `[JsonIgnore]`, and `[JsonRequired]`
   are honored. Supported leaves are booleans, integers, floats, strings, camelCase enum names,
   `Guid`, offset date-times, `Vector2/3/4` (`[x, y]`), `Color` (`[r, g, b, a]`),
@@ -454,10 +460,10 @@ reference.
   errors are `BK7xxx`; sidecar binding errors are `BK2xxx`; texture decode/probe errors remain
   `BK4xxx`. See [asset processors](../architecture/asset-processors.md).
 - **Tooling commands (not in the runtime).** M4: `bork2d-bake generate-host`/`bake`/`validate`.
-  Target: `MyGame.Assets` is the CLI and exposes `bake`, `generate-host`, `validate`, `clean`, and
-  `copy-packs`; building the project runs `bake` automatically. Exit codes are `0` success/up to
-  date, `1` source diagnostics, `2` usage/configuration/host error, `3` internal failure. The build
-  pipeline is described in
+  Target: `MyGame.Assets` is the CLI and exposes `bake`, `validate`, `clean`, and `copy-packs`;
+  building the project runs `bake` automatically. There is no `generate-host` command and no
+  generated host. Exit codes are `0` success/up to date, `1` source diagnostics, `2`
+  usage/configuration error, `3` internal failure. The build pipeline is described in
   [Assets and tooling §11](../architecture/assets-and-tooling.md#11-build-pipeline), the TOML model
   and leaves in [Assets and tooling §10](../architecture/assets-and-tooling.md#10-toml-source-model),
   and the as-built evidence in the

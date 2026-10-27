@@ -8,9 +8,10 @@
 > opening the base pack (or the `WithoutAssets()` empty filesystem) before the window and `Setup`.
 > The renderer is M8. See the [API reference](reference.md#12-runtime-surface).
 >
-> **Post-M4 target (D-036/D-037, Planned):** assets/processors move to a build-time `MyGame.Assets`
-> executable configured with `BakeApplicationBuilder`; the project descriptor is removed. Runtime
-> game code still references only `Bork2d.Api`/`Bork2d.Runtime`.
+> **Post-M4 target (D-036/D-037/D-038, Planned):** assets/processors move to a build-time
+> `MyGame.Assets` executable configured with `BakeApplicationBuilder`; the project descriptor and
+> generated host are removed, and data types are registered explicitly. Runtime game code still
+> references only `Bork2d.Api`/`Bork2d.Runtime`.
 
 ## 1. What you reference
 
@@ -27,7 +28,7 @@ tests** may reference `Bork2d.Assets` for the public `Bork2d.Assets.Pack.PackBui
 `PackCompressionMode` writer (§10); that surface is not part of the game contract. The M4 bake
 library/CLI are JIT tooling driven by `build/Bork2d.Bake.targets`; runtime game code never references
 them. The target replaces the descriptor/CLI flow with the build-time `MyGame.Assets` builder and
-`Bork2d.Bake.Builder` (D-036/D-037); it is never part of the runtime app or AOT publish.
+`Bork2d.Bake.Builder` (D-036/D-037/D-038); it is never part of the runtime app or AOT publish.
 
 `Bork2d.Api` is split by area: engine/game in `Bork2d.Api`, scene types in `Bork2d.Api.Scene`,
 render value types in `Bork2d.Api.Rendering`, input in `Bork2d.Api.Input`, window/time in
@@ -447,13 +448,14 @@ byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
 
 ### Data serialization and bake
 
-`Status: M4 as-built for custom data and sprite-as-data; the post-M4 target (D-036/D-037, planned on
-task/file-processors) replaces the project descriptor with a builder in `MyGame.Assets`. Sprite
+`Status: M4 as-built for custom data and sprite-as-data; the post-M4 target (D-036/D-037/D-038,
+planned on task/file-processors) replaces the project descriptor with a builder in `MyGame.Assets`
+and removes the generated host. Sprite
 field validation and slicing are M5.` Author data as TOML in the pack roots configured by the
 builder, declare each type in its own `[bork2d]` table, and let the tooling bake the main pack and
 any DLC packs. The runtime never sees TOML.
 
-**Target layout (D-037).** The game has a build-time `MyGame.Assets` executable that owns the asset
+**Target layout (D-037/D-038).** The game has a build-time `MyGame.Assets` executable that owns the asset
 roots and processors. Its `Program.cs` configures the bake; there is no `bork2d.project.toml`:
 
 ```csharp
@@ -461,6 +463,10 @@ return await new BakeApplicationBuilder()
     .WithPack("assets.pck", "Assets")          // first = main
     .WithPack("dlc1.pck", "DLC1")              // later = overlay
     .WithCommonAssembly(typeof(GameConfig).Assembly)
+    .UseDefaultAssets()                        // SpriteAsset
+    .RegisterAsset<GameConfig>()               // explicit data-TOML types
+    .RegisterAsset<LevelTuning>()
+    .UseDefaultProcessors()                    // built-in texture processor
     .WithTextureDefaults(TextureFilter.Linear, TextureWrap.Clamp)
     .AddProcessor(new PpmProcessor())
     .Build()
@@ -483,8 +489,8 @@ using Bork2d.Api.Assets;
 using Bork2d.Api.Rendering;
 using PolyType;
 
-// The data TOML's [bork2d] table declares MyGame.Data.GameConfig; there is no type list.
-// [GenerateShape] + partial is PolyType's rule: it injects IShapeable<T> into the partial type.
+// The data TOML's [bork2d] table selects MyGame.Data.GameConfig among the builder's
+// explicitly registered types. [GenerateShape] + partial is PolyType's rule.
 [GenerateShape]
 public sealed partial class GameConfig
 {
@@ -520,7 +526,12 @@ type = "MyGame.Data.GameConfig"
 
 - **`partial` is PolyType's requirement.** On .NET 8+, `[GenerateShape]` emits
   `IShapeable<T>` through a partial declaration. There is no `[Bork2dSerializable]` attribute and no
-  Bork2d source generator; each data TOML's `[bork2d] type = "Full.Type.Name"` entry is the registration (D-M4-13).
+  Bork2d source generator.
+- **Registration is explicit (D-038).** Call `.RegisterAsset<GameConfig>()` for every type a data
+  TOML may select; `.UseDefaultAssets()` supplies engine authoring types such as `SpriteAsset`.
+  There is no generated host and no reflection. `[bork2d] type = "Full.Type.Name"` is the
+  per-source selector; an unregistered type is a `BK1xxx` error. A registered internal type needs
+  `InternalsVisibleTo` to the assets executable.
 - **Keys and leaves.** Keys are camelCase; `[JsonPropertyName]`, `[JsonIgnore]`, and
   `[JsonRequired]` are honored. Supported leaves are booleans, integers, floats, strings, camelCase
   enums, `Guid`, offset date-times, `Vector2/3/4`, `Color`, `AssetRef<T>`/`DataRef` path strings,
@@ -533,16 +544,16 @@ type = "MyGame.Data.GameConfig"
   present reference against the pack's local baked set and, for a DLC, the main pack. An absent key
   is an absent reference.
 - **Commands (tooling only).** Current M4: `bork2d-bake generate-host`, `bake`, `validate` driven by
-  `build/Bork2d.Bake.targets`. Target (D-037): `MyGame.Assets` is the CLI, exposing `bake`,
-  `generate-host`, `validate`, `clean`, and `copy-packs`; building the project runs `bake`
-  automatically. `bake` writes every configured pack under its output root. Exit codes: `0`
-  success/up to date, `1` source diagnostics, `2` usage/configuration/host error, `3` internal
+  `build/Bork2d.Bake.targets`. Target (D-037/D-038): `MyGame.Assets` is the CLI, exposing `bake`,
+  `validate`, `clean`, and `copy-packs`; building the project runs `bake` automatically. There is
+  no `generate-host` command. `bake` writes every configured pack under its output root. Exit codes:
+  `0` success/up to date, `1` source diagnostics, `2` usage/configuration error, `3` internal
   failure. The runtime does not reference this tooling. See
   [asset processors](../architecture/asset-processors.md) for the target contract and
   [assets and tooling §10–§11](../architecture/assets-and-tooling.md#10-toml-source-model) for the
   full mapping/pipeline and current M4 details.
 
-### Asset processors and `MyGame.Assets` (target, D-036/D-037)
+### Asset processors and `MyGame.Assets` (target, D-036/D-037/D-038)
 
 `Status: Planned on task/file-processors. The current M4 tree has the texture-specific pipeline.`
 
@@ -602,9 +613,9 @@ public readonly partial record struct Unit(string Name, int Health, int Attack);
   for opaque raw bytes. A processor never serializes MessagePack or calls `PackBuilder`.
 - The built-in PNG/JPG/JPEG/BMP/TGA importer is a processor registered automatically. A later
   registration overrides it for a duplicate extension.
-- Processor outputs do not need to be registered with the generated host; `AddAsset<T>` uses the
-  type's compiled shape. The runtime can load them with `LoadAsset<T>` when the type lives in a
-  runtime assembly such as `Project.Common`.
+- Processor outputs do not need a `RegisterAsset<T>()` entry; `AddAsset<T>` uses the type's
+  compiled shape. The runtime can load them with `LoadAsset<T>` when the type lives in a runtime
+  assembly such as `Project.Common`.
 - Sidecar binding uses the same camelCase/unknown-key/required rules as data TOML. There are only
   two policies: `Required` sidecars are created once through `CreateDefaultSidecar` when missing;
   `None` has no sidecar. There is no optional-without-file policy.
