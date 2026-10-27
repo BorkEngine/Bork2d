@@ -140,11 +140,13 @@ public static class BakeProjectFixture
     /// <param name="projectDirectory">The project root.</param>
     /// <param name="packs">The ordered <c>(pack path, root)</c> entries.</param>
     /// <param name="registerFixtureTypes">Whether to register the fixture data types.</param>
+    /// <param name="processors">The custom processors to register, in builder order.</param>
     /// <returns>The configured application.</returns>
     internal static BakeApplication CreateApplication(
         string projectDirectory,
         IReadOnlyList<(string Pack, string Root)> packs,
-        bool registerFixtureTypes = true)
+        bool registerFixtureTypes = true,
+        IReadOnlyList<IAssetProcessor>? processors = null)
     {
         BakeApplicationBuilder builder = new BakeApplicationBuilder()
             .WithProjectRoot(projectDirectory);
@@ -160,6 +162,14 @@ public static class BakeProjectFixture
             builder
                 .RegisterAsset<Bork2d.BakeFixture.GameConfig>()
                 .RegisterAsset<Bork2d.BakeFixture.StatsRoot>();
+        }
+
+        if (processors is not null)
+        {
+            foreach (IAssetProcessor processor in processors)
+            {
+                builder.AddProcessor(processor);
+            }
         }
 
         return builder

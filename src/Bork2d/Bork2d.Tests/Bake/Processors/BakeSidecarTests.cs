@@ -1,3 +1,4 @@
+using Bork2d.Bake.Builder;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Processors;
 using Bork2d.Bake.Sources;
@@ -44,6 +45,89 @@ public sealed class BakeSidecarTests
         byte[] bytes = File.ReadAllBytes(sidecarPath);
         Assert.False(bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF);
         Assert.DoesNotContain('\r', text);
+    }
+
+    [Fact]
+    public void CheckModeUsesTheDefaultSidecarInMemoryWithoutWritingIt()
+    {
+        TestSidecar? bound = null;
+        var processor = new TestSidecarProcessor(
+            "test-unit",
+            "unit",
+            _ => new TestSidecar { Value = 7, Mode = TestSidecarMode.Slow },
+            (_, sidecar) => bound = sidecar);
+        using var project = TestBakeProject.Create("sidecar-check", processors: [processor]);
+        project.WriteAssetBytes("data/archer.unit", [1]);
+        string sidecarPath = project.FullPath("Assets/data/archer.unit.toml");
+
+        var checkDiagnostics = new BakeDiagnostics();
+        _ = Run(project, checkDiagnostics, allowSourceWrites: false);
+
+        Assert.Empty(checkDiagnostics.GetSorted());
+        Assert.False(File.Exists(sidecarPath));
+        Assert.DoesNotContain(
+            checkDiagnostics.GetSorted(),
+            diagnostic => diagnostic.Code == BakeDiagnosticCodes.ProcessorSidecarCreated);
+        Assert.Equal(1, processor.CreateDefaultSidecarCount);
+        Assert.Equal(1, processor.ProcessCount);
+        Assert.NotNull(bound);
+        Assert.Equal(7, bound!.Value);
+        Assert.Equal(TestSidecarMode.Slow, bound.Mode);
+
+        var bakeDiagnostics = new BakeDiagnostics();
+        _ = Run(project, bakeDiagnostics, allowSourceWrites: true);
+
+        Assert.True(File.Exists(sidecarPath));
+        Assert.Single(
+            bakeDiagnostics.GetSorted(),
+            diagnostic => diagnostic.Code == BakeDiagnosticCodes.ProcessorSidecarCreated);
+        Assert.Equal(2, processor.CreateDefaultSidecarCount);
+        Assert.Equal(2, processor.ProcessCount);
+    }
+
+    [Fact]
+    public void CheckModeStillValidatesTheDefaultSidecarSerialization()
+    {
+        using var project = TestBakeProject.Create(
+            "sidecar-check-unsupported",
+            processors: [new UnsupportedSidecarProcessor()]);
+        project.WriteAssetBytes("data/thing.unsupported", [1]);
+
+        var diagnostics = new BakeDiagnostics();
+        IReadOnlyList<BakeProcessorOutput> outputs = Run(
+            project,
+            diagnostics,
+            allowSourceWrites: false);
+
+        Assert.Empty(outputs);
+        BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
+        Assert.Equal(BakeDiagnosticCodes.ProcessorSidecarCreateFailed, diagnostic.Code);
+        Assert.False(File.Exists(project.FullPath("Assets/data/thing.unsupported.toml")));
+    }
+
+    [Fact]
+    public void ValidateThroughBakeApplicationLeavesNoSidecar()
+    {
+        var processor = new TestSidecarProcessor(
+            "test-unit",
+            "unit",
+            _ => new TestSidecar { Value = 7 });
+        using var project = TestBakeProject.Create("sidecar-validate");
+        project.WriteAssetBytes("data/archer.unit", [1]);
+        BakeApplication application = BakeProjectFixture.CreateApplication(
+            project.RootPath,
+            [("assets.pck", "Assets")],
+            processors: [processor]);
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        int exitCode = application.Run(["validate"], output, error, "test-assets");
+
+        Assert.Equal(0, exitCode);
+        Assert.False(File.Exists(project.FullPath("Assets/data/archer.unit.toml")));
+        Assert.DoesNotContain("BK7009", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(1, processor.CreateDefaultSidecarCount);
+        Assert.Equal(1, processor.ProcessCount);
     }
 
     [Fact]
@@ -254,9 +338,14 @@ public sealed class BakeSidecarTests
 
     private static IReadOnlyList<BakeProcessorOutput> Run(
         TestBakeProject project,
-        BakeDiagnostics diagnostics)
+        BakeDiagnostics diagnostics,
+        bool allowSourceWrites = true)
     {
         BakeDiscoveredSources discovered = BakeSourceDiscovery.Discover(project.Project, diagnostics);
-        return BakeProcessorRunner.Run(project.Project, discovered.ProcessorSources, diagnostics);
+        return BakeProcessorRunner.Run(
+            project.Project,
+            discovered.ProcessorSources,
+            diagnostics,
+            allowSourceWrites);
     }
 }

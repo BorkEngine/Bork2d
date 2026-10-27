@@ -15,10 +15,19 @@ namespace Bork2d.Bake.Processors;
 /// <para>
 /// A <see cref="BakeSidecarPolicy.None"/> processor runs directly. A
 /// <see cref="BakeSidecarPolicy.Required"/> processor runs with its bound sidecar; when the sidecar
-/// file is missing, <see cref="IBakeAssetProcessor.CreateDefaultSidecar"/> is called exactly once, the
-/// result is written as canonical TOML with <see cref="TomlSidecarWriter"/>, an informational
+/// file is missing and source writes are allowed, <see cref="IBakeAssetProcessor.CreateDefaultSidecar"/>
+/// is called exactly once, the result is written as canonical TOML with
+/// <see cref="TomlSidecarWriter"/>, an informational
 /// <see cref="BakeDiagnosticCodes.ProcessorSidecarCreated"/> diagnostic is reported, and the file is
-/// read back and bound. An existing file is never overwritten or defaulted.
+/// read back and bound. An existing file is never overwritten or defaulted. When source writes are
+/// disabled (a <c>--check</c>/<c>validate</c> run), the default object is still created and validated
+/// with the writer, but no file is written, no creation diagnostic is reported, and the object is
+/// passed directly to the processor.
+/// </para>
+/// <para>
+/// The sidecar path is the one discovery attached to the source, falling back to the conventional
+/// <c>&lt;source&gt;.toml</c> only when no sidecar was discovered. This keeps a casing-different
+/// sidecar filename attached to the source it belongs to.
 /// </para>
 /// <para>
 /// A processor exception is <see cref="BakeDiagnosticCodes.ProcessorFailed"/> and discards that
@@ -37,11 +46,17 @@ internal static class BakeProcessorRunner
     /// <param name="project">The validated project configuration.</param>
     /// <param name="sources">The processor sources, in deterministic order.</param>
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
+    /// <param name="allowSourceWrites">
+    /// Whether a missing required sidecar may be written next to its source. Pass
+    /// <see langword="false"/> for <c>--check</c>/<c>validate</c>, which create and validate the
+    /// default sidecar in memory but never mutate the source tree.
+    /// </param>
     /// <returns>The accepted outputs of every successfully processed source, sorted by path.</returns>
     internal static IReadOnlyList<BakeProcessorOutput> Run(
         BakeProject project,
         IReadOnlyList<BakeProcessorSource> sources,
-        BakeDiagnostics diagnostics)
+        BakeDiagnostics diagnostics,
+        bool allowSourceWrites = true)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(sources);
@@ -79,8 +94,21 @@ internal static class BakeProcessorRunner
             object? sidecar = null;
             if (source.Processor.Policy == BakeSidecarPolicy.Required)
             {
-                string sidecarPath = source.FullPath + ".toml";
-                if (!File.Exists(sidecarPath))
+                string sidecarPath = source.SidecarPath ?? source.FullPath + ".toml";
+                if (File.Exists(sidecarPath))
+                {
+                    if (!TryBindSidecar(
+                        project,
+                        source,
+                        sidecarPath,
+                        diagnosticPath,
+                        diagnostics,
+                        out sidecar))
+                    {
+                        continue;
+                    }
+                }
+                else
                 {
                     if (!TryCreateDefaultSidecar(
                         project,
@@ -88,26 +116,35 @@ internal static class BakeProcessorRunner
                         sidecarPath,
                         context,
                         diagnosticPath,
-                        diagnostics))
+                        diagnostics,
+                        writeFile: allowSourceWrites,
+                        out object? created))
                     {
                         continue;
                     }
-                }
 
-                if (diagnosticSink.HasError)
-                {
-                    continue;
-                }
+                    if (diagnosticSink.HasError)
+                    {
+                        continue;
+                    }
 
-                if (!TryBindSidecar(
-                    project,
-                    source,
-                    sidecarPath,
-                    diagnosticPath,
-                    diagnostics,
-                    out sidecar))
-                {
-                    continue;
+                    if (allowSourceWrites)
+                    {
+                        if (!TryBindSidecar(
+                            project,
+                            source,
+                            sidecarPath,
+                            diagnosticPath,
+                            diagnostics,
+                            out sidecar))
+                        {
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        sidecar = created;
+                    }
                 }
             }
 
@@ -177,14 +214,17 @@ internal static class BakeProcessorRunner
         string sidecarPath,
         BakeProcessorContext context,
         string diagnosticPath,
-        BakeDiagnostics diagnostics)
+        BakeDiagnostics diagnostics,
+        bool writeFile,
+        out object? created)
     {
         string sidecarDisplayPath = BakeDiagnosticPath.ForSource(project.ProjectRoot, sidecarPath);
+        created = null;
 
-        object? created;
+        object? defaultSidecar;
         try
         {
-            created = source.Processor.CreateDefaultSidecar(context);
+            defaultSidecar = source.Processor.CreateDefaultSidecar(context);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -198,7 +238,7 @@ internal static class BakeProcessorRunner
             return false;
         }
 
-        if (created is null)
+        if (defaultSidecar is null)
         {
             diagnostics.Add(
                 BakeSeverity.Error,
@@ -227,7 +267,7 @@ internal static class BakeProcessorRunner
         string? reason;
         try
         {
-            if (!TomlSidecarWriter.TryWrite(shape, created, out text, out reason))
+            if (!TomlSidecarWriter.TryWrite(shape, defaultSidecar, out text, out reason))
             {
                 diagnostics.Add(
                     BakeSeverity.Error,
@@ -249,6 +289,14 @@ internal static class BakeProcessorRunner
                 diagnosticPath,
                 assetPath: source.BaseAssetPath);
             return false;
+        }
+
+        if (!writeFile)
+        {
+            // Validate the default object without touching the source tree; the caller passes it
+            // directly to the processor.
+            created = defaultSidecar;
+            return true;
         }
 
         try

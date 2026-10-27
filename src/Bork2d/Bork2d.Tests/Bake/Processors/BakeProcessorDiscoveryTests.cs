@@ -1,4 +1,5 @@
 using Bork2d.Bake.Diagnostics;
+using Bork2d.Bake.Processors;
 using Bork2d.Bake.Sources;
 using Bork2d.Tests.Bake.Baking;
 using Xunit;
@@ -113,6 +114,39 @@ public sealed class BakeProcessorDiscoveryTests
         BakeProcessorSource source = Assert.Single(discovered.ProcessorSources);
         Assert.Equal("data/Archer.UNIT", source.RelativePath);
         Assert.Equal("data/ARCHER.unit.TOML", source.SidecarRelativePath);
+    }
+
+    [Fact]
+    public void DiscoveredSidecarPathIsUsedByTheRunner()
+    {
+        TestSidecar? bound = null;
+        var processor = new TestSidecarProcessor(
+            "test-unit",
+            "unit",
+            _ => new TestSidecar { Value = 7 },
+            (_, sidecar) => bound = sidecar);
+        using var project = TestBakeProject.Create(
+            "processor-sidecar-run",
+            processors: [processor]);
+        project.WriteAssetBytes("data/Archer.UNIT", [1]);
+        project.WriteAsset("data/ARCHER.unit.TOML", "value = 9\n");
+
+        var diagnostics = new BakeDiagnostics();
+        BakeDiscoveredSources discovered = BakeSourceDiscovery.Discover(project.Project, diagnostics);
+
+        Assert.Empty(diagnostics.GetSorted());
+        BakeProcessorSource source = Assert.Single(discovered.ProcessorSources);
+        Assert.Equal(
+            project.FullPath("Assets/data/ARCHER.unit.TOML"),
+            source.SidecarPath);
+
+        _ = BakeProcessorRunner.Run(project.Project, discovered.ProcessorSources, diagnostics);
+
+        Assert.Empty(diagnostics.GetSorted());
+        Assert.Equal(0, processor.CreateDefaultSidecarCount);
+        Assert.Equal(1, processor.ProcessCount);
+        Assert.NotNull(bound);
+        Assert.Equal(9, bound!.Value);
     }
 
     [Fact]

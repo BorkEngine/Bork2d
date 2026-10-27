@@ -33,7 +33,7 @@ namespace Bork2d.Bake.Baking;
 /// Duplicate canonical paths are legal across packs (overlay) and illegal inside one pack. The
 /// pipeline is sequential and deterministic: packs in configuration order, discovery sorted, processor
 /// outputs sorted, textures sorted, indexes sorted, diagnostics through the deterministic sorter.
-/// <c>--check</c> stops after validation and writes no pack.
+/// <c>--check</c> stops after validation, writes no pack, and performs no source-tree writes.
 /// </para>
 /// <para>
 /// The incremental manifest, skip/force behavior, and MSBuild integration are layered on top by WP5;
@@ -119,7 +119,8 @@ internal static class BakePipeline
             IReadOnlyList<BakeProcessorOutput> processorOutputs = BakeProcessorRunner.Run(
                 project,
                 packProcessorSources,
-                diagnostics);
+                diagnostics,
+                allowSourceWrites: !options.Check);
             int assetCount = assets.Count + CountShapedOutputs(processorOutputs);
             int referenceCount = CountReferences(assets, processorOutputs);
 
