@@ -13,6 +13,12 @@
         <ProjectReference Include="..\Bork2d.BakeFixture\Bork2d.BakeFixture.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+        <!-- Tests instantiate the fixture's internal PPM and Unit processors through the public
+             builder so the acceptance processors are exercised end to end (WP4). -->
+        <InternalsVisibleTo Include="Bork2d.Tests" />
+    </ItemGroup>
+
     <!-- Building this project bakes Assets/ -> assets.pck and DLC1/ -> dlc1.pck next to the
          executable; clean removes them. The assets executable owns the pack paths. -->
     <Import Project="..\..\..\build\Bork2d.Assets.targets" />

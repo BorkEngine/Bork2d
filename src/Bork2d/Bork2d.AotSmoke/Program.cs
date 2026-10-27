@@ -114,6 +114,15 @@ internal static class Program
         SmokeChecks.Require(
             game.LoadedTexturePayloadPath == AssetSmoke.TexturePayloadPath,
             "LoadAsset<TextureDescriptor> must return the baked descriptor with its raw payload reference.");
+        SmokeChecks.Require(
+            game.LoadedPpmTexturePayloadPath == AssetSmoke.PpmPayloadPath,
+            "LoadAsset<TextureDescriptor> must return the baked PPM descriptor with its raw payload reference.");
+        SmokeChecks.Require(
+            game.PpmByteCount == AssetSmoke.PpmPayload.Length,
+            "LoadData must return the baked PPM raw payload.");
+        SmokeChecks.Require(
+            game.LoadedUnit == AssetSmoke.GameUnit,
+            "LoadAsset<Unit> must return the baked Unit.");
 
         VerifyMessagePackRoundTrip();
         VerifyRootIsCleared(game);
@@ -124,11 +133,14 @@ internal static class Program
             + $"'{packPath}' and '{dlcPackPath}', mainEntries={game.BrowsedEntryCount}, "
             + $"mergedEntries={game.MergedBrowsedEntryCount} ({AssetSmoke.GamePath}, "
             + $"{AssetSmoke.StatsRootPath}, {AssetSmoke.SpritePath}, {AssetSmoke.TexturePath}, "
-            + $"{AssetSmoke.TexturePayloadPath}, {AssetSmoke.DlcGamePath}), "
+            + $"{AssetSmoke.TexturePayloadPath}, {AssetSmoke.PpmTexturePath}, "
+            + $"{AssetSmoke.PpmPayloadPath}, {AssetSmoke.UnitPath}, {AssetSmoke.DlcGamePath}), "
             + $"game={game.LoadedGameName}, dlc={game.LoadedDlcGameName}, "
             + $"dlcTexture={game.LoadedDlcTexturePath}, statsRoot={game.LoadedStatsRoot}, "
             + $"spriteScale={AssetSmoke.SpriteScale}, spriteTexture={game.LoadedSpriteTexturePath}, "
-            + $"texturePayload={game.LoadedTexturePayloadPath}, rawBytes={game.RawByteCount}.");
+            + $"texturePayload={game.LoadedTexturePayloadPath}, rawBytes={game.RawByteCount}, "
+            + $"ppmTexturePayload={game.LoadedPpmTexturePayloadPath}, "
+            + $"ppmRawBytes={game.PpmByteCount}, unit={game.LoadedUnit}.");
         return 0;
     }
 

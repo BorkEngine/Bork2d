@@ -17,12 +17,13 @@ namespace Bork2d.AotSmoke.Smoke;
 /// <para>
 /// The game deliberately uses only the public engine surface and the default logging path. It
 /// creates no window, GPU resource, or loop. <c>Setup</c> browses the base pack, mounts the DLC pack
-/// as an overlay, and starts the six loads: the main <see cref="GameConfig"/> class root, the
+/// as an overlay, and starts the nine loads: the main <see cref="GameConfig"/> class root, the
 /// <see cref="StatsRoot"/> struct root through an <see cref="AssetRef{TAsset}"/>, the
-/// <see cref="SpriteAsset"/>, its <see cref="TextureDescriptor"/>, the raw RGBA8 payload, and the DLC
-/// <see cref="GameConfig"/> whose texture reference resolves to the main pack's <c>art/player</c>
-/// (D-M4-14). <c>Tick</c> browses/exists and awaits all six tasks with a bounded timeout before
-/// asserting their exact values.
+/// <see cref="SpriteAsset"/>, its <see cref="TextureDescriptor"/>, the raw RGBA8 payload, the PPM
+/// acceptance processor's <see cref="TextureDescriptor"/> and exact payload, the Unit acceptance
+/// processor's <see cref="Unit"/>, and the DLC <see cref="GameConfig"/> whose texture reference
+/// resolves to the main pack's <c>art/player</c> (D-M4-14). <c>Tick</c> browses/exists and awaits all
+/// nine tasks with a bounded timeout before asserting their exact values.
 /// </para>
 /// <para>
 /// The asset checks use only the public <see cref="IAssets"/> surface, so the AOT smoke proves the
@@ -45,6 +46,9 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
     private Task<SpriteAsset>? _spriteTask;
     private Task<TextureDescriptor>? _textureTask;
     private Task<byte[]>? _rawTask;
+    private Task<TextureDescriptor>? _ppmTextureTask;
+    private Task<byte[]>? _ppmRawTask;
+    private Task<Unit>? _unitTask;
 
     /// <summary>Initializes a new instance of the <see cref="SmokeGame"/> class.</summary>
     /// <param name="loadAssets">
@@ -104,6 +108,15 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
     /// <summary>Gets the texture descriptor's payload path loaded in <c>Tick</c>.</summary>
     public string? LoadedTexturePayloadPath { get; private set; }
 
+    /// <summary>Gets the PPM texture descriptor's payload path loaded in <c>Tick</c>.</summary>
+    public string? LoadedPpmTexturePayloadPath { get; private set; }
+
+    /// <summary>Gets the number of bytes loaded by the PPM raw payload request.</summary>
+    public int PpmByteCount { get; private set; }
+
+    /// <summary>Gets the baked <see cref="Unit"/> loaded in <c>Tick</c>.</summary>
+    public Unit LoadedUnit { get; private set; }
+
     /// <inheritdoc />
     public void Setup(IEngine<SmokeLayer> engine)
     {
@@ -148,6 +161,9 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
             _spriteTask = engine.Assets.LoadAsset<SpriteAsset>(AssetSmoke.SpritePath);
             _textureTask = engine.Assets.LoadAsset<TextureDescriptor>(AssetSmoke.TexturePath);
             _rawTask = engine.Assets.LoadData(AssetSmoke.TexturePayloadPath);
+            _ppmTextureTask = engine.Assets.LoadAsset<TextureDescriptor>(AssetSmoke.PpmTexturePath);
+            _ppmRawTask = engine.Assets.LoadData(AssetSmoke.PpmPayloadPath);
+            _unitTask = engine.Assets.LoadAsset<Unit>(AssetSmoke.UnitPath);
         }
     }
 
@@ -242,6 +258,9 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
             AssetSmoke.SpritePath,
             AssetSmoke.TexturePath,
             AssetSmoke.TexturePayloadPath,
+            AssetSmoke.PpmTexturePath,
+            AssetSmoke.PpmPayloadPath,
+            AssetSmoke.UnitPath,
             AssetSmoke.DlcGamePath,
         ];
 
@@ -283,12 +302,26 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
             .WaitAsync(_loadTimeout)
             .GetAwaiter()
             .GetResult();
+        TextureDescriptor ppmTexture = _ppmTextureTask!
+            .WaitAsync(_loadTimeout)
+            .GetAwaiter()
+            .GetResult();
+        byte[] ppmRaw = _ppmRawTask!
+            .WaitAsync(_loadTimeout)
+            .GetAwaiter()
+            .GetResult();
+        Unit unit = _unitTask!
+            .WaitAsync(_loadTimeout)
+            .GetAwaiter()
+            .GetResult();
 
         VerifyGameConfig(game);
         VerifyDlcGameConfig(dlc);
         VerifyStatsRoot(statsRoot);
         VerifySprite(sprite);
         VerifyTexture(texture, raw);
+        VerifyPpmTexture(ppmTexture, ppmRaw);
+        VerifyUnit(unit);
 
         LoadedGameName = game.Name;
         LoadedDlcGameName = dlc.Name;
@@ -296,7 +329,10 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
         LoadedStatsRoot = statsRoot;
         LoadedSpriteTexturePath = sprite.Texture.Path;
         LoadedTexturePayloadPath = texture.Payload.Path;
+        LoadedPpmTexturePayloadPath = ppmTexture.Payload.Path;
+        LoadedUnit = unit;
         RawByteCount = raw.Length;
+        PpmByteCount = ppmRaw.Length;
     }
 
     private static void VerifyDlcGameConfig(GameConfig dlc)
@@ -409,5 +445,39 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
         SmokeChecks.Require(
             raw.AsSpan().SequenceEqual(AssetSmoke.TexturePayload),
             "LoadData must return the exact baked RGBA8 payload bytes.");
+    }
+
+    private static void VerifyPpmTexture(TextureDescriptor texture, byte[] raw)
+    {
+        SmokeChecks.Require(
+            texture.Payload.Path == AssetSmoke.PpmPayloadPath,
+            "LoadAsset<TextureDescriptor> must round-trip the PPM payload path.");
+        SmokeChecks.Require(
+            texture.Width == AssetSmoke.PpmWidth && texture.Height == AssetSmoke.PpmHeight,
+            "LoadAsset<TextureDescriptor> must round-trip the baked PPM 2x2 dimensions.");
+        SmokeChecks.Require(
+            texture.Format == AssetSmoke.PpmFormat,
+            "LoadAsset<TextureDescriptor> must round-trip the baked PPM rgba8 format.");
+        SmokeChecks.Require(
+            texture.Filter == AssetSmoke.PpmFilter,
+            "LoadAsset<TextureDescriptor> must round-trip the baked PPM sidecar's nearest filter.");
+        SmokeChecks.Require(
+            texture.Wrap == AssetSmoke.PpmWrap,
+            "LoadAsset<TextureDescriptor> must round-trip the baked PPM sidecar's repeat wrap.");
+
+        int expectedLength = checked((int)(AssetSmoke.PpmWidth * AssetSmoke.PpmHeight * 4));
+        SmokeChecks.Require(
+            raw.Length == expectedLength,
+            $"the baked PPM raw payload must be {expectedLength} bytes; got {raw.Length}.");
+        SmokeChecks.Require(
+            raw.AsSpan().SequenceEqual(AssetSmoke.PpmPayload),
+            "LoadData must return the exact PPM RGBA8 payload bytes.");
+    }
+
+    private static void VerifyUnit(Unit unit)
+    {
+        SmokeChecks.Require(
+            unit == AssetSmoke.GameUnit,
+            "LoadAsset<Unit> must round-trip the baked Unit name, health, and attack.");
     }
 }

@@ -378,20 +378,23 @@ public sealed class DependencyMatrixTests
                 "Bork2d.BakeFixture.GameConfig",
                 "Bork2d.BakeFixture.Stats",
                 "Bork2d.BakeFixture.StatsRoot",
+                "Bork2d.BakeFixture.Unit",
             },
             exported);
     }
 
     [Fact]
-    public void BakeFixtureAssetsReferencesOnlyBuilderAndFixture()
+    public void BakeFixtureAssetsReferencesOnlyApiBuilderAndFixture()
     {
         // The fixture assets executable is build-time only: it references the public builder and the
-        // game-side data-type fixture. It is never referenced by the runtime or the AOT publish and
-        // exposes no public type of its own.
+        // game-side data-type fixture, plus Bork2d.Api for the TextureDescriptor its PPM acceptance
+        // processor emits. It is never referenced by the runtime or the AOT publish and exposes no
+        // public type of its own.
         Assembly assembly = Assembly.LoadFrom(RepositoryPaths.FixtureAssetsExecutable);
 
         AssertReferenceMatrix(
             assembly,
+            "Bork2d.Api",
             "Bork2d.Bake.Builder",
             "Bork2d.BakeFixture");
         Assert.Empty(assembly.GetExportedTypes());
@@ -409,11 +412,12 @@ public sealed class DependencyMatrixTests
         AssertReferenceMatrix(
             typeof(DependencyMatrixTests).Assembly,
             "Bork2d.Api",
-            "Bork2d.Common",
             "Bork2d.Assets",
             "Bork2d.Bake",
             "Bork2d.Bake.Builder",
             "Bork2d.BakeFixture",
+            "Bork2d.BakeFixture.Assets",
+            "Bork2d.Common",
             "Bork2d.Render",
             "Bork2d.Runtime");
     }
