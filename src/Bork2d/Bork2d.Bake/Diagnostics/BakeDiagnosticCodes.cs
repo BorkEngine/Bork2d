@@ -42,7 +42,10 @@ namespace Bork2d.Bake.Diagnostics;
 /// </item>
 /// <item>
 /// <term><c>BK7xxx</c></term>
-/// <description>Processor registration and processing.</description>
+/// <description>
+/// Processor registration and processing: invalid registrations, extension overrides, sidecar
+/// creation, source inputs, outputs, and processor exceptions.
+/// </description>
 /// </item>
 /// </list>
 /// </remarks>
@@ -150,6 +153,15 @@ internal static class BakeDiagnosticCodes
     /// <summary>An unexpected exception escaped a registered type's binder.</summary>
     internal const string BinderUnexpected = "BK2012";
 
+    /// <summary>A sidecar declares an <c>AssetRef</c>/<c>DataRef</c> member, which sidecars do not support.</summary>
+    internal const string SidecarReferenceUnsupported = "BK2013";
+
+    /// <summary>An orphan sidecar has no matching source file.</summary>
+    internal const string SidecarOrphaned = "BK2014";
+
+    /// <summary>More than one sidecar resolves to the same processor source.</summary>
+    internal const string SidecarDuplicate = "BK2015";
+
     /// <summary>
     /// The pack could not be composed because <c>PackBuilder</c> rejected an entry or reference. This
     /// is an internal baker error: reference validation runs first, so a correct bake never reaches it.
@@ -161,4 +173,31 @@ internal static class BakeDiagnosticCodes
 
     /// <summary>A configured pack could not be copied to the requested destination.</summary>
     internal const string PackCopyFailed = "BK5004";
+
+    /// <summary>A processor source or sidecar could not be read or decoded as UTF-8.</summary>
+    internal const string ProcessorSourceRead = "BK7001";
+
+    /// <summary>A processor source relative path cannot be mapped to a canonical base asset path.</summary>
+    internal const string ProcessorInputInvalid = "BK7002";
+
+    /// <summary>A processor threw while processing one source; its outputs are discarded.</summary>
+    internal const string ProcessorFailed = "BK7003";
+
+    /// <summary>A processor output path is not canonical or is not base-path-derived.</summary>
+    internal const string ProcessorOutputPathInvalid = "BK7004";
+
+    /// <summary>A processor produced the same output path twice for one source.</summary>
+    internal const string ProcessorOutputDuplicate = "BK7005";
+
+    /// <summary>A required sidecar could not be created or written.</summary>
+    internal const string ProcessorSidecarCreateFailed = "BK7006";
+
+    /// <summary>A processor registration is invalid.</summary>
+    internal const string ProcessorRegistrationInvalid = "BK7007";
+
+    /// <summary>A later processor registration overrides an earlier one for one extension.</summary>
+    internal const string ProcessorExtensionOverride = "BK7008";
+
+    /// <summary>A required sidecar was created next to its source.</summary>
+    internal const string ProcessorSidecarCreated = "BK7009";
 }

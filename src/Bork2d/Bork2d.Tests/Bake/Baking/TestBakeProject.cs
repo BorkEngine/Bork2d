@@ -1,4 +1,5 @@
 using Bork2d.Bake.Baking;
+using Bork2d.Bake.Builder;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Textures;
 using Bork2d.Tests.Bake.Textures;
@@ -32,19 +33,25 @@ internal sealed class TestBakeProject : IDisposable
     /// <summary>Creates a one-pack project with an <c>Assets</c> root.</summary>
     /// <param name="name">A folder-name fragment that identifies the test.</param>
     /// <param name="registerFixtureTypes">Whether to register the fixture data types.</param>
+    /// <param name="processors">The custom processors to register, in builder order.</param>
     /// <returns>The temporary project.</returns>
-    internal static TestBakeProject Create(string name, bool registerFixtureTypes = true)
-        => Create(name, [("assets.pck", "Assets")], registerFixtureTypes);
+    internal static TestBakeProject Create(
+        string name,
+        bool registerFixtureTypes = true,
+        IReadOnlyList<IAssetProcessor>? processors = null)
+        => Create(name, [("assets.pck", "Assets")], registerFixtureTypes, processors);
 
     /// <summary>Creates a project with the supplied ordered pack roots.</summary>
     /// <param name="name">A folder-name fragment that identifies the test.</param>
     /// <param name="packs">The ordered <c>(pack path, root)</c> entries.</param>
     /// <param name="registerFixtureTypes">Whether to register the fixture data types.</param>
+    /// <param name="processors">The custom processors to register, in builder order.</param>
     /// <returns>The temporary project.</returns>
     internal static TestBakeProject Create(
         string name,
         IReadOnlyList<(string Pack, string Root)> packs,
-        bool registerFixtureTypes = true)
+        bool registerFixtureTypes = true,
+        IReadOnlyList<IAssetProcessor>? processors = null)
     {
         var directory = TempBakeDirectory.Create();
         foreach ((_, string root) in packs)
@@ -55,7 +62,8 @@ internal sealed class TestBakeProject : IDisposable
         BakeProject project = BakeProjectFixture.CreateProject(
             directory.RootPath,
             packs,
-            registerFixtureTypes);
+            registerFixtureTypes,
+            processors);
 
         return new TestBakeProject(directory, project);
     }

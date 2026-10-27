@@ -224,7 +224,7 @@ public sealed class BakeSourceBinderTests
     {
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
         return BakeSourceBinder.BindAll(project.Project, sources, diagnostics);
     }
 }

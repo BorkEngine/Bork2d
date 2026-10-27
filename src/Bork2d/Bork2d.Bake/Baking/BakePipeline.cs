@@ -1,39 +1,45 @@
 using Bork2d.Assets.Pack;
 using Bork2d.Bake.Diagnostics;
+using Bork2d.Bake.Processors;
 using Bork2d.Bake.Sources;
 using Bork2d.Bake.Textures;
 
 namespace Bork2d.Bake.Baking;
 
 /// <summary>
-/// The complete multi-pack bake pipeline: discovery, per-pack custom-data binding, textures, baked
-/// asset index, reference validation, pack composition, and the atomic pack writes.
+/// The complete multi-pack bake pipeline: discovery, per-pack custom-data binding, processor execution,
+/// textures, the generic baked asset index, reference validation, pack composition, and the atomic
+/// pack writes.
 /// </summary>
 /// <remarks>
 /// <para>
 /// A <see cref="BakeProject"/> declares one or more ordered packs. The first is the main/base pack;
 /// the rest are DLC/overlay packs. Each pack is processed in order with its own root: sources are
-/// discovered and bound through the project's explicit registrations, textures imported, its index
-/// built, and its references validated. The main index is built first and is the only external index
-/// a DLC pack receives; the main pack is strict (local entries only).
+/// discovered and bound through the project's explicit registrations, registered processors run over
+/// their non-TOML sources, the built-in texture pipeline imports image sources that no registered
+/// processor claimed, its index is built, and its references are validated. The main index is built
+/// first and is the only external index a DLC pack receives; the main pack is strict (local entries
+/// only).
 /// </para>
 /// <para>
 /// Validation always completes for every pack before <c>PackBuilder</c> writes anything: a source,
-/// texture, collision, or reference failure returns a <see cref="BakeStatus.DiagnosticsError"/> result
-/// and leaves every previous pack (and anything else in the destination) unchanged. Packs are
-/// composed in memory after their own validation and written only after every pack has validated, so
-/// a failed pack cannot corrupt an older pack. Each write is still atomic.
+/// processor, texture, collision, or reference failure returns a
+/// <see cref="BakeStatus.DiagnosticsError"/> result and leaves every previous pack (and anything else
+/// in the destination) unchanged. Packs are composed in memory after their own validation and written
+/// only after every pack has validated, so a failed pack cannot corrupt an older pack. Each write is
+/// still atomic.
 /// </para>
 /// <para>
 /// Duplicate canonical paths are legal across packs (overlay) and illegal inside one pack. The
-/// pipeline is sequential and deterministic: packs in configuration order, discovery sorted, textures
-/// sorted, indexes sorted, diagnostics through the deterministic sorter. <c>--check</c> stops after
-/// validation and writes nothing.
+/// pipeline is sequential and deterministic: packs in configuration order, discovery sorted, processor
+/// outputs sorted, textures sorted, indexes sorted, diagnostics through the deterministic sorter.
+/// <c>--check</c> stops after validation and writes no pack.
 /// </para>
 /// <para>
 /// The incremental manifest, skip/force behavior, and MSBuild integration are layered on top by WP5;
-/// the pipeline itself always runs a full bake. WP1 keeps the existing texture pipeline as the only
-/// texture producer; the registered processors are carried by the project for WP2.
+/// the pipeline itself always runs a full bake. WP2 keeps the existing texture pipeline as the
+/// producer for image sources that no registered processor claims; WP3 moves that behavior behind a
+/// processor.
 /// </para>
 /// </remarks>
 internal static class BakePipeline
@@ -70,7 +76,7 @@ internal static class BakePipeline
         }
 
         string mainPackPath = outputs[0].Path;
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(project, diagnostics);
+        BakeDiscoveredSources discovered = BakeSourceDiscovery.Discover(project, diagnostics);
         if (diagnostics.HasErrors)
         {
             return Failure(
@@ -89,7 +95,7 @@ internal static class BakePipeline
         foreach (BakePackOutput output in outputs)
         {
             BakePack pack = output.Pack;
-            IReadOnlyList<BakeSource> packSources = [.. sources
+            IReadOnlyList<BakeSource> packSources = [.. discovered.DataSources
                 .Where(source => source.Pack.Index == pack.Index)];
 
             IReadOnlyList<BoundAsset> assets = BakeSourceBinder.BindAll(
@@ -108,7 +114,31 @@ internal static class BakePipeline
                     diagnostics);
             }
 
-            TextureBakeResult textures = TexturePipeline.Import(project, pack);
+            IReadOnlyList<BakeProcessorSource> packProcessorSources = [.. discovered.ProcessorSources
+                .Where(source => source.Pack.Index == pack.Index)];
+            IReadOnlyList<BakeProcessorOutput> processorOutputs = BakeProcessorRunner.Run(
+                project,
+                packProcessorSources,
+                diagnostics);
+            int assetCount = assets.Count + CountShapedOutputs(processorOutputs);
+            int referenceCount = CountReferences(assets, processorOutputs);
+
+            if (diagnostics.HasErrors)
+            {
+                return Failure(
+                    BakeStatus.DiagnosticsError,
+                    BakeFailureStage.Processors,
+                    output.Path,
+                    assetCount,
+                    textureCount: 0,
+                    referenceCount,
+                    diagnostics);
+            }
+
+            TextureBakeResult textures = TexturePipeline.Import(
+                project,
+                pack,
+                BuildTextureExclusion(packProcessorSources));
             foreach (BakeDiagnostic diagnostic in textures.Diagnostics)
             {
                 diagnostics.Add(diagnostic);
@@ -120,20 +150,15 @@ internal static class BakePipeline
                     BakeStatus.DiagnosticsError,
                     BakeFailureStage.Textures,
                     output.Path,
-                    assets.Count,
+                    assetCount,
                     textures.Textures.Count,
-                    referenceCount: 0,
+                    referenceCount,
                     diagnostics);
-            }
-
-            int referenceCount = 0;
-            foreach (BoundAsset asset in assets)
-            {
-                referenceCount += asset.References.Count;
             }
 
             BakedAssetIndex index = BakedAssetIndex.Build(
                 assets,
+                processorOutputs,
                 textures.Textures,
                 project.ProjectRoot,
                 diagnostics,
@@ -144,15 +169,15 @@ internal static class BakePipeline
                     BakeStatus.DiagnosticsError,
                     BakeFailureStage.References,
                     output.Path,
-                    assets.Count,
+                    assetCount,
                     textures.Textures.Count,
                     referenceCount,
                     diagnostics);
             }
 
+            referenceCount = CountReferences(index);
             BakedAssetIndex? externalIndex = pack.IsMain ? null : mainIndex;
             if (!BakeReferenceValidator.Validate(
-                assets,
                 index,
                 externalIndex,
                 pack.PackPath,
@@ -163,7 +188,7 @@ internal static class BakePipeline
                     BakeStatus.DiagnosticsError,
                     BakeFailureStage.References,
                     output.Path,
-                    assets.Count,
+                    assetCount,
                     textures.Textures.Count,
                     referenceCount,
                     diagnostics);
@@ -184,7 +209,7 @@ internal static class BakePipeline
                         BakeStatus.DiagnosticsError,
                         BakeFailureStage.Pack,
                         output.Path,
-                        assets.Count,
+                        assetCount,
                         textures.Textures.Count,
                         referenceCount,
                         diagnostics);
@@ -198,7 +223,7 @@ internal static class BakePipeline
 
             packStates.Add(new PackState(
                 output,
-                assets.Count,
+                assetCount,
                 textures.Textures.Count,
                 referenceCount,
                 index,
@@ -233,6 +258,76 @@ internal static class BakePipeline
         }
 
         return Success(packStates, packWritten: true, diagnostics);
+    }
+
+    private static int CountShapedOutputs(IReadOnlyList<BakeProcessorOutput> outputs)
+    {
+        int count = 0;
+        foreach (BakeProcessorOutput output in outputs)
+        {
+            if (!output.IsRaw)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static int CountReferences(
+        IReadOnlyList<BoundAsset> assets,
+        IReadOnlyList<BakeProcessorOutput> outputs)
+    {
+        int count = 0;
+        foreach (BoundAsset asset in assets)
+        {
+            count += asset.References.Count;
+        }
+
+        foreach (BakeProcessorOutput output in outputs)
+        {
+            count += output.References.Count;
+        }
+
+        return count;
+    }
+
+    private static int CountReferences(BakedAssetIndex index)
+    {
+        int count = 0;
+        foreach (BakedAssetEntry entry in index.Entries)
+        {
+            count += entry.References.Count;
+        }
+
+        return count;
+    }
+
+    private static IReadOnlySet<string> BuildTextureExclusion(
+        IReadOnlyList<BakeProcessorSource> processorSources)
+    {
+        StringComparer comparer = OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+        var excluded = new HashSet<string>(comparer);
+        foreach (BakeProcessorSource source in processorSources)
+        {
+            // A processor that owns an image extension takes over from the legacy texture path,
+            // including its discovered sidecar, so the texture pipeline never reports it again.
+            excluded.Add(source.FullPath);
+            if (source.SidecarPath is not null)
+            {
+                excluded.Add(source.SidecarPath);
+            }
+            else if (source.Processor.Policy == BakeSidecarPolicy.Required)
+            {
+                // A required sidecar may be created after discovery; exclude its conventional path so
+                // the legacy texture pipeline does not treat it as an orphan.
+                excluded.Add(source.FullPath + ".toml");
+            }
+        }
+
+        return excluded;
     }
 
     private static BakeResult Success(

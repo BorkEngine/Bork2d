@@ -10,16 +10,18 @@ namespace Bork2d.Bake.Baking;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The rules are §9's six: the path must be canonical, the bake must produce it locally or, for a
-/// DLC pack only, in the main pack; the kind must match (<c>AssetRef</c> targets MessagePack,
-/// <c>DataRef</c> targets raw), and a typed reference must match the target's baked type. An absent
-/// reference is never recorded as a site and is valid by construction.
+/// Every baked entry carries its reference sites: bound custom data from TOML binding and shaped
+/// processor output from the compiled shape walk. The rules are §9's six: the path must be canonical,
+/// the bake must produce it locally or, for a DLC pack only, in the main pack; the kind must match
+/// (<c>AssetRef</c> targets MessagePack, <c>DataRef</c> targets raw), and a typed reference must match
+/// the target's baked type. An absent reference is never recorded as a site and is valid by
+/// construction.
 /// </para>
 /// <para>
 /// The main pack is strict: it passes no external index, so a reference to a DLC path fails. A DLC
 /// pack resolves a local entry first (a local overlay wins), then the main pack's index. A path that
 /// exists only in another DLC pack is not in either index and is therefore an error. Diagnostics name
-/// the checked pack so a cross-pack mistake is obvious.
+/// the checked pack so a cross-pack mistake is obvious. Processor references have no line or column.
 /// </para>
 /// <para>
 /// Diagnostics point at the reference value's source file, line, and column with the member path and
@@ -30,19 +32,16 @@ namespace Bork2d.Bake.Baking;
 /// </remarks>
 internal static class BakeReferenceValidator
 {
-    /// <summary>Validates every reference site of every bound asset in one pack.</summary>
-    /// <param name="assets">The bound custom-data assets of the pack.</param>
+    /// <summary>Validates every reference site of a single-pack bake.</summary>
     /// <param name="index">The complete baked asset index of the pack.</param>
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
     /// <returns><see langword="true"/> when every reference is valid.</returns>
     internal static bool Validate(
-        IReadOnlyList<BoundAsset> assets,
         BakedAssetIndex index,
         BakeDiagnostics diagnostics)
-        => Validate(assets, index, externalIndex: null, packPath: null, diagnostics);
+        => Validate(index, externalIndex: null, packPath: null, diagnostics);
 
     /// <summary>Validates one pack's references with the optional main-pack external scope.</summary>
-    /// <param name="assets">The bound custom-data assets of the pack.</param>
     /// <param name="localIndex">The complete baked asset index of the pack.</param>
     /// <param name="externalIndex">
     /// The main pack's index for a DLC pack, or <see langword="null"/> for the main pack / single-pack
@@ -53,24 +52,22 @@ internal static class BakeReferenceValidator
     /// <param name="externalPackPath">The main pack's label when <paramref name="externalIndex"/> is supplied.</param>
     /// <returns><see langword="true"/> when every reference is valid.</returns>
     internal static bool Validate(
-        IReadOnlyList<BoundAsset> assets,
         BakedAssetIndex localIndex,
         BakedAssetIndex? externalIndex,
         string? packPath,
         BakeDiagnostics diagnostics,
         string? externalPackPath = null)
     {
-        ArgumentNullException.ThrowIfNull(assets);
         ArgumentNullException.ThrowIfNull(localIndex);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
         bool valid = true;
-        foreach (BoundAsset asset in assets)
+        foreach (BakedAssetEntry entry in localIndex.Entries)
         {
-            foreach (BakeReferenceSite site in asset.References)
+            foreach (BakeReferenceSite site in entry.References)
             {
                 valid &= ValidateSite(
-                    asset,
+                    entry,
                     site,
                     localIndex,
                     externalIndex,
@@ -84,7 +81,7 @@ internal static class BakeReferenceValidator
     }
 
     private static bool ValidateSite(
-        BoundAsset asset,
+        BakedAssetEntry entry,
         BakeReferenceSite site,
         BakedAssetIndex localIndex,
         BakedAssetIndex? externalIndex,
@@ -102,7 +99,7 @@ internal static class BakeReferenceValidator
                 BakeDiagnosticCodes.ReferenceNotCanonical,
                 $"The reference at '{memberPath}' uses the non-canonical asset path "
                     + $"'{referencePath}': {reason}.",
-                asset.SourcePath,
+                entry.SourcePath,
                 site.Line,
                 site.Column,
                 referencePath,
@@ -119,7 +116,7 @@ internal static class BakeReferenceValidator
                     BakeSeverity.Error,
                     BakeDiagnosticCodes.ReferenceMissing,
                     BuildMissingMessage(memberPath, referencePath, packPath, externalPackPath),
-                    asset.SourcePath,
+                    entry.SourcePath,
                     site.Line,
                     site.Column,
                     referencePath,
@@ -143,7 +140,7 @@ internal static class BakeReferenceValidator
                 BakeDiagnosticCodes.ReferenceWrongKind,
                 $"The reference at '{memberPath}' targets '{referencePath}' as {expected}, but the "
                     + $"baked entry{targetScope} is {actual}.",
-                asset.SourcePath,
+                entry.SourcePath,
                 site.Line,
                 site.Column,
                 referencePath,
@@ -169,7 +166,7 @@ internal static class BakeReferenceValidator
                 + (target.TypeName is null
                     ? "an untyped MessagePack asset."
                     : $"'{target.TypeName}'."),
-            asset.SourcePath,
+            entry.SourcePath,
             site.Line,
             site.Column,
             referencePath,

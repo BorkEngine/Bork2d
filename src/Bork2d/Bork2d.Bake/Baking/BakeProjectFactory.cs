@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Paths;
+using Bork2d.Bake.Processors;
 
 namespace Bork2d.Bake.Baking;
 
@@ -49,6 +50,11 @@ internal static class BakeProjectFactory
         {
             diagnostics.Add(issue);
         }
+
+        bool registryValid = BakeProcessorRegistry.TryCreate(
+            definition.Processors,
+            diagnostics,
+            out BakeProcessorRegistry? processorRegistry);
 
         if (!TryResolveProjectRoot(definition, projectRootOverride, diagnostics, out string projectRoot))
         {
@@ -188,6 +194,13 @@ internal static class BakeProjectFactory
             definition.AssetTypes,
             StringComparer.Ordinal);
 
+        if (!registryValid || processorRegistry is null)
+        {
+            // An invalid processor registry is a configuration error: the project must not exist, so
+            // no source can ever be read with a partially registered processor set.
+            return false;
+        }
+
         var projectValue = new BakeProject(
             projectRoot,
             packs,
@@ -195,6 +208,7 @@ internal static class BakeProjectFactory
             definition.TextureWrap,
             assetTypes,
             definition.Processors,
+            processorRegistry,
             definition.UseDefaultProcessors);
 
         project = projectValue;

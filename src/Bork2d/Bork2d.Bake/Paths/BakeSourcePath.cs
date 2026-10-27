@@ -69,6 +69,62 @@ internal static class BakeSourcePath
     }
 
     /// <summary>
+    /// Converts a source-relative path to a canonical asset path by removing one matched registered
+    /// processor extension.
+    /// </summary>
+    /// <param name="relativeSourcePath">The path relative to the pack root.</param>
+    /// <param name="matchedExtension">
+    /// The normalized extension the processor registry matched, without a leading dot; a compound
+    /// extension such as <c>tar.gz</c> removes both segments.
+    /// </param>
+    /// <param name="assetPath">The canonical asset path when successful.</param>
+    /// <param name="reason">The failure reason when unsuccessful.</param>
+    /// <returns><see langword="true"/> when a canonical asset path was produced.</returns>
+    internal static bool TryToAssetPath(
+        string relativeSourcePath,
+        string matchedExtension,
+        out string assetPath,
+        out string? reason)
+    {
+        assetPath = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(relativeSourcePath))
+        {
+            reason = "the path is empty";
+            return false;
+        }
+
+        if (Path.IsPathRooted(relativeSourcePath))
+        {
+            reason = "the path is rooted";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(matchedExtension))
+        {
+            reason = "the matched processor extension is empty";
+            return false;
+        }
+
+        string normalized = relativeSourcePath.Replace('\\', '/').ToLowerInvariant();
+        string suffix = "." + matchedExtension.ToLowerInvariant();
+        if (!normalized.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            reason = $"the path does not end with the matched extension '{suffix}'";
+            return false;
+        }
+
+        string withoutSuffix = normalized[..^suffix.Length];
+        if (!AssetPath.TryValidateCanonical(withoutSuffix, out reason))
+        {
+            return false;
+        }
+
+        assetPath = withoutSuffix;
+        return true;
+    }
+
+    /// <summary>
     /// Makes a source path relative to the asset root.
     /// </summary>
     /// <param name="assetRoot">The asset-root directory.</param>

@@ -73,23 +73,49 @@ internal static class TexturePipeline
         => Import(project, project.MainPack, decoder);
 
     /// <summary>
+    /// Imports every texture of one pack, excluding files claimed by a registered processor.
+    /// </summary>
+    /// <param name="project">The validated project configuration.</param>
+    /// <param name="pack">The pack whose root is imported.</param>
+    /// <param name="excludedSourcePaths">
+    /// Absolute source and sidecar paths already claimed by a registered processor; the legacy texture
+    /// pipeline must not bake or diagnose them (WP2 bridge; removed in WP3).
+    /// </param>
+    /// <returns>The baked textures and every diagnostic, in deterministic order.</returns>
+    internal static TextureBakeResult Import(
+        BakeProject project,
+        BakePack pack,
+        IReadOnlySet<string> excludedSourcePaths)
+        => Import(project, pack, StbTextureDecoder.Instance, excludedSourcePaths);
+
+    /// <summary>
     /// Imports every texture of one pack with an explicit decoder seam.
     /// </summary>
     /// <param name="project">The validated project configuration.</param>
     /// <param name="pack">The pack whose root is imported.</param>
     /// <param name="decoder">The decoder implementation.</param>
+    /// <param name="excludedSourcePaths">
+    /// Absolute source and sidecar paths already claimed by a registered processor, or
+    /// <see langword="null"/> when every image source belongs to the legacy pipeline.
+    /// </param>
     /// <returns>The baked textures and every diagnostic, in deterministic order.</returns>
     internal static TextureBakeResult Import(
         BakeProject project,
         BakePack pack,
-        ITextureDecoder decoder)
+        ITextureDecoder decoder,
+        IReadOnlySet<string>? excludedSourcePaths = null)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(pack);
         ArgumentNullException.ThrowIfNull(decoder);
 
         var diagnostics = new BakeDiagnostics();
-        List<BakedTexture> textures = ImportCore(project, pack, decoder, diagnostics);
+        List<BakedTexture> textures = ImportCore(
+            project,
+            pack,
+            decoder,
+            excludedSourcePaths,
+            diagnostics);
         return new TextureBakeResult(textures, diagnostics.GetSorted());
     }
 
@@ -97,6 +123,7 @@ internal static class TexturePipeline
         BakeProject project,
         BakePack pack,
         ITextureDecoder decoder,
+        IReadOnlySet<string>? excludedSourcePaths,
         BakeDiagnostics diagnostics)
     {
         var sources = new List<TextureSourceEntry>();
@@ -106,6 +133,11 @@ internal static class TexturePipeline
 
         foreach (string file in BakeSourcePath.EnumerateFilesSorted(pack.Root))
         {
+            if (excludedSourcePaths is not null && excludedSourcePaths.Contains(file))
+            {
+                continue;
+            }
+
             string extension = Path.GetExtension(file);
             if (extension.Equals(TomlSuffix, StringComparison.OrdinalIgnoreCase))
             {

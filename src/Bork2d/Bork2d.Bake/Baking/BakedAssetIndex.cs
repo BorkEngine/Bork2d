@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Paths;
+using Bork2d.Bake.Processors;
 using Bork2d.Bake.Sources;
 using Bork2d.Bake.Textures;
 
@@ -11,10 +12,11 @@ namespace Bork2d.Bake.Baking;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Custom data contributes one MessagePack entry carrying its registered type name; each baked
-/// texture contributes a <c>TextureDescriptor</c> MessagePack entry and a raw RGBA8 payload entry.
-/// Entries are sorted ordinal by path, so reference validation, collision reporting, and pack
-/// composition all see the same order regardless of discovery or dictionary order (D-M4-07).
+/// Custom data contributes one MessagePack entry carrying its registered type name; registered
+/// processors contribute shaped MessagePack entries and raw data entries; each baked texture
+/// contributes a <c>TextureDescriptor</c> MessagePack entry and a raw RGBA8 payload entry. Entries
+/// are sorted ordinal by path, so reference validation, collision reporting, and pack composition all
+/// see the same order regardless of discovery or dictionary order (D-M4-07).
 /// </para>
 /// <para>
 /// Building the index reports a <see cref="BakeDiagnosticCodes.AssetPathCollision"/> error for a path
@@ -48,6 +50,7 @@ internal sealed class BakedAssetIndex
 
     /// <summary>Builds the index and reports duplicate or cross-kind paths.</summary>
     /// <param name="assets">The bound custom-data assets, in discovery order.</param>
+    /// <param name="processorOutputs">The accepted processor outputs, in path order.</param>
     /// <param name="textures">The successfully baked textures, in path order.</param>
     /// <param name="projectDirectory">The project root, used to render texture source paths.</param>
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
@@ -55,18 +58,20 @@ internal sealed class BakedAssetIndex
     /// <returns>The index, including the first entry for every colliding path.</returns>
     internal static BakedAssetIndex Build(
         IReadOnlyList<BoundAsset> assets,
+        IReadOnlyList<BakeProcessorOutput> processorOutputs,
         IReadOnlyList<BakedTexture> textures,
         string projectDirectory,
         BakeDiagnostics diagnostics,
         string? packPath = null)
     {
         ArgumentNullException.ThrowIfNull(assets);
+        ArgumentNullException.ThrowIfNull(processorOutputs);
         ArgumentNullException.ThrowIfNull(textures);
         ArgumentException.ThrowIfNullOrWhiteSpace(projectDirectory);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
         var byPath = new Dictionary<string, BakedAssetEntry>(
-            assets.Count + (textures.Count * 2),
+            assets.Count + processorOutputs.Count + (textures.Count * 2),
             StringComparer.Ordinal);
         var entries = new List<BakedAssetEntry>(byPath.Capacity);
 
@@ -75,11 +80,20 @@ internal sealed class BakedAssetIndex
             Add(BakedAssetEntry.ForCustomData(asset), asset.SourcePath);
         }
 
+        foreach (BakeProcessorOutput output in processorOutputs)
+        {
+            Add(
+                output.IsRaw
+                    ? BakedAssetEntry.ForProcessorData(output)
+                    : BakedAssetEntry.ForProcessorAsset(output),
+                output.SourcePath);
+        }
+
         foreach (BakedTexture texture in textures)
         {
             string diagnosticPath = BakeDiagnosticPath.ForSource(projectDirectory, texture.SourcePath);
-            Add(BakedAssetEntry.ForTextureDescriptor(texture), diagnosticPath);
-            Add(BakedAssetEntry.ForTexturePayload(texture), diagnosticPath);
+            Add(BakedAssetEntry.ForTextureDescriptor(texture, diagnosticPath), diagnosticPath);
+            Add(BakedAssetEntry.ForTexturePayload(texture, diagnosticPath), diagnosticPath);
         }
 
         entries.Sort(static (left, right) => string.CompareOrdinal(left.Path, right.Path));

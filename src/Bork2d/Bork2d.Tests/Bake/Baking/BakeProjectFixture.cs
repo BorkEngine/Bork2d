@@ -1,5 +1,6 @@
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Builder;
+using Bork2d.Bake.Builder.Processors;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Textures;
 using Xunit;
@@ -89,11 +90,13 @@ public static class BakeProjectFixture
     /// <param name="projectDirectory">The project root.</param>
     /// <param name="packs">The ordered <c>(pack path, root)</c> entries.</param>
     /// <param name="registerFixtureTypes">Whether to register the fixture data types.</param>
+    /// <param name="processors">The custom processors to register, in builder order.</param>
     /// <returns>The validated project.</returns>
     internal static BakeProject CreateProject(
         string projectDirectory,
         IReadOnlyList<(string Pack, string Root)> packs,
-        bool registerFixtureTypes = true)
+        bool registerFixtureTypes = true,
+        IReadOnlyList<IAssetProcessor>? processors = null)
     {
         var definition = new BakeProjectDefinition();
         definition.SetProjectRoot(projectDirectory);
@@ -107,6 +110,14 @@ public static class BakeProjectFixture
         {
             definition.AddAsset<Bork2d.BakeFixture.GameConfig>();
             definition.AddAsset<Bork2d.BakeFixture.StatsRoot>();
+        }
+
+        if (processors is not null)
+        {
+            foreach (IAssetProcessor processor in processors)
+            {
+                definition.AddProcessor(new BakeProcessorAdapter(processor));
+            }
         }
 
         definition.RequestDefaultProcessors();

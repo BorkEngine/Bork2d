@@ -10,10 +10,11 @@ namespace Bork2d.Bake.Baking;
 /// <remarks>
 /// <para>
 /// This is the only place the pipeline calls <c>PackBuilder</c>. Entries are added in the index's
-/// ordinal path order: custom data through its registered typed writer, texture descriptors through
-/// <c>AddMessagePack&lt;TextureDescriptor&gt;</c>, and payloads through <c>AddRaw</c>. The writer
-/// sorts the entry table independently, so this order only affects how deterministic the composition
-/// itself is.
+/// ordinal path order: custom data through its registered typed writer, processor shaped output
+/// through its stored engine write delegate, processor data through <c>AddRaw</c>, texture
+/// descriptors through <c>AddMessagePack&lt;TextureDescriptor&gt;</c>, and payloads through
+/// <c>AddRaw</c>. The writer sorts the entry table independently, so this order only affects how
+/// deterministic the composition itself is.
 /// </para>
 /// <para>
 /// A DLC pack may reference an asset in the main pack. The main index is passed as the external asset
@@ -77,6 +78,14 @@ internal static class PackComposer
 
                     case BakedAssetEntryKind.TexturePayload:
                         builder.AddRaw(entry.Path, entry.Texture!.Payload);
+                        break;
+
+                    case BakedAssetEntryKind.ProcessorAsset:
+                        entry.ProcessorOutput!.Write!(builder, entry.Path);
+                        break;
+
+                    case BakedAssetEntryKind.ProcessorData:
+                        builder.AddRaw(entry.Path, entry.ProcessorOutput!.RawPayload);
                         break;
 
                     default:
