@@ -3,6 +3,7 @@ using Bork2d.Bake.Builder;
 using Bork2d.BakeFixture.Assets.Processors;
 using Bork2d.Tests.Assets.Service;
 using Bork2d.Tests.Bake.Baking;
+using Bork2d.Tests.TestSupport;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Processors;
@@ -79,5 +80,47 @@ public sealed class FixtureProcessorsApplicationTests
         Bork2d.BakeFixture.Unit unit =
             await host.Service.LoadAsset<Bork2d.BakeFixture.Unit>("data/archer");
         Assert.Equal(new Bork2d.BakeFixture.Unit("archer", 50, 20), unit);
+    }
+
+    [Fact]
+    public void FixtureAssetsExecutableBakesEightMainAndNineMergedEntries()
+    {
+        string executable = RepositoryPaths.FixtureAssetsExecutable;
+        Assert.True(
+            File.Exists(executable),
+            $"The fixture assets executable was not built: '{executable}'.");
+        using var output = TempBakeDirectory.Create();
+
+        TempProcessRunner.Result result = TempProcessRunner.Run(
+            "dotnet",
+            [
+                executable,
+                "bake",
+                "--project-root",
+                RepositoryPaths.FixtureAssetsProjectDirectory,
+                "--output-root",
+                output.RootPath,
+                "--mode",
+                "debug",
+            ],
+            RepositoryPaths.FixtureAssetsProjectDirectory,
+            timeoutMilliseconds: 600_000);
+
+        Assert.True(result.ExitCode == 0, result.Output);
+
+        string[] mainEntries = [.. BakedPackAssertions
+            .Shapes(output.FullPath("assets.pck"))
+            .Select(shape => shape.Path)];
+        string[] dlcEntries = [.. BakedPackAssertions
+            .Shapes(output.FullPath("dlc1.pck"))
+            .Select(shape => shape.Path)];
+
+        Assert.Equal(8, mainEntries.Length);
+        Assert.Single(dlcEntries);
+        Assert.Equal(9, mainEntries.Union(dlcEntries, StringComparer.Ordinal).Count());
+        Assert.Contains("art/checker", mainEntries);
+        Assert.Contains("art/checker-raw", mainEntries);
+        Assert.Contains("data/archer", mainEntries);
+        Assert.Equal(new[] { "data/dlc" }, dlcEntries);
     }
 }

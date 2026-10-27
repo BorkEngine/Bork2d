@@ -14,10 +14,16 @@
           Bork2dAssetsTargetFramework   target framework used in the executable path; default net11.0
           Bork2dDotNetHost              dotnet host executable; default dotnet
 
-        The app references the assets project with ReferenceOutputAssembly="false" for build order
-        only, so neither the builder nor the assets executable enters its compile or publish graph.
-        After Build the target asks the executable to copy every configured pack to $(TargetDir);
-        after Publish it copies them to $(PublishDir). Clean is owned by the assets project.
+        A normal desktop app may reference the assets project with ReferenceOutputAssembly="false"
+        for build order only. That does not work for a self-contained AOT app: the SDK copies an
+        executable reference's apphost/deps/runtimeconfig transitively and rejects a self-contained
+        reference to a JIT executable, so the AOT smoke instead sets Bork2dAssetsProjectFile and the
+        target builds the assets executable out of process. Either way the app references the assets
+        executable only for build order: neither the builder, the assets executable, nor the
+        processors enter its compile or publish graph. After Build the target asks the executable to
+        copy every configured pack to $(TargetDir); after Publish it copies them to $(PublishDir).
+        Clean is owned by the assets project, which is the only component that knows the pack paths
+        and the incremental manifest directory.
 
         Optional: Bork2dAssetsAssemblyName, used to derive Bork2dAssetsExecutable when it is not set
         explicitly; Bork2dAssetsEnabled=false disables the integration.

@@ -23,6 +23,12 @@ internal interface IBakeAssetProcessor
     /// <summary>Gets the stable processor name used in diagnostics and hashing.</summary>
     string Name { get; }
 
+    /// <summary>
+    /// Gets the CLR type of the registered processor. The incremental manifest hashes this type's
+    /// assembly, so a processor code change invalidates the bake.
+    /// </summary>
+    Type ProcessorType { get; }
+
     /// <summary>Gets the source extensions this processor owns.</summary>
     IReadOnlyList<string> Extensions { get; }
 

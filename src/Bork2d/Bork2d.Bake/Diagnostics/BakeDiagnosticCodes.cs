@@ -171,8 +171,17 @@ internal static class BakeDiagnosticCodes
     /// <summary>The pack could not be written or atomically replaced.</summary>
     internal const string PackWriteFailed = "BK5002";
 
+    /// <summary>
+    /// The incremental manifest could not be written after a successful bake. The bake still
+    /// succeeds; the next invocation bakes in full.
+    /// </summary>
+    internal const string IncrementalManifestWriteFailed = "BK5003";
+
     /// <summary>A configured pack could not be copied to the requested destination.</summary>
     internal const string PackCopyFailed = "BK5004";
+
+    /// <summary>The incremental manifest matched and the bake was skipped as up to date.</summary>
+    internal const string IncrementalSkipped = "BK5005";
 
     /// <summary>A processor source or sidecar could not be read or decoded as UTF-8.</summary>
     internal const string ProcessorSourceRead = "BK7001";

@@ -1,6 +1,7 @@
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Builder;
 using Bork2d.Bake.Diagnostics;
+using Bork2d.Bake.Incremental;
 using Bork2d.Tests.Bake.Baking;
 using Bork2d.Tests.TestSupport;
 using Xunit;
@@ -187,6 +188,46 @@ public sealed class BakeApplicationTests
     }
 
     [Fact]
+    public void SecondBakeWithUnchangedInputsIsUpToDate()
+    {
+        using var project = TestBakeProject.Create("cli-up-to-date");
+        project.WriteStandardAssets();
+        project.WriteTexture();
+        BakeApplication app = BakeProjectFixture.CreateApplication(
+            project.RootPath,
+            [("assets.pck", "Assets")]);
+        using var output = TempBakeDirectory.Create();
+        string packPath = output.FullPath("assets.pck");
+        string manifestPath = BakeManifestPaths.ManifestPath(project.RootPath);
+
+        Result first = Run(
+            app,
+            "bake",
+            "--project-root",
+            project.RootPath,
+            "--output-root",
+            output.RootPath);
+        Assert.Equal(0, first.ExitCode);
+        Assert.True(File.Exists(manifestPath));
+        Assert.Contains("\"schema\": 3", File.ReadAllText(manifestPath), StringComparison.Ordinal);
+        byte[] packBytes = File.ReadAllBytes(packPath);
+
+        Result second = Run(
+            app,
+            "bake",
+            "--project-root",
+            project.RootPath,
+            "--output-root",
+            output.RootPath);
+
+        Assert.Equal(0, second.ExitCode);
+        Assert.Contains("up to date:", second.Output, StringComparison.Ordinal);
+        Assert.Contains("no inputs changed.", second.Output, StringComparison.Ordinal);
+        Assert.Contains("info BK5005:", second.Error, StringComparison.Ordinal);
+        Assert.Equal(packBytes, File.ReadAllBytes(packPath));
+    }
+
+    [Fact]
     public void CheckWritesNoPack()
     {
         using var project = TestBakeProject.Create("cli-check");
@@ -211,6 +252,7 @@ public sealed class BakeApplicationTests
         Assert.Equal(string.Empty, result.Error);
         Assert.False(File.Exists(packPath));
         Assert.Contains("no pack written", result.Output, StringComparison.Ordinal);
+        Assert.False(File.Exists(BakeManifestPaths.ManifestPath(project.RootPath)));
     }
 
     [Fact]
@@ -345,7 +387,9 @@ public sealed class BakeApplicationTests
 
         Assert.Equal(0, clean.ExitCode);
         Assert.Contains("cleaned 1 pack(s)", clean.Output, StringComparison.Ordinal);
+        Assert.Contains("incremental", clean.Output, StringComparison.Ordinal);
         Assert.False(File.Exists(output.FullPath("assets.pck")));
+        Assert.False(Directory.Exists(BakeManifestPaths.Directory(project.RootPath)));
     }
 
     [Fact]

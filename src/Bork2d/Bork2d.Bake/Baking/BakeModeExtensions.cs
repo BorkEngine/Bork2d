@@ -17,6 +17,12 @@ internal static class BakeModeExtensions
             _ => PackCompressionMode.Debug,
         };
 
+    /// <summary>Maps a bake mode to its documented lowercase name.</summary>
+    /// <param name="mode">The bake mode.</param>
+    /// <returns><c>debug</c> or <c>release</c>.</returns>
+    internal static string ToName(this BakeMode mode)
+        => mode == BakeMode.Release ? "release" : "debug";
+
     /// <summary>Parses a <c>--mode</c> value.</summary>
     /// <param name="value">The option value.</param>
     /// <param name="mode">The parsed mode.</param>

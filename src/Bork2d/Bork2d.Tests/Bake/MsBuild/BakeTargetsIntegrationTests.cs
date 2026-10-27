@@ -1,3 +1,4 @@
+using Bork2d.Bake.Incremental;
 using Bork2d.Tests.Bake.Baking;
 using Bork2d.Tests.Bake.Textures;
 using Bork2d.Tests.TestSupport;
@@ -34,6 +35,18 @@ public sealed class BakeTargetsIntegrationTests
             BakeProjectFixture.ExpectedTexturePayload,
             ReadRawPayload(fixture.AssetsPackPath, BakeProjectFixture.TexturePayloadPath));
         Assert.False(Directory.Exists(Path.Combine(fixture.AssetsProjectDirectory, "obj", "bork2d", "bakehost")));
+        string manifestPath = BakeManifestPaths.ManifestPath(fixture.AssetsProjectDirectory);
+        Assert.True(File.Exists(manifestPath));
+        Assert.Contains("\"schema\": 3", File.ReadAllText(manifestPath), StringComparison.Ordinal);
+
+        // A second build with no changed input/output/config is a no-op: the executable's schema-3
+        // manifest skips the bake and the packs stay byte-identical.
+        byte[] firstAssetsBytes = File.ReadAllBytes(fixture.AssetsPackPath);
+        TempProcessRunner.Result secondAssetsBuild = fixture.BuildAssets();
+        Assert.True(secondAssetsBuild.ExitCode == 0, secondAssetsBuild.Output);
+        Assert.Contains("up to date:", secondAssetsBuild.Output, StringComparison.Ordinal);
+        Assert.Contains("no inputs changed.", secondAssetsBuild.Output, StringComparison.Ordinal);
+        Assert.Equal(firstAssetsBytes, File.ReadAllBytes(fixture.AssetsPackPath));
 
         TempProcessRunner.Result appBuild = fixture.BuildApp();
 
@@ -59,6 +72,7 @@ public sealed class BakeTargetsIntegrationTests
         Assert.True(clean.ExitCode == 0, clean.Output);
         Assert.False(File.Exists(fixture.AssetsPackPath));
         Assert.False(File.Exists(fixture.DlcPackPath));
+        Assert.False(Directory.Exists(BakeManifestPaths.Directory(fixture.AssetsProjectDirectory)));
     }
 
     [Fact]
