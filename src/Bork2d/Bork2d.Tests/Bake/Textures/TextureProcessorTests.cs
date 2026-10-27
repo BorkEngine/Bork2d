@@ -121,9 +121,10 @@ public sealed class TextureProcessorTests
     [Fact]
     public async Task PartialSidecarOverridesOnlyTheSpecifiedSetting()
     {
-        using var project = TextureTestProject.Create(TextureFilter.Linear, TextureWrap.Clamp);
+        // The absent wrap key keeps the builder default (repeat); the present filter key overrides it.
+        using var project = TextureTestProject.Create(TextureFilter.Nearest, TextureWrap.Repeat);
         project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
-        project.WriteText("textures/player.png.toml", "filter = \"nearest\"\n");
+        project.WriteText("textures/player.png.toml", "filter = \"linear\"\n");
 
         BakeResult result = project.Bake();
 
@@ -131,15 +132,14 @@ public sealed class TextureProcessorTests
         using var host = new AssetServiceHost(project.PackPath);
         host.Start();
         TextureDescriptor descriptor = await host.Service.LoadAsset<TextureDescriptor>("textures/player");
-        Assert.Equal("nearest", descriptor.Filter);
-        Assert.Equal("clamp", descriptor.Wrap);
+        Assert.Equal("linear", descriptor.Filter);
+        Assert.Equal("repeat", descriptor.Wrap);
     }
 
     [Fact]
-    public async Task EmptySidecarUsesTheSidecarTypeDefaults()
+    public async Task EmptySidecarUsesTheBuilderDefaults()
     {
-        // An existing sidecar is bound as-is: an absent key keeps the sidecar shape's default rather
-        // than the builder's default sidecar values, which apply only when the file is missing.
+        // An existing sidecar with no keys overrides nothing, so both values come from the builder.
         using var project = TextureTestProject.Create(TextureFilter.Nearest, TextureWrap.Repeat);
         project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
         project.WriteText("textures/player.png.toml", string.Empty);
@@ -150,8 +150,8 @@ public sealed class TextureProcessorTests
         using var host = new AssetServiceHost(project.PackPath);
         host.Start();
         TextureDescriptor descriptor = await host.Service.LoadAsset<TextureDescriptor>("textures/player");
-        Assert.Equal("linear", descriptor.Filter);
-        Assert.Equal("clamp", descriptor.Wrap);
+        Assert.Equal("nearest", descriptor.Filter);
+        Assert.Equal("repeat", descriptor.Wrap);
     }
 
     [Fact]

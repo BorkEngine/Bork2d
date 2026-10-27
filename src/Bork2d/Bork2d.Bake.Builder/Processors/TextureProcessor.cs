@@ -16,9 +16,9 @@ namespace Bork2d.Bake.Builder.Processors;
 /// </para>
 /// <para>
 /// The descriptor is added as a typed instance through <see cref="IAssetOutputSink.AddAsset{T}"/>, so
-/// the engine serializes it; the processor never touches MessagePack or the pack writer. The sampler
-/// state comes from the bound sidecar, or from the builder's texture defaults when the sidecar was
-/// missing.
+/// the engine serializes it; the processor never touches MessagePack or the pack writer. A present
+/// sidecar key overrides the builder's texture default, an absent key keeps that default, and a
+/// missing sidecar is created with both values from <c>WithTextureDefaults</c>.
 /// </para>
 /// </remarks>
 internal sealed class TextureProcessor : AssetProcessor<TextureSidecar>
@@ -35,7 +35,8 @@ internal sealed class TextureProcessor : AssetProcessor<TextureSidecar>
     /// </summary>
     /// <param name="defaults">
     /// The mutable builder texture defaults; the processor reads them when it creates a default
-    /// sidecar, so a late <c>WithTextureDefaults</c> call still applies.
+    /// sidecar and when a present sidecar omits a setting, so a late <c>WithTextureDefaults</c> call
+    /// still applies.
     /// </param>
     internal TextureProcessor(BakeTextureDefaults defaults)
     {
@@ -56,12 +57,8 @@ internal sealed class TextureProcessor : AssetProcessor<TextureSidecar>
 
         return new TextureSidecar
         {
-            Filter = _defaults.Filter == BakeTextureFilter.Nearest
-                ? TextureFilter.Nearest
-                : TextureFilter.Linear,
-            Wrap = _defaults.Wrap == BakeTextureWrap.Repeat
-                ? TextureWrap.Repeat
-                : TextureWrap.Clamp,
+            Filter = DefaultFilter,
+            Wrap = DefaultWrap,
         };
     }
 
@@ -82,6 +79,8 @@ internal sealed class TextureProcessor : AssetProcessor<TextureSidecar>
             return;
         }
 
+        TextureFilter filter = sidecar.Filter ?? DefaultFilter;
+        TextureWrap wrap = sidecar.Wrap ?? DefaultWrap;
         string payloadPath = context.BaseAssetPath + RawSuffix;
         var descriptor = new TextureDescriptor
         {
@@ -89,11 +88,19 @@ internal sealed class TextureProcessor : AssetProcessor<TextureSidecar>
             Width = (uint)width,
             Height = (uint)height,
             Format = FormatRgba8,
-            Filter = sidecar.Filter == TextureFilter.Nearest ? "nearest" : "linear",
-            Wrap = sidecar.Wrap == TextureWrap.Repeat ? "repeat" : "clamp",
+            Filter = filter == TextureFilter.Nearest ? "nearest" : "linear",
+            Wrap = wrap == TextureWrap.Repeat ? "repeat" : "clamp",
         };
 
         context.Outputs.AddAsset(context.BaseAssetPath, descriptor);
         context.Outputs.AddData(payloadPath, payload);
     }
+
+    private TextureFilter DefaultFilter => _defaults.Filter == BakeTextureFilter.Nearest
+        ? TextureFilter.Nearest
+        : TextureFilter.Linear;
+
+    private TextureWrap DefaultWrap => _defaults.Wrap == BakeTextureWrap.Repeat
+        ? TextureWrap.Repeat
+        : TextureWrap.Clamp;
 }

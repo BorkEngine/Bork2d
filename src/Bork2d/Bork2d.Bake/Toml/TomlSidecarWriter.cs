@@ -15,7 +15,8 @@ namespace Bork2d.Bake.Toml;
 /// The writer is shape-driven and reflection-free: it walks the compiled properties in shape order,
 /// applies the same camelCase/<see cref="JsonPropertyNameAttribute"/>/<see cref="JsonIgnoreAttribute"/>
 /// rules as the binder, and supports scalar leaves only (bool, integer, float, double, string, enum).
-/// A null member is skipped, which is how an optional setting stays absent.
+/// A nullable scalar/enum member is unwrapped to its element shape; a null member is skipped, which is
+/// how an optional setting stays absent.
 /// </para>
 /// <para>
 /// Output is deterministic: bare keys where TOML allows them, quoted keys otherwise, LF line
@@ -86,6 +87,13 @@ internal static class TomlSidecarWriter
         out string formatted,
         out string? reason)
     {
+        if (shape.Kind == TypeShapeKind.Optional && shape is IOptionalTypeShape optional)
+        {
+            // A non-null nullable member is boxed as its underlying value (the null case was skipped
+            // by the caller), so format it with the element shape.
+            return TryFormatValue(optional.ElementType, value, out formatted, out reason);
+        }
+
         switch (value)
         {
             case string text:
