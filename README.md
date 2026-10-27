@@ -5,13 +5,15 @@ windowing through **Silk.NET**, with gameplay on a tick thread and rendering on 
 that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets ship in
 **`assets.pck`**, and windowed, offscreen, and headless modes are the target design.
 
-> **Status: pre-alpha.** M0 is complete; M1 (foundation + NativeAOT baseline), M2 (SDL windowed
-> platform), and M3 (assets: pack, VFS, descriptors) are merged into `develop` (2026-10-26, PR #4).
-> The D-035 asset-reference refactor is merged (PR #6). Windowed mode opens a real SDL window and
+> **Status: pre-alpha.** M0–M4 are merged into `develop`. Windowed mode opens a real SDL window and
 > runs an uncapped loop; the runtime loads and browses `assets.pck` through the app-scoped asset
-> service. There is still no renderer (M8), and headless/offscreen keep the one-tick
-> `Setup` → `Tick` → `Teardown` sequence. See the [roadmap](docs/roadmap.md) and the
-> [M3 record](docs/specs/m3-assets.md).
+> service. The bake is the game-owned builder flow (D-036/D-037/D-038): a build-time
+> `MyGame.Assets` executable registers explicit data types and asset processors, bakes on build, and
+> records a schema-3 incremental manifest; PPM and Unit are the acceptance processors. There is still
+> no renderer (M8), and headless/offscreen keep the one-tick `Setup` → `Tick` → `Teardown` sequence.
+> See the [roadmap](docs/roadmap.md), the
+> [file-processors spec](docs/specs/file-processors.md), and the
+> [asset-processors architecture](docs/architecture/asset-processors.md).
 
 ## Projects
 
@@ -22,14 +24,19 @@ that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets sh
 | [`Bork2d.Common`](src/Bork2d/Bork2d.Common) | Engine, root-owned unordered scene tree, transforms, time. |
 | [`Bork2d.Render`](src/Bork2d/Bork2d.Render) | Vulkan renderer; reference-wired and empty until M6/M8. |
 | [`Bork2d.Assets`](src/Bork2d/Bork2d.Assets) | Pack reader/writer, VFS, loader, descriptors, sprite assets; public tooling is `Bork2d.Assets.Pack`. |
-| [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite and dependency-matrix test (528 tests: 519 deterministic, 9 opt-in real-window). |
-| [`Bork2d.AotSmoke`](src/Bork2d/Bork2d.AotSmoke) | NativeAOT smoke executable: headless one-tick run plus `--windowed [--ticks N]` SDL demo; local publish/run gate. |
+| [`Bork2d.Bake`](src/Bork2d/Bork2d.Bake) | Internal JIT bake implementation: TOML binder, processor framework, texture processor, pack composition, schema-3 incremental planner. |
+| [`Bork2d.Bake.Builder`](src/Bork2d/Bork2d.Bake.Builder) | Public JIT builder/processor/CLI surface used by game and fixture assets executables. |
+| [`Bork2d.BakeFixture`](src/Bork2d/Bork2d.BakeFixture) | AOT-safe game-side fixture data types (`GameConfig`, `Stats`, `StatsRoot`, `Unit`). |
+| [`Bork2d.BakeFixture.Assets`](src/Bork2d/Bork2d.BakeFixture.Assets) | Build-only fixture assets executable; owns `Assets/`/`DLC1/`, PPM/Unit processors, and bakes on build. |
+| [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite and dependency-matrix test (957 tests: 945 deterministic, 12 opt-in/conditional). |
+| [`Bork2d.AotSmoke`](src/Bork2d/Bork2d.AotSmoke) | NativeAOT smoke executable: headless one-tick run loading the baked fixture packs (8 main / 9 merged entries) plus `--windowed [--ticks N]` SDL demo; local publish/run gate. |
 | `Bork2d.Editor` | Planned Avalonia editor library/app (M5); JIT, not in the solution. |
 
 Game developers consume only `Bork2d.Api` and `Bork2d.Runtime`. `Bork2d.Api` is grouped by area
 (`Bork2d.Api.Scene`, `.Rendering`, `.Input`, `.Platform`, `.Assets`); the tooling pack writer lives
-in `Bork2d.Assets.Pack`. A game solution adds `Project.Common`, `Project.Desktop`, and
-`Project.Editor`; those templates are M9.
+in `Bork2d.Assets.Pack` and the builder/processor surface in `Bork2d.Bake.Builder`. A game solution
+adds `Project.Common`, `MyGame.Assets`, `Project.Desktop`, and `Project.Editor`; those templates are
+M9. `MyGame.Assets` is build-time only and never enters the runtime or AOT publish graph.
 
 ## Build
 
@@ -86,6 +93,10 @@ Start at the [documentation index](docs/README.md).
 - Assets: `assets.pck` with a compressed, XXH3-64-checksummed header, uint64 offsets, later
   overlays win, and debug/release payload compression. A missing base pack is fatal unless the app
   uses `WithoutAssets()`.
+- Bake: a build-time `MyGame.Assets` executable configured with `BakeApplicationBuilder` (ordered
+  packs, texture defaults, processors, explicit `RegisterAsset<T>()` types) bakes on build and is the
+  CLI; source file types are registered processors with `None`/`Required` sidecars. The schema-3
+  manifest makes an unchanged second build a no-op. Runtime data types stay in `Project.Common`.
 - Textures are MessagePack descriptors plus raw RGBA8 payloads; sprites are quads with UVs, pivot,
   topology, optional indices, and pixels-per-unit scale. No vertices array; the shader generates
   corners.
