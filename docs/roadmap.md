@@ -8,12 +8,14 @@
 > The sequence is dependency-ordered.
 > A milestone is done when its exit criterion is demonstrated, not merely when code is merged.
 >
-> **Post-M4 task (not a milestone): D-036/D-037/D-038 asset processors and `MyGame.Assets`.** Planned
-> on `task/file-processors`; it replaces the project descriptor with builder configuration, makes
-> source file types registered processors (built-in texture importer included), removes the generated
-> host in favor of explicit `RegisterAsset<T>()` registrations, and moves assets/processors to a
-> game-owned executable that bakes on build. The runtime model and milestone sequence are unchanged.
-> Design: [asset processors](architecture/asset-processors.md).
+> **Post-M4 task (not a milestone): D-036/D-037/D-038/D-039 asset processors and `MyGame.Assets`.**
+> **Implementation baseline locked 2026-10-27**; implementation planned on `task/file-processors`. It
+> replaces the project descriptor with builder configuration, makes source file types registered
+> processors (built-in texture importer included), removes the generated host in favor of explicit
+> `RegisterAsset<T>()` registrations, and moves assets/processors to a game-owned executable that
+> bakes on build. The runtime model and milestone sequence are unchanged. Design:
+> [asset processors](architecture/asset-processors.md); implementation spec:
+> [file processors](specs/file-processors.md).
 
 ## 1. How to read this roadmap
 
@@ -173,9 +175,10 @@ assemblies, and its default run loads the baked pack and exits 0.
 
 **Post-M4 task (not a milestone).** D-036/D-037/D-038 replace the descriptor/texture-sidecar special
 cases with asset processors, explicit type registration, and a game-owned `MyGame.Assets`
-builder/CLI. The generated host is removed. Planned on `task/file-processors`; it does not change the
-M5–M10 sequence. See
-[asset processors](architecture/asset-processors.md) and [D-036/D-037/D-038](decisions.md#post-m4-asset-processors-approved-2026-10-27).
+builder/CLI. The generated host is removed. D-039 locks the implementation baseline; implementation
+follows the [file-processors spec](specs/file-processors.md) on `task/file-processors` and does not
+change the M5–M10 sequence. See [asset processors](architecture/asset-processors.md) and
+[D-036/D-037/D-038/D-039](decisions.md#post-m4-asset-processors-approved-2026-10-27).
 
 ### M5 — Editor
 
@@ -344,7 +347,7 @@ approvals; only unresolved choices are listed here.
 | M3 Assets/pack | Merged (2026-10-26, PR #4) | 587 tests (578 deterministic + 9 opt-in real-window); Debug/Release zero warnings; format/docs clean; AOT publish zero AOT/trim warnings with `SDL2.dll`; default AOT run exit 0 loading a 2-entry temporary pack (raw + generated-shape MessagePack) and one tick; `--windowed --ticks 120` exit 0 with `WithoutAssets()`; crash-free pack/overlay failure matrix. [M3 record](specs/m3-assets.md). |
 | Asset-reference refactor | Merged (2026-10-26, PR #6, D-035) | 528 tests (519 deterministic + 9 opt-in real-window); Debug/Release zero warnings; format/docs/`git diff --check` clean; AOT publish zero AOT/trim warnings; default AOT run exit 0 with a 5-entry pack including the public `SpriteAsset`/`TextureDescriptor` shapes; `--windowed --ticks 120` exit 0. [Refactor record](specs/refactor-asset-references.md). |
 | M4 Serialization/bake | Merged (2026-10-27, PR #7) | WP0–WP6 landed: bake library + CLI, generated host, per-source `[bork2d]` metadata, descriptor/TOML binder, location-free texture pipeline, reference validation, structural determinism, incremental bake, MSBuild targets, `Bork2d.BakeFixture`, and the AOT baked-pack smoke. The fix-1 revision removed the descriptor `[[types]]`/prefix model, moved type metadata into each data TOML, allowed data/textures anywhere under the asset root, and changed raw payload paths to `<descriptor>-raw`. Fix-2 commits the fixture **source** PNG at `Bork2d.BakeFixture/Assets/art/player.png` (sidecar `art/player.png.toml`; data/sprite TOMLs reference `art/player`), removes the texture generator, and leaves test images/packs generated in temp directories. Fix-3 applies D-M4-14/D-M4-15: ordered `[[assets]]` multi-pack descriptors (first is main; no `name`/`[bake].pack`), one host over all roots, per-pack bake with main-only external references, internal `PackBuilder` external-main seam, `bake --output-root` (no `--output`), all-output incremental manifest schema 2, MSBuild bake/publish/clean for every declared pack, fixture `DLC1/data/dlc.toml`, and the AOT main + `dlc1.pck` overlay proof; texture sidecars are retained. The main fixture pack has 5 entries (ending in `art/player` and `art/player-raw`) and the DLC pack 1 (`data/dlc`). 911 deterministic + 12 conditional tests (923 total); Debug/Release zero warnings; format/docs/diff checks clean. Fix-3 AOT publish is zero-warning with `assets.pck`/`dlc1.pck`/`SDL2.dll` and no Bake/Tomlyn/StbImageSharp assemblies; the published headless run exits 0 with `mainEntries=5`, `mergedEntries=6`, the DLC → main texture reference, and 16 raw bytes; `--windowed --ticks 120` exits 0. Final CI run [40455684420](https://github.com/BorkEngine/Bork2d/actions/runs/40455684420) succeeded: 914 passed, 9 skipped (the 3 reparse tests ran with symlink capability; the local gate is 911 passed, 12 skipped). [M4 spec §22](specs/m4-serialization-and-bake.md#22-as-built-evidence-m4-merged-to-develop). |
-| Post-M4 asset processors | Planned (`task/file-processors`) | D-036/D-037/D-038 design accepted; `MyGame.Assets` builder/no descriptor/no generated host, explicit `RegisterAsset<T>()` + defaults, processor extension point, PPM/Unit tests. Design: [asset processors](architecture/asset-processors.md). Not implemented. |
+| Post-M4 asset processors | Locked; implementation planned (`task/file-processors`) | D-036/D-037/D-038/D-039 baseline locked; `MyGame.Assets` builder/no descriptor/no generated host, explicit `RegisterAsset<T>()` + defaults, processor extension point, PPM/Unit tests. Design: [asset processors](architecture/asset-processors.md); spec: [file processors](specs/file-processors.md). Not implemented. |
 | M5 Editor | Not started | — |
 | M6 Vulkan bring-up | Not started | — |
 | M7 Frame handoff/pacing | Not started | — |

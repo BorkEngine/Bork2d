@@ -1,7 +1,8 @@
 # Asset Processors and `MyGame.Assets`
 
-> **Status:** **Accepted design (D-036/D-037/D-038, 2026-10-27); implementation planned on
-> `task/file-processors`; the current tree is still M4.** The M4 code hardcodes image extensions,
+> **Status:** **Locked implementation baseline (D-036/D-037/D-038/D-039, 2026-10-27); implementation
+> follows [`docs/specs/file-processors.md`](../specs/file-processors.md) on `task/file-processors`;
+> the current tree is still M4.** The M4 code hardcodes image extensions,
 > has a texture-specific sidecar parser and texture-specific baked-index entries, reads
 > `bork2d.project.toml`, and uses a generated host for data-type binding. This document defines the
 > replacement: every non-TOML source type is an asset processor registered in a game-owned executable
@@ -601,6 +602,8 @@ and are settled during WP1/WP2.
 
 ## 18. Related documents
 
+- [File-processors implementation spec](../specs/file-processors.md) — locked scope, API,
+  work packages, tests, and acceptance criteria.
 - [Assets and tooling](assets-and-tooling.md) — pack, VFS, asset model, current M4 bake text.
 - [Projects and dependencies](projects.md) — project graph and game layout.
 - [API guide](../api/guide.md) and [API reference](../api/reference.md) — builder/processor usage.

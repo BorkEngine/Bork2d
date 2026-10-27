@@ -12,7 +12,8 @@
 > build-time `MyGame.Assets`/`Bork2d.BakeFixture.Assets` executables, explicit
 > `RegisterAsset<T>()` registrations, and PPM/Unit processor tests. The generated host is removed.
 > The local AOT gate loads packs baked by the fixture assets executable; no builder/processor
-> assembly enters the publish.
+> assembly enters the publish. Implementation scope:
+> [file-processors spec](specs/file-processors.md).
 
 ## 1. Prerequisites
 

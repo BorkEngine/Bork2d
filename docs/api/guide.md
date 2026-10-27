@@ -11,7 +11,8 @@
 > **Post-M4 target (D-036/D-037/D-038, Planned):** assets/processors move to a build-time
 > `MyGame.Assets` executable configured with `BakeApplicationBuilder`; the project descriptor and
 > generated host are removed, and data types are registered explicitly. Runtime game code still
-> references only `Bork2d.Api`/`Bork2d.Runtime`.
+> references only `Bork2d.Api`/`Bork2d.Runtime`. Implementation scope:
+> [file-processors spec](../specs/file-processors.md).
 
 ## 1. What you reference
 

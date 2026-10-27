@@ -16,7 +16,8 @@
 > **Post-M4 target (D-036/D-037/D-038, Planned):** the build-time `MyGame.Assets` executable uses
 > the public `Bork2d.Bake.Builder` surface for builder config, explicit `RegisterAsset<T>()` data
 > types, asset processors, and sidecars; the project descriptor and generated host are removed.
-> Runtime `Bork2d.Api`/`Bork2d.Runtime` contracts are unchanged.
+> Runtime `Bork2d.Api`/`Bork2d.Runtime` contracts are unchanged. Implementation scope:
+> [file-processors spec](../specs/file-processors.md).
 
 ## 1. Contract-wide rules
 

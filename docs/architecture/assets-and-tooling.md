@@ -31,7 +31,8 @@
 > removed and all bake configuration moves into a builder in a game-owned `MyGame.Assets` executable,
 > which is also the CLI and bakes automatically when built. Data types are registered explicitly with
 > `RegisterAsset<T>()`; the generated host is removed and there is no reflection. The
-> [asset processors](asset-processors.md) design doc owns that contract. Until the task lands, the
+> [asset processors](asset-processors.md) design doc owns the architecture and the
+> [file-processors spec](../specs/file-processors.md) owns implementation scope/acceptance. Until the task lands, the
 > M4 sections below that mention the descriptor, the generated host, the hand-written texture sidecar
 > parser, or texture-specific discovery are the **as-built M4** behavior; the target replaces them.
 

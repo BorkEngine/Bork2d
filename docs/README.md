@@ -15,13 +15,15 @@
 > validation, incremental bake, MSBuild targets, AOT baked-pack proof). The editor and renderer are
 > target designs for later milestones. Check status markers before treating an API as implemented.
 >
-> **Post-M4 target (D-036/D-037/D-038, Planned on `task/file-processors`).** File types become
-> registered **asset processors** with `[GenerateShape]` sidecars when settings are required; the
-> built-in texture importer is one processor. The project descriptor and generated host are removed,
-> data types are registered explicitly with `RegisterAsset<T>()`, and a game-owned `MyGame.Assets`
-> executable configures the bake through `BakeApplicationBuilder`, serves as the CLI, and bakes
-> automatically when built. The [asset processors](architecture/asset-processors.md) design doc owns
-> the target; the M4 text below remains the as-built behavior until the task lands.
+> **Post-M4 implementation baseline (D-036/D-037/D-038/D-039, locked 2026-10-27; implementation
+> planned on `task/file-processors`).** File types become registered **asset processors** with
+> `[GenerateShape]` sidecars when settings are required; the built-in texture importer is one
+> processor. The project descriptor and generated host are removed, data types are registered
+> explicitly with `RegisterAsset<T>()`, and a game-owned `MyGame.Assets` executable configures the
+> bake through `BakeApplicationBuilder`, serves as the CLI, and bakes automatically when built. The
+> [file-processors spec](specs/file-processors.md) owns implementation scope/acceptance; the
+> [asset processors](architecture/asset-processors.md) doc owns the architecture; the M4 text below
+> remains the as-built behavior until the task lands.
 
 Bork2d is a focused 2D game engine for .NET: **Vulkan 1.3** rendering, **SDL2** windowing through
 **Silk.NET**, a NativeAOT runtime, and **`assets.pck`** assets addressed by canonical paths.
@@ -71,7 +73,8 @@ automatically wins. The [decision log](decisions.md) records the accepted choice
 | [Scene ownership](architecture/scene-ownership.md) | contributors | Root-owned graph, membership, remove/re-add, read-only root. |
 | [Threading](architecture/threading.md) | contributors | Thread ownership, locks, snapshot ring, input, memory ordering. |
 | [Assets and tooling](architecture/assets-and-tooling.md) | contributors, editor | Pack format, VFS, descriptors, sprites, TOML bake, editor. |
-| [Asset processors and `MyGame.Assets`](architecture/asset-processors.md) | contributors, game developers | Target processor contract, sidecar policies, builder/no-descriptor flow, PPM/Unit tests. |
+| [Asset processors and `MyGame.Assets`](architecture/asset-processors.md) | contributors, game developers | Target processor contract, sidecar policies, builder/no-descriptor/no-host flow, PPM/Unit tests. |
+| [File-processors implementation spec](specs/file-processors.md) | implementers | Locked scope, public API, semantics, work packages, tests, acceptance criteria. |
 | [Rendering](architecture/rendering.md) | contributors | Vulkan 1.3, one draw per camera, generated quads, bindless, present. |
 | [NativeAOT](architecture/nativeaot.md) | contributors | Runtime AOT constraints, generated shapes, local publish gate. |
 | [Logging](architecture/logging.md) | contributors | MEL/ZLogger, `IEngine.LoggerFactory`, default format. |
@@ -96,6 +99,7 @@ automatically wins. The [decision log](decisions.md) records the accepted choice
   → [Threading](architecture/threading.md).
 - **Assets/editor/bake:** [Assets and tooling](architecture/assets-and-tooling.md) →
   [Asset processors](architecture/asset-processors.md) →
+  [file-processors spec](specs/file-processors.md) →
   [M4 spec](specs/m4-serialization-and-bake.md) → [Roadmap](roadmap.md#5-milestone-detail) M3–M5.
 - **NativeAOT/server:** [NativeAOT](architecture/nativeaot.md) →
   [Lifecycle modes](architecture/runtime-lifecycle.md#2-modes) →
@@ -116,6 +120,7 @@ One fact has one owner. Update the owner and link to it; do not copy.
 | Source layout and namespaces | [Projects §4](architecture/projects.md#4-source-layout-and-namespaces) |
 | Pack, assets, TOML bake, editor | [Assets and tooling](architecture/assets-and-tooling.md) |
 | Asset processors, sidecars, builder/no descriptor | [Asset processors](architecture/asset-processors.md) |
+| File-processor implementation scope/work packages | [File-processors spec](specs/file-processors.md) |
 | Renderer | [Rendering](architecture/rendering.md) |
 | AOT constraints | [NativeAOT](architecture/nativeaot.md) |
 | Logging | [Logging](architecture/logging.md) |

@@ -22,8 +22,8 @@
 > discovery, and removes the generated host in favor of explicit `RegisterAsset<T>()` registrations.
 > Sections below that describe the descriptor, generated host, or texture-specific sidecar pipeline
 > are M4 as-built history. Target design: [asset processors](../architecture/asset-processors.md);
-> decisions: D-036/D-037/D-038 in the
-> [decision log](../decisions.md#post-m4-asset-processors-approved-2026-10-27).
+> implementation spec: [file processors](file-processors.md); decisions: D-036/D-037/D-038/D-039 in
+> the [decision log](../decisions.md#post-m4-asset-processors-approved-2026-10-27).
 
 ## 1. Goal
 

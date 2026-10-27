@@ -36,8 +36,9 @@
 > `MyGame.Assets`, an executable that owns assets/processors, configures the bake through
 > `BakeApplicationBuilder`, registers data types explicitly, and bakes on build. The project
 > descriptor and generated host are removed. `Bork2d.Bake.Cli` is retired as the game-facing CLI.
-> The matrix and rows below are the current M4 graph; the target delta is in §2.1 and
-> [asset processors](asset-processors.md).
+> The matrix and rows below are the current M4 graph; the target delta is in §2.1,
+> [asset processors](asset-processors.md), and the
+> [file-processors spec](../specs/file-processors.md).
 
 ## 1. Current projects
 
