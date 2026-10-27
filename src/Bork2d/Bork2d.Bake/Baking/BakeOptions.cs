@@ -1,59 +1,36 @@
 namespace Bork2d.Bake.Baking;
 
 /// <summary>
-/// The inputs of one <c>bork2d-bake bake</c> (or <c>validate --host</c>) invocation.
+/// The invocation inputs of one <c>bake</c>/<c>validate</c>/<c>clean</c> command.
 /// </summary>
 /// <remarks>
-/// CLI paths are already resolved against the process current directory by the caller. The output
-/// root is optional: when it is <see langword="null"/> the descriptor directory is used, and every
-/// descriptor pack path is resolved under it (D-M4-14). <see cref="Check"/> validates everything and
-/// writes nothing, and never skips the bake. <see cref="Force"/> bypasses the incremental manifest
-/// skip so a full bake always runs.
+/// The configuration (packs, roots, texture defaults, registrations, processors) lives in
+/// <see cref="BakeProject"/>; these options describe the invocation. <see cref="OutputRoot"/> is
+/// resolved to an absolute path before this instance is created. <see cref="Check"/> validates
+/// everything and writes nothing, and never skips the bake. <see cref="Force"/> is accepted and
+/// reserved for the WP5 incremental skip; WP1 always runs a full bake.
 /// </remarks>
 internal sealed class BakeOptions
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="BakeOptions"/> class.
     /// </summary>
-    /// <param name="projectPath">The absolute descriptor path.</param>
-    /// <param name="hostPath">The absolute generated host assembly path.</param>
-    /// <param name="outputRoot">
-    /// The absolute output root every pack path is joined under, or <see langword="null"/> for the
-    /// descriptor directory.
-    /// </param>
+    /// <param name="outputRoot">The absolute output root every pack path is resolved under.</param>
     /// <param name="mode">The payload compression mode.</param>
     /// <param name="check">Whether to validate without writing packs.</param>
-    /// <param name="force">Whether <c>--force</c> was passed (bypasses the incremental skip).</param>
-    internal BakeOptions(
-        string projectPath,
-        string hostPath,
-        string? outputRoot,
-        BakeMode mode,
-        bool check,
-        bool force)
+    /// <param name="force">Whether <c>--force</c> was passed.</param>
+    internal BakeOptions(string outputRoot, BakeMode mode, bool check, bool force)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(hostPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputRoot);
 
-        ProjectPath = projectPath;
-        HostPath = hostPath;
         OutputRoot = outputRoot;
         Mode = mode;
         Check = check;
         Force = force;
     }
 
-    /// <summary>Gets the absolute descriptor path.</summary>
-    internal string ProjectPath { get; }
-
-    /// <summary>Gets the absolute generated host assembly path.</summary>
-    internal string HostPath { get; }
-
-    /// <summary>
-    /// Gets the absolute output root every pack path is joined under, or <see langword="null"/> for
-    /// the descriptor directory.
-    /// </summary>
-    internal string? OutputRoot { get; }
+    /// <summary>Gets the absolute output root every pack path is joined under.</summary>
+    internal string OutputRoot { get; }
 
     /// <summary>Gets the payload compression mode.</summary>
     internal BakeMode Mode { get; }
@@ -62,8 +39,8 @@ internal sealed class BakeOptions
     internal bool Check { get; }
 
     /// <summary>
-    /// Gets a value indicating whether <c>--force</c> was passed, which bypasses the incremental
-    /// manifest skip and always runs a full bake.
+    /// Gets a value indicating whether <c>--force</c> was passed. WP1 accepts it; WP5 gives it the
+    /// incremental-skip meaning.
     /// </summary>
     internal bool Force { get; }
 }

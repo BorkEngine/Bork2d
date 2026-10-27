@@ -1,61 +1,54 @@
 using System.Text;
 using Bork2d.Api.Assets;
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Hosting;
 using Bork2d.Bake.Sources;
-using Bork2d.Tests.Bake.Hosting;
+using Bork2d.Tests.Bake.Baking;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Sources;
 
 /// <summary>
-/// Binding every discovered source through the generated host, including the canonical diagnostic
-/// paths, UTF-8/BOM handling, and reference sites for the fixture assets.
+/// Binding every discovered source through the explicit registrations, including the canonical
+/// diagnostic paths, UTF-8/BOM handling, and reference sites for the fixture assets.
 /// </summary>
-[Collection(BakeHostFixtureCollection.Name)]
 public sealed class BakeSourceBinderTests
 {
-    private readonly TempBakeFixture _fixture;
-
-    /// <summary>Initializes a new instance of the <see cref="BakeSourceBinderTests"/> class.</summary>
-    /// <param name="fixture">The shared fixture.</param>
-    public BakeSourceBinderTests(TempBakeFixture fixture) => _fixture = fixture;
-
     [Fact]
     public void EveryFixtureSourceBindsInOrder()
     {
+        using var project = TestBakeProject.Create("binder-order");
+        WriteStandardSources(project);
         var diagnostics = new BakeDiagnostics();
 
-        IReadOnlyList<BoundAsset> assets = Bind(_fixture.DescriptorDescriptor, diagnostics);
+        IReadOnlyList<BoundAsset> assets = Bind(project, diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
         Assert.Equal(
-            new[] { "data/config", "hidden/secret", "roots/stats", "sprites/player", "weapons/sword" },
+            new[] { "data/config", "roots/stats", "sprites/player" },
             assets.Select(asset => asset.AssetPath));
         Assert.Equal(
             new[]
             {
-                "BakeFixture.Common.GameConfig",
-                "BakeFixture.Common.HiddenConfig",
-                "BakeFixture.Common.StatsRoot",
+                "Bork2d.BakeFixture.GameConfig",
+                "Bork2d.BakeFixture.StatsRoot",
                 "Bork2d.Api.Assets.SpriteAsset",
-                "Game.Data.Weapon",
             },
             assets.Select(asset => asset.TypeName));
         Assert.All(assets, asset => Assert.Equal("Assets", asset.SourcePath.Split('/')[0]));
-        Assert.All(assets, asset => Assert.True(File.Exists(Path.Combine(_fixture.RootPath, "Assets", asset.RelativeSourcePath.Replace('/', Path.DirectorySeparatorChar)))));
     }
 
     [Fact]
     public void ClassAndStructRootsAndTheirReferenceSitesBind()
     {
+        using var project = TestBakeProject.Create("binder-roots");
+        WriteStandardSources(project);
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BoundAsset> assets = Bind(_fixture.DescriptorDescriptor, diagnostics);
+        IReadOnlyList<BoundAsset> assets = Bind(project, diagnostics);
         Assert.Empty(diagnostics.GetSorted());
 
         BoundAsset config = assets.Single(asset => asset.AssetPath == "data/config");
-        var gameConfig = config.Value;
-        Assert.Equal("BakeFixture.Common.GameConfig", gameConfig.GetType().FullName);
+        var gameConfig = Assert.IsType<Bork2d.BakeFixture.GameConfig>(config.Value);
+        Assert.Equal("campaign", gameConfig.Name);
         BakeReferenceSite texture = Assert.Single(config.References);
         Assert.Equal("texture", texture.MemberPath);
         Assert.Equal("art/player", texture.ReferencePath);
@@ -72,27 +65,27 @@ public sealed class BakeSourceBinderTests
         Assert.Single(sprite.References);
 
         BoundAsset stats = assets.Single(asset => asset.AssetPath == "roots/stats");
-        Assert.Contains("Attack = 7", stats.Value.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Defense = 9", stats.Value.ToString(), StringComparison.Ordinal);
+        Assert.Equal(new Bork2d.BakeFixture.StatsRoot(11, 13), stats.Value);
     }
 
     [Fact]
     public void UnknownKeyUsesTheProjectRelativePathAndTheValueSpan()
     {
-        string project = _fixture.CreateProjectCopy(
-            "unknown-key",
-            ("data/bad.toml", """
-                name = "x"
-                health = 1
-                must = "m"
-                bogus = true
+        using var project = TestBakeProject.Create("binder-unknown-key");
+        project.WriteAsset(
+            "data/bad.toml",
+            """
+            name = "x"
+            health = 1
+            must = "m"
+            bogus = true
 
-                [bork2d]
-                type = "BakeFixture.Common.GameConfig"
-                """));
+            [bork2d]
+            type = "Bork2d.BakeFixture.GameConfig"
+            """);
         var diagnostics = new BakeDiagnostics();
 
-        _ = Bind(Parse(project), diagnostics);
+        _ = Bind(project, diagnostics);
 
         BakeDiagnostic diagnostic = Assert.Single(
             diagnostics.GetSorted(),
@@ -107,12 +100,11 @@ public sealed class BakeSourceBinderTests
     [Fact]
     public void InvalidTomlIsASyntaxDiagnostic()
     {
-        string project = _fixture.CreateProjectCopy(
-            "syntax",
-            ("data/bad.toml", "name = \n"));
+        using var project = TestBakeProject.Create("binder-syntax");
+        project.WriteAsset("data/bad.toml", "name = \n");
         var diagnostics = new BakeDiagnostics();
 
-        _ = Bind(Parse(project), diagnostics);
+        _ = Bind(project, diagnostics);
 
         Assert.Contains(
             diagnostics.GetSorted(),
@@ -124,32 +116,33 @@ public sealed class BakeSourceBinderTests
     [Fact]
     public void Utf8BomIsAcceptedAndStripped()
     {
-        string project = _fixture.CreateProjectCopy("bom");
-        string path = Path.Combine(project, "Assets", "data", "bom.toml");
+        using var project = TestBakeProject.Create("binder-bom");
+        string path = project.FullPath("Assets/data/bom.toml");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         byte[] content = Encoding.UTF8.GetBytes(
-            "name = \"caf\u00e9\"\nhealth = 1\nmust = \"m\"\n\n[bork2d]\ntype = \"BakeFixture.Common.GameConfig\"\n");
+            "name = \"caf\u00e9\"\nhealth = 1\nmust = \"m\"\n\n[bork2d]\n"
+                + "type = \"Bork2d.BakeFixture.GameConfig\"\n");
         File.WriteAllBytes(path, [0xEF, 0xBB, 0xBF, .. content]);
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BoundAsset> assets = Bind(Parse(project), diagnostics);
+        IReadOnlyList<BoundAsset> assets = Bind(project, diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
         BoundAsset asset = Assert.Single(assets);
         Assert.Equal("data/bom", asset.AssetPath);
-        Assert.Equal("caf\u00e9", ((dynamic)asset.Value).Name);
+        Assert.Equal("caf\u00e9", Assert.IsType<Bork2d.BakeFixture.GameConfig>(asset.Value).Name);
     }
 
     [Fact]
     public void InvalidUtf8IsReported()
     {
-        string project = _fixture.CreateProjectCopy("invalid-utf8");
-        string path = Path.Combine(project, "Assets", "data", "bad.toml");
+        using var project = TestBakeProject.Create("binder-invalid-utf8");
+        string path = project.FullPath("Assets/data/bad.toml");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllBytes(path, [0x6E, 0x61, 0x6D, 0x65, 0x20, 0x3D, 0x20, 0xFF, 0xFE]);
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BoundAsset> assets = Bind(Parse(project), diagnostics);
+        IReadOnlyList<BoundAsset> assets = Bind(project, diagnostics);
 
         Assert.Empty(assets);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -160,48 +153,78 @@ public sealed class BakeSourceBinderTests
     [Fact]
     public void ATextureSidecarIsNeverBound()
     {
-        string project = _fixture.CreateProjectCopy(
-            "sidecar",
-            ("art/player.png.toml", "filter = \"nearest\"\n"),
-            ("data/config.toml", """
-                name = "campaign"
-                health = 1
-                must = "m"
-                texture = "art/player"
+        using var project = TestBakeProject.Create("binder-sidecar");
+        project.WriteAsset("art/player.png.toml", "filter = \"nearest\"\n");
+        project.WriteAsset(
+            "data/config.toml",
+            """
+            name = "campaign"
+            health = 1
+            must = "m"
+            texture = "art/player"
 
-                [bork2d]
-                type = "BakeFixture.Common.GameConfig"
-                """));
+            [bork2d]
+            type = "Bork2d.BakeFixture.GameConfig"
+            """);
         var diagnostics = new BakeDiagnostics();
 
-        IReadOnlyList<BoundAsset> assets = Bind(Parse(project), diagnostics);
+        IReadOnlyList<BoundAsset> assets = Bind(project, diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
         BoundAsset asset = Assert.Single(assets);
         Assert.Equal("data/config", asset.AssetPath);
     }
 
-    private IReadOnlyList<BoundAsset> Bind(
-        Bork2d.Bake.Project.ProjectDescriptor descriptor,
-        BakeDiagnostics diagnostics)
+    private static void WriteStandardSources(TestBakeProject project)
     {
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
-        return BakeSourceBinder.BindAll(
-            descriptor,
-            sources,
-            _fixture.Manifest,
-            diagnostics);
+        project.WriteAsset(
+            "data/config.toml",
+            """
+            name = "campaign"
+            health = 100
+            max_players = 4
+            must = "present"
+            tint = [1.0, 0.5, 0.25, 1.0]
+            texture = "art/player"
+
+            [stats]
+            attack = 1
+            defense = 2
+
+            [bork2d]
+            type = "Bork2d.BakeFixture.GameConfig"
+            """);
+        project.WriteAsset(
+            "roots/stats.toml",
+            """
+            attack = 11
+            defense = 13
+
+            [bork2d]
+            type = "Bork2d.BakeFixture.StatsRoot"
+            """);
+        project.WriteAsset(
+            "sprites/player.toml",
+            """
+            texture = "art/player"
+            uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
+            scale = 16.0
+            pivot = [0.5, 0.5]
+            topology = "triangles"
+            indices = [0, 1, 2, 0, 2, 3]
+
+            [bork2d]
+            type = "Bork2d.Api.Assets.SpriteAsset"
+            """);
     }
 
-    private static Bork2d.Bake.Project.ProjectDescriptor Parse(string project)
+    private static IReadOnlyList<BoundAsset> Bind(
+        TestBakeProject project,
+        BakeDiagnostics diagnostics)
     {
-        var diagnostics = new BakeDiagnostics();
-        Bork2d.Bake.Project.ProjectDescriptor? descriptor =
-            Bork2d.Bake.Project.ProjectDescriptorParser.Parse(
-                Path.Combine(project, TempBakeFixture.DescriptorFileName),
-                diagnostics);
-        Assert.NotNull(descriptor);
-        Assert.Empty(diagnostics.GetSorted());
-        return descriptor;
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
+        return BakeSourceBinder.BindAll(project.Project, sources, diagnostics);
     }
 }

@@ -1,35 +1,34 @@
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Project;
 using Bork2d.Bake.Sources;
+using Bork2d.Tests.Bake.Baking;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Sources;
 
 /// <summary>
-/// The source discovery contract (D-M4-13): every typed TOML anywhere under the asset root, its own
-/// <c>[bork2d].type</c> declaration, sidecar discrimination, ordinal order, and missing/malformed
-/// metadata diagnostics.
+/// The source discovery contract: every typed TOML anywhere under a pack root, its own
+/// <c>[bork2d].type</c> declaration resolved against the explicit registrations, sidecar
+/// discrimination, ordinal order, and missing/malformed/unregistered metadata diagnostics.
 /// </summary>
 public sealed class BakeSourceDiscoveryTests
 {
     [Fact]
     public void TypedSourcesAreDiscoveredAnywhereAndOtherFilesAreIgnored()
     {
-        using var directory = TempBakeDirectory.Create();
-        ProjectDescriptor descriptor = Parse(directory);
-        directory.WriteFile(
-            "Assets/data/a.toml",
+        using var project = TestBakeProject.Create("discovery-anywhere");
+        project.WriteAsset(
+            "data/a.toml",
             """
             value = 1
 
             [bork2d]
-            type = "BakeFixture.Common.GameConfig"
+            type = "Bork2d.BakeFixture.StatsRoot"
             """);
-        directory.WriteFile("Assets/data/readme.md", "not a source\n");
-        directory.WriteFile("Assets/art/player.png.toml", "filter = \"nearest\"\n");
-        directory.WriteFile("Assets/art/player.png", "not an image");
-        directory.WriteFile(
-            "Assets/textures/ui/button.toml",
+        project.WriteAsset("data/readme.md", "not a source\n");
+        project.WriteAsset("art/player.png.toml", "filter = \"nearest\"\n");
+        project.WriteAssetBytes("art/player.png", "not an image"u8.ToArray());
+        project.WriteAsset(
+            "textures/ui/button.toml",
             """
             value = 2
 
@@ -38,14 +37,16 @@ public sealed class BakeSourceDiscoveryTests
             """);
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
         Assert.Equal(2, sources.Count);
 
         BakeSource data = Assert.Single(sources, source => source.AssetPath == "data/a");
         Assert.Equal("data/a.toml", data.RelativePath);
-        Assert.Equal("BakeFixture.Common.GameConfig", data.TypeName);
+        Assert.Equal("Bork2d.BakeFixture.StatsRoot", data.TypeName);
         Assert.Equal(4, data.TypeLine);
         Assert.Equal(8, data.TypeColumn);
 
@@ -58,14 +59,15 @@ public sealed class BakeSourceDiscoveryTests
     [Fact]
     public void SourcesAreSortedOrdinalByCanonicalAssetPath()
     {
-        using var directory = TempBakeDirectory.Create();
-        ProjectDescriptor descriptor = Parse(directory);
-        WriteTyped(directory, "Assets/data/zeta.toml", "Type.Zeta");
-        WriteTyped(directory, "Assets/data/alpha.toml", "Type.Alpha");
-        WriteTyped(directory, "Assets/art/beta.toml", "Type.Beta");
+        using var project = TestBakeProject.Create("discovery-sorted");
+        WriteTyped(project, "data/zeta.toml");
+        WriteTyped(project, "data/alpha.toml");
+        WriteTyped(project, "art/beta.toml");
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
         Assert.Equal(
@@ -76,14 +78,15 @@ public sealed class BakeSourceDiscoveryTests
     [Fact]
     public void TypeLessSidecarShapedTomlIsLeftToTheTexturePipeline()
     {
-        using var directory = TempBakeDirectory.Create();
-        ProjectDescriptor descriptor = Parse(directory);
-        directory.WriteFile("Assets/art/player.png.toml", "filter = \"nearest\"\n");
-        directory.WriteFile("Assets/art/player.png", "not an image");
-        WriteTyped(directory, "Assets/data/a.toml", "Type.A");
+        using var project = TestBakeProject.Create("discovery-sidecar");
+        project.WriteAsset("art/player.png.toml", "filter = \"nearest\"\n");
+        project.WriteAssetBytes("art/player.png", "not an image"u8.ToArray());
+        WriteTyped(project, "data/a.toml");
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
         BakeSource source = Assert.Single(sources);
@@ -93,12 +96,13 @@ public sealed class BakeSourceDiscoveryTests
     [Fact]
     public void TypeLessNonSidecarTomlIsAMissingTypeError()
     {
-        using var directory = TempBakeDirectory.Create();
-        ProjectDescriptor descriptor = Parse(directory);
-        directory.WriteFile("Assets/data/notes.toml", "value = 1\n");
+        using var project = TestBakeProject.Create("discovery-missing-type");
+        project.WriteAsset("data/notes.toml", "value = 1\n");
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
 
         Assert.Empty(sources);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -107,35 +111,20 @@ public sealed class BakeSourceDiscoveryTests
     }
 
     [Fact]
-    public void MissingBork2dTableIsAMissingTypeError()
-    {
-        using var directory = TempBakeDirectory.Create();
-        ProjectDescriptor descriptor = Parse(directory);
-        directory.WriteFile("Assets/art/ground.toml", "value = 1\n");
-
-        var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
-
-        Assert.Empty(sources);
-        Assert.Equal(
-            BakeDiagnosticCodes.SourceTypeMissing,
-            Assert.Single(diagnostics.GetSorted()).Code);
-    }
-
-    [Fact]
     public void TypedTomlWithAnExtensionInItsNameIsAnInvalidAssetPath()
     {
-        using var directory = TempBakeDirectory.Create();
-        ProjectDescriptor descriptor = Parse(directory);
-        directory.WriteFile(
-            "Assets/art/player.png.toml",
+        using var project = TestBakeProject.Create("discovery-invalid-path");
+        project.WriteAsset(
+            "art/player.png.toml",
             """
             [bork2d]
-            type = "Type.Player"
+            type = "Bork2d.BakeFixture.StatsRoot"
             """);
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
 
         Assert.Empty(sources);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -147,10 +136,9 @@ public sealed class BakeSourceDiscoveryTests
     [Fact]
     public void MalformedBork2dTableIsAnErrorWithTheValueSpan()
     {
-        using var directory = TempBakeDirectory.Create();
-        ProjectDescriptor descriptor = Parse(directory);
-        directory.WriteFile(
-            "Assets/data/bad.toml",
+        using var project = TestBakeProject.Create("discovery-malformed");
+        project.WriteAsset(
+            "data/bad.toml",
             """
             value = 1
 
@@ -159,7 +147,9 @@ public sealed class BakeSourceDiscoveryTests
             """);
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
 
         Assert.Empty(sources);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -171,18 +161,19 @@ public sealed class BakeSourceDiscoveryTests
     [Fact]
     public void UnknownBork2dKeyIsAnError()
     {
-        using var directory = TempBakeDirectory.Create();
-        ProjectDescriptor descriptor = Parse(directory);
-        directory.WriteFile(
-            "Assets/data/bad.toml",
+        using var project = TestBakeProject.Create("discovery-unknown-key");
+        project.WriteAsset(
+            "data/bad.toml",
             """
             [bork2d]
-            type = "Type.A"
+            type = "Bork2d.BakeFixture.StatsRoot"
             kind = "MessagePack"
             """);
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
 
         Assert.Empty(sources);
         Assert.Equal(
@@ -193,12 +184,13 @@ public sealed class BakeSourceDiscoveryTests
     [Fact]
     public void MissingBork2dTypeIsAnError()
     {
-        using var directory = TempBakeDirectory.Create();
-        ProjectDescriptor descriptor = Parse(directory);
-        directory.WriteFile("Assets/data/bad.toml", "[bork2d]\n");
+        using var project = TestBakeProject.Create("discovery-missing-bork2d-type");
+        project.WriteAsset("data/bad.toml", "[bork2d]\n");
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
 
         Assert.Empty(sources);
         Assert.Equal(
@@ -209,12 +201,13 @@ public sealed class BakeSourceDiscoveryTests
     [Fact]
     public void TomlSyntaxErrorInADataSourceIsReported()
     {
-        using var directory = TempBakeDirectory.Create();
-        ProjectDescriptor descriptor = Parse(directory);
-        directory.WriteFile("Assets/data/bad.toml", "value =\n");
+        using var project = TestBakeProject.Create("discovery-syntax");
+        project.WriteAsset("data/bad.toml", "value =\n");
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
 
         Assert.Empty(sources);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -225,18 +218,19 @@ public sealed class BakeSourceDiscoveryTests
     [Fact]
     public void DuplicateTypeKeyIsASyntaxError()
     {
-        using var directory = TempBakeDirectory.Create();
-        ProjectDescriptor descriptor = Parse(directory);
-        directory.WriteFile(
-            "Assets/data/bad.toml",
+        using var project = TestBakeProject.Create("discovery-duplicate-key");
+        project.WriteAsset(
+            "data/bad.toml",
             """
             [bork2d]
-            type = "Type.A"
-            type = "Type.B"
+            type = "Bork2d.BakeFixture.StatsRoot"
+            type = "Bork2d.BakeFixture.StatsRoot"
             """);
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
 
         Assert.Empty(sources);
         Assert.Equal(
@@ -247,12 +241,13 @@ public sealed class BakeSourceDiscoveryTests
     [Fact]
     public void NonTableBork2dRootValueIsAnError()
     {
-        using var directory = TempBakeDirectory.Create();
-        ProjectDescriptor descriptor = Parse(directory);
-        directory.WriteFile("Assets/data/bad.toml", "bork2d = \"Type.A\"\n");
+        using var project = TestBakeProject.Create("discovery-non-table");
+        project.WriteAsset("data/bad.toml", "bork2d = \"Bork2d.BakeFixture.StatsRoot\"\n");
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
 
         Assert.Empty(sources);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -262,55 +257,56 @@ public sealed class BakeSourceDiscoveryTests
     }
 
     [Fact]
-    public void TheDescriptorInsideTheAssetRootIsNotADataSource()
+    public void UnregisteredBork2dTypeIsBK1011WithTheValueSpanAndHint()
     {
-        using var directory = TempBakeDirectory.Create();
-        directory.CreateDirectory("Assets");
-        string descriptorPath = directory.WriteFile(
-            "Assets/bork2d.project.toml",
+        using var project = TestBakeProject.Create("discovery-unregistered");
+        project.WriteAsset(
+            "data/missing.toml",
             """
-            schema = 1
+            value = 1
 
-            [[assets]]
-            root = "."
-            pack = "assets.pck"
+            [bork2d]
+            type = "Game.Data.Missing"
             """);
-        var parseDiagnostics = new BakeDiagnostics();
-        ProjectDescriptor descriptor = Assert.IsType<ProjectDescriptor>(
-            ProjectDescriptorParser.Parse(descriptorPath, parseDiagnostics));
-        Assert.Empty(parseDiagnostics.GetSorted());
-
-        WriteTyped(directory, "Assets/data/a.toml", "Type.A");
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
+
+        Assert.Empty(sources);
+        BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
+        Assert.Equal(BakeDiagnosticCodes.AssetTypeNotRegistered, diagnostic.Code);
+        Assert.Equal(4, diagnostic.Line);
+        Assert.Equal(8, diagnostic.Column);
+        Assert.Contains("Game.Data.Missing", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("RegisterAsset<Game.Data.Missing>()", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DefaultAssetsAreRegisteredWithoutGameTypes()
+    {
+        using var project = TestBakeProject.Create(
+            "discovery-default-assets",
+            registerFixtureTypes: false);
+        project.WriteAsset(
+            "sprites/player.toml",
+            """
+            [bork2d]
+            type = "Bork2d.Api.Assets.SpriteAsset"
+            """);
+
+        var diagnostics = new BakeDiagnostics();
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            project.Project,
+            diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
         Assert.Single(sources);
     }
 
-    private static void WriteTyped(TempBakeDirectory directory, string path, string typeName)
-        => directory.WriteFile(
+    private static void WriteTyped(TestBakeProject project, string path)
+        => project.WriteAsset(
             path,
-            $"value = 1\n\n[bork2d]\ntype = \"{typeName}\"\n");
-
-    private static ProjectDescriptor Parse(TempBakeDirectory directory)
-    {
-        directory.CreateDirectory("Assets");
-        string descriptorPath = directory.WriteFile(
-            "bork2d.project.toml",
-            """
-            schema = 1
-
-            [[assets]]
-            root = "Assets"
-            pack = "assets.pck"
-            """);
-
-        var diagnostics = new BakeDiagnostics();
-        ProjectDescriptor? descriptor = ProjectDescriptorParser.Parse(descriptorPath, diagnostics);
-        Assert.NotNull(descriptor);
-        Assert.Empty(diagnostics.GetSorted());
-        return descriptor;
-    }
+            "value = 1\n\n[bork2d]\ntype = \"Bork2d.BakeFixture.StatsRoot\"\n");
 }

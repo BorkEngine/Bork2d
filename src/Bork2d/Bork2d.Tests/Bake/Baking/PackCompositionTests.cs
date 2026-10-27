@@ -1,22 +1,19 @@
-using Bork2d.Api;
 using Bork2d.Api.Assets;
 using Bork2d.Assets.Pack;
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Hosting;
-using Bork2d.Bake.Project;
 using Bork2d.Bake.Sources;
 using Bork2d.Bake.Textures;
-using Bork2d.Bake.Toml;
 using Bork2d.Tests.Assets.Service;
+using Bork2d.Tests.Bake.Baking;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Baking;
 
 /// <summary>
-/// Pack composition and the atomic pack writer: deterministic composition, the destination-directory
-/// creation, replacement of an existing pack, and the guarantee that a failure leaves the previous
-/// pack byte-for-byte intact with no temporary file behind.
+/// Pack composition and the atomic pack writer: deterministic composition through an explicit typed
+/// registration, destination-directory creation, replacement of an existing pack, and the guarantee
+/// that a failure leaves the previous pack byte-for-byte intact with no temporary file behind.
 /// </summary>
 public sealed class PackCompositionTests
 {
@@ -26,6 +23,7 @@ public sealed class PackCompositionTests
     [Fact]
     public async Task ComposesCustomDataAndTextureEntriesIntoOnePack()
     {
+        using var project = TestBakeProject.Create("composition");
         using var directory = TempBakeDirectory.Create();
         var diagnostics = new BakeDiagnostics();
         var game = new Bork2d.BakeFixture.GameConfig
@@ -45,7 +43,7 @@ public sealed class PackCompositionTests
 
         PackBuilder? builder = PackComposer.Compose(
             index,
-            new TestManifest(),
+            project.Project,
             PackCompressionMode.Debug,
             diagnostics);
         Assert.NotNull(builder);
@@ -133,11 +131,16 @@ public sealed class PackCompositionTests
     [Fact]
     public void ComposerReportsAnInternalBK5001WhenThePackWriterRejectsAnEntry()
     {
+        using var project = TestBakeProject.Create("composer-reject");
         using var directory = TempBakeDirectory.Create();
         var diagnostics = new BakeDiagnostics();
 
+        var value = new Bork2d.BakeFixture.GameConfig { Name = "campaign" };
+
+        // A non-canonical output path is rejected by PackBuilder when the typed writer runs; the
+        // composer converts the writer exception into an internal baker diagnostic.
         BakedAssetIndex index = BakedAssetIndex.Build(
-            [Custom("data/bad", new object(), typeName: "Throw")],
+            [Custom("Bad Path", value)],
             [],
             directory.RootPath,
             diagnostics);
@@ -145,24 +148,21 @@ public sealed class PackCompositionTests
 
         PackBuilder? builder = PackComposer.Compose(
             index,
-            new TestManifest(),
+            project.Project,
             PackCompressionMode.Debug,
             diagnostics);
 
         Assert.Null(builder);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
         Assert.Equal(BakeDiagnosticCodes.PackComposeFailed, diagnostic.Code);
-        Assert.Equal("data/bad", diagnostic.AssetPath);
+        Assert.Equal("Bad Path", diagnostic.AssetPath);
         Assert.Contains("Internal bake error", diagnostic.Message, StringComparison.Ordinal);
     }
 
-    private static BoundAsset Custom(
-        string assetPath,
-        object value,
-        string? typeName = null)
+    private static BoundAsset Custom(string assetPath, object value)
         => new(
             assetPath,
-            typeName ?? typeof(Bork2d.BakeFixture.GameConfig).FullName!,
+            typeof(Bork2d.BakeFixture.GameConfig).FullName!,
             value,
             $"Assets/{assetPath}.toml",
             $"{assetPath}.toml",
@@ -184,36 +184,4 @@ public sealed class PackCompositionTests
             payload,
             Path.Combine(projectDirectory, "Assets", "textures", "player.png"),
             TextureImportSettings.Defaults(BakeTextureFilter.Linear, BakeTextureWrap.Clamp));
-
-    private sealed class TestManifest : IBakeManifest
-    {
-        public IReadOnlyList<BakeTypeRegistration> Types => [];
-
-        public object? Bind(string typeName, BakeBindContext context)
-            => throw new NotSupportedException();
-
-        public void AddToPack(
-            PackBuilder builder,
-            string typeName,
-            string assetPath,
-            object value)
-        {
-            if (string.Equals(typeName, "Throw", StringComparison.Ordinal))
-            {
-                throw new Bork2dException("the pack writer rejected a reference");
-            }
-
-            if (value is Bork2d.BakeFixture.GameConfig game)
-            {
-                builder.AddMessagePack(assetPath, game);
-                return;
-            }
-
-            throw new NotSupportedException($"Unexpected value '{value.GetType()}'.");
-        }
-
-        public void ValidateShapes(BakeDiagnostics diagnostics)
-        {
-        }
-    }
 }

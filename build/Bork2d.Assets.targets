@@ -1,0 +1,70 @@
+<Project>
+
+    <!--
+        Bork2d.Assets.targets - MSBuild integration for a game-owned assets executable.
+
+        Import this file from the assets executable project (for example MyGame.Assets or
+        Bork2d.BakeFixture.Assets). The executable owns the pack paths, roots, texture defaults,
+        explicit data-type registrations, and processors, so MSBuild needs no pack-path property and
+        there is no project descriptor and no generated host.
+
+        After Build the target runs the freshly built executable's `bake` command with the project
+        directory as the project root and a mode derived from $(Configuration). The default output
+        root is the executable's own directory (AppContext.BaseDirectory), so the packs sit next to
+        the assets executable and a desktop/AOT app copies them with Bork2d.Assets.Copy.targets.
+
+        On Clean the target asks the executable to delete every configured pack output. Clean runs
+        before the SDK deletes the executable, because the executable is the only component that
+        knows the configured pack paths.
+
+        Properties:
+          Bork2dAssetsMode          debug|release; default derived from $(Configuration)
+          Bork2dAssetsVerbose       true adds the CLI verbose switch
+          Bork2dAssetsEnabled       false disables the integration
+          Bork2dAssetsTargetFramework  informational target framework for consumers; default net11.0
+          Bork2dDotNetHost          dotnet host executable; default dotnet
+    -->
+
+    <PropertyGroup>
+        <Bork2dAssetsTargetFramework Condition="'$(Bork2dAssetsTargetFramework)' == ''">net11.0</Bork2dAssetsTargetFramework>
+        <Bork2dDotNetHost Condition="'$(Bork2dDotNetHost)' == ''">dotnet</Bork2dDotNetHost>
+        <Bork2dAssetsMode Condition="'$(Bork2dAssetsMode)' == '' and '$(Configuration)' == 'Release'">release</Bork2dAssetsMode>
+        <Bork2dAssetsMode Condition="'$(Bork2dAssetsMode)' == ''">debug</Bork2dAssetsMode>
+        <Bork2dAssetsVerbose Condition="'$(Bork2dAssetsVerbose)' == ''">false</Bork2dAssetsVerbose>
+        <_Bork2dAssetsVerboseSwitch Condition="'$(Bork2dAssetsVerbose)' == 'true'"> --verbose</_Bork2dAssetsVerboseSwitch>
+        <_Bork2dAssetsVerboseSwitch Condition="'$(_Bork2dAssetsVerboseSwitch)' == ''"></_Bork2dAssetsVerboseSwitch>
+    </PropertyGroup>
+
+    <Target Name="Bork2dAssetsBake"
+            AfterTargets="Build"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dAssetsEnabled)' != 'false' and '$(_Bork2dAssetsBakeCompleted)' != 'true'">
+        <PropertyGroup>
+            <_Bork2dAssetsBakeCompleted>true</_Bork2dAssetsBakeCompleted>
+        </PropertyGroup>
+        <Error Condition="!Exists('$(TargetPath)')"
+               Text="Bork2d assets: the assets executable was not produced at '$(TargetPath)'." />
+        <Exec Command="&quot;$(Bork2dDotNetHost)&quot; &quot;$(TargetPath)&quot; bake --project-root &quot;$(MSBuildProjectDirectory)&quot; --mode &quot;$(Bork2dAssetsMode)&quot;$(_Bork2dAssetsVerboseSwitch)"
+              WorkingDirectory="$(MSBuildProjectDirectory)"
+              StandardOutputImportance="high"
+              StandardErrorImportance="high" />
+    </Target>
+
+    <!--
+        Clean runs before CoreClean deletes the executable: the executable is the only component that
+        knows the configured pack outputs. A never-built project has nothing to clean. Hook CoreClean
+        rather than Clean because a target's BeforeTargets run after its DependsOnTargets, and Clean
+        depends on CoreClean (which deletes the executable).
+    -->
+    <Target Name="Bork2dAssetsClean"
+            BeforeTargets="CoreClean"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dAssetsEnabled)' != 'false' and '$(_Bork2dAssetsCleanCompleted)' != 'true' and Exists('$(TargetPath)')">
+        <PropertyGroup>
+            <_Bork2dAssetsCleanCompleted>true</_Bork2dAssetsCleanCompleted>
+        </PropertyGroup>
+        <Exec Command="&quot;$(Bork2dDotNetHost)&quot; &quot;$(TargetPath)&quot; clean --project-root &quot;$(MSBuildProjectDirectory)&quot;$(_Bork2dAssetsVerboseSwitch)"
+              WorkingDirectory="$(MSBuildProjectDirectory)"
+              StandardOutputImportance="high"
+              StandardErrorImportance="high" />
+    </Target>
+
+</Project>

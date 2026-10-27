@@ -9,20 +9,20 @@ public sealed class BakeDiagnosticsTests
     public void DiagnosticsSortByFileLineColumnCodeThenMessage()
     {
         var diagnostics = new BakeDiagnostics();
-        diagnostics.Add(BakeSeverity.Error, "BK1002", "second", "/z/descriptor.toml", 2, 1);
-        diagnostics.Add(BakeSeverity.Error, "BK1001", "later column", "/a/descriptor.toml", 1, 5);
-        diagnostics.Add(BakeSeverity.Error, "BK1001", "b message", "/a/descriptor.toml", 1, 2);
-        diagnostics.Add(BakeSeverity.Error, "BK1001", "a message", "/a/descriptor.toml", 1, 2);
+        diagnostics.Add(BakeSeverity.Error, "BK1002", "second", "/z/project.toml", 2, 1);
+        diagnostics.Add(BakeSeverity.Error, "BK1001", "later column", "/a/project.toml", 1, 5);
+        diagnostics.Add(BakeSeverity.Error, "BK1001", "b message", "/a/project.toml", 1, 2);
+        diagnostics.Add(BakeSeverity.Error, "BK1001", "a message", "/a/project.toml", 1, 2);
 
         BakeDiagnostic[] sorted = [.. diagnostics.GetSorted()];
 
         Assert.Equal(
             new[]
             {
-                "/a/descriptor.toml(1,2): error BK1001: a message",
-                "/a/descriptor.toml(1,2): error BK1001: b message",
-                "/a/descriptor.toml(1,5): error BK1001: later column",
-                "/z/descriptor.toml(2,1): error BK1002: second",
+                "/a/project.toml(1,2): error BK1001: a message",
+                "/a/project.toml(1,2): error BK1001: b message",
+                "/a/project.toml(1,5): error BK1001: later column",
+                "/z/project.toml(2,1): error BK1002: second",
             },
             sorted.Select(diagnostic => diagnostic.Format()));
     }
@@ -55,12 +55,12 @@ public sealed class BakeDiagnosticsTests
                 .Format());
 
         Assert.Equal(
-            "descriptor.toml: warning BK1002: file only",
+            "project.toml: warning BK1002: file only",
             new BakeDiagnostic(
                 BakeSeverity.Warning,
                 "BK1002",
                 "file only",
-                "descriptor.toml",
+                "project.toml",
                 null,
                 null,
                 null,
@@ -68,12 +68,12 @@ public sealed class BakeDiagnosticsTests
                 .Format());
 
         Assert.Equal(
-            "descriptor.toml(7): info BK1003: line only",
+            "project.toml(7): info BK1003: line only",
             new BakeDiagnostic(
                 BakeSeverity.Info,
                 "BK1003",
                 "line only",
-                "descriptor.toml",
+                "project.toml",
                 7,
                 null,
                 null,
@@ -99,8 +99,10 @@ public sealed class BakeDiagnosticsTests
     [Fact]
     public void CodesStayInsideTheDocumentedRanges()
     {
-        Assert.StartsWith("BK1", BakeDiagnosticCodes.DescriptorReadFailed, StringComparison.Ordinal);
-        Assert.StartsWith("BK1", BakeDiagnosticCodes.DescriptorUnknownKey, StringComparison.Ordinal);
+        Assert.StartsWith("BK1", BakeDiagnosticCodes.ProjectRootInvalid, StringComparison.Ordinal);
+        Assert.StartsWith("BK1", BakeDiagnosticCodes.AssetTypeNotRegistered, StringComparison.Ordinal);
+        Assert.StartsWith("BK1", BakeDiagnosticCodes.SourceTypeMissing, StringComparison.Ordinal);
         Assert.StartsWith("BK2", BakeDiagnosticCodes.TomlSyntax, StringComparison.Ordinal);
+        Assert.StartsWith("BK5", BakeDiagnosticCodes.PackWriteFailed, StringComparison.Ordinal);
     }
 }

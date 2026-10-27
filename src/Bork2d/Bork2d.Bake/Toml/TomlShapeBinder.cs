@@ -55,8 +55,25 @@ internal static class TomlShapeBinder
         where T : IShapeable<T>
     {
         ArgumentNullException.ThrowIfNull(context);
+        return Bind(T.GetTypeShape(), context);
+    }
+
+    /// <summary>Binds a parsed document into a type described by a compiled shape.</summary>
+    /// <remarks>
+    /// This is the non-generic entry point the processor framework uses for
+    /// <c>AssetProcessor&lt;TSidecar&gt;</c> sidecars: the public base class carries
+    /// <c>TSidecar.GetTypeShape()</c> through <see cref="PolyType.ITypeShape"/>, so the framework never
+    /// needs a generic type parameter or reflection. The generic overload forwards here.
+    /// </remarks>
+    /// <param name="shape">The compiled shape of the type to bind.</param>
+    /// <param name="context">The per-source binding context.</param>
+    /// <returns>The bound value, or a default value when a diagnostic was reported.</returns>
+    internal static object? Bind(ITypeShape shape, BakeBindContext context)
+    {
+        ArgumentNullException.ThrowIfNull(shape);
+        ArgumentNullException.ThrowIfNull(context);
         return BindShape(
-            T.GetTypeShape(),
+            shape,
             context,
             BakeBindNode.Root(CreateBindRoot(context.Root)));
     }

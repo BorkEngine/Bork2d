@@ -1,5 +1,4 @@
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Project;
 using Bork2d.Bake.Textures;
 using Bork2d.Tests.TestSupport;
 using Xunit;
@@ -30,7 +29,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         BakedTexture texture = Assert.Single(result.Textures);
@@ -53,7 +52,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/rgb.png", TextureImageFactory.RgbPng());
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal(
             new byte[]
@@ -74,7 +73,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/gray.png", TextureImageFactory.GrayscalePng());
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal(
             new byte[]
@@ -93,7 +92,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/palette.png", TextureImageFactory.PalettePng());
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal(_rgbaPayload, texture.Payload);
     }
@@ -104,7 +103,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/tile.bmp", TextureImageFactory.Bmp24());
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal(_checkerboardPayload, texture.Payload);
         Assert.Equal("textures/tile", texture.AssetPath);
@@ -118,7 +117,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/tile.tga", TextureImageFactory.Tga24(topLeftOrigin));
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal(_checkerboardPayload, texture.Payload);
     }
@@ -129,7 +128,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/rle.tga", TextureImageFactory.RleTga());
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         BakedTexture texture = Assert.Single(result.Textures);
@@ -152,7 +151,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/photo.jpg", TextureImageFactory.TinyJpeg());
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         byte[] expected =
         [
@@ -175,7 +174,7 @@ public sealed class TexturePipelineTests
         project.WriteImage("textures/Tile.BMP", TextureImageFactory.Bmp24());
         project.WriteImage("textures/Panel.TGA", TextureImageFactory.Tga24(topLeftOrigin: true));
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         Assert.Equal(
@@ -190,14 +189,14 @@ public sealed class TexturePipelineTests
     }
 
     [Fact]
-    public void DescriptorDefaultsComeFromTheProjectDescriptor()
+    public void TextureDefaultsComeFromTheProjectConfiguration()
     {
         using var project = TextureTestProject.Create(
             BakeTextureFilter.Nearest,
             BakeTextureWrap.Repeat);
         project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal("nearest", texture.Descriptor.Filter);
         Assert.Equal("repeat", texture.Descriptor.Wrap);
@@ -209,7 +208,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/ui/button.png", TextureImageFactory.RgbaPng());
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal("textures/ui/button", texture.AssetPath);
         Assert.Equal("textures/ui/button-raw", texture.PayloadPath);
@@ -221,7 +220,7 @@ public sealed class TexturePipelineTests
     {
         using var project = TextureTestProject.Create();
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         Assert.Empty(result.Textures);
@@ -236,7 +235,7 @@ public sealed class TexturePipelineTests
         project.WriteImage("textures/layers.psd", [1, 2, 3, 4]);
         project.WriteText("art/readme.txt", "not an asset");
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         Assert.Empty(result.Textures);
@@ -248,7 +247,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/broken.png", [1, 2, 3, 4]);
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -266,7 +265,7 @@ public sealed class TexturePipelineTests
         byte[] complete = TextureImageFactory.RgbaPng();
         project.WriteImage("textures/truncated.png", complete[..(complete.Length / 2)]);
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -281,7 +280,7 @@ public sealed class TexturePipelineTests
         byte[] complete = TextureImageFactory.Bmp24();
         project.WriteImage("textures/cut.bmp", complete[..^4]);
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -297,7 +296,7 @@ public sealed class TexturePipelineTests
         byte[] complete = TextureImageFactory.Tga24(topLeftOrigin: true);
         project.WriteImage("textures/cut.tga", complete[..^6]);
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -313,7 +312,7 @@ public sealed class TexturePipelineTests
         byte[] complete = TextureImageFactory.TinyJpeg();
         project.WriteImage("textures/cut.jpg", complete[..(complete.Length / 2)]);
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -330,7 +329,7 @@ public sealed class TexturePipelineTests
         byte[] trailing = new byte[256];
         project.WriteImage("textures/trailing.jpg", [.. complete, .. trailing]);
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         BakedTexture texture = Assert.Single(result.Textures);
@@ -355,7 +354,7 @@ public sealed class TexturePipelineTests
         byte[] trailing = new byte[40000];
         project.WriteImage("textures/padded.jpg", [.. complete, .. trailing]);
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         BakedTexture texture = Assert.Single(result.Textures);
@@ -370,7 +369,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/text.png", "this is definitely not an image"u8.ToArray());
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -385,7 +384,7 @@ public sealed class TexturePipelineTests
             "textures/deep.png",
             TextureImageFactory.HeaderOnlyPng(1, 1, bitDepth: 16, colorType: 2));
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -404,7 +403,7 @@ public sealed class TexturePipelineTests
             "textures/odd.png",
             TextureImageFactory.HeaderOnlyPng(width, height));
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -417,7 +416,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/odd.bmp", TextureImageFactory.HeaderOnlyBmp(100000, 100000));
 
-        BakeDiagnostic error = Assert.Single(TexturePipeline.Import(project.Descriptor).Diagnostics);
+        BakeDiagnostic error = Assert.Single(TexturePipeline.Import(project.Project).Diagnostics);
 
         Assert.Equal(TextureDiagnosticCodes.TextureDimensions, error.Code);
     }
@@ -428,7 +427,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/odd.bmp", TextureImageFactory.HeaderOnlyBmp(0, 2));
 
-        BakeDiagnostic error = Assert.Single(TexturePipeline.Import(project.Descriptor).Diagnostics);
+        BakeDiagnostic error = Assert.Single(TexturePipeline.Import(project.Project).Diagnostics);
 
         Assert.Equal(TextureDiagnosticCodes.TextureDimensions, error.Code);
     }
@@ -439,7 +438,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/core.bmp", TextureImageFactory.CoreBmp());
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         BakedTexture texture = Assert.Single(result.Textures);
@@ -459,7 +458,7 @@ public sealed class TexturePipelineTests
             "textures/wide.bmp",
             TextureImageFactory.CoreBmp(65535, 1));
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         BakedTexture texture = Assert.Single(result.Textures);
@@ -476,7 +475,7 @@ public sealed class TexturePipelineTests
             "textures/odd.bmp",
             TextureImageFactory.HeaderOnlyBmpCore(1, 0));
 
-        BakeDiagnostic error = Assert.Single(TexturePipeline.Import(project.Descriptor).Diagnostics);
+        BakeDiagnostic error = Assert.Single(TexturePipeline.Import(project.Project).Diagnostics);
 
         Assert.Equal(TextureDiagnosticCodes.TextureDimensions, error.Code);
     }
@@ -487,7 +486,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/odd.tga", TextureImageFactory.HeaderOnlyTga(65535, 65535));
 
-        BakeDiagnostic error = Assert.Single(TexturePipeline.Import(project.Descriptor).Diagnostics);
+        BakeDiagnostic error = Assert.Single(TexturePipeline.Import(project.Project).Diagnostics);
 
         Assert.Equal(TextureDiagnosticCodes.TextureDimensions, error.Code);
     }
@@ -498,7 +497,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/odd.tga", TextureImageFactory.HeaderOnlyTga(0, 2));
 
-        BakeDiagnostic error = Assert.Single(TexturePipeline.Import(project.Descriptor).Diagnostics);
+        BakeDiagnostic error = Assert.Single(TexturePipeline.Import(project.Project).Diagnostics);
 
         Assert.Equal(TextureDiagnosticCodes.TextureDimensions, error.Code);
     }
@@ -510,7 +509,7 @@ public sealed class TexturePipelineTests
         project.WriteImage("textures/seam.png", [9, 9, 9]);
 
         TextureBakeResult result = TexturePipeline.Import(
-            project.Descriptor,
+            project.Project,
             FixedImage(0, 0, []));
 
         Assert.Empty(result.Textures);
@@ -525,7 +524,7 @@ public sealed class TexturePipelineTests
         project.WriteImage("textures/seam.png", [9, 9, 9]);
 
         TextureBakeResult result = TexturePipeline.Import(
-            project.Descriptor,
+            project.Project,
             FixedImage(100000, 100000, []));
 
         Assert.Empty(result.Textures);
@@ -540,7 +539,7 @@ public sealed class TexturePipelineTests
         project.WriteImage("textures/seam.png", [9, 9, 9]);
 
         TextureBakeResult result = TexturePipeline.Import(
-            project.Descriptor,
+            project.Project,
             FixedImage(2, 2, [1, 2, 3]));
 
         Assert.Empty(result.Textures);
@@ -555,7 +554,7 @@ public sealed class TexturePipelineTests
         project.WriteImage("textures/seam.png", [9, 9, 9]);
         var decoder = new StubTextureDecoder(_ => throw new OutOfMemoryException());
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor, decoder);
+        TextureBakeResult result = TexturePipeline.Import(project.Project, decoder);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -570,7 +569,7 @@ public sealed class TexturePipelineTests
         project.WriteImage("textures/scan.jpg", [9, 9, 9]);
 
         BakedTexture texture = Assert.Single(
-            TexturePipeline.Import(project.Descriptor, FixedImage(1, 1, [1, 2, 3, 4])).Textures);
+            TexturePipeline.Import(project.Project, FixedImage(1, 1, [1, 2, 3, 4])).Textures);
 
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, texture.Payload);
         Assert.Equal("textures/scan", texture.AssetPath);
@@ -585,7 +584,7 @@ public sealed class TexturePipelineTests
         project.WriteImage("textures/Player.png", TextureImageFactory.RgbaPng());
         project.WriteImage("textures/player.jpg", TextureImageFactory.TinyJpeg());
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -603,7 +602,7 @@ public sealed class TexturePipelineTests
         project.WriteImage("textures/tile.png", TextureImageFactory.RgbaPng());
         project.WriteImage("textures/tile.jpeg", TextureImageFactory.TinyJpeg());
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         Assert.Equal(
@@ -617,7 +616,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("art/player.png", TextureImageFactory.RgbaPng());
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal("art/player", texture.AssetPath);
         Assert.Equal("art/player-raw", texture.PayloadPath);
@@ -631,7 +630,7 @@ public sealed class TexturePipelineTests
         project.WriteImage("art/player.png", TextureImageFactory.RgbaPng());
         project.WriteImage("art/player-raw.png", TextureImageFactory.RgbaPng());
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         Assert.Equal(
@@ -654,7 +653,7 @@ public sealed class TexturePipelineTests
             """);
         project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         BakedTexture texture = Assert.Single(result.Textures);
@@ -674,7 +673,7 @@ public sealed class TexturePipelineTests
             type = "Type.Player"
             """);
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         BakedTexture texture = Assert.Single(result.Textures);
@@ -688,7 +687,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteText("textures/notes.toml", "filter = \"nearest\"\n");
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         Assert.Empty(result.Textures);
@@ -700,7 +699,7 @@ public sealed class TexturePipelineTests
         using var project = TextureTestProject.Create();
         project.WriteImage("textures/bad name.png", TextureImageFactory.RgbaPng());
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -716,7 +715,7 @@ public sealed class TexturePipelineTests
         project.WriteImage("textures/alpha.png", TextureImageFactory.RgbaPng());
         project.WriteImage("textures/middle.png", TextureImageFactory.RgbaPng());
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Equal(
             new[] { "textures/alpha", "textures/middle", "textures/zeta" },
@@ -730,7 +729,7 @@ public sealed class TexturePipelineTests
         project.WriteImage("textures/z bad.png", TextureImageFactory.RgbaPng());
         project.WriteImage("textures/a bad.png", TextureImageFactory.RgbaPng());
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Equal(
             new[]
@@ -749,7 +748,7 @@ public sealed class TexturePipelineTests
         string link = project.FullPath("textures/link.png");
         File.CreateSymbolicLink(link, source);
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         BakedTexture texture = Assert.Single(result.Textures);
@@ -772,7 +771,7 @@ public sealed class TexturePipelineTests
         string link = project.FullPath("textures/linked");
         Directory.CreateSymbolicLink(link, outside);
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         Assert.Empty(result.Textures);

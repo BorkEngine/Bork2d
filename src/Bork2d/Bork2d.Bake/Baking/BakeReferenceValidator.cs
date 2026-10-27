@@ -1,6 +1,5 @@
 using Bork2d.Assets.Vfs;
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Hosting;
 using Bork2d.Bake.Sources;
 
 namespace Bork2d.Bake.Baking;

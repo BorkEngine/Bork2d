@@ -1,0 +1,93 @@
+<Project>
+
+    <!--
+        Bork2d.Assets.Copy.targets - build/publish integration for a desktop or AOT app that consumes
+        packs baked by an assets executable.
+
+        Import this file from the app project and set:
+          Bork2dAssetsProjectDirectory  the assets executable project directory (also the project
+                                        root used to validate the configuration)
+          Bork2dAssetsExecutable        the built assets executable assembly (for example
+                                        ...\bin\Debug\net11.0\Bork2d.BakeFixture.Assets.dll)
+          Bork2dAssetsProjectFile       optional assets executable project; when set, the targets build
+                                        it out of process before copying
+          Bork2dAssetsTargetFramework   target framework used in the executable path; default net11.0
+          Bork2dDotNetHost              dotnet host executable; default dotnet
+
+        The app references the assets project with ReferenceOutputAssembly="false" for build order
+        only, so neither the builder nor the assets executable enters its compile or publish graph.
+        After Build the target asks the executable to copy every configured pack to $(TargetDir);
+        after Publish it copies them to $(PublishDir). Clean is owned by the assets project.
+
+        Optional: Bork2dAssetsAssemblyName, used to derive Bork2dAssetsExecutable when it is not set
+        explicitly; Bork2dAssetsEnabled=false disables the integration.
+    -->
+
+    <PropertyGroup>
+        <Bork2dAssetsTargetFramework Condition="'$(Bork2dAssetsTargetFramework)' == ''">net11.0</Bork2dAssetsTargetFramework>
+        <Bork2dDotNetHost Condition="'$(Bork2dDotNetHost)' == ''">dotnet</Bork2dDotNetHost>
+        <Bork2dAssetsExecutable Condition="'$(Bork2dAssetsExecutable)' == '' and '$(Bork2dAssetsProjectDirectory)' != '' and '$(Bork2dAssetsAssemblyName)' != ''">$(Bork2dAssetsProjectDirectory)\bin\$(Configuration)\$(Bork2dAssetsTargetFramework)\$(Bork2dAssetsAssemblyName).dll</Bork2dAssetsExecutable>
+        <Bork2dAssetsMode Condition="'$(Bork2dAssetsMode)' == '' and '$(Configuration)' == 'Release'">release</Bork2dAssetsMode>
+        <Bork2dAssetsMode Condition="'$(Bork2dAssetsMode)' == ''">debug</Bork2dAssetsMode>
+        <Bork2dAssetsVerbose Condition="'$(Bork2dAssetsVerbose)' == ''">false</Bork2dAssetsVerbose>
+        <_Bork2dAssetsVerboseSwitch Condition="'$(Bork2dAssetsVerbose)' == 'true'"> --verbose</_Bork2dAssetsVerboseSwitch>
+        <_Bork2dAssetsVerboseSwitch Condition="'$(_Bork2dAssetsVerboseSwitch)' == ''"></_Bork2dAssetsVerboseSwitch>
+    </PropertyGroup>
+
+    <Target Name="Bork2dValidateAssetsCopyConfiguration"
+            BeforeTargets="Bork2dCopyAssetsToBuild;Bork2dCopyAssetsToPublish"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dAssetsEnabled)' != 'false'">
+        <Error Condition="'$(Bork2dAssetsProjectDirectory)' == ''"
+               Text="Bork2d assets: set Bork2dAssetsProjectDirectory to the assets executable project directory." />
+        <Error Condition="'$(Bork2dAssetsExecutable)' == ''"
+               Text="Bork2d assets: set Bork2dAssetsExecutable to the built assets executable assembly." />
+    </Target>
+
+    <!--
+        Builds the assets executable out of process when its project file is configured. This keeps
+        the tools out of the app's output and publish graph: SDK executable references copy their
+        apphost/deps/runtimeconfig transitively and reject a self-contained reference to a JIT
+        executable. RemoveProperties keeps the app's RID/publish settings off the assets build so the
+        executable stays at its documented $(Configuration)/net11.0 path.
+    -->
+    <Target Name="Bork2dBuildAssetsExecutable"
+            DependsOnTargets="Bork2dValidateAssetsCopyConfiguration"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dAssetsEnabled)' != 'false' and '$(Bork2dAssetsProjectFile)' != '' and Exists('$(Bork2dAssetsProjectFile)')">
+        <MSBuild Projects="$(Bork2dAssetsProjectFile)"
+                 Targets="Build"
+                 Properties="Configuration=$(Configuration)"
+                 RemoveProperties="RuntimeIdentifier;SelfContained;OutDir;OutputPath;PublishDir;BaseOutputPath;BaseIntermediateOutputPath" />
+        <Error Condition="!Exists('$(Bork2dAssetsExecutable)')"
+               Text="Bork2d assets: the assets executable was not produced at '$(Bork2dAssetsExecutable)'." />
+    </Target>
+
+    <Target Name="Bork2dCopyAssetsToBuild"
+            AfterTargets="Build"
+            DependsOnTargets="Bork2dBuildAssetsExecutable"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dAssetsEnabled)' != 'false' and '$(_Bork2dCopyAssetsToBuildCompleted)' != 'true'">
+        <PropertyGroup>
+            <_Bork2dCopyAssetsToBuildCompleted>true</_Bork2dCopyAssetsToBuildCompleted>
+            <!-- The trailing dot keeps TargetDir's trailing separator away from the closing quote. -->
+            <_Bork2dAssetsTargetDirArg>$(TargetDir).</_Bork2dAssetsTargetDirArg>
+        </PropertyGroup>
+        <Exec Command="&quot;$(Bork2dDotNetHost)&quot; &quot;$(Bork2dAssetsExecutable)&quot; copy-packs --output-root &quot;$(_Bork2dAssetsTargetDirArg)&quot; --project-root &quot;$(Bork2dAssetsProjectDirectory)&quot;$(_Bork2dAssetsVerboseSwitch)"
+              WorkingDirectory="$(MSBuildProjectDirectory)"
+              StandardOutputImportance="high"
+              StandardErrorImportance="high" />
+    </Target>
+
+    <Target Name="Bork2dCopyAssetsToPublish"
+            AfterTargets="Publish"
+            DependsOnTargets="Bork2dBuildAssetsExecutable"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dAssetsEnabled)' != 'false' and '$(_Bork2dCopyAssetsToPublishCompleted)' != 'true'">
+        <PropertyGroup>
+            <_Bork2dCopyAssetsToPublishCompleted>true</_Bork2dCopyAssetsToPublishCompleted>
+            <_Bork2dAssetsPublishDirArg>$(PublishDir).</_Bork2dAssetsPublishDirArg>
+        </PropertyGroup>
+        <Exec Command="&quot;$(Bork2dDotNetHost)&quot; &quot;$(Bork2dAssetsExecutable)&quot; copy-packs --output-root &quot;$(_Bork2dAssetsPublishDirArg)&quot; --project-root &quot;$(Bork2dAssetsProjectDirectory)&quot;$(_Bork2dAssetsVerboseSwitch)"
+              WorkingDirectory="$(MSBuildProjectDirectory)"
+              StandardOutputImportance="high"
+              StandardErrorImportance="high" />
+    </Target>
+
+</Project>
