@@ -338,13 +338,13 @@ dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build
 dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 ```
 
-AOT publish/run — **required local gate**, not CI. Use the AOT smoke project in the solution
-(currently `Bork2d.AotSmoke`):
+AOT publish/run — **required local gate**, not CI. Use the AOT smoke project in the examples
+solution (currently `examples/Bork2d.AotSmoke`):
 
 ```powershell
-dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj `
+dotnet publish examples/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj `
     -c Release -r win-x64 --nologo
-& src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe
+& examples/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe
 ```
 
 Additional gates:
@@ -354,7 +354,7 @@ Additional gates:
 - AOT/trim warnings are zero; no reflection/dynamic-code warnings.
 - Dependency test proves the reference matrix in
   [`docs/architecture/projects.md`](docs/architecture/projects.md#2-target-dependency-graph).
-- No unintended public types in `Common`/`Assets`/`Render`.
+- No unintended public types in `Bork2d.Engine`/`Bork2d.Bake`/`Bork2d.Render`.
 - No `EntityList`/weak registry/entity `Dispose`/`IsAlive` in shipped code.
 - The milestone spec's acceptance criteria and exit checklist are demonstrated.
 
@@ -362,7 +362,9 @@ Additional gates:
 **pushes to `develop`** after a milestone merge. Do not run CI on milestone/task branch pushes.
 Workflow triggers are `on: pull_request: branches: [develop]` and `on: push: branches: [develop]`.
 AOT publish/run is **not** in CI; it is a required local gate. Because CI does not catch AOT
-regressions, run the AOT gate locally on every runtime-affecting change.
+regressions, run the AOT gate locally on every runtime-affecting change. CI also does not build
+the examples solution (`examples/Bork2d.Examples.slnx`); the local AOT gate exercises its smoke
+app, and the examples solution is built locally when it changes.
 
 Install the SDK pinned by `global.json` explicitly in CI; hosted Windows runners do not ship
 prerelease .NET SDKs by default. Do not weaken a gate to make CI green; fix the code or record a
@@ -372,11 +374,15 @@ justified, narrow suppression.
 
 ### Public boundary
 
-- `Bork2d.Api`: public contracts and value types only. BCL plus
-  `Microsoft.Extensions.Logging.Abstractions`; no GPU/OS/Silk/ZLogger/Avalonia.
+- `Bork2d.Engine`: the public contract (`Bork2d.Engine` and its area namespaces) plus the
+  internal scene, time, serialization, and asset implementation. The contract is BCL plus
+  `Microsoft.Extensions.Logging.Abstractions` and PolyType; Nerdbank.MessagePack and
+  `System.IO.Hashing` stay implementation-only. The tooling-only pack surface
+  (`Bork2d.Engine.Assets.Pack.PackBuilder`/`PackCompressionMode`) is the documented exception.
 - `Bork2d.Runtime`: public builder/app surface only; composition root.
-- `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`: `internal` by default; expose only via
-  intentional `InternalsVisibleTo` (see
+- `Bork2d.Render` and `Bork2d.Bake`: `internal` by default; `Bork2d.Bake` exposes only its
+  builder/processor/command surface publicly. Expose internals only via intentional
+  `InternalsVisibleTo` (see
   [`docs/architecture/projects.md`](docs/architecture/projects.md)).
 - Tests may reference everything and use internals.
 - Adding a project reference or public type updates the dependency docs and dependency test in
@@ -456,7 +462,7 @@ status is **not** standing permission to change the API unilaterally.
 - Microsoft.Extensions.Logging + ZLogger. `IEngine.LoggerFactory` is the public seam.
 - Default: ZLogger console with local-time milliseconds, level, and category prefix; no colors;
   minimum level Debug in Debug builds, Information in Release; no file sink by default.
-- Categories: `Bork2d.Runtime`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`.
+- Categories: `Bork2d.Runtime`, `Bork2d.Engine`, `Bork2d.Engine.Assets`, `Bork2d.Render`.
 - Log startup mode and validation outcome. Do not log per sprite/per frame in hot paths.
 - The AOT smoke app must exercise the default logging path with zero trim/AOT warnings.
 
