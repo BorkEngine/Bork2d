@@ -153,10 +153,10 @@ public sealed class TempBakeFixture : IDisposable
 
     private const string Descriptor = """
         schema = 1
-        name = "BakeFixture"
 
-        [assets]
+        [[assets]]
         root = "Assets"
+        pack = "assets.pck"
 
         [bake]
         host = "host"

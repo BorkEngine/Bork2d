@@ -62,6 +62,12 @@ internal static class BakeDiagnosticCodes
     /// <summary>The assets root is missing or is not a directory.</summary>
     internal const string DescriptorAssetsRoot = "BK1007";
 
+    /// <summary>Two <c>[[assets]]</c> entries declare the same pack path.</summary>
+    internal const string DescriptorDuplicatePack = "BK1008";
+
+    /// <summary>Two <c>[[assets]]</c> entries declare the same asset root.</summary>
+    internal const string DescriptorDuplicateRoot = "BK1009";
+
     /// <summary>A <c>[textures]</c> filter or wrap value is not supported.</summary>
     internal const string DescriptorTextureSetting = "BK1010";
 

@@ -121,8 +121,9 @@ public sealed class CliApplicationTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
         directory.WriteFile(
             "Assets/data/game.toml",
@@ -161,8 +162,9 @@ public sealed class CliApplicationTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             unexpected = true
             """);
 
@@ -171,7 +173,7 @@ public sealed class CliApplicationTests
         Assert.Equal(CliApplication.UsageExitCode, result.ExitCode);
         Assert.Contains("error BK1004:", result.Error, StringComparison.Ordinal);
         Assert.Contains("unexpected", result.Error, StringComparison.Ordinal);
-        Assert.Contains("(5,1)", result.Error, StringComparison.Ordinal);
+        Assert.Contains("(6,1)", result.Error, StringComparison.Ordinal);
         Assert.Contains("is invalid", result.Output, StringComparison.Ordinal);
     }
 
@@ -182,7 +184,7 @@ public sealed class CliApplicationTests
         directory.CreateDirectory("Assets");
         string descriptorPath = directory.WriteFile(
             "bork2d.project.toml",
-            "schema = 2\n\n[assets]\nroot = \"Assets\"\n");
+            "schema = 2\n\n[[assets]]\nroot = \"Assets\"\npack = \"assets.pck\"\n");
 
         var result = Run("validate", "--project", descriptorPath, "--quiet");
 
@@ -238,8 +240,9 @@ public sealed class CliApplicationTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
     }
 }

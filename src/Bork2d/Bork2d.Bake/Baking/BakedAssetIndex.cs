@@ -51,12 +51,14 @@ internal sealed class BakedAssetIndex
     /// <param name="textures">The successfully baked textures, in path order.</param>
     /// <param name="projectDirectory">The descriptor directory, used to render texture source paths.</param>
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
+    /// <param name="packPath">The pack label used in collision messages, or <see langword="null"/>.</param>
     /// <returns>The index, including the first entry for every colliding path.</returns>
     internal static BakedAssetIndex Build(
         IReadOnlyList<BoundAsset> assets,
         IReadOnlyList<BakedTexture> textures,
         string projectDirectory,
-        BakeDiagnostics diagnostics)
+        BakeDiagnostics diagnostics,
+        string? packPath = null)
     {
         ArgumentNullException.ThrowIfNull(assets);
         ArgumentNullException.ThrowIfNull(textures);
@@ -91,7 +93,7 @@ internal sealed class BakedAssetIndex
                 diagnostics.Add(
                     BakeSeverity.Error,
                     BakeDiagnosticCodes.AssetPathCollision,
-                    BuildCollisionMessage(existing, entry),
+                    BuildCollisionMessage(existing, entry, packPath),
                     diagnosticPath,
                     assetPath: entry.Path);
                 return;
@@ -101,15 +103,19 @@ internal sealed class BakedAssetIndex
         }
     }
 
-    private static string BuildCollisionMessage(BakedAssetEntry existing, BakedAssetEntry incoming)
+    private static string BuildCollisionMessage(
+        BakedAssetEntry existing,
+        BakedAssetEntry incoming,
+        string? packPath)
     {
+        string scope = packPath is null ? string.Empty : $" in pack '{packPath}'";
         if (existing.IsRaw != incoming.IsRaw)
         {
             return $"The baked asset path '{incoming.Path}' is produced both as a MessagePack asset "
-                + "and as a raw payload by this bake.";
+                + $"and as a raw payload{scope} by this bake.";
         }
 
-        return $"The baked asset path '{incoming.Path}' is produced more than once "
+        return $"The baked asset path '{incoming.Path}' is produced more than once{scope} "
             + $"('{existing.Kind}' and '{incoming.Kind}').";
     }
 }

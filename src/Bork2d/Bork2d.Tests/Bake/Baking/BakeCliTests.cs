@@ -29,8 +29,8 @@ public sealed class BakeCliTests
             _fixture.DescriptorPath,
             "--host",
             _fixture.HostAssemblyPath,
-            "--output",
-            packPath);
+            "--output-root",
+            Path.GetDirectoryName(packPath)!);
 
         Assert.Equal(CliApplication.SuccessExitCode, result.ExitCode);
         Assert.Equal(string.Empty, result.Error);
@@ -54,8 +54,8 @@ public sealed class BakeCliTests
             _fixture.DescriptorPath,
             "--host",
             _fixture.HostAssemblyPath,
-            "--output",
-            packPath,
+            "--output-root",
+            Path.GetDirectoryName(packPath)!,
             "--check");
 
         Assert.Equal(CliApplication.SuccessExitCode, result.ExitCode);
@@ -76,8 +76,8 @@ public sealed class BakeCliTests
             _fixture.DescriptorPath,
             "--host",
             _fixture.HostAssemblyPath,
-            "--output",
-            packPath);
+            "--output-root",
+            Path.GetDirectoryName(packPath)!);
         Assert.Equal(CliApplication.SuccessExitCode, first.ExitCode);
         Assert.Contains("baked '", first.Output, StringComparison.Ordinal);
         byte[] packBytes = File.ReadAllBytes(packPath);
@@ -88,8 +88,8 @@ public sealed class BakeCliTests
             _fixture.DescriptorPath,
             "--host",
             _fixture.HostAssemblyPath,
-            "--output",
-            packPath);
+            "--output-root",
+            Path.GetDirectoryName(packPath)!);
         Assert.Equal(CliApplication.SuccessExitCode, second.ExitCode);
         Assert.Contains("up to date", second.Output, StringComparison.Ordinal);
         Assert.Equal(packBytes, File.ReadAllBytes(packPath));
@@ -100,8 +100,8 @@ public sealed class BakeCliTests
             _fixture.DescriptorPath,
             "--host",
             _fixture.HostAssemblyPath,
-            "--output",
-            packPath,
+            "--output-root",
+            Path.GetDirectoryName(packPath)!,
             "--force");
         Assert.Equal(CliApplication.SuccessExitCode, forced.ExitCode);
         Assert.Contains("baked '", forced.Output, StringComparison.Ordinal);
@@ -119,8 +119,8 @@ public sealed class BakeCliTests
             _fixture.DescriptorPath,
             "--host",
             _fixture.HostAssemblyPath,
-            "--output",
-            directory.FullPath("assets.pck"),
+            "--output-root",
+            directory.RootPath,
             "--mode",
             "release");
 
@@ -177,8 +177,8 @@ public sealed class BakeCliTests
             Path.Combine(project, BakeProjectFixture.DescriptorFileName),
             "--host",
             _fixture.HostAssemblyPath,
-            "--output",
-            packPath);
+            "--output-root",
+            Path.GetDirectoryName(packPath)!);
 
         Assert.Equal(CliApplication.DiagnosticsExitCode, result.ExitCode);
         Assert.Contains("error BK2001:", result.Error, StringComparison.Ordinal);
@@ -216,8 +216,8 @@ public sealed class BakeCliTests
                 _fixture.DescriptorPath,
                 "--host",
                 _fixture.HostAssemblyPath,
-                "--output",
-                packPath,
+                "--output-root",
+                Path.GetDirectoryName(packPath)!,
                 "--mode",
                 "debug",
             ],

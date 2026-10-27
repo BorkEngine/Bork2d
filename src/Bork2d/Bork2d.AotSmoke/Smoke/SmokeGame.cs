@@ -16,17 +16,18 @@ namespace Bork2d.AotSmoke.Smoke;
 /// <remarks>
 /// <para>
 /// The game deliberately uses only the public engine surface and the default logging path. It
-/// creates no window, GPU resource, or loop. <c>Setup</c> starts the five loads from the baked
-/// packet the app mounted before <c>Setup</c>: the <see cref="GameConfig"/> class root, the
+/// creates no window, GPU resource, or loop. <c>Setup</c> browses the base pack, mounts the DLC pack
+/// as an overlay, and starts the six loads: the main <see cref="GameConfig"/> class root, the
 /// <see cref="StatsRoot"/> struct root through an <see cref="AssetRef{TAsset}"/>, the
-/// <see cref="SpriteAsset"/>, its <see cref="TextureDescriptor"/>, and the raw RGBA8 payload.
-/// <c>Tick</c> browses/exists and awaits all five tasks with a bounded timeout before asserting
-/// their exact values.
+/// <see cref="SpriteAsset"/>, its <see cref="TextureDescriptor"/>, the raw RGBA8 payload, and the DLC
+/// <see cref="GameConfig"/> whose texture reference resolves to the main pack's <c>art/player</c>
+/// (D-M4-14). <c>Tick</c> browses/exists and awaits all six tasks with a bounded timeout before
+/// asserting their exact values.
 /// </para>
 /// <para>
 /// The asset checks use only the public <see cref="IAssets"/> surface, so the AOT smoke proves the
-/// shape-only <c>LoadAsset&lt;T&gt;</c> path, including the D-M4-11 struct-root reference overload,
-/// without touching internal asset types.
+/// shape-only <c>LoadAsset&lt;T&gt;</c> path, including the D-M4-11 struct-root reference overload and
+/// the multi-pack overlay behavior, without touching internal asset types.
 /// </para>
 /// </remarks>
 internal sealed class SmokeGame : IGame<SmokeLayer>
@@ -39,6 +40,7 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
 
     private readonly bool _loadAssets;
     private Task<GameConfig>? _gameTask;
+    private Task<GameConfig>? _dlcTask;
     private Task<StatsRoot>? _statsRootTask;
     private Task<SpriteAsset>? _spriteTask;
     private Task<TextureDescriptor>? _textureTask;
@@ -75,14 +77,23 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
     /// <summary>Gets the sprite created under the transform.</summary>
     public ISpriteRender<SmokeLayer>? SpriteRender { get; private set; }
 
-    /// <summary>Gets the number of visible pack entries observed in <c>Tick</c>.</summary>
+    /// <summary>Gets the number of visible entries in the main pack before the DLC overlay is mounted.</summary>
     public int BrowsedEntryCount { get; private set; }
+
+    /// <summary>Gets the number of visible entries after the DLC overlay is mounted.</summary>
+    public int MergedBrowsedEntryCount { get; private set; }
 
     /// <summary>Gets the number of bytes loaded by the raw texture payload request.</summary>
     public int RawByteCount { get; private set; }
 
     /// <summary>Gets the baked <see cref="GameConfig"/> name loaded in <c>Tick</c>.</summary>
     public string? LoadedGameName { get; private set; }
+
+    /// <summary>Gets the baked DLC <see cref="GameConfig"/> name loaded in <c>Tick</c>.</summary>
+    public string? LoadedDlcGameName { get; private set; }
+
+    /// <summary>Gets the DLC configuration's texture path, which must resolve to the main pack.</summary>
+    public string? LoadedDlcTexturePath { get; private set; }
 
     /// <summary>Gets the baked <see cref="StatsRoot"/> loaded in <c>Tick</c>.</summary>
     public StatsRoot LoadedStatsRoot { get; private set; }
@@ -122,8 +133,16 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
 
         if (_loadAssets)
         {
-            // The baked pack was mounted by Run() before Setup, so the loader thread is live here.
+            // The base pack was mounted by Run() before Setup. Browse it first so the main-pack
+            // count is proved independently, then mount the DLC pack as an overlay (D-M4-14).
+            BrowsedEntryCount = engine.Assets.Browse().Count;
+            engine.Assets.LoadPack(
+                Path.Combine(AppContext.BaseDirectory, AssetSmoke.DlcPackFileName));
+            MergedBrowsedEntryCount = engine.Assets.Browse().Count;
+
+            // The baked packs are mounted, so the loader thread is live here.
             _gameTask = engine.Assets.LoadAsset<GameConfig>(AssetSmoke.GamePath);
+            _dlcTask = engine.Assets.LoadAsset<GameConfig>(AssetSmoke.DlcGamePath);
             _statsRootTask = engine.Assets.LoadAsset(
                 new AssetRef<StatsRoot>(AssetSmoke.StatsRootPath));
             _spriteTask = engine.Assets.LoadAsset<SpriteAsset>(AssetSmoke.SpritePath);
@@ -201,12 +220,20 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
 
     private void VerifyAssets(IEngine<SmokeLayer> engine)
     {
-        IReadOnlyList<AssetInfo> browse = engine.Assets.Browse();
-        BrowsedEntryCount = browse.Count;
-
         SmokeChecks.Require(
-            browse.Count == AssetSmoke.EntryCount,
-            $"Browse must return exactly {AssetSmoke.EntryCount} entries; got {browse.Count}.");
+            BrowsedEntryCount == AssetSmoke.EntryCount,
+            $"the main pack must contain exactly {AssetSmoke.EntryCount} entries; got "
+                + $"{BrowsedEntryCount}.");
+        SmokeChecks.Require(
+            MergedBrowsedEntryCount == AssetSmoke.MergedEntryCount,
+            $"the main pack plus the DLC overlay must expose exactly "
+                + $"{AssetSmoke.MergedEntryCount} entries; got {MergedBrowsedEntryCount}.");
+
+        IReadOnlyList<AssetInfo> browse = engine.Assets.Browse();
+        SmokeChecks.Require(
+            browse.Count == AssetSmoke.MergedEntryCount,
+            $"Browse must return exactly {AssetSmoke.MergedEntryCount} merged entries; got "
+                + $"{browse.Count}.");
 
         string[] expectedPaths =
         [
@@ -215,6 +242,7 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
             AssetSmoke.SpritePath,
             AssetSmoke.TexturePath,
             AssetSmoke.TexturePayloadPath,
+            AssetSmoke.DlcGamePath,
         ];
 
         foreach (string path in expectedPaths)
@@ -232,6 +260,10 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
             "Exists must be false for a path that is not in the pack.");
 
         GameConfig game = _gameTask!
+            .WaitAsync(_loadTimeout)
+            .GetAwaiter()
+            .GetResult();
+        GameConfig dlc = _dlcTask!
             .WaitAsync(_loadTimeout)
             .GetAwaiter()
             .GetResult();
@@ -253,15 +285,34 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
             .GetResult();
 
         VerifyGameConfig(game);
+        VerifyDlcGameConfig(dlc);
         VerifyStatsRoot(statsRoot);
         VerifySprite(sprite);
         VerifyTexture(texture, raw);
 
         LoadedGameName = game.Name;
+        LoadedDlcGameName = dlc.Name;
+        LoadedDlcTexturePath = dlc.Texture.Path;
         LoadedStatsRoot = statsRoot;
         LoadedSpriteTexturePath = sprite.Texture.Path;
         LoadedTexturePayloadPath = texture.Payload.Path;
         RawByteCount = raw.Length;
+    }
+
+    private static void VerifyDlcGameConfig(GameConfig dlc)
+    {
+        SmokeChecks.Require(
+            dlc.Name == AssetSmoke.DlcGameName,
+            "LoadAsset<GameConfig> must return the DLC pack's custom data.");
+        SmokeChecks.Require(
+            dlc.Health == AssetSmoke.DlcGameHealth,
+            "the DLC configuration's health must round-trip.");
+        SmokeChecks.Require(
+            dlc.Must == AssetSmoke.DlcGameMust,
+            "the DLC configuration's required member must round-trip.");
+        SmokeChecks.Require(
+            dlc.Texture.Path == AssetSmoke.TexturePath,
+            "the DLC configuration's texture reference must resolve to the main pack's art/player.");
     }
 
     private static void VerifyGameConfig(GameConfig game)

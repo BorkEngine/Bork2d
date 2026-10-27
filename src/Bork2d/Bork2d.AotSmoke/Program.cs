@@ -50,15 +50,20 @@ internal static class Program
     }
 
     /// <summary>
-    /// Runs the M1 scene checks and the M4 baked-pack proof against the pack next to the executable.
+    /// Runs the M1 scene checks and the M4 baked-pack proof against the packs next to the executable.
     /// </summary>
     /// <returns>0 when every assertion passes.</returns>
     private static int RunHeadless()
     {
         string packPath = Path.Combine(AppContext.BaseDirectory, AssetSmoke.PackFileName);
+        string dlcPackPath = Path.Combine(AppContext.BaseDirectory, AssetSmoke.DlcPackFileName);
         SmokeChecks.Require(
             File.Exists(packPath),
-            $"the baked fixture pack must exist at '{packPath}'; the build's bake targets produce it "
+            $"the baked main pack must exist at '{packPath}'; the build's bake targets produce it "
+                + "next to the app and the publish copies it next to the published executable.");
+        SmokeChecks.Require(
+            File.Exists(dlcPackPath),
+            $"the baked DLC pack must exist at '{dlcPackPath}'; the build's bake targets produce it "
                 + "next to the app and the publish copies it next to the published executable.");
 
         var game = new SmokeGame(loadAssets: true);
@@ -82,14 +87,24 @@ internal static class Program
 
         SmokeChecks.Require(
             game.BrowsedEntryCount == AssetSmoke.EntryCount,
-            $"Browse must report {AssetSmoke.EntryCount} baked pack entries; got "
+            $"Browse must report {AssetSmoke.EntryCount} main-pack entries before the overlay; got "
                 + $"{game.BrowsedEntryCount}.");
+        SmokeChecks.Require(
+            game.MergedBrowsedEntryCount == AssetSmoke.MergedEntryCount,
+            $"Browse must report {AssetSmoke.MergedEntryCount} entries after the DLC overlay; got "
+                + $"{game.MergedBrowsedEntryCount}.");
         SmokeChecks.Require(
             game.RawByteCount == AssetSmoke.TexturePayload.Length,
             "LoadData must return the baked raw texture payload.");
         SmokeChecks.Require(
             game.LoadedGameName == AssetSmoke.GameName,
             "LoadAsset<GameConfig> must return the baked class-root custom data.");
+        SmokeChecks.Require(
+            game.LoadedDlcGameName == AssetSmoke.DlcGameName,
+            "LoadAsset<GameConfig> must return the DLC pack's custom data.");
+        SmokeChecks.Require(
+            game.LoadedDlcTexturePath == AssetSmoke.TexturePath,
+            "the DLC configuration's texture reference must resolve to the main pack.");
         SmokeChecks.Require(
             game.LoadedStatsRoot == AssetSmoke.GameStatsRoot,
             "LoadAsset<StatsRoot>(AssetRef<StatsRoot>) must return the baked struct root.");
@@ -105,12 +120,14 @@ internal static class Program
 
         Console.WriteLine(
             $"Bork2d NativeAOT smoke passed: Setup/Tick/Teardown = 1/1/1, root cleared, "
-            + $"default logging, Nerdbank.MessagePack generated shape, baked fixture pack at "
-            + $"'{packPath}', entries={game.BrowsedEntryCount} ({AssetSmoke.GamePath}, "
+            + $"default logging, Nerdbank.MessagePack generated shape, baked fixture packs at "
+            + $"'{packPath}' and '{dlcPackPath}', mainEntries={game.BrowsedEntryCount}, "
+            + $"mergedEntries={game.MergedBrowsedEntryCount} ({AssetSmoke.GamePath}, "
             + $"{AssetSmoke.StatsRootPath}, {AssetSmoke.SpritePath}, {AssetSmoke.TexturePath}, "
-            + $"{AssetSmoke.TexturePayloadPath}), game={game.LoadedGameName}, "
-            + $"statsRoot={game.LoadedStatsRoot}, spriteScale={AssetSmoke.SpriteScale}, "
-            + $"spriteTexture={game.LoadedSpriteTexturePath}, "
+            + $"{AssetSmoke.TexturePayloadPath}, {AssetSmoke.DlcGamePath}), "
+            + $"game={game.LoadedGameName}, dlc={game.LoadedDlcGameName}, "
+            + $"dlcTexture={game.LoadedDlcTexturePath}, statsRoot={game.LoadedStatsRoot}, "
+            + $"spriteScale={AssetSmoke.SpriteScale}, spriteTexture={game.LoadedSpriteTexturePath}, "
             + $"texturePayload={game.LoadedTexturePayloadPath}, rawBytes={game.RawByteCount}.");
         return 0;
     }

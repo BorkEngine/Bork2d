@@ -2,8 +2,9 @@
 
 > **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4) and the post-M3
 > asset-reference refactor (D-035, merged PR #6); **M4 bake is implementation complete on
-> `m-4/common`, and the owner D-M4-13 revision (including the committed fixture source PNG) is
-> complete on `m-4/fix-2` (PR #7 open, not merged)**. `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`,
+> `m-4/common`, the owner D-M4-13 revision (including the committed fixture source PNG) is
+> complete on `m-4/fix-2`, and the D-M4-14/D-M4-15 multi-pack revision is complete on `m-4/fix-3`
+> (PR #7 open, not merged)**. `Bork2d.Api`, `Bork2d.Common`, `Bork2d.Assets`, `Bork2d.Render`,
 > and `Bork2d.Runtime` compile with `IsAotCompatible` plus the trim and AOT analyzers, and
 > `Bork2d.AotSmoke` publishes and runs with zero AOT/trim warnings. The default smoke loads the
 > **baked fixture pack** (produced by the imported MSBuild bake targets from `Bork2d.BakeFixture`),
@@ -180,20 +181,21 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    with zero AOT/trim warnings; `SDL2.dll` is copied next to the executable.
 3. The AOT smoke's build runs the M4 bake targets
    ([`build/Bork2d.Bake.targets`](../../build/Bork2d.Bake.targets)): it builds the CLI out of process,
-   copies the fixture project's committed `Assets/**` tree (including the fixture **source asset**
-   `Assets/art/player.png`; no texture generator script runs), generates and builds the
-   `Bork2d.BakeFixture` host, and bakes the prepared fixture pack to
-   `$(TargetDir)assets.pck`; `Publish` copies it next to the published executable. The publish output
-   must contain no `Bork2d.Bake`, `Bork2d.Bake.Cli`, `Bork2d.BakeHost`, Tomlyn, or StbImageSharp
-   assembly (`Bork2d.BakeFixture` is the expected game-side common assembly) and must contain
-   `assets.pck` and `SDL2.dll`. The NativeAOT output is a single-file executable plus PDBs, so the
-   managed assemblies are linked in; `Bork2d.BakeFixture.pdb` is the remaining on-disk proof that the
-   fixture was in the publish graph.
+   copies the fixture project's committed `Assets/**` and `DLC1/**` trees (including the fixture
+   **source asset** `Assets/art/player.png`; no texture generator script runs), generates and builds
+   the single `Bork2d.BakeFixture` host from all roots, and bakes the prepared fixture packs
+   (`assets.pck`, `dlc1.pck`) under `$(TargetDir)`; `Publish` copies both next to the published
+   executable. The publish output must contain no `Bork2d.Bake`, `Bork2d.Bake.Cli`,
+   `Bork2d.BakeHost`, Tomlyn, or StbImageSharp assembly (`Bork2d.BakeFixture` is the expected
+   game-side common assembly) and must contain both packs and `SDL2.dll`. The NativeAOT output is a
+   single-file executable plus PDBs, so the managed assemblies are linked in;
+   `Bork2d.BakeFixture.pdb` is the remaining on-disk proof that the fixture was in the publish graph.
 4. Run the AOT-published headless smoke locally (no GPU): default logging, one
-   `Setup`/`Tick`/`Teardown`, root cleared, generated-shape round trip, the **baked fixture pack**
+   `Setup`/`Tick`/`Teardown`, root cleared, generated-shape round trip, the **baked main pack**
    (class root with nested struct/`Color`/texture reference, `StatsRoot` through
-   `AssetRef<StatsRoot>`, sprite, `art/player` descriptor, exact `art/player-raw` payload),
-   browse/exists, exit `0`.
+   `AssetRef<StatsRoot>`, sprite, `art/player` descriptor, exact `art/player-raw` payload), the
+   **overlaid DLC pack** (`LoadPack("dlc1.pck")`, one `data/dlc` entry whose texture reference
+   resolves to the main `art/player`), browse/exists (5 main entries, 6 merged), exit `0`.
 5. Run the AOT-published windowed demo locally on a desktop session:
    `Bork2d.AotSmoke.exe --windowed --ticks 120` must exit `0` after exactly 120 ticks with one
    `Setup` and one `Teardown`; the demo uses `WithoutAssets()`. The interactive `--windowed` run

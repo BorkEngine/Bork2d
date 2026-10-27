@@ -2,8 +2,9 @@
 
 > **Status:** M3 and the post-M3 asset-reference refactor (D-035) are merged into `develop`
 > (2026-10-26, PR #4 and PR #6); **M4 serialization and bake is implementation complete on
-> `m-4/common`, and the owner D-M4-13 revision (per-source `[bork2d].type`, location-free
-> data/textures, `-raw` payload paths) is complete on `m-4/fix-2` (PR #7 open, not merged)**.
+> `m-4/common`, the owner D-M4-13 revision (per-source `[bork2d].type`, location-free
+> data/textures, `-raw` payload paths) is complete on `m-4/fix-2`, and the D-M4-14/D-M4-15
+> multi-pack revision is complete on `m-4/fix-3` (PR #7 open, not merged)**.
 > `Bork2d.Assets` provides the v1 pack
 > reader/writer and the public `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode` tooling
 > surface, canonical paths, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, one
@@ -74,8 +75,10 @@ sprites/player/idle
 
 - The loader lowercases input and rejects invalid segments. The baker strips source extensions and
   the `.toml` suffix (`art/player.png` + `art/player.png.toml` → `art/player`).
-- Duplicate paths in one pack are build errors. A texture's raw payload is the descriptor path plus
-  `-raw` (`art/player` → `art/player-raw`); there is no reserved raw folder. Sprites reference the
+- Duplicate paths inside one pack are build errors. The same canonical path may exist in different
+  packs: the runtime overlays packs (later mounts win, D-M3-09), so a DLC pack can replace a base
+  path deliberately (D-M4-14). A texture's raw payload is the descriptor path plus `-raw`
+  (`art/player` → `art/player-raw`); there is no reserved raw folder. Sprites reference the
   descriptor, never the payload. Paths imply no extension or decoder; the asset type or consuming API
   decides how bytes are interpreted.
 
@@ -443,44 +446,57 @@ M4 has no sprite source schema and no slicing; slices arrive with M5.
 
 ### 11.1 Project descriptor
 
-`bork2d.project.toml` is committed at the game root and parsed by the JIT tooling (never packed):
+`bork2d.project.toml` is committed at the game root and parsed by the JIT tooling (never packed).
+It declares one or more **ordered** `[[assets]]` entries (D-M4-14); the first entry is the
+main/base pack and every later entry is a DLC/overlay pack. There is no `main` flag and no project
+name.
 
 ```toml
 schema = 1
-name = "MyGame"
 
-[assets]
+[[assets]]
 root = "Assets"                            # required; relative to this descriptor
+pack = "assets.pck"                        # required; relative to the output root
+
+[[assets]]
+root = "DLC1"                              # later entries are DLC/overlay packs
+pack = "dlc1.pck"
 
 [bake]
-pack = "assets.pck"                        # literal default; --output wins
 host = "obj/bork2d/bakehost"               # generated host directory
 
 [textures]
-filter = "linear"                          # nearest | linear
+filter = "linear"                          # nearest | linear (global defaults)
 wrap = "clamp"                             # clamp | repeat
 ```
 
-`schema` must be `1`; `[assets].root` is required and must exist; every relative path resolves
-against the descriptor directory. The descriptor declares **no types**: each data TOML carries its
-own `[bork2d].type` (§10.1). `types` is an unknown key and is rejected. Unknown keys, a source
-without a valid `[bork2d]` table, an unknown/ambiguous/missing-shape type, and an invalid data asset
-path are `BK1xxx`/`BK2xxx` diagnostics with source line/column. The texture defaults apply when a
-sidecar omits `filter`/`wrap`.
+`schema` must be `1`; at least one `[[assets]]` entry is required; `root` and `pack` are required
+per entry. Asset roots resolve against the descriptor directory, must exist, may not be rooted, and
+may not contain `..`. Pack paths are relative to the output root (the descriptor directory by default,
+or `bake --output-root`/`$(TargetDir)`), may contain subdirectories, may not be rooted, and may not
+contain `.`/`..`; duplicate roots and duplicate pack paths are `BK1008`/`BK1009` errors. The removed
+project `name`, single `[assets]` table, and `[bake].pack` are unknown-key errors. The descriptor
+declares **no types**: each data TOML carries its own `[bork2d].type` (§10.1). `types` is an
+unknown key and is rejected. Unknown keys, a source without a valid `[bork2d]` table, an
+unknown/ambiguous/missing-shape type, and an invalid data asset path are `BK1xxx`/`BK2xxx`
+diagnostics with source line/column. The texture defaults apply when a sidecar omits
+`filter`/`wrap`.
 
 ### 11.2 Generated host
 
 1. The mapped game assembly builds. Each root carries `[GenerateShape]` on a `partial` declaration;
    PolyType's generator has emitted `IShapeable<T>` into that assembly.
 2. `bork2d-bake generate-host --project … --common <Project.Common.dll> --output
-   obj/bork2d/bakehost --configuration <Debug|Release>` scans the sources for their `[bork2d].type`
-   declarations **before** binding, reads the game assembly's metadata (a `MetadataLoadContext`; it
-   does not execute game code), resolves every distinct type, validates `IShapeable<T>`, and writes
-   `BakeHost.csproj` plus `BakeManifest.g.cs` with the static type manifest and per-type
-   `Bind`/`AddToPack` delegates. A source TOML syntax or metadata error fails generation before any
-   host file is written. Generation is content-hash gated
+   obj/bork2d/bakehost --configuration <Debug|Release>` scans **every pack root** for
+   `[bork2d].type` declarations **before** binding, reads the game assembly's metadata (a
+   `MetadataLoadContext`; it does not execute game code), resolves every distinct type, validates
+   `IShapeable<T>`, and writes one `BakeHost.csproj` plus `BakeManifest.g.cs` with the static type
+   manifest and per-type `Bind`/`AddToPack` delegates. There is exactly one host/project per
+   descriptor, never a per-pack host. A source TOML syntax or metadata error fails generation before
+   any host file is written. Generation is content-hash gated
    (`obj/bork2d/bake/host-generation.json`), including a hash of the discovered source type
-   declarations, so a type/path add/remove/change regenerates the host.
+   declarations **with their pack identity/root**, so adding/removing a root or moving/renaming/
+   changing a source declaration regenerates the host (D-M4-14).
 3. MSBuild builds `BakeHost.csproj` in the current configuration; the generated host references the
    mapped assemblies by absolute `HintPath` and is **not** a solution project.
 4. `bork2d-bake bake --project … --host <Bork2d.BakeHost.dll>` discovers the sources, checks the
@@ -493,15 +509,24 @@ sidecar omits `filter`/`wrap`.
 
 ### 11.3 Custom data, textures, and references
 
+- **Per-pack pipeline.** The descriptor is processed in order: one generated host, then for each pack
+  (main first, then DLCs) discovery → binding → texture import → index → reference validation →
+  composition. The main index is built first and is the **only** external index a DLC pack may use;
+  the main pack is strict (local entries only). A DLC reference resolves locally first (a local
+  overlay wins), then against main; a path only in another DLC pack is an error that names the
+  checked pack and main. `PackBuilder` receives the external main paths/kinds through an internal
+  tooling seam (`SetExternalAssets`), so the on-disk format and the runtime `IAssets` contract are
+  unchanged; the main pack never passes external assets. Duplicate canonical paths across packs are
+  allowed and intentional; duplicates inside one pack stay `BK3005` errors.
 - **Custom data.** The host's generic DOM binder (`Bork2d.Bake.Toml`) reads `TomlTable` values
   through the compiled PolyType shape, assigns constructor/property/field members, records reference
   sites with their exact value spans, and rejects unknown keys. Baked values are added to one
-  `PackBuilder` with the generated per-type delegate (`builder.AddMessagePack<T>(path, (T)value)`);
-  the binder never reflects over game members. Sprite TOML is baked exactly like any other mapped
-  type (no `SpritePipeline`).
+  `PackBuilder` per pack with the generated per-type delegate
+  (`builder.AddMessagePack<T>(path, (T)value)`); the binder never reflects over game members. Sprite
+  TOML is baked exactly like any other mapped type (no `SpritePipeline`).
 - **Textures.** Discovery accepts `.png`, `.jpg`/`.jpeg`, `.bmp`, and `.tga` (case-insensitive)
-  **anywhere under the asset root**, not just under `textures/`. The descriptor path is the source
-  path relative to the root minus its extension (`art/player.png` → `art/player`) and the raw payload
+  **anywhere under each pack root**, not just under `textures/`. The descriptor path is the source
+  path relative to that root minus its extension (`art/player.png` → `art/player`) and the raw payload
   is the descriptor path plus `-raw` (`art/player-raw`). StbImageSharp decodes to straight-alpha
   RGBA8 (`ColorComponents.RedGreenBlueAlpha`), with no premultiplication, gamma, ICC, flipping, or
   resampling. A missing sidecar is valid; a sidecar without a source and canonical texture
@@ -509,26 +534,33 @@ sidecar omits `filter`/`wrap`.
   looks like a sidecar; a type-less `<image>.toml` next to the source is a sidecar. The descriptor is
   created in code (authors do not hand-write `TextureDescriptor` TOML) and the payload must be
   exactly `width × height × 4`. A collision across data paths, texture descriptor paths, and raw
-  payload paths is a `BK3005` error and prevents the pack.
-- **References.** The bake validates every present `AssetRef<T>`/`DataRef` against the complete
-  baked set before writing: canonical path, entry exists, kind matches, and type matches when known.
-  `PackBuilder` re-validates at pack build as a backstop; a user-visible failure comes from the
+  payload paths inside one pack is a `BK3005` error and prevents the bake.
+- **Texture sidecars stay (D-M4-15).** `<source>.toml` is the minimal authoring-only settings file
+  for `filter`/`wrap`. A normal typed texture-descriptor TOML would still need an authoring-only
+  `source` split because the runtime `TextureDescriptor` has generated `payload`/`width`/`height`/
+  `format`; the sidecar avoids that second model. `TextureDescriptor`, the `<source>.toml`
+  authoring model, and the texture pipeline are unchanged.
+- **References.** The bake validates every present `AssetRef<T>`/`DataRef` against the pack's local
+  baked set and, for a DLC, main: canonical path, entry exists, kind matches, and type matches when
+  known. `PackBuilder` re-validates at pack build as a backstop; a user-visible failure comes from the
   baker with `file:line:column` and the member path.
 
 ### 11.4 Pack write and atomic replacement
 
-One `PackBuilder` collects every entry. The compression mode follows the MSBuild configuration
-(`Debug` → `PackCompressionMode.Debug`, `Release` → `.Release`) or `--mode`. Entries are sorted by
-the builder; discovery sorts paths ordinal first. The pack is written to a temporary file in the
-destination directory and atomically replaces the target only after a fully successful bake. A
-failed bake leaves the previous pack and manifest unchanged and fails the build. An empty project
-produces a valid empty pack; a texture-only project is valid. The v1 header is always
-Zstd-compressed and XXH3-64-checksummed; M4 changes no format bytes.
+One `PackBuilder` per pack collects that pack's entries. The compression mode follows the MSBuild
+configuration (`Debug` → `PackCompressionMode.Debug`, `Release` → `.Release`) or `--mode`. Entries
+are sorted by the builder; discovery sorts paths ordinal first. All packs validate and compose in
+memory before the first write, and each pack is written to a temporary file in its destination
+directory and atomically replaces the target only after a fully successful bake. A failed pack
+therefore leaves every previous pack and the manifest unchanged and fails the build; a failure while
+writing a later pack cannot leave a half-validated pack set. An empty project produces a valid empty
+pack; a texture-only project is valid. The v1 header is always Zstd-compressed and
+XXH3-64-checksummed; M4 changes no format bytes.
 
 ### 11.5 Structural determinism
 
 For identical descriptor, sources, game assembly, tool version, and mode, a second bake produces
-the same canonical path/kind set, the same sorted entry table (path, `IsRaw`, `IsCompressed`,
+the same canonical path/kind set per pack, the same sorted entry table (path, `IsRaw`, `IsCompressed`,
 `Length`, `Size`, with `Offset` derived from the layout), byte-identical MessagePack payloads,
 byte-identical texture payloads and descriptor values, and identical diagnostics. Whole-pack byte
 equality is **not** guaranteed (D-M3-08/D-M4-07): Zstd output may vary across runtime versions, so
@@ -537,29 +569,35 @@ tests compare the entry table and decompressed payloads, never a pack hash.
 ### 11.6 Incremental bake and MSBuild
 
 - The internal, non-committed manifest is `<descriptor directory>/obj/bork2d/bake/manifest.json`:
-  JSON schema 1, XXH3-128 uppercase hex, explicit field framing, deterministic field order. It
-  records the descriptor hash, the sorted tracked inputs (every `.toml` and every accepted texture
-  source anywhere under the asset root), the game-side assembly closure next to the host, the host
-  assembly hash, tool version, mode, output path/hash, and the asset/texture/reference counts.
-- `bake` skips before loading the host only when every recorded field matches and the pack exists
-  with the recorded hash. A missing/corrupt manifest, any changed/deleted source, a changed
-  common/host/tool/mode, a missing pack, or an externally modified pack forces a full bake. A
-  successful full bake writes the manifest atomically; a manifest write failure after a valid pack
-  is a warning. `--force` bypasses both skips; `--check` never skips and writes nothing.
+  JSON **schema 2**, XXH3-128 uppercase hex, explicit field framing, deterministic field order. It
+  records the descriptor hash, the sorted tracked inputs across every pack root (every `.toml` and
+  every accepted texture source), the game-side assembly closure next to the host, the host assembly
+  hash, tool version, mode, **every pack output path and hash in descriptor order**, and the
+  aggregate asset/texture/reference counts.
+- `bake` skips before loading the host only when every recorded field matches and **every** output
+  pack exists with its recorded hash. The decision is all-or-nothing; there is no per-pack cache
+  (D-M4-14). A missing/corrupt manifest, any changed/deleted source or output, a changed
+  common/host/tool/mode, or an externally modified pack forces a full multi-pack bake. A successful
+  full bake writes the manifest atomically; a manifest write failure after valid packs is a warning.
+  `--force` bypasses both skips; `--check` never skips and writes nothing.
 - `generate-host` records the source-type declaration hash in
   `obj/bork2d/bake/host-generation.json` in addition to the descriptor, common assembly, generator
-  version, configuration, output directory, and generated-file hashes. A type or path add, remove, or
-  change therefore regenerates the host even when the descriptor and `Project.Common` are unchanged.
-- `build/Bork2d.Bake.targets` is imported by the runnable app that owns the pack. After `Build` it
+  version, configuration, output directory, and generated-file hashes. The declaration hash includes
+  the pack identity/root, so adding/removing a root or moving/renaming/changing a source declaration
+  regenerates generation state even when the descriptor and `Project.Common` are unchanged
+  (D-M4-14).
+- `build/Bork2d.Bake.targets` is imported by the runnable app that owns the packs. After `Build` it
   builds the CLI out of process, runs `generate-host`, builds the host with the MSBuild task, and
-  runs `bake`; `Publish` copies the pack to `$(PublishDir)`; `Clean` removes the generated host,
-  prepared fixture copy, incremental state, and pack. Properties:
+  runs `bake --output-root $(Bork2dBakeOutputRoot)` (default `$(TargetDir)`); `Publish` copies every
+  path in `Bork2dBakePackPaths` to `$(PublishDir)`; `Clean` removes the generated host, prepared
+  fixture copy, incremental state, and those packs. Properties:
   `Bork2dProjectDescriptor`, `Bork2dCommonAssembly`/`Bork2dBakeCommonAssemblyName`,
-  `Bork2dBakeHostDirectory`, `Bork2dBakeOutput`, `Bork2dBakeMode`, `Bork2dBakeVerbose`,
-  `Bork2dBakeForce`, `Bork2dBakeEnabled`, and the fixture-preparation properties used by
-  `Bork2d.AotSmoke`. Fixture preparation copies the fixture project's committed `Assets/**` tree
-  (including `Assets/art/player.png`, a fixture **source asset**) and descriptor into the consuming
-  app's `obj/`; it does not generate textures, and no binary test/pack fixture is committed.
+  `Bork2dBakeHostDirectory`, `Bork2dBakeOutputRoot`, `Bork2dBakePackPaths`, `Bork2dBakeMode`,
+  `Bork2dBakeVerbose`, `Bork2dBakeForce`, `Bork2dBakeEnabled`, and the fixture-preparation
+  properties used by `Bork2d.AotSmoke`. Fixture preparation copies the fixture project's committed
+  `Assets/**` **and `DLC1/**`** trees (including `Assets/art/player.png`, a fixture **source asset**)
+  plus the descriptor into the consuming app's `obj/`; it does not generate textures, and no binary
+  test/pack fixture is committed. The AOT smoke sets `Bork2dBakePackPaths` to `assets.pck;dlc1.pck`.
 - Builds with no imported targets are unaffected; CI stays restore/format/build/test, and the bake
   tests run in the normal Debug pass. The local AOT gate adds the publish/run step.
 
@@ -569,17 +607,20 @@ tests compare the entry table and decompressed payloads, never a pack hash.
 bork2d-bake generate-host --project <bork2d.project.toml> --common <Project.Common.dll>
                           --output <dir> [--configuration Debug|Release] [--force]
 bork2d-bake bake          --project <bork2d.project.toml> --host <BakeHost.dll>
-                          [--output <assets.pck>] [--mode debug|release]
+                          [--output-root <dir>] [--mode debug|release]
                           [--check] [--force] [--verbose|--quiet]
 bork2d-bake validate      --project <bork2d.project.toml> [--host <BakeHost.dll>]
 bork2d-bake --help | --version
 ```
 
-`bake` runs the full pipeline and atomically writes the pack; `--check` validates and writes
-nothing; `validate` without `--host` checks the descriptor, the source `[bork2d]` type metadata and
-TOML syntax, and texture sources, and with `--host` runs the full discovery/host/binding/reference
-validation without writing a pack. Exit codes: `0` success/up to date, `1` one or more source
-diagnostics, `2` usage/descriptor/host configuration error, `3` unexpected internal failure.
+`bake` processes **every** `[[assets]]` pack and atomically writes each under `--output-root`
+(default: the descriptor directory). `--output` is removed (D-M4-14): with multiple packs a single
+file path is ambiguous, so the descriptor owns the output layout and the CLI owns only the root.
+`--check` validates every pack and writes nothing; `validate` without `--host` checks the descriptor,
+every pack root's source `[bork2d]` type metadata and TOML syntax, and texture sources, and with
+`--host` runs the full discovery/host/binding/reference validation for every pack without writing a
+pack. Summaries report the pack count and paths. Exit codes: `0` success/up to date, `1` one or more
+source diagnostics, `2` usage/descriptor/host configuration error, `3` unexpected internal failure.
 Diagnostics go to stderr in the MSBuild form; the summary goes to stdout.
 
 ### 11.8 Outputs
@@ -588,16 +629,18 @@ Diagnostics go to stderr in the MSBuild form; the summary goes to stdout.
 | --- | --- | --- |
 | Project descriptor | game root (`bork2d.project.toml`) | yes (source) |
 | Fixture source PNG | `Bork2d.BakeFixture/Assets/art/player.png` | yes (fixture **source asset**, not a test/pack fixture) |
+| Fixture DLC source | `Bork2d.BakeFixture/DLC1/data/dlc.toml` | yes (fixture **source asset**) |
 | Generated host project/sources | `<project>/obj/bork2d/bakehost/` | no |
 | Host-generation state | `<descriptor dir>/obj/bork2d/bake/host-generation.json` | no |
 | Incremental manifest | `<descriptor dir>/obj/bork2d/bake/manifest.json` | no |
-| Runtime pack | default `$(TargetDir)assets.pck`, copied to `$(PublishDir)`; overridable | no |
+| Runtime packs | one file per `[[assets]].pack` under the output root; default root `$(TargetDir)` | no |
 
-The app opens `assets.pck` at `Run()` (or the `WithAssetsPack` path), resolved against the process
-current directory or given as an absolute path (D-M3-03/Q-10). There is no "next to the executable"
-fallback in the runtime; the AOT smoke passes `AppContext.BaseDirectory/assets.pck` explicitly. The
-M5 editor reuses the library and shares the validator/baker; the local gates build debug and
-release packs and run loader validation on both (CI builds Debug only).
+The app opens the main pack at `Run()` (or the `WithAssetsPack` path) and can mount DLC packs with
+`IAssets.LoadPack`; paths resolve against the process current directory or are given as absolute
+paths (D-M3-03/Q-10). There is no "next to the executable" fallback in the runtime; the AOT smoke
+passes `AppContext.BaseDirectory/assets.pck` and mounts `dlc1.pck` from the same directory
+explicitly. The M5 editor reuses the library and shares the validator/baker; the local gates build
+debug and release packs and run loader validation on both (CI builds Debug only).
 
 ## 12. Editor
 
@@ -654,9 +697,10 @@ multi-project workspaces in v1.
   (D-034, M3). The M4 bake tooling (`Bork2d.Bake`, `Bork2d.Bake.Cli`, Tomlyn, StbImageSharp) is
   JIT-only and internal; no runtime project references it, and the generated host is not a solution
   project. Build-time reflection over `Project.Common` metadata is confined to host generation.
-- The default AOT run loads the baked fixture pack from `AppContext.BaseDirectory/assets.pck`; it
-  does not build a temporary pack. Its publish contains `assets.pck` and `SDL2.dll`, the game-side
-  `Bork2d.BakeFixture` assembly (linked into the single-file executable; its PDB is present), and no
+- The default AOT run loads the baked main pack from `AppContext.BaseDirectory/assets.pck` and
+  overlays `AppContext.BaseDirectory/dlc1.pck`; it does not build a temporary pack. Its publish
+  contains both packs and `SDL2.dll`, the game-side `Bork2d.BakeFixture` assembly (linked into the
+  single-file executable; its PDB is present), and no
   `Bork2d.Bake`/`Bork2d.Bake.Cli`/`Bork2d.BakeHost`/Tomlyn/StbImageSharp assembly.
 - Runtime projects set `IsAotCompatible` with trim/AOT analyzers; only the AOT smoke app sets
   `PublishAot`. AOT publish/run is a required local gate, not a CI job.
@@ -716,10 +760,11 @@ that in exchange for no arbitrary caps, and fails cleanly rather than reading ou
 | Sprite assets (UVs/scale/pivot/topology/indices) | `Current` (M3/D-035; data bake M4): public `SpriteAsset` model with an `AssetRef<TextureDescriptor>` link, loaded via `LoadAsset<SpriteAsset>` and baked as ordinary custom data when a TOML declares its type in `[bork2d]`. No runtime or bake-time field validation; UV/pivot/scale/topology/indices validation and slicing are M5 (D-M4-06). Drawing is M8 |
 | CPU resource table (descriptors/sprites) | Removed by D-035; the loader caches no resolved sprite/texture resources |
 | Runtime asset lifecycle | `Current` (M3): `WithoutAssets()`, base pack at `Run()` before the window/`Setup`, start/stop/error order, post-shutdown `ObjectDisposedException`, app disposal |
-| TOML model, baker, deterministic bake | `Current` (M4) on `m-4/common`; D-M4-13 revision complete on `m-4/fix-2` (PR #7 open, not merged): `bork2d.project.toml` with no type list, per-source `[bork2d].type`, generated host, shape-driven Tomlyn DOM binder, location-free texture import, typed reference validation, structural determinism, incremental manifest/host state, atomic pack write, CLI, MSBuild targets. Sprite field validation/slicing are M5 |
-| `Bork2d.Bake` / `Bork2d.Bake.Cli` | `Current` (M4/D-M4-13): internal JIT tooling; no public types; `generate-host` (source scan + type resolution), `bake`, `validate` with exit codes `0`–`3` |
-| `build/Bork2d.Bake.targets` | `Current` (M4): build/publish/clean integration, fixture preparation, property overrides |
-| `Bork2d.BakeFixture` | `Current` (M4, Q-16; committed source PNG): game-side `Project.Common`-like fixture with `[GenerateShape] partial` types and an `Assets/` tree whose TOMLs carry `[bork2d]` types and whose `art/player.png` is the committed 2x2 RGBA source asset (sidecar `art/player.png.toml`); referenced by tests and the AOT smoke, never by the runtime |
+| TOML model, baker, deterministic bake | `Current` (M4) on `m-4/common`; D-M4-13, D-M4-14, and D-M4-15 revisions complete on `m-4/fix-3` (PR #7 open, not merged): multi-pack `bork2d.project.toml` (ordered `[[assets]]`, first is main; no name, no `[bake].pack`), per-source `[bork2d].type`, one generated host over all roots, shape-driven Tomlyn DOM binder, per-pack location-free texture import, local + main cross-pack reference validation, structural determinism, all-pack incremental manifest/host state, atomic per-pack writes, CLI, MSBuild targets. Sprite field validation/slicing are M5 |
+| `Bork2d.Bake` / `Bork2d.Bake.Cli` | `Current` (M4/D-M4-13/D-M4-14): internal JIT tooling; no public types; `generate-host` (all-root source scan + type resolution), `bake` (every pack, `--output-root`), `validate` (every pack) with exit codes `0`–`3` |
+| `build/Bork2d.Bake.targets` | `Current` (M4/D-M4-14): build/publish/clean integration for every declared pack, fixture preparation (`Assets` + `DLC1`), property overrides |
+| `Bork2d.BakeFixture` | `Current` (M4, Q-16/D-M4-14; committed source PNG): game-side `Project.Common`-like fixture with `[GenerateShape] partial` types, a main `Assets/` tree, and a `DLC1/` tree whose `data/dlc.toml` references the main `art/player`; referenced by tests and the AOT smoke, never by the runtime |
+| Texture sidecars | `Current` (M4/D-M4-15): `<source>.toml` remains the minimal authoring-only `filter`/`wrap` settings file; no normal typed `TextureDescriptor` TOML and no runtime/API change |
 | Serialization policy | `Current` (M3/D-035): Nerdbank.MessagePack `1.4.95` pinned with generated-shape smoke in Common, tests, and AOT smoke; pack header/entry and public `SpriteAsset`/`TextureDescriptor` shapes are generated; `AssetRef<T>`/`DataRef` use public PolyType path marshalers; `Bork2d.Api` references PolyType `1.4.1`; `LoadAsset<T>` passes the shape from `T.GetTypeShape()` |
 | `IAssets` load members | `Current` (M3/D-035): declarations, XML docs, the `IShapeable<T>` constraint, deserialize-only loader bodies, and `AssetRef<T>`/`DataRef` overloads; `IEngine.Assets` returns the real service in every mode |
 | `IAssets.LoadPack`/`Browse`/`Exists`, `AssetInfo` | `Current` (M3): `AssetInfo`, the internal VFS/lookup, and public delegation |

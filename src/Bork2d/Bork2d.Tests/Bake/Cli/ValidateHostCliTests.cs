@@ -105,8 +105,9 @@ public sealed class ValidateHostCliTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
 
         Result result = Run(

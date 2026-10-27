@@ -15,7 +15,7 @@ namespace Bork2d.Bake.Incremental;
 internal sealed class BakeHostGenerationState
 {
     /// <summary>The current state schema version.</summary>
-    internal const int CurrentVersion = 2;
+    internal const int CurrentVersion = 3;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BakeHostGenerationState"/> class.

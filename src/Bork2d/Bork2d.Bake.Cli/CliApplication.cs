@@ -283,7 +283,7 @@ internal static class CliApplication
     {
         string? projectPath = null;
         string? hostPath = null;
-        string? outputPath = null;
+        string? outputRoot = null;
         BakeMode mode = BakeMode.Debug;
         bool check = false;
         bool force = false;
@@ -322,19 +322,25 @@ internal static class CliApplication
                     hostPath = args[++i];
                     break;
 
-                case "--output":
+                case "--output-root":
                     if (i + 1 >= args.Length)
                     {
-                        return UsageError(error, "bake requires a value after --output.");
+                        return UsageError(error, "bake requires a value after --output-root.");
                     }
 
-                    if (outputPath is not null)
+                    if (outputRoot is not null)
                     {
-                        return UsageError(error, "bake accepts --output only once.");
+                        return UsageError(error, "bake accepts --output-root only once.");
                     }
 
-                    outputPath = args[++i];
+                    outputRoot = args[++i];
                     break;
+
+                case "--output":
+                    return UsageError(
+                        error,
+                        "bake no longer accepts --output; use --output-root <dir> and declare each "
+                            + "pack path in the descriptor's [[assets]] entries.");
 
                 case "--mode":
                     if (i + 1 >= args.Length)
@@ -393,9 +399,9 @@ internal static class CliApplication
             return UsageExitCode;
         }
 
-        string? resolvedOutput = null;
-        if (!string.IsNullOrWhiteSpace(outputPath)
-            && !TryResolveCliPath(outputPath, "--output", error, out resolvedOutput))
+        string? resolvedOutputRoot = null;
+        if (!string.IsNullOrWhiteSpace(outputRoot)
+            && !TryResolveCliPath(outputRoot, "--output-root", error, out resolvedOutputRoot))
         {
             return UsageExitCode;
         }
@@ -403,7 +409,7 @@ internal static class CliApplication
         var options = new BakeOptions(
             resolvedProject,
             resolvedHost,
-            resolvedOutput,
+            resolvedOutputRoot,
             mode,
             check,
             force);
@@ -548,11 +554,7 @@ internal static class CliApplication
             return UsageExitCode;
         }
 
-        TextureBakeResult textures = TexturePipeline.Import(descriptor);
-        foreach (BakeDiagnostic diagnostic in textures.Diagnostics)
-        {
-            diagnostics.Add(diagnostic);
-        }
+        TextureBakeResult textures = ImportTexturesForEveryPack(descriptor, diagnostics);
 
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
         int sourceCount = BakeSourceBinder.ValidateSyntax(descriptor, sources, diagnostics);
@@ -574,13 +576,15 @@ internal static class CliApplication
         {
             output.WriteLine(
                 $"{ProgramName}: '{descriptor.DescriptorPath}' is valid: "
-                    + $"{sourceCount} custom-data source(s), {textures.Textures.Count} texture(s), "
+                    + $"{descriptor.Packs.Count} pack(s), {sourceCount} custom-data source(s), "
+                    + $"{textures.Textures.Count} texture(s), "
                     + $"{sources.Select(source => source.TypeName).Distinct(StringComparer.Ordinal).Count()} "
                     + "declared type(s); no pack written.");
         }
 
         if (verbose)
         {
+            WritePackList(output, descriptor);
             foreach (BakeSource source in sources)
             {
                 output.WriteLine($"  {source.AssetPath} -> {source.TypeName}");
@@ -588,6 +592,25 @@ internal static class CliApplication
         }
 
         return SuccessExitCode;
+    }
+
+    private static TextureBakeResult ImportTexturesForEveryPack(
+        ProjectDescriptor descriptor,
+        BakeDiagnostics diagnostics)
+    {
+        var textures = new List<BakedTexture>();
+        foreach (ProjectPack pack in descriptor.Packs)
+        {
+            TextureBakeResult result = TexturePipeline.Import(descriptor, pack);
+            foreach (BakeDiagnostic diagnostic in result.Diagnostics)
+            {
+                diagnostics.Add(diagnostic);
+            }
+
+            textures.AddRange(result.Textures);
+        }
+
+        return new TextureBakeResult(textures, []);
     }
 
     private static int ValidateWithHost(
@@ -601,7 +624,7 @@ internal static class CliApplication
         var options = new BakeOptions(
             projectPath,
             hostPath,
-            outputPath: null,
+            outputRoot: null,
             BakeMode.Debug,
             check: true,
             force: false);
@@ -646,6 +669,27 @@ internal static class CliApplication
         }
     }
 
+    private static void WritePackList(TextWriter output, ProjectDescriptor descriptor)
+    {
+        foreach (ProjectPack pack in descriptor.Packs)
+        {
+            string role = pack.IsMain ? "main" : "dlc";
+            output.WriteLine($"  pack {role} '{pack.PackPath}' <- {pack.Root}");
+        }
+    }
+
+    private static void WritePackList(TextWriter output, IReadOnlyList<BakedPackResult> packs)
+    {
+        foreach (BakedPackResult pack in packs)
+        {
+            string role = pack.IsMain ? "main" : "dlc";
+            output.WriteLine($"  pack {role} '{pack.PackPath}'");
+        }
+    }
+
+    private static string DescribePacks(IReadOnlyList<BakedPackResult> packs)
+        => string.Join(", ", packs.Select(pack => $"'{pack.PackPath}'"));
+
     private static void WriteBakeSuccessSummary(
         TextWriter output,
         BakeOptions options,
@@ -655,16 +699,17 @@ internal static class CliApplication
         {
             string mode = options.Mode == BakeMode.Release ? "release" : "debug";
             output.WriteLine(
-                $"{ProgramName}: baked '{result.PackPath}' ({result.AssetCount} asset(s), "
+                $"{ProgramName}: baked {DescribePacks(result.Packs)} "
+                    + $"({result.Packs.Count} pack(s), {result.AssetCount} asset(s), "
                     + $"{result.TextureCount} texture(s), {result.ReferenceCount} reference(s), "
                     + $"{mode} mode).");
             return;
         }
 
         output.WriteLine(
-            $"{ProgramName}: '{options.ProjectPath}' is valid: {result.AssetCount} asset(s), "
-                + $"{result.TextureCount} texture(s), {result.ReferenceCount} reference(s); "
-                + "no pack written (--check).");
+            $"{ProgramName}: '{options.ProjectPath}' is valid: {result.Packs.Count} pack(s), "
+                + $"{result.AssetCount} asset(s), {result.TextureCount} texture(s), "
+                + $"{result.ReferenceCount} reference(s); no pack written (--check).");
     }
 
     private static void WriteUpToDateSummary(
@@ -674,7 +719,8 @@ internal static class CliApplication
     {
         string mode = options.Mode == BakeMode.Release ? "release" : "debug";
         output.WriteLine(
-            $"{ProgramName}: up to date: '{result.PackPath}' ({result.AssetCount} asset(s), "
+            $"{ProgramName}: up to date: {DescribePacks(result.Packs)} "
+                + $"({result.Packs.Count} pack(s), {result.AssetCount} asset(s), "
                 + $"{result.TextureCount} texture(s), {result.ReferenceCount} reference(s), "
                 + $"{mode} mode); no inputs changed.");
     }
@@ -812,18 +858,22 @@ internal static class CliApplication
             "               write the generated bake host project and manifest; skip when the "
                 + "recorded inputs and generated files are unchanged");
         writer.WriteLine(
-            "  bake --project <bork2d.project.toml> --host <BakeHost.dll> [--output <assets.pck>]");
+            "  bake --project <bork2d.project.toml> --host <BakeHost.dll> [--output-root <dir>]");
         writer.WriteLine("       [--mode debug|release] [--check] [--force] [--verbose|--quiet]");
         writer.WriteLine(
-            "               run the full bake and atomically write the pack; skip when the "
-                + "incremental manifest is current;");
+            "               bake every [[assets]] pack (first is the main pack) and atomically write "
+                + "each pack under --output-root");
+        writer.WriteLine(
+            "               (default: the descriptor directory); skip when the incremental manifest "
+                + "is current");
         writer.WriteLine(
             "               --check validates and writes nothing; --force always re-bakes");
         writer.WriteLine(
             "  validate --project <bork2d.project.toml> [--host <BakeHost.dll>] "
                 + "[--verbose|--quiet]");
         writer.WriteLine(
-            "               without --host: descriptor, source [bork2d] types, TOML syntax, textures;");
+            "               without --host: descriptor, all pack roots, source [bork2d] types, TOML "
+                + "syntax, textures;");
         writer.WriteLine(
             "               with --host: the full bake validation (binding + references), no pack");
         writer.WriteLine(

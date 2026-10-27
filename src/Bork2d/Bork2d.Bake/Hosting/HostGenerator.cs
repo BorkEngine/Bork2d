@@ -326,10 +326,15 @@ internal static class HostGenerator
 
     private static string HashSourceTypes(IReadOnlyList<BakeSource> sources)
     {
+        // The pack identity and root are part of the declaration identity: moving a source between
+        // packs, adding a DLC root, or renaming/removing one must regenerate the host even when the
+        // asset paths and type names look unchanged (D-M4-14).
         string[] declarations = new string[sources.Count];
         for (int i = 0; i < sources.Count; i++)
         {
-            declarations[i] = sources[i].AssetPath + "=" + sources[i].TypeName;
+            BakeSource source = sources[i];
+            declarations[i] = $"{source.Pack.PackPath}={source.Pack.RelativeRoot}="
+                + $"{source.RelativePath}={source.TypeName}";
         }
 
         return BakeHash.HashTextFields(declarations);

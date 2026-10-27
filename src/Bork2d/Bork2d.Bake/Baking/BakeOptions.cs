@@ -5,9 +5,10 @@ namespace Bork2d.Bake.Baking;
 /// </summary>
 /// <remarks>
 /// CLI paths are already resolved against the process current directory by the caller. The output
-/// path is optional: when it is <see langword="null"/> the descriptor's <c>[bake].pack</c> is the
-/// target. <see cref="Check"/> validates everything and writes nothing, and never skips the bake.
-/// <see cref="Force"/> bypasses the incremental manifest skip so a full bake always runs.
+/// root is optional: when it is <see langword="null"/> the descriptor directory is used, and every
+/// descriptor pack path is resolved under it (D-M4-14). <see cref="Check"/> validates everything and
+/// writes nothing, and never skips the bake. <see cref="Force"/> bypasses the incremental manifest
+/// skip so a full bake always runs.
 /// </remarks>
 internal sealed class BakeOptions
 {
@@ -16,14 +17,17 @@ internal sealed class BakeOptions
     /// </summary>
     /// <param name="projectPath">The absolute descriptor path.</param>
     /// <param name="hostPath">The absolute generated host assembly path.</param>
-    /// <param name="outputPath">The absolute pack path override, or <see langword="null"/>.</param>
+    /// <param name="outputRoot">
+    /// The absolute output root every pack path is joined under, or <see langword="null"/> for the
+    /// descriptor directory.
+    /// </param>
     /// <param name="mode">The payload compression mode.</param>
-    /// <param name="check">Whether to validate without writing a pack.</param>
-    /// <param name="force">Whether <c>--force</c> was passed (no-op until WP5).</param>
+    /// <param name="check">Whether to validate without writing packs.</param>
+    /// <param name="force">Whether <c>--force</c> was passed (bypasses the incremental skip).</param>
     internal BakeOptions(
         string projectPath,
         string hostPath,
-        string? outputPath,
+        string? outputRoot,
         BakeMode mode,
         bool check,
         bool force)
@@ -33,7 +37,7 @@ internal sealed class BakeOptions
 
         ProjectPath = projectPath;
         HostPath = hostPath;
-        OutputPath = outputPath;
+        OutputRoot = outputRoot;
         Mode = mode;
         Check = check;
         Force = force;
@@ -45,13 +49,16 @@ internal sealed class BakeOptions
     /// <summary>Gets the absolute generated host assembly path.</summary>
     internal string HostPath { get; }
 
-    /// <summary>Gets the absolute pack path override, or <see langword="null"/> for the descriptor's.</summary>
-    internal string? OutputPath { get; }
+    /// <summary>
+    /// Gets the absolute output root every pack path is joined under, or <see langword="null"/> for
+    /// the descriptor directory.
+    /// </summary>
+    internal string? OutputRoot { get; }
 
     /// <summary>Gets the payload compression mode.</summary>
     internal BakeMode Mode { get; }
 
-    /// <summary>Gets a value indicating whether validation runs without writing a pack.</summary>
+    /// <summary>Gets a value indicating whether validation runs without writing packs.</summary>
     internal bool Check { get; }
 
     /// <summary>

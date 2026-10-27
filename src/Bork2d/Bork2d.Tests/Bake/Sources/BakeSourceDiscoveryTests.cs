@@ -271,8 +271,9 @@ public sealed class BakeSourceDiscoveryTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "."
+            pack = "assets.pck"
             """);
         var parseDiagnostics = new BakeDiagnostics();
         ProjectDescriptor descriptor = Assert.IsType<ProjectDescriptor>(
@@ -301,8 +302,9 @@ public sealed class BakeSourceDiscoveryTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
 
         var diagnostics = new BakeDiagnostics();

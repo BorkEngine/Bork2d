@@ -84,8 +84,9 @@ public sealed class BakeHostLoaderTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """,
             "data/config.toml",
             """
@@ -128,8 +129,9 @@ public sealed class BakeHostLoaderTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """,
             "data/config.toml",
             """

@@ -40,11 +40,14 @@ internal sealed class TextureTestProject : IDisposable
     {
         TempBakeDirectory directory = TempBakeDirectory.Create();
         string assetsRoot = directory.CreateDirectory(AssetsDirectoryName);
+        var pack = new ProjectPack(
+            index: 0,
+            assetsRoot,
+            relativeRoot: AssetsDirectoryName,
+            packPath: "assets.pck");
         var descriptor = new ProjectDescriptor(
             directory.FullPath("bork2d.project.toml"),
-            name: null,
-            assetsRoot,
-            directory.FullPath("assets.pck"),
+            [pack],
             directory.FullPath("obj/bork2d/bakehost"),
             filter,
             wrap);

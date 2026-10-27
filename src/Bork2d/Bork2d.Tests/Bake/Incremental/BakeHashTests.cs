@@ -82,8 +82,7 @@ public sealed class BakeHashTests
             "COMMON",
             "HOST",
             "release",
-            "OUTPUT.pck",
-            "OUTPUTHASH",
+            [new BakeOutputHash("OUTPUT.pck", "OUTPUTHASH")],
             3,
             1,
             2);
@@ -98,8 +97,9 @@ public sealed class BakeHashTests
         Assert.Equal("COMMON", manifest.CommonAssemblyHash);
         Assert.Equal("HOST", manifest.HostHash);
         Assert.Equal("release", manifest.Mode);
-        Assert.Equal("OUTPUT.pck", manifest.OutputPath);
-        Assert.Equal("OUTPUTHASH", manifest.OutputHash);
+        Assert.Equal(
+            new[] { new BakeOutputHash("OUTPUT.pck", "OUTPUTHASH") },
+            manifest.Outputs);
         Assert.Equal(3, manifest.AssetCount);
         Assert.Equal(1, manifest.TextureCount);
         Assert.Equal(2, manifest.ReferenceCount);
@@ -116,8 +116,7 @@ public sealed class BakeHashTests
             "C",
             "H",
             "debug",
-            "O",
-            "OH",
+            [new BakeOutputHash("O", "OH")],
             0,
             0,
             0));
@@ -129,8 +128,7 @@ public sealed class BakeHashTests
             "C",
             "H",
             "debug",
-            "O",
-            "OH",
+            [new BakeOutputHash("O", "OH")],
             0,
             0,
             0));
@@ -142,8 +140,7 @@ public sealed class BakeHashTests
             "C",
             "H",
             "debug",
-            "O",
-            "OH",
+            [new BakeOutputHash("O", "OH")],
             -1,
             0,
             0));

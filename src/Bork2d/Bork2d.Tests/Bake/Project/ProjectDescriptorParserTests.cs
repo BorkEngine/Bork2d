@@ -9,8 +9,9 @@ public sealed class ProjectDescriptorParserTests
     private const string MinimalDescriptor = """
         schema = 1
 
-        [assets]
+        [[assets]]
         root = "Assets"
+        pack = "assets.pck"
         """;
 
     [Fact]
@@ -22,9 +23,12 @@ public sealed class ProjectDescriptorParserTests
         ProjectDescriptor descriptor = Parse(directory, MinimalDescriptor);
 
         string projectDirectory = directory.RootPath;
-        Assert.Null(descriptor.Name);
-        Assert.Equal(Path.Combine(projectDirectory, "Assets"), descriptor.AssetsRoot);
-        Assert.Equal(Path.Combine(projectDirectory, "assets.pck"), descriptor.PackPath);
+        ProjectPack main = Assert.Single(descriptor.Packs);
+        Assert.True(main.IsMain);
+        Assert.Equal(0, main.Index);
+        Assert.Equal("Assets", main.RelativeRoot);
+        Assert.Equal("assets.pck", main.PackPath);
+        Assert.Equal(Path.Combine(projectDirectory, "Assets"), main.Root);
         Assert.Equal(
             Path.Combine(projectDirectory, "obj", "bork2d", "bakehost"),
             descriptor.HostPath);
@@ -34,22 +38,66 @@ public sealed class ProjectDescriptorParserTests
     }
 
     [Fact]
-    public void FullDescriptorParsesEveryField()
+    public void MultipleAssetsEntriesParseInOrderAndTheFirstIsMain()
     {
         using var directory = TempBakeDirectory.Create();
         directory.CreateDirectory("Assets");
+        directory.CreateDirectory("DLC1");
+        directory.CreateDirectory("DLC1/More");
 
         ProjectDescriptor descriptor = Parse(
             directory,
             """
             schema = 1
-            name = "MyGame"
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
+
+            [[assets]]
+            root = "DLC1"
+            pack = "dlc1.pck"
+
+            [[assets]]
+            root = "DLC1/More"
+            pack = "dlc/more.pck"
+            """);
+
+        ProjectDescriptor descriptorWithThree = descriptor;
+        Assert.Equal(3, descriptorWithThree.Packs.Count);
+        Assert.Same(descriptorWithThree.Packs[0], descriptorWithThree.MainPack);
+        Assert.True(descriptorWithThree.Packs[0].IsMain);
+        Assert.False(descriptorWithThree.Packs[1].IsMain);
+        Assert.False(descriptorWithThree.Packs[2].IsMain);
+        Assert.Equal(
+            new[] { "assets.pck", "dlc1.pck", "dlc/more.pck" },
+            descriptorWithThree.Packs.Select(pack => pack.PackPath));
+        Assert.Equal(
+            new[] { 0, 1, 2 },
+            descriptorWithThree.Packs.Select(pack => pack.Index));
+    }
+
+    [Fact]
+    public void FullDescriptorParsesEveryField()
+    {
+        using var directory = TempBakeDirectory.Create();
+        directory.CreateDirectory("Assets");
+        directory.CreateDirectory("DLC1");
+
+        ProjectDescriptor descriptor = Parse(
+            directory,
+            """
+            schema = 1
+
+            [[assets]]
+            root = "Assets"
+            pack = "out/game.pck"
+
+            [[assets]]
+            root = "DLC1"
+            pack = "dlc/dlc1.pck"
 
             [bake]
-            pack = "out/game.pck"
             host = "obj/host"
 
             [textures]
@@ -57,8 +105,9 @@ public sealed class ProjectDescriptorParserTests
             wrap = "repeat"
             """);
 
-        Assert.Equal("MyGame", descriptor.Name);
-        Assert.Equal(Path.Combine(directory.RootPath, "out", "game.pck"), descriptor.PackPath);
+        Assert.Equal(
+            new[] { "out/game.pck", "dlc/dlc1.pck" },
+            descriptor.Packs.Select(pack => pack.PackPath));
         Assert.Equal(Path.Combine(directory.RootPath, "obj", "host"), descriptor.HostPath);
         Assert.Equal(BakeTextureFilter.Nearest, descriptor.TextureFilter);
         Assert.Equal(BakeTextureWrap.Repeat, descriptor.TextureWrap);
@@ -69,17 +118,22 @@ public sealed class ProjectDescriptorParserTests
     {
         using var directory = TempBakeDirectory.Create();
         directory.CreateDirectory("project/Assets");
+        directory.CreateDirectory("project/DLC1");
 
         string descriptorPath = directory.WriteFile(
             "project/bork2d.project.toml",
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "packs/assets.pck"
+
+            [[assets]]
+            root = "DLC1"
+            pack = "packs/dlc1.pck"
 
             [bake]
-            pack = "../out/game.pck"
             host = "obj/host"
             """);
         var diagnostics = new BakeDiagnostics();
@@ -90,42 +144,93 @@ public sealed class ProjectDescriptorParserTests
         Assert.NotNull(descriptor);
         Assert.Equal(
             Path.Combine(directory.RootPath, "project", "Assets"),
-            descriptor.AssetsRoot);
-        Assert.Equal(
-            Path.Combine(directory.RootPath, "out", "game.pck"),
-            descriptor.PackPath);
+            descriptor.Packs[0].Root);
+        Assert.Equal("packs/assets.pck", descriptor.Packs[0].PackPath);
         Assert.Equal(
             Path.Combine(directory.RootPath, "project", "obj", "host"),
             descriptor.HostPath);
     }
 
     [Fact]
-    public void AbsolutePathsStayAbsolute()
+    public void RootDotDeclaresTheDescriptorDirectory()
     {
         using var directory = TempBakeDirectory.Create();
-        string assetsRoot = directory.CreateDirectory("Elsewhere/Assets");
-        string packPath = Path.Combine(directory.RootPath, "elsewhere", "game.pck");
-        string hostPath = Path.Combine(directory.RootPath, "elsewhere", "host");
-        string toml = string.Join(
-            '\n',
-            "schema = 1",
-            string.Empty,
-            "[assets]",
-            $"root = '{ToTomlPath(assetsRoot)}'",
-            string.Empty,
-            "[bake]",
-            $"pack = '{ToTomlPath(packPath)}'",
-            $"host = '{ToTomlPath(hostPath)}'");
-        string descriptorPath = directory.WriteFile("bork2d.project.toml", toml);
-        var diagnostics = new BakeDiagnostics();
 
-        ProjectDescriptor? descriptor = ProjectDescriptorParser.Parse(descriptorPath, diagnostics);
+        ProjectDescriptor descriptor = Parse(
+            directory,
+            """
+            schema = 1
 
-        Assert.False(diagnostics.HasErrors);
-        Assert.NotNull(descriptor);
-        Assert.Equal(assetsRoot, descriptor.AssetsRoot);
-        Assert.Equal(packPath, descriptor.PackPath);
-        Assert.Equal(hostPath, descriptor.HostPath);
+            [[assets]]
+            root = "."
+            pack = "assets.pck"
+            """);
+
+        Assert.Equal(directory.RootPath, descriptor.MainPack.Root);
+        Assert.Equal(".", descriptor.MainPack.RelativeRoot);
+    }
+
+    [Fact]
+    public void AbsoluteAndTraversalPathsAreRejected()
+    {
+        using var directory = TempBakeDirectory.Create();
+        directory.CreateDirectory("Assets");
+
+        Assert.Equal(
+            BakeDiagnosticCodes.DescriptorInvalidValue,
+            ParseError(
+                directory,
+                $"""
+                schema = 1
+
+                [[assets]]
+                root = '{ToTomlPath(directory.FullPath("Assets"))}'
+                pack = "assets.pck"
+                """).Code);
+        Assert.Equal(
+            BakeDiagnosticCodes.DescriptorInvalidValue,
+            ParseError(
+                directory,
+                """
+                schema = 1
+
+                [[assets]]
+                root = "../Assets"
+                pack = "assets.pck"
+                """).Code);
+        Assert.Equal(
+            BakeDiagnosticCodes.DescriptorInvalidValue,
+            ParseError(
+                directory,
+                """
+                schema = 1
+
+                [[assets]]
+                root = "Assets"
+                pack = "../assets.pck"
+                """).Code);
+        Assert.Equal(
+            BakeDiagnosticCodes.DescriptorInvalidValue,
+            ParseError(
+                directory,
+                $"""
+                schema = 1
+
+                [[assets]]
+                root = "Assets"
+                pack = '{ToTomlPath(Path.Combine(directory.RootPath, "assets.pck"))}'
+                """).Code);
+        Assert.Equal(
+            BakeDiagnosticCodes.DescriptorInvalidValue,
+            ParseError(
+                directory,
+                """
+                schema = 1
+
+                [[assets]]
+                root = "Assets"
+                pack = "packs/../assets.pck"
+                """).Code);
     }
 
     [Fact]
@@ -138,14 +243,53 @@ public sealed class ProjectDescriptorParserTests
             directory,
             """
             schema = 1
-            "assets".root = "Assets"
             "textures".filter = "nearest"
             "textures".wrap = "repeat"
+
+            [[assets]]
+            root = "Assets"
+            pack = "assets.pck"
             """);
 
-        Assert.Equal(Path.Combine(directory.RootPath, "Assets"), descriptor.AssetsRoot);
+        Assert.Single(descriptor.Packs);
+        Assert.Equal("assets.pck", descriptor.MainPack.PackPath);
         Assert.Equal(BakeTextureFilter.Nearest, descriptor.TextureFilter);
         Assert.Equal(BakeTextureWrap.Repeat, descriptor.TextureWrap);
+    }
+
+    [Fact]
+    public void ProjectNameAndBakePackKeysAreRejected()
+    {
+        using var directory = TempBakeDirectory.Create();
+        directory.CreateDirectory("Assets");
+
+        BakeDiagnostic nameError = ParseError(
+            directory,
+            """
+            schema = 1
+            name = "MyGame"
+
+            [[assets]]
+            root = "Assets"
+            pack = "assets.pck"
+            """);
+        Assert.Equal(BakeDiagnosticCodes.DescriptorUnknownKey, nameError.Code);
+        Assert.Contains("name", nameError.Message, StringComparison.Ordinal);
+
+        BakeDiagnostic packError = ParseError(
+            directory,
+            """
+            schema = 1
+
+            [[assets]]
+            root = "Assets"
+            pack = "assets.pck"
+
+            [bake]
+            pack = "old.pck"
+            """);
+        Assert.Equal(BakeDiagnosticCodes.DescriptorUnknownKey, packError.Code);
+        Assert.Contains("bake.pack", packError.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -159,8 +303,9 @@ public sealed class ProjectDescriptorParserTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
 
             [[types]]
             prefix = "data"
@@ -180,8 +325,9 @@ public sealed class ProjectDescriptorParserTests
         BakeDiagnostic error = ParseError(
             directory,
             """
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
 
         Assert.Equal(BakeDiagnosticCodes.DescriptorSchemaMissing, error.Code);
@@ -199,8 +345,9 @@ public sealed class ProjectDescriptorParserTests
             """
             schema = 2
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
 
         Assert.Equal(BakeDiagnosticCodes.DescriptorSchemaUnsupported, error.Code);
@@ -218,8 +365,9 @@ public sealed class ProjectDescriptorParserTests
             """
             schema = "1"
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
 
         Assert.Equal(BakeDiagnosticCodes.DescriptorInvalidValue, error.Code);
@@ -227,20 +375,33 @@ public sealed class ProjectDescriptorParserTests
     }
 
     [Fact]
-    public void MissingAssetsTableFails()
+    public void MissingAssetsListFails()
     {
         using var directory = TempBakeDirectory.Create();
 
         BakeDiagnostic error = ParseError(directory, "schema = 1");
 
         Assert.Equal(BakeDiagnosticCodes.DescriptorMissingKey, error.Code);
-        Assert.Contains("assets.root", error.Message, StringComparison.Ordinal);
+        Assert.Contains("assets", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void MissingAssetsRootFailsWithTheTableLocation()
+    public void EmptyAssetsListFails()
     {
         using var directory = TempBakeDirectory.Create();
+
+        BakeDiagnostic error = ParseError(directory, "schema = 1\nassets = []");
+
+        Assert.Equal(BakeDiagnosticCodes.DescriptorInvalidValue, error.Code);
+        Assert.Contains("at least one", error.Message, StringComparison.Ordinal);
+        Assert.Contains("[[assets]]", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SingleAssetsTableIsRejectedWithTheArrayOfTablesRule()
+    {
+        using var directory = TempBakeDirectory.Create();
+        directory.CreateDirectory("Assets");
 
         BakeDiagnostic error = ParseError(
             directory,
@@ -248,11 +409,41 @@ public sealed class ProjectDescriptorParserTests
             schema = 1
 
             [assets]
+            root = "Assets"
+            pack = "assets.pck"
             """);
 
-        Assert.Equal(BakeDiagnosticCodes.DescriptorMissingKey, error.Code);
-        Assert.Contains("assets.root", error.Message, StringComparison.Ordinal);
-        Assert.Equal(3, error.Line);
+        Assert.Equal(BakeDiagnosticCodes.DescriptorInvalidValue, error.Code);
+        Assert.Contains("[[assets]]", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingRootOrPackInAnEntryFails()
+    {
+        using var directory = TempBakeDirectory.Create();
+        directory.CreateDirectory("Assets");
+
+        BakeDiagnostic missingRoot = ParseError(
+            directory,
+            """
+            schema = 1
+
+            [[assets]]
+            pack = "assets.pck"
+            """);
+        Assert.Equal(BakeDiagnosticCodes.DescriptorMissingKey, missingRoot.Code);
+        Assert.Contains("assets[0].root", missingRoot.Message, StringComparison.Ordinal);
+
+        BakeDiagnostic missingPack = ParseError(
+            directory,
+            """
+            schema = 1
+
+            [[assets]]
+            root = "Assets"
+            """);
+        Assert.Equal(BakeDiagnosticCodes.DescriptorMissingKey, missingPack.Code);
+        Assert.Contains("assets[0].pack", missingPack.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -261,17 +452,59 @@ public sealed class ProjectDescriptorParserTests
         using var directory = TempBakeDirectory.Create();
         string filePath = directory.WriteFile("Assets", "not a directory");
 
+        BakeDiagnostic error = ParseError(directory, MinimalDescriptor);
+
+        Assert.Equal(BakeDiagnosticCodes.DescriptorAssetsRoot, error.Code);
+        Assert.Contains(filePath, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DuplicateRootIsRejected()
+    {
+        using var directory = TempBakeDirectory.Create();
+        directory.CreateDirectory("Assets");
+
         BakeDiagnostic error = ParseError(
             directory,
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
+
+            [[assets]]
+            root = "Assets"
+            pack = "dlc1.pck"
             """);
 
-        Assert.Equal(BakeDiagnosticCodes.DescriptorAssetsRoot, error.Code);
-        Assert.Contains(filePath, error.Message, StringComparison.Ordinal);
+        Assert.Equal(BakeDiagnosticCodes.DescriptorDuplicateRoot, error.Code);
+        Assert.Contains("more than one", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DuplicatePackPathIsRejected()
+    {
+        using var directory = TempBakeDirectory.Create();
+        directory.CreateDirectory("Assets");
+        directory.CreateDirectory("DLC1");
+
+        BakeDiagnostic error = ParseError(
+            directory,
+            """
+            schema = 1
+
+            [[assets]]
+            root = "Assets"
+            pack = "assets.pck"
+
+            [[assets]]
+            root = "DLC1"
+            pack = "assets.pck"
+            """);
+
+        Assert.Equal(BakeDiagnosticCodes.DescriptorDuplicatePack, error.Code);
+        Assert.Contains("unique", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -285,14 +518,15 @@ public sealed class ProjectDescriptorParserTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             unexpected = true
             """);
 
         Assert.Equal(BakeDiagnosticCodes.DescriptorUnknownKey, error.Code);
         Assert.Contains("unexpected", error.Message, StringComparison.Ordinal);
-        Assert.Equal(5, error.Line);
+        Assert.Equal(6, error.Line);
         Assert.Equal(1, error.Column);
     }
 
@@ -308,8 +542,9 @@ public sealed class ProjectDescriptorParserTests
             schema = 1
             output = "assets.pck"
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
 
         Assert.Equal(BakeDiagnosticCodes.DescriptorUnknownKey, error.Code);
@@ -329,15 +564,16 @@ public sealed class ProjectDescriptorParserTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
 
             [textures]
             filter = "cubic"
             """);
 
         Assert.Equal(BakeDiagnosticCodes.DescriptorTextureSetting, error.Code);
-        Assert.Equal(7, error.Line);
+        Assert.Equal(8, error.Line);
         Assert.Equal(10, error.Column);
     }
 
@@ -352,8 +588,9 @@ public sealed class ProjectDescriptorParserTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
 
             [textures]
             wrap = "mirror"
@@ -375,8 +612,9 @@ public sealed class ProjectDescriptorParserTests
             schema = 1
             schema = 2
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
 
         Assert.Equal(BakeDiagnosticCodes.TomlSyntax, error.Code);

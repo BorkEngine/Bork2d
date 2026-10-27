@@ -6,24 +6,28 @@ using Bork2d.BakeFixture;
 namespace Bork2d.AotSmoke.Smoke;
 
 /// <summary>
-/// Holds the canonical paths and the exact expected values of the baked fixture pack that the
+/// Holds the canonical paths and the exact expected values of the baked fixture packs that the
 /// default NativeAOT smoke run loads.
 /// </summary>
 /// <remarks>
-/// The pack is produced by the imported <c>build/Bork2d.Bake.targets</c> from the fixture's
-/// committed <c>Bork2d.BakeFixture</c> asset tree and contains exactly five entries:
-/// <c>data/game</c>, the <c>roots/stats</c> struct root, <c>sprites/player</c>, <c>art/player</c>,
-/// and the raw <c>art/player-raw</c> payload. The smoke opens it with
-/// <see cref="Path.Combine(string, string)"/> on <see cref="AppContext.BaseDirectory"/>, so the
-/// published executable reads the pack next to itself instead of building a temporary pack or
-/// depending on the process current directory. The fixture's <c>Assets/art/player.png</c> is a
-/// committed fixture <em>source asset</em>; test packs and test images stay generated in temp
-/// directories (no committed test/pack binary fixture).
+/// The packs are produced by the imported <c>build/Bork2d.Bake.targets</c> from the fixture's
+/// committed <c>Bork2d.BakeFixture</c> asset trees (D-M4-14). The main pack
+/// <c>assets.pck</c> contains exactly five entries: <c>data/game</c>, the <c>roots/stats</c> struct
+/// root, <c>sprites/player</c>, <c>art/player</c>, and the raw <c>art/player-raw</c> payload. The DLC
+/// pack <c>dlc1.pck</c> contains exactly one entry, <c>data/dlc</c>, whose texture reference resolves
+/// to the main pack's <c>art/player</c> (an allowed DLC -> main reference). The smoke mounts the main
+/// pack as the base and <c>LoadPack("dlc1.pck")</c> as an overlay, both next to the published
+/// executable. The fixture's <c>Assets/art/player.png</c> is a committed fixture <em>source asset</em>;
+/// test packs and test images stay generated in temp directories (no committed test/pack binary
+/// fixture).
 /// </remarks>
 internal static class AssetSmoke
 {
-    /// <summary>The baked pack file name next to the app and in the publish directory.</summary>
+    /// <summary>The baked main pack file name next to the app and in the publish directory.</summary>
     internal const string PackFileName = "assets.pck";
+
+    /// <summary>The baked DLC/overlay pack file name next to the app and in the publish directory.</summary>
+    internal const string DlcPackFileName = "dlc1.pck";
 
     /// <summary>The canonical path of the baked class-root custom data.</summary>
     internal const string GamePath = "data/game";
@@ -40,11 +44,29 @@ internal static class AssetSmoke
     /// <summary>The canonical path of the baked raw texture payload.</summary>
     internal const string TexturePayloadPath = "art/player-raw";
 
-    /// <summary>The exact entry count of the baked fixture pack.</summary>
+    /// <summary>The canonical path of the DLC pack's custom data.</summary>
+    internal const string DlcGamePath = "data/dlc";
+
+    /// <summary>The exact entry count of the baked main pack.</summary>
     internal const int EntryCount = 5;
+
+    /// <summary>The exact entry count of the baked DLC pack.</summary>
+    internal const int DlcEntryCount = 1;
+
+    /// <summary>The exact visible entry count after the DLC overlay is mounted.</summary>
+    internal const int MergedEntryCount = EntryCount + DlcEntryCount;
 
     /// <summary>The expected <c>name</c> of the baked <see cref="GameConfig"/>.</summary>
     internal const string GameName = "campaign";
+
+    /// <summary>The expected <c>name</c> of the baked DLC <see cref="GameConfig"/>.</summary>
+    internal const string DlcGameName = "dlc";
+
+    /// <summary>The expected <c>must</c> value of the baked DLC <see cref="GameConfig"/>.</summary>
+    internal const string DlcGameMust = "overlay";
+
+    /// <summary>The expected <c>health</c> of the baked DLC <see cref="GameConfig"/>.</summary>
+    internal const int DlcGameHealth = 10;
 
     /// <summary>The expected <c>health</c> of the baked <see cref="GameConfig"/>.</summary>
     internal const int GameHealth = 120;

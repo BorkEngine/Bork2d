@@ -5,14 +5,16 @@ using Xunit;
 namespace Bork2d.Tests.Bake.Incremental;
 
 /// <summary>
-/// The incremental manifest and skip rule: JSON round-trip, deterministic input order, and each
-/// field of the skip decision (descriptor, inputs, common closure, host, tool, mode, output, pack
-/// hash) invalidating a recorded manifest.
+/// The incremental manifest and skip rule: JSON round-trip, deterministic input order, every recorded
+/// pack output, and each field of the skip decision (descriptor, inputs, common closure, host, tool,
+/// mode, outputs, pack hashes) invalidating a recorded manifest.
 /// </summary>
 public sealed class BakeIncrementalManifestTests
 {
     private const string PackHash = "PACKHASH";
+    private const string DlcHash = "DLCHASH";
     private static string PackPath => Path.Combine("game", "out", "assets.pck");
+    private static string DlcPath => Path.Combine("game", "out", "dlc1.pck");
 
     [Fact]
     public void JsonRoundTripsEveryRecordedField()
@@ -29,8 +31,7 @@ public sealed class BakeIncrementalManifestTests
         Assert.Equal(manifest.CommonAssemblyHash, parsed.CommonAssemblyHash);
         Assert.Equal(manifest.HostHash, parsed.HostHash);
         Assert.Equal(manifest.Mode, parsed.Mode);
-        Assert.Equal(manifest.OutputPath, parsed.OutputPath);
-        Assert.Equal(manifest.OutputHash, parsed.OutputHash);
+        Assert.Equal(manifest.Outputs, parsed.Outputs);
         Assert.Equal(manifest.AssetCount, parsed.AssetCount);
         Assert.Equal(manifest.TextureCount, parsed.TextureCount);
         Assert.Equal(manifest.ReferenceCount, parsed.ReferenceCount);
@@ -50,7 +51,7 @@ public sealed class BakeIncrementalManifestTests
         Assert.Null(BakeManifestJson.TryDeserialize("[]"u8.ToArray()));
         Assert.Null(BakeManifestJson.TryDeserialize("{}"u8.ToArray()));
         Assert.Null(BakeManifestJson.TryDeserialize(
-            """{"version":1,"toolVersion":"1.0.0"}"""u8.ToArray()));
+            """{"version":2,"toolVersion":"1.0.0"}"""u8.ToArray()));
     }
 
     [Fact]
@@ -81,6 +82,7 @@ public sealed class BakeIncrementalManifestTests
         BakeIncrementalManifest? read = BakeManifestStore.TryRead(manifestPath);
         Assert.NotNull(read);
         Assert.Equal(CreateManifest().Inputs, read.Inputs);
+        Assert.Equal(CreateManifest().Outputs, read.Outputs);
     }
 
     [Fact]
@@ -90,54 +92,67 @@ public sealed class BakeIncrementalManifestTests
             CreateManifest(),
             CreateInputs(),
             BakeToolInfo.Version,
-            PackHash));
+            CreateOutputHashes()));
     }
 
     [Fact]
     public void EveryChangedInputInvalidatesTheSkip()
     {
         BakeIncrementalInputs current = CreateInputs();
+        IReadOnlyList<BakeOutputHash> outputHashes = CreateOutputHashes();
 
         Assert.False(BakeIncrementalPlanner.Matches(
             CreateManifest(version: BakeIncrementalManifest.CurrentVersion + 1),
             current,
             BakeToolInfo.Version,
-            PackHash));
+            outputHashes));
         Assert.False(BakeIncrementalPlanner.Matches(
             CreateManifest(toolVersion: "0.0.1"),
             current,
             BakeToolInfo.Version,
-            PackHash));
+            outputHashes));
         Assert.False(BakeIncrementalPlanner.Matches(
             CreateManifest(descriptorHash: "OTHER"),
             current,
             BakeToolInfo.Version,
-            PackHash));
+            outputHashes));
         Assert.False(BakeIncrementalPlanner.Matches(
             CreateManifest(commonAssemblyHash: "OTHER"),
             current,
             BakeToolInfo.Version,
-            PackHash));
+            outputHashes));
         Assert.False(BakeIncrementalPlanner.Matches(
             CreateManifest(hostHash: "OTHER"),
             current,
             BakeToolInfo.Version,
-            PackHash));
+            outputHashes));
         Assert.False(BakeIncrementalPlanner.Matches(
             CreateManifest(mode: "release"),
             current,
             BakeToolInfo.Version,
-            PackHash));
+            outputHashes));
         Assert.False(BakeIncrementalPlanner.Matches(
-            CreateManifest(outputPath: Path.Combine("game", "out", "other.pck")),
+            CreateManifest(outputs:
+            [
+                new BakeOutputHash(Path.Combine("game", "out", "other.pck"), PackHash),
+            ]),
             current,
             BakeToolInfo.Version,
-            PackHash));
+            outputHashes));
         Assert.False(BakeIncrementalPlanner.Matches(
-            CreateManifest(outputHash: "OTHER"),
+            CreateManifest(outputs:
+            [
+                new BakeOutputHash(PackPath, "OTHER"),
+                new BakeOutputHash(DlcPath, DlcHash),
+            ]),
             current,
             BakeToolInfo.Version,
-            PackHash));
+            outputHashes));
+        Assert.False(BakeIncrementalPlanner.Matches(
+            CreateManifest(outputs: [new BakeOutputHash(PackPath, PackHash)]),
+            current,
+            BakeToolInfo.Version,
+            outputHashes));
         Assert.False(BakeIncrementalPlanner.Matches(
             CreateManifest(inputs:
             [
@@ -146,7 +161,7 @@ public sealed class BakeIncrementalManifestTests
             ]),
             current,
             BakeToolInfo.Version,
-            PackHash));
+            outputHashes));
         Assert.False(BakeIncrementalPlanner.Matches(
             CreateManifest(inputs:
             [
@@ -155,7 +170,7 @@ public sealed class BakeIncrementalManifestTests
             ]),
             current,
             BakeToolInfo.Version,
-            PackHash));
+            outputHashes));
         Assert.False(BakeIncrementalPlanner.Matches(
             CreateManifest(inputs:
             [
@@ -165,16 +180,16 @@ public sealed class BakeIncrementalManifestTests
             ]),
             current,
             BakeToolInfo.Version,
-            PackHash));
+            outputHashes));
         Assert.False(BakeIncrementalPlanner.Matches(
             CreateManifest(),
             current,
             BakeToolInfo.Version,
-            "OTHER"));
+            [new BakeOutputHash(PackPath, "OTHER"), new BakeOutputHash(DlcPath, DlcHash)]));
     }
 
     [Fact]
-    public void InputsAreHeldInOrdinalOrder()
+    public void InputsAreHeldInOrdinalOrderAndOutputsKeepTheirOrder()
     {
         var current = new BakeIncrementalInputs(
             "DESC",
@@ -182,11 +197,12 @@ public sealed class BakeIncrementalManifestTests
             "COMMON",
             "HOST",
             "debug",
-            PackPath);
+            [PackPath, DlcPath]);
 
         Assert.Equal(
             new[] { "assets/b.toml", "assets/a.toml" },
             current.Inputs.Select(input => input.Path));
+        Assert.Equal(new[] { PackPath, DlcPath }, current.Outputs);
         Assert.Equal("debug", BakeIncrementalInputs.ModeName(BakeMode.Debug));
         Assert.Equal("release", BakeIncrementalInputs.ModeName(BakeMode.Release));
     }
@@ -199,8 +215,7 @@ public sealed class BakeIncrementalManifestTests
         string? commonAssemblyHash = null,
         string? hostHash = null,
         string? mode = null,
-        string? outputPath = null,
-        string? outputHash = null)
+        IEnumerable<BakeOutputHash>? outputs = null)
         => new(
             version ?? BakeIncrementalManifest.CurrentVersion,
             toolVersion ?? BakeToolInfo.Version,
@@ -213,8 +228,7 @@ public sealed class BakeIncrementalManifestTests
             commonAssemblyHash ?? "COMMON",
             hostHash ?? "HOST",
             mode ?? "debug",
-            outputPath ?? CreateInputs().OutputPath,
-            outputHash ?? PackHash,
+            outputs ?? CreateOutputHashes(),
             3,
             1,
             2);
@@ -229,5 +243,12 @@ public sealed class BakeIncrementalManifestTests
             "COMMON",
             "HOST",
             "debug",
-            PackPath);
+            [PackPath, DlcPath]);
+
+    private static BakeOutputHash[] CreateOutputHashes()
+        =>
+        [
+            new BakeOutputHash(PackPath, PackHash),
+            new BakeOutputHash(DlcPath, DlcHash),
+        ];
 }

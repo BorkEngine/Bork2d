@@ -100,8 +100,9 @@ public sealed class BakeIncrementalCliTests
         Assert.Equal(BakeIncrementalManifest.CurrentVersion, manifest.Version);
         Assert.Equal(BakeToolInfo.Version, manifest.ToolVersion);
         Assert.Equal("debug", manifest.Mode);
-        Assert.Equal(Path.GetFullPath(pack), manifest.OutputPath);
-        Assert.Equal(BakeHash.HashFile(pack), manifest.OutputHash);
+        BakeOutputHash output = Assert.Single(manifest.Outputs);
+        Assert.Equal(Path.GetFullPath(pack), output.Path);
+        Assert.Equal(BakeHash.HashFile(pack), output.Hash);
         Assert.Equal(3, manifest.AssetCount);
         Assert.Equal(1, manifest.TextureCount);
         Assert.Equal(2, manifest.ReferenceCount);
@@ -261,7 +262,7 @@ public sealed class BakeIncrementalCliTests
         Assert.Equal(
             BakeHash.HashFile(pack),
             Assert.IsType<BakeIncrementalManifest>(
-                BakeManifestStore.TryRead(ManifestPath(project))).OutputHash);
+                BakeManifestStore.TryRead(ManifestPath(project))).Outputs[0].Hash);
     }
 
     [Fact]
@@ -374,8 +375,8 @@ public sealed class BakeIncrementalCliTests
             Path.Combine(project, BakeProjectFixture.DescriptorFileName),
             "--host",
             _fixture.EmptyHostAssemblyPath,
-            "--output",
-            pack);
+            "--output-root",
+            Path.GetDirectoryName(pack)!);
 
         Assert.Equal(CliApplication.SuccessExitCode, result.ExitCode);
         BakeIncrementalManifest manifest = Assert.IsType<BakeIncrementalManifest>(
@@ -420,8 +421,8 @@ public sealed class BakeIncrementalCliTests
             Path.Combine(project, BakeProjectFixture.DescriptorFileName),
             "--host",
             _fixture.HostAssemblyPath,
-            "--output",
-            packPath,
+            "--output-root",
+            Path.GetDirectoryName(packPath)!,
             .. extra,
         ]);
 

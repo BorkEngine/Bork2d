@@ -137,8 +137,9 @@ public sealed class GenerateHostIncrementalTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
         string sourcePath = Path.Combine(project, "Assets", "data", "source.toml");
         File.WriteAllText(
@@ -203,6 +204,61 @@ public sealed class GenerateHostIncrementalTests
         string removedManifest = File.ReadAllText(manifestPath);
         Assert.DoesNotContain("\"BakeFixture.Common.StatsRoot\"", removedManifest, StringComparison.Ordinal);
         Assert.Contains("\"Game.Data.Weapon\"", removedManifest, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MovingASourceBetweenPackRootsRegeneratesTheHost()
+    {
+        string project = Path.Combine(
+            Path.GetTempPath(),
+            $"bork2d-bake-host-packs-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(project, "Assets", "data"));
+        Directory.CreateDirectory(Path.Combine(project, "DLC1", "data"));
+        string descriptorPath = Path.Combine(project, TempBakeFixture.DescriptorFileName);
+        File.WriteAllText(
+            descriptorPath,
+            """
+            schema = 1
+
+            [[assets]]
+            root = "Assets"
+            pack = "assets.pck"
+
+            [[assets]]
+            root = "DLC1"
+            pack = "dlc1.pck"
+            """);
+        string source = """
+            value = 1
+
+            [bork2d]
+            type = "BakeFixture.Common.GameConfig"
+            """;
+        string sourcePath = Path.Combine(project, "Assets", "data", "source.toml");
+        File.WriteAllText(sourcePath, source);
+        string output = CreateOutputDirectory();
+
+        Assert.Equal(
+            CliApplication.SuccessExitCode,
+            Generate(descriptorPath, _fixture.ProjectCommonAssemblyPath, output).ExitCode);
+        Result unchanged = Generate(descriptorPath, _fixture.ProjectCommonAssemblyPath, output);
+        Assert.Contains("up to date", unchanged.Output, StringComparison.Ordinal);
+        string statePath = BakeManifestPaths.HostGenerationStatePath(project);
+        string beforeHash = Assert.IsType<BakeHostGenerationState>(
+            BakeHostGenerationStore.TryRead(statePath)).SourceTypesHash;
+
+        // The asset path and type are unchanged; only the pack/root identity changes. Without pack
+        // identity in the source-type hash this would incorrectly stay current (D-M4-14).
+        File.Delete(sourcePath);
+        string movedPath = Path.Combine(project, "DLC1", "data", "source.toml");
+        File.WriteAllText(movedPath, source);
+
+        Result moved = Generate(descriptorPath, _fixture.ProjectCommonAssemblyPath, output);
+
+        Assert.Equal(CliApplication.SuccessExitCode, moved.ExitCode);
+        BakeHostGenerationState state = Assert.IsType<BakeHostGenerationState>(
+            BakeHostGenerationStore.TryRead(statePath));
+        Assert.NotEqual(beforeHash, state.SourceTypesHash);
     }
 
     [Fact]
