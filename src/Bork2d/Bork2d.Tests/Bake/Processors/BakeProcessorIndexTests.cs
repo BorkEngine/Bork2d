@@ -3,7 +3,6 @@ using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Processors;
 using Bork2d.Bake.Sources;
-using Bork2d.Bake.Textures;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Processors;
@@ -15,12 +14,9 @@ namespace Bork2d.Tests.Bake.Processors;
 /// </summary>
 public sealed class BakeProcessorIndexTests
 {
-    private static readonly string _projectDirectory = Path.Combine(
-        Path.GetTempPath(),
-        "bork2d-processor-index-tests");
-
     private static readonly string _gameConfigType = typeof(Bork2d.BakeFixture.GameConfig).FullName!;
     private static readonly string _statsRootType = typeof(Bork2d.BakeFixture.StatsRoot).FullName!;
+    private static readonly string _textureType = typeof(TextureDescriptor).FullName!;
 
     [Fact]
     public void ProcessorAssetCollidingWithCustomDataIsBK3005()
@@ -30,8 +26,6 @@ public sealed class BakeProcessorIndexTests
         BakedAssetIndex index = BakedAssetIndex.Build(
             [Custom("data/proc", _gameConfigType)],
             [ProcessorAsset("data/proc", _statsRootType)],
-            [],
-            _projectDirectory,
             diagnostics);
 
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -41,15 +35,16 @@ public sealed class BakeProcessorIndexTests
     }
 
     [Fact]
-    public void ProcessorAssetCollidingWithATextureDescriptorIsBK3005()
+    public void ProcessorAssetCollidingWithAProcessorAssetIsBK3005()
     {
         var diagnostics = new BakeDiagnostics();
 
         _ = BakedAssetIndex.Build(
             [],
-            [ProcessorAsset("art/player", _statsRootType)],
-            [Texture("art/player")],
-            _projectDirectory,
+            [
+                ProcessorAsset("art/player", _statsRootType),
+                ProcessorAsset("art/player", _textureType),
+            ],
             diagnostics);
 
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -58,21 +53,21 @@ public sealed class BakeProcessorIndexTests
     }
 
     [Fact]
-    public void ProcessorDataCollidingWithATexturePayloadIsBK3005()
+    public void DuplicateProcessorDataPathIsBK3005()
     {
         var diagnostics = new BakeDiagnostics();
 
         BakedAssetIndex index = BakedAssetIndex.Build(
             [],
-            [ProcessorData("art/player-raw")],
-            [Texture("art/player")],
-            _projectDirectory,
+            [
+                ProcessorData("art/player-raw"),
+                ProcessorData("art/player-raw"),
+            ],
             diagnostics);
 
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
         Assert.Equal(BakeDiagnosticCodes.AssetPathCollision, diagnostic.Code);
         Assert.Contains("ProcessorData", diagnostic.Message, StringComparison.Ordinal);
-        Assert.Contains("TexturePayload", diagnostic.Message, StringComparison.Ordinal);
         Assert.Contains(
             index.Entries,
             entry => entry.Path == "art/player-raw"
@@ -162,9 +157,10 @@ public sealed class BakeProcessorIndexTests
         var diagnostics = new BakeDiagnostics();
         BakedAssetIndex mainIndex = BakedAssetIndex.Build(
             [],
-            [],
-            [Texture("art/player")],
-            _projectDirectory,
+            [
+                ProcessorAsset("art/player", _textureType),
+                ProcessorData("art/player-raw"),
+            ],
             diagnostics);
 
         BakedAssetIndex dlcIndex = ProcessorReferenceOnlyIndex(
@@ -230,9 +226,11 @@ public sealed class BakeProcessorIndexTests
 
         return BakedAssetIndex.Build(
             [Custom("roots/stats", _statsRootType)],
-            [output],
-            [Texture("art/player")],
-            _projectDirectory,
+            [
+                output,
+                ProcessorAsset("art/player", _textureType),
+                ProcessorData("art/player-raw"),
+            ],
             diagnostics);
     }
 
@@ -244,8 +242,6 @@ public sealed class BakeProcessorIndexTests
         return BakedAssetIndex.Build(
             [],
             [output],
-            [],
-            _projectDirectory,
             diagnostics);
     }
 
@@ -287,26 +283,4 @@ public sealed class BakeProcessorIndexTests
             $"Assets/{assetPath}.toml",
             $"{assetPath}.toml",
             []);
-
-    private static BakedTexture Texture(string assetPath)
-    {
-        string payloadPath = assetPath + "-raw";
-        var descriptor = new TextureDescriptor
-        {
-            Payload = payloadPath,
-            Width = 2,
-            Height = 2,
-            Format = "rgba8",
-            Filter = "linear",
-            Wrap = "clamp",
-        };
-
-        return new BakedTexture(
-            assetPath,
-            descriptor,
-            payloadPath,
-            new byte[16],
-            Path.Combine(_projectDirectory, "Assets", "art", Path.GetFileName(assetPath) + ".png"),
-            TextureImportSettings.Defaults(BakeTextureFilter.Linear, BakeTextureWrap.Clamp));
-    }
 }

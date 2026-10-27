@@ -45,11 +45,16 @@ internal sealed class BakeProjectDefinition
     /// <summary>Gets a value indicating whether <c>UseDefaultProcessors()</c> was called.</summary>
     internal bool UseDefaultProcessors { get; private set; }
 
+    /// <summary>
+    /// Gets the mutable texture defaults shared with the built-in texture processor.
+    /// </summary>
+    internal BakeTextureDefaults TextureDefaults { get; } = new();
+
     /// <summary>Gets the default sampler filter for textures without a sidecar.</summary>
-    internal BakeTextureFilter TextureFilter { get; private set; } = BakeTextureFilter.Linear;
+    internal BakeTextureFilter TextureFilter => TextureDefaults.Filter;
 
     /// <summary>Gets the default sampler wrap mode for textures without a sidecar.</summary>
-    internal BakeTextureWrap TextureWrap { get; private set; } = BakeTextureWrap.Clamp;
+    internal BakeTextureWrap TextureWrap => TextureDefaults.Wrap;
 
     /// <summary>Gets the semantic configuration issues found while building the definition.</summary>
     internal IReadOnlyList<BakeDiagnostic> Issues => _issues;
@@ -105,8 +110,8 @@ internal sealed class BakeProjectDefinition
     /// <param name="wrap">The default sampler wrap mode.</param>
     internal void WithTextureDefaults(BakeTextureFilter filter, BakeTextureWrap wrap)
     {
-        TextureFilter = filter;
-        TextureWrap = wrap;
+        TextureDefaults.Filter = filter;
+        TextureDefaults.Wrap = wrap;
     }
 
     /// <summary>Records one semantic configuration issue.</summary>

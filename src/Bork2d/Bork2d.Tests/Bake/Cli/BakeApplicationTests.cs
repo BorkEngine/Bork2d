@@ -182,7 +182,7 @@ public sealed class BakeApplicationTests
         Assert.Contains("baked '", result.Output, StringComparison.Ordinal);
         Assert.Contains("3 asset(s)", result.Output, StringComparison.Ordinal);
         Assert.Contains("1 texture(s)", result.Output, StringComparison.Ordinal);
-        Assert.Contains("2 reference(s)", result.Output, StringComparison.Ordinal);
+        Assert.Contains("3 reference(s)", result.Output, StringComparison.Ordinal);
         Assert.Contains("debug mode", result.Output, StringComparison.Ordinal);
     }
 

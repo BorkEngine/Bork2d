@@ -151,9 +151,10 @@ public sealed class BakeSourceBinderTests
     }
 
     [Fact]
-    public void ATextureSidecarIsNeverBound()
+    public void ATextureSidecarIsNeverBoundAsData()
     {
         using var project = TestBakeProject.Create("binder-sidecar");
+        project.WriteAssetBytes("art/player.png", [1, 2, 3]);
         project.WriteAsset("art/player.png.toml", "filter = \"nearest\"\n");
         project.WriteAsset(
             "data/config.toml",

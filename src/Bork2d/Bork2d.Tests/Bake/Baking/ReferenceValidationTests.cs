@@ -1,8 +1,8 @@
 using Bork2d.Api.Assets;
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
+using Bork2d.Bake.Processors;
 using Bork2d.Bake.Sources;
-using Bork2d.Bake.Textures;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Baking;
@@ -13,10 +13,6 @@ namespace Bork2d.Tests.Bake.Baking;
 /// </summary>
 public sealed class ReferenceValidationTests
 {
-    private static readonly string _projectDirectory = Path.Combine(
-        Path.GetTempPath(),
-        "bork2d-reference-tests");
-
     private static readonly string _gameConfigType = typeof(Bork2d.BakeFixture.GameConfig).FullName!;
     private static readonly string _statsRootType = typeof(Bork2d.BakeFixture.StatsRoot).FullName!;
     private static readonly string _textureType = typeof(TextureDescriptor).FullName!;
@@ -32,9 +28,10 @@ public sealed class ReferenceValidationTests
                 Custom("sprites/player", _spriteType),
                 Custom("data/game", _gameConfigType),
             ],
-            [],
-            [Texture("textures/player")],
-            _projectDirectory,
+            [
+                ProcessorAsset("textures/player", _textureType),
+                ProcessorData("textures/player-raw"),
+            ],
             diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
@@ -52,11 +49,11 @@ public sealed class ReferenceValidationTests
         Assert.Equal(_gameConfigType, index.Entries[0].TypeName);
         Assert.False(index.Entries[0].IsRaw);
 
-        Assert.Equal(BakedAssetEntryKind.TextureDescriptor, index.Entries[2].Kind);
+        Assert.Equal(BakedAssetEntryKind.ProcessorAsset, index.Entries[2].Kind);
         Assert.Equal(_textureType, index.Entries[2].TypeName);
         Assert.False(index.Entries[2].IsRaw);
 
-        Assert.Equal(BakedAssetEntryKind.TexturePayload, index.Entries[3].Kind);
+        Assert.Equal(BakedAssetEntryKind.ProcessorData, index.Entries[3].Kind);
         Assert.Null(index.Entries[3].TypeName);
         Assert.True(index.Entries[3].IsRaw);
     }
@@ -79,9 +76,10 @@ public sealed class ReferenceValidationTests
 
         BakedAssetIndex index = BakedAssetIndex.Build(
             assets,
-            [],
-            [Texture("textures/player")],
-            _projectDirectory,
+            [
+                ProcessorAsset("textures/player", _textureType),
+                ProcessorData("textures/player-raw"),
+            ],
             diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
@@ -152,8 +150,6 @@ public sealed class ReferenceValidationTests
         BakedAssetIndex index = BakedAssetIndex.Build(
             assets,
             [],
-            [],
-            _projectDirectory,
             diagnostics);
         Assert.Empty(diagnostics.GetSorted());
 
@@ -178,8 +174,6 @@ public sealed class ReferenceValidationTests
                 Custom("data/dup", _spriteType),
             ],
             [],
-            [],
-            _projectDirectory,
             diagnostics);
 
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -196,9 +190,7 @@ public sealed class ReferenceValidationTests
 
         _ = BakedAssetIndex.Build(
             [Custom("textures/player-raw", _gameConfigType)],
-            [],
-            [Texture("textures/player")],
-            _projectDirectory,
+            [ProcessorData("textures/player-raw")],
             diagnostics);
 
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -222,9 +214,7 @@ public sealed class ReferenceValidationTests
 
         BakedAssetIndex index = BakedAssetIndex.Build(
             assets,
-            [],
-            [Texture("textures/player")],
-            _projectDirectory,
+            [ProcessorAsset("textures/player", _textureType)],
             diagnostics);
         Assert.Empty(diagnostics.GetSorted());
 
@@ -249,9 +239,10 @@ public sealed class ReferenceValidationTests
 
         BakedAssetIndex index = BakedAssetIndex.Build(
             assets,
-            [],
-            [Texture("textures/player")],
-            _projectDirectory,
+            [
+                ProcessorAsset("textures/player", _textureType),
+                ProcessorData("textures/player-raw"),
+            ],
             diagnostics);
         Assert.Empty(diagnostics.GetSorted());
 
@@ -286,25 +277,19 @@ public sealed class ReferenceValidationTests
             $"{assetPath}.toml",
             references);
 
-    private static BakedTexture Texture(string assetPath)
-    {
-        string payloadPath = assetPath + "-raw";
-        var descriptor = new TextureDescriptor
-        {
-            Payload = payloadPath,
-            Width = 2,
-            Height = 2,
-            Format = "rgba8",
-            Filter = "linear",
-            Wrap = "clamp",
-        };
+    private static BakeProcessorOutput ProcessorAsset(string path, string typeName)
+        => BakeProcessorOutput.ForAsset(
+            path,
+            typeName,
+            static (_, _) => { },
+            [],
+            $"Assets/{path}.png",
+            "texture");
 
-        return new BakedTexture(
-            assetPath,
-            descriptor,
-            payloadPath,
+    private static BakeProcessorOutput ProcessorData(string path)
+        => BakeProcessorOutput.ForData(
+            path,
             new byte[16],
-            Path.Combine(_projectDirectory, "Assets", "textures", Path.GetFileName(assetPath) + ".png"),
-            TextureImportSettings.Defaults(BakeTextureFilter.Linear, BakeTextureWrap.Clamp));
-    }
+            $"Assets/{path}.png",
+            "texture");
 }

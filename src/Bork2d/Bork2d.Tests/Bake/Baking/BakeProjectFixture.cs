@@ -1,8 +1,6 @@
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Builder;
-using Bork2d.Bake.Builder.Processors;
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Textures;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Baking;
@@ -12,6 +10,12 @@ namespace Bork2d.Tests.Bake.Baking;
 /// internal <see cref="BakeProject"/> or the public <see cref="BakeApplication"/> for the standard
 /// fixture configuration.
 /// </summary>
+/// <remarks>
+/// The configuration goes through the public <see cref="BakeApplicationBuilder"/> exactly as a game's
+/// assets executable would, so the fixture exercises the default texture processor and the builder's
+/// processor ordering. Defaults are registered before custom processors, which is the documented
+/// order for a custom override.
+/// </remarks>
 public static class BakeProjectFixture
 {
     /// <summary>The canonical class-root asset path.</summary>
@@ -86,6 +90,51 @@ public static class BakeProjectFixture
         wrap = "repeat"
         """;
 
+    /// <summary>Builds the public builder for the standard fixture configuration.</summary>
+    /// <param name="projectDirectory">The project root.</param>
+    /// <param name="packs">The ordered <c>(pack path, root)</c> entries.</param>
+    /// <param name="registerFixtureTypes">Whether to register the fixture data types.</param>
+    /// <param name="processors">The custom processors to register, in builder order.</param>
+    /// <returns>The configured builder, before <c>Build()</c>.</returns>
+    internal static BakeApplicationBuilder CreateBuilder(
+        string projectDirectory,
+        IReadOnlyList<(string Pack, string Root)> packs,
+        bool registerFixtureTypes = true,
+        IReadOnlyList<IAssetProcessor>? processors = null)
+    {
+        BakeApplicationBuilder builder = new BakeApplicationBuilder()
+            .WithProjectRoot(projectDirectory);
+
+        foreach ((string pack, string root) in packs)
+        {
+            builder.WithPack(pack, root);
+        }
+
+        builder.UseDefaultAssets();
+        if (registerFixtureTypes)
+        {
+            builder
+                .RegisterAsset<Bork2d.BakeFixture.GameConfig>()
+                .RegisterAsset<Bork2d.BakeFixture.StatsRoot>();
+        }
+
+        // Defaults first: a later custom processor overrides the built-in texture processor for a
+        // shared extension, as the builder documentation requires.
+        builder
+            .UseDefaultProcessors()
+            .WithTextureDefaults(TextureFilter.Linear, TextureWrap.Clamp);
+
+        if (processors is not null)
+        {
+            foreach (IAssetProcessor processor in processors)
+            {
+                builder.AddProcessor(processor);
+            }
+        }
+
+        return builder;
+    }
+
     /// <summary>Builds the internal project configuration for a temporary project.</summary>
     /// <param name="projectDirectory">The project root.</param>
     /// <param name="packs">The ordered <c>(pack path, root)</c> entries.</param>
@@ -98,33 +147,15 @@ public static class BakeProjectFixture
         bool registerFixtureTypes = true,
         IReadOnlyList<IAssetProcessor>? processors = null)
     {
-        var definition = new BakeProjectDefinition();
-        definition.SetProjectRoot(projectDirectory);
-        foreach ((string pack, string root) in packs)
-        {
-            definition.AddPack(pack, root);
-        }
-
-        definition.UseDefaultAssets();
-        if (registerFixtureTypes)
-        {
-            definition.AddAsset<Bork2d.BakeFixture.GameConfig>();
-            definition.AddAsset<Bork2d.BakeFixture.StatsRoot>();
-        }
-
-        if (processors is not null)
-        {
-            foreach (IAssetProcessor processor in processors)
-            {
-                definition.AddProcessor(new BakeProcessorAdapter(processor));
-            }
-        }
-
-        definition.RequestDefaultProcessors();
-        definition.WithTextureDefaults(BakeTextureFilter.Linear, BakeTextureWrap.Clamp);
+        BakeApplicationBuilder builder = CreateBuilder(
+            projectDirectory,
+            packs,
+            registerFixtureTypes,
+            processors);
 
         var diagnostics = new BakeDiagnostics();
-        if (!BakeProjectFactory.TryCreate(definition, null, diagnostics, out BakeProject? project))
+        BakeProject? project = builder.CreateProject(diagnostics);
+        if (project is null || diagnostics.HasErrors)
         {
             throw new InvalidOperationException(
                 "The test bake project is invalid:" + Environment.NewLine
@@ -147,35 +178,5 @@ public static class BakeProjectFixture
         IReadOnlyList<(string Pack, string Root)> packs,
         bool registerFixtureTypes = true,
         IReadOnlyList<IAssetProcessor>? processors = null)
-    {
-        BakeApplicationBuilder builder = new BakeApplicationBuilder()
-            .WithProjectRoot(projectDirectory);
-
-        foreach ((string pack, string root) in packs)
-        {
-            builder.WithPack(pack, root);
-        }
-
-        builder.UseDefaultAssets();
-        if (registerFixtureTypes)
-        {
-            builder
-                .RegisterAsset<Bork2d.BakeFixture.GameConfig>()
-                .RegisterAsset<Bork2d.BakeFixture.StatsRoot>();
-        }
-
-        if (processors is not null)
-        {
-            foreach (IAssetProcessor processor in processors)
-            {
-                builder.AddProcessor(processor);
-            }
-        }
-
-        return builder
-            .UseDefaultProcessors()
-            .WithTextureDefaults(TextureFilter.Linear, TextureWrap.Clamp)
-            .Build();
-    }
-
+        => CreateBuilder(projectDirectory, packs, registerFixtureTypes, processors).Build();
 }

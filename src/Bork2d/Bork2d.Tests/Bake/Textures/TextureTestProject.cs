@@ -1,27 +1,41 @@
 using Bork2d.Bake.Baking;
-using Bork2d.Bake.Processors;
-using Bork2d.Bake.Textures;
+using Bork2d.Bake.Builder;
+using Bork2d.Bake.Diagnostics;
 
 namespace Bork2d.Tests.Bake.Textures;
 
 /// <summary>
-/// A temporary project with an <c>Assets</c> root and a validated project configuration for texture
-/// tests.
+/// A temporary project with an <c>Assets</c> root, the default-processor configuration, and a
+/// separate output root for pack-level texture bakes.
 /// </summary>
 /// <remarks>
+/// <para>
+/// The project is produced through the public <see cref="BakeApplicationBuilder"/> exactly as a game's
+/// assets executable would configure it, so tests exercise the same builder ordering, default texture
+/// processor, sidecar creation, and pack pipeline as production. <see cref="Bake"/> runs the real
+/// pipeline and writes <c>assets.pck</c> under <see cref="OutputRoot"/>; the decode-only tests call
+/// <c>TextureSourceReader</c> directly instead.
+/// </para>
+/// <para>
 /// Paths passed to the write helpers are relative to the asset root (<c>textures/player.png</c>), and
 /// <see cref="DisplayPath"/> returns the project-relative form diagnostics use
 /// (<c>Assets/textures/player.png</c>).
+/// </para>
 /// </remarks>
 internal sealed class TextureTestProject : IDisposable
 {
     private const string AssetsDirectoryName = "Assets";
 
     private readonly TempBakeDirectory _directory;
+    private readonly TempBakeDirectory _output;
 
-    private TextureTestProject(TempBakeDirectory directory, BakeProject project)
+    private TextureTestProject(
+        TempBakeDirectory directory,
+        TempBakeDirectory output,
+        BakeProject project)
     {
         _directory = directory;
+        _output = output;
         Project = project;
     }
 
@@ -31,33 +45,52 @@ internal sealed class TextureTestProject : IDisposable
     /// <summary>Gets the project root (the temp directory).</summary>
     internal string RootPath => _directory.RootPath;
 
+    /// <summary>Gets the pack output root.</summary>
+    internal string OutputRoot => _output.RootPath;
+
+    /// <summary>Gets the absolute path of the pack a <see cref="Bake"/> writes.</summary>
+    internal string PackPath => _output.FullPath("assets.pck");
+
     /// <summary>Creates a temporary project with the given texture defaults.</summary>
-    /// <param name="filter">The default filter.</param>
-    /// <param name="wrap">The default wrap mode.</param>
+    /// <param name="filter">The default filter for a texture without a sidecar.</param>
+    /// <param name="wrap">The default wrap mode for a texture without a sidecar.</param>
     /// <returns>The test project.</returns>
     internal static TextureTestProject Create(
-        BakeTextureFilter filter = BakeTextureFilter.Linear,
-        BakeTextureWrap wrap = BakeTextureWrap.Clamp)
+        TextureFilter filter = TextureFilter.Linear,
+        TextureWrap wrap = TextureWrap.Clamp)
     {
         TempBakeDirectory directory = TempBakeDirectory.Create();
-        string assetsRoot = directory.CreateDirectory(AssetsDirectoryName);
-        var pack = new BakePack(
-            index: 0,
-            assetsRoot,
-            relativeRoot: AssetsDirectoryName,
-            packPath: "assets.pck");
-        var project = new BakeProject(
-            directory.RootPath,
-            [pack],
-            filter,
-            wrap,
-            new Dictionary<string, BakeAssetTypeRegistration>(StringComparer.Ordinal),
-            [],
-            BakeProcessorRegistry.Empty,
-            useDefaultProcessors: false);
+        directory.CreateDirectory(AssetsDirectoryName);
+        TempBakeDirectory output = TempBakeDirectory.Create();
 
-        return new TextureTestProject(directory, project);
+        var diagnostics = new BakeDiagnostics();
+        BakeProject? project = new BakeApplicationBuilder()
+            .WithProjectRoot(directory.RootPath)
+            .WithPack("assets.pck", AssetsDirectoryName)
+            .UseDefaultProcessors()
+            .WithTextureDefaults(filter, wrap)
+            .CreateProject(diagnostics);
+
+        if (project is null || diagnostics.HasErrors)
+        {
+            throw new InvalidOperationException(
+                "The texture test project is invalid:" + Environment.NewLine
+                    + string.Join(
+                        Environment.NewLine,
+                        diagnostics.GetSorted().Select(diagnostic => diagnostic.Format())));
+        }
+
+        return new TextureTestProject(directory, output, project);
     }
+
+    /// <summary>Runs the real bake pipeline into <see cref="OutputRoot"/>.</summary>
+    /// <param name="check">Whether to run a check-only bake (no pack and no source writes).</param>
+    /// <returns>The bake result, including every diagnostic.</returns>
+    internal BakeResult Bake(bool check = false)
+        => BakePipeline.Run(
+            Project,
+            new BakeOptions(Path.GetFullPath(OutputRoot), BakeMode.Debug, check, force: false),
+            new BakeDiagnostics());
 
     /// <summary>Writes a texture source or sidecar byte array under the asset root.</summary>
     /// <param name="relativePath">The asset-root-relative path.</param>
@@ -119,7 +152,11 @@ internal sealed class TextureTestProject : IDisposable
         => AssetsDirectoryName + "/" + relativePath.Replace('\\', '/');
 
     /// <inheritdoc/>
-    public void Dispose() => _directory.Dispose();
+    public void Dispose()
+    {
+        _directory.Dispose();
+        _output.Dispose();
+    }
 
     private static string ToAssetsPath(string relativePath)
         => Path.Combine(AssetsDirectoryName, relativePath.Replace('/', Path.DirectorySeparatorChar));

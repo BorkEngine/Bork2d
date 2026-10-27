@@ -30,7 +30,7 @@ namespace Bork2d.Bake.Diagnostics;
 /// </item>
 /// <item>
 /// <term><c>BK4xxx</c></term>
-/// <description>Texture discovery, sidecar, decoding, dimensions, payload.</description>
+/// <description>Built-in texture decode/probe, dimensions, and payload; sidecars use the shared <c>BK2xxx</c> binder codes.</description>
 /// </item>
 /// <item>
 /// <term><c>BK5xxx</c></term>

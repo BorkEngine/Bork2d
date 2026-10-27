@@ -34,7 +34,7 @@ public sealed class BakePipelineTests
         Assert.Empty(result.Diagnostics);
         Assert.Equal(3, result.AssetCount);
         Assert.Equal(1, result.TextureCount);
-        Assert.Equal(2, result.ReferenceCount);
+        Assert.Equal(3, result.ReferenceCount);
         Assert.DoesNotContain(
             result.Diagnostics,
             diagnostic => diagnostic.Code.StartsWith("BK5", StringComparison.Ordinal));
@@ -108,7 +108,7 @@ public sealed class BakePipelineTests
         Assert.Empty(result.Diagnostics);
         Assert.Equal(3, result.AssetCount);
         Assert.Equal(1, result.TextureCount);
-        Assert.Equal(2, result.ReferenceCount);
+        Assert.Equal(3, result.ReferenceCount);
         Assert.False(File.Exists(packPath));
     }
 
@@ -143,7 +143,9 @@ public sealed class BakePipelineTests
 
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.True(result.PackWritten);
-        Assert.Empty(result.Diagnostics);
+        Assert.DoesNotContain(
+            result.Diagnostics,
+            diagnostic => diagnostic.Severity == BakeSeverity.Error);
         Assert.Equal(0, result.AssetCount);
         Assert.Equal(1, result.TextureCount);
         Assert.Equal(

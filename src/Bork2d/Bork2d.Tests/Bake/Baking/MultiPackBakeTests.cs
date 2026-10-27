@@ -115,7 +115,9 @@ public sealed class MultiPackBakeTests
 
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.True(result.PackWritten);
-        Assert.Empty(result.Diagnostics);
+        Assert.DoesNotContain(
+            result.Diagnostics,
+            diagnostic => diagnostic.Severity == BakeSeverity.Error);
         Assert.Equal(3, result.Packs.Count);
         Assert.Equal(
             new[] { BakeProjectFixture.DlcGamePath },

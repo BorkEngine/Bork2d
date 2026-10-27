@@ -1,3 +1,4 @@
+using Bork2d.Api.Assets;
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Tests.Bake.Baking;
@@ -34,13 +35,17 @@ public sealed class BakeProcessorMultiPackTests
 
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.True(result.PackWritten);
-        Assert.Empty(result.Diagnostics);
+        Assert.DoesNotContain(
+            result.Diagnostics,
+            diagnostic => diagnostic.Severity == BakeSeverity.Error);
         Assert.Contains(
             result.Packs[1].Entries,
             entry => entry.Path == "data/link" && entry.Kind == BakedAssetEntryKind.ProcessorAsset);
         Assert.Contains(
             result.Packs[0].Entries,
-            entry => entry.Path == "art/player" && entry.Kind == BakedAssetEntryKind.TextureDescriptor);
+            entry => entry.Path == "art/player"
+                && entry.Kind == BakedAssetEntryKind.ProcessorAsset
+                && entry.TypeName == typeof(TextureDescriptor).FullName);
     }
 
     [Fact]

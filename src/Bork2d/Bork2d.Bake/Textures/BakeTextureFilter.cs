@@ -1,7 +1,7 @@
 namespace Bork2d.Bake.Textures;
 
 /// <summary>
-/// The default sampler filter for texture imports when a sidecar omits <c>filter</c>.
+/// The sampler filter used by the built-in texture processor when it creates a default sidecar.
 /// </summary>
 internal enum BakeTextureFilter
 {

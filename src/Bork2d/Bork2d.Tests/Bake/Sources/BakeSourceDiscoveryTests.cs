@@ -76,7 +76,7 @@ public sealed class BakeSourceDiscoveryTests
     }
 
     [Fact]
-    public void TypeLessSidecarShapedTomlIsLeftToTheTexturePipeline()
+    public void TypeLessTextureSidecarIsAttachedToItsSource()
     {
         using var project = TestBakeProject.Create("discovery-sidecar");
         project.WriteAsset("art/player.png.toml", "filter = \"nearest\"\n");
@@ -84,13 +84,13 @@ public sealed class BakeSourceDiscoveryTests
         WriteTyped(project, "data/a.toml");
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
-            project.Project,
-            diagnostics).DataSources;
+        BakeDiscoveredSources discovered = BakeSourceDiscovery.Discover(project.Project, diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
-        BakeSource source = Assert.Single(sources);
+        BakeSource source = Assert.Single(discovered.DataSources);
         Assert.Equal("data/a", source.AssetPath);
+        BakeProcessorSource texture = Assert.Single(discovered.ProcessorSources);
+        Assert.Equal("art/player.png.toml", texture.SidecarRelativePath);
     }
 
     [Fact]

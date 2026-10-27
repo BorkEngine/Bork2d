@@ -19,8 +19,9 @@ namespace Bork2d.Bake.Baking;
 /// <see cref="Type.FullName"/>. A data TOML's <c>[bork2d].type</c> selects one entry; an unregistered
 /// name is a configuration diagnostic. <see cref="Processors"/> is the registration-order list and
 /// <see cref="ProcessorRegistry"/> is the immutable normalized extension registry built from it; the
-/// pipeline runs those processors over the discovered processor sources. The legacy texture pipeline
-/// remains the producer for image sources that no registered processor claims until WP3.
+/// pipeline runs those processors over the discovered processor sources. Texture support is the
+/// built-in processor registered by <c>UseDefaultProcessors()</c>; there is no separate texture
+/// pipeline.
 /// </para>
 /// </remarks>
 internal sealed class BakeProject
@@ -30,8 +31,8 @@ internal sealed class BakeProject
     /// </summary>
     /// <param name="projectRoot">The absolute project root.</param>
     /// <param name="packs">The ordered packs; the first is the main pack.</param>
-    /// <param name="textureFilter">The default sampler filter for textures without a sidecar.</param>
-    /// <param name="textureWrap">The default sampler wrap mode for textures without a sidecar.</param>
+    /// <param name="textureFilter">The sampler filter for a texture sidecar created by default.</param>
+    /// <param name="textureWrap">The sampler wrap mode for a texture sidecar created by default.</param>
     /// <param name="assetTypes">The explicitly registered data types keyed by full type name.</param>
     /// <param name="processors">The registered processors, in registration order.</param>
     /// <param name="processorRegistry">The immutable extension registry built from the processors.</param>
@@ -77,10 +78,10 @@ internal sealed class BakeProject
     /// <summary>Gets the main/base pack (the first configured pack).</summary>
     internal BakePack MainPack => Packs[0];
 
-    /// <summary>Gets the default sampler filter for textures without a sidecar.</summary>
+    /// <summary>Gets the sampler filter for a texture sidecar created by default.</summary>
     internal BakeTextureFilter TextureFilter { get; }
 
-    /// <summary>Gets the default sampler wrap mode for textures without a sidecar.</summary>
+    /// <summary>Gets the sampler wrap mode for a texture sidecar created by default.</summary>
     internal BakeTextureWrap TextureWrap { get; }
 
     /// <summary>Gets the explicitly registered data types keyed by full type name.</summary>

@@ -15,7 +15,8 @@ namespace Bork2d.Bake.Textures;
 /// </para>
 /// <para>
 /// StbImageSharp reports corrupt or unsupported input by throwing <see cref="InvalidOperationException"/>;
-/// the pipeline converts every decoder failure into a BK4xxx diagnostic naming the source.
+/// <see cref="TextureSourceReader"/> converts every decoder failure into a BK4xxx diagnostic naming the
+/// source.
 /// </para>
 /// </remarks>
 internal sealed class StbTextureDecoder : ITextureDecoder

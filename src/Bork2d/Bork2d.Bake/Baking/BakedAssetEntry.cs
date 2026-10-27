@@ -1,7 +1,5 @@
-using Bork2d.Api.Assets;
 using Bork2d.Bake.Processors;
 using Bork2d.Bake.Sources;
-using Bork2d.Bake.Textures;
 
 namespace Bork2d.Bake.Baking;
 
@@ -14,7 +12,8 @@ namespace Bork2d.Bake.Baking;
 /// collision detection see the whole bake in one deterministic, sorted structure. A MessagePack entry
 /// records the full name of the type the engine serializes; a raw entry has no type contract and
 /// <see cref="TypeName"/> is <see langword="null"/>. Every kind exposes its reference sites and the
-/// diagnostic display path of the source that produced it.
+/// diagnostic display path of the source that produced it. The built-in texture processor produces
+/// ordinary processor entries, so a texture descriptor is a <see cref="ProcessorAsset"/> entry.
 /// </remarks>
 internal sealed class BakedAssetEntry
 {
@@ -24,7 +23,6 @@ internal sealed class BakedAssetEntry
         string? typeName,
         BakedAssetEntryKind kind,
         BoundAsset? asset,
-        BakedTexture? texture,
         BakeProcessorOutput? processorOutput,
         IReadOnlyList<BakeReferenceSite> references,
         string sourcePath)
@@ -34,7 +32,6 @@ internal sealed class BakedAssetEntry
         TypeName = typeName;
         Kind = kind;
         Asset = asset;
-        Texture = texture;
         ProcessorOutput = processorOutput;
         References = references;
         SourcePath = sourcePath;
@@ -49,14 +46,11 @@ internal sealed class BakedAssetEntry
     /// <summary>Gets the baked MessagePack type's full name, or <see langword="null"/> for a raw entry.</summary>
     internal string? TypeName { get; }
 
-    /// <summary>Gets the pipeline that produced the entry.</summary>
+    /// <summary>Gets the producer of the entry.</summary>
     internal BakedAssetEntryKind Kind { get; }
 
     /// <summary>Gets the bound custom-data asset, or <see langword="null"/> for another kind.</summary>
     internal BoundAsset? Asset { get; }
-
-    /// <summary>Gets the baked texture, or <see langword="null"/> for another kind.</summary>
-    internal BakedTexture? Texture { get; }
 
     /// <summary>Gets the processor output, or <see langword="null"/> for another kind.</summary>
     internal BakeProcessorOutput? ProcessorOutput { get; }
@@ -79,54 +73,9 @@ internal sealed class BakedAssetEntry
             asset.TypeName,
             BakedAssetEntryKind.CustomData,
             asset: asset,
-            texture: null,
             processorOutput: null,
             references: asset.References,
             sourcePath: asset.SourcePath);
-    }
-
-    /// <summary>Creates the MessagePack descriptor entry of a baked texture.</summary>
-    /// <param name="texture">The baked texture.</param>
-    /// <param name="diagnosticPath">The diagnostic display path of the texture source.</param>
-    /// <returns>The index entry.</returns>
-    internal static BakedAssetEntry ForTextureDescriptor(
-        BakedTexture texture,
-        string diagnosticPath)
-    {
-        ArgumentNullException.ThrowIfNull(texture);
-        ArgumentException.ThrowIfNullOrWhiteSpace(diagnosticPath);
-        return new BakedAssetEntry(
-            texture.AssetPath,
-            isRaw: false,
-            typeof(TextureDescriptor).FullName,
-            BakedAssetEntryKind.TextureDescriptor,
-            asset: null,
-            texture: texture,
-            processorOutput: null,
-            references: [],
-            sourcePath: diagnosticPath);
-    }
-
-    /// <summary>Creates the raw payload entry of a baked texture.</summary>
-    /// <param name="texture">The baked texture.</param>
-    /// <param name="diagnosticPath">The diagnostic display path of the texture source.</param>
-    /// <returns>The index entry.</returns>
-    internal static BakedAssetEntry ForTexturePayload(
-        BakedTexture texture,
-        string diagnosticPath)
-    {
-        ArgumentNullException.ThrowIfNull(texture);
-        ArgumentException.ThrowIfNullOrWhiteSpace(diagnosticPath);
-        return new BakedAssetEntry(
-            texture.PayloadPath,
-            isRaw: true,
-            typeName: null,
-            BakedAssetEntryKind.TexturePayload,
-            asset: null,
-            texture: texture,
-            processorOutput: null,
-            references: [],
-            sourcePath: diagnosticPath);
     }
 
     /// <summary>Creates the MessagePack entry of a shaped processor output.</summary>
@@ -146,7 +95,6 @@ internal sealed class BakedAssetEntry
             output.TypeName,
             BakedAssetEntryKind.ProcessorAsset,
             asset: null,
-            texture: null,
             processorOutput: output,
             references: output.References,
             sourcePath: output.SourcePath);
@@ -169,7 +117,6 @@ internal sealed class BakedAssetEntry
             typeName: null,
             BakedAssetEntryKind.ProcessorData,
             asset: null,
-            texture: null,
             processorOutput: output,
             references: output.References,
             sourcePath: output.SourcePath);
