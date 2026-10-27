@@ -760,8 +760,15 @@ public sealed class TexturePipelineTests
     public void ReparsePointDirectoriesAreSkipped()
     {
         using var project = TextureTestProject.Create();
-        string outside = project.CreateDirectory("elsewhere");
+        // The target must be outside the asset root: texture discovery now scans every folder, so a
+        // real directory under Assets would be baked independently of the link being skipped.
+        string outside = project.ProjectPath("elsewhere");
+        Directory.CreateDirectory(outside);
         File.WriteAllBytes(Path.Combine(outside, "other.png"), TextureImageFactory.RgbaPng());
+
+        // The project no longer creates Assets/textures implicitly; create the link's parent before
+        // creating the directory symlink (CI surfaces a missing parent as DirectoryNotFound).
+        project.CreateDirectory("textures");
         string link = project.FullPath("textures/linked");
         Directory.CreateSymbolicLink(link, outside);
 
