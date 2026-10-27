@@ -37,7 +37,7 @@ public sealed class BakeTargetsIntegrationTests
         max_players = 4
         must = "present"
         tint = [1.0, 0.5, 0.25, 1.0]
-        texture = "textures/player"
+        texture = "art/player"
 
         [stats]
         attack = 3
@@ -56,7 +56,7 @@ public sealed class BakeTargetsIntegrationTests
         """;
 
     private const string SpriteToml = """
-        texture = "textures/player"
+        texture = "art/player"
         uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
         scale = 16.0
         pivot = [0.5, 0.5]
@@ -74,11 +74,11 @@ public sealed class BakeTargetsIntegrationTests
 
     private static readonly string[] _expectedEntries =
     [
+        BakeProjectFixture.TexturePath,
+        BakeProjectFixture.TexturePayloadPath,
         BakeProjectFixture.GamePath,
         BakeProjectFixture.StatsPath,
         BakeProjectFixture.SpritePath,
-        BakeProjectFixture.TexturePath,
-        BakeProjectFixture.TexturePayloadPath,
     ];
 
     [Fact]
@@ -262,8 +262,8 @@ public sealed class BakeTargetsIntegrationTests
             app.WriteAsset("data/game.toml", GameToml);
             app.WriteAsset("roots/stats.toml", StatsToml);
             app.WriteAsset("sprites/player.toml", SpriteToml);
-            app.WriteAsset("textures/player.png.toml", SidecarToml);
-            app.WriteAssetBytes("textures/player.png", TextureImageFactory.RgbaPng());
+            app.WriteAsset("art/player.png.toml", SidecarToml);
+            app.WriteAssetBytes("art/player.png", TextureImageFactory.RgbaPng());
 
             return app;
         }

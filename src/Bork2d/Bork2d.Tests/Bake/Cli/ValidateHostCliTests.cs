@@ -24,7 +24,7 @@ public sealed class ValidateHostCliTests
     {
         string project = _fixture.CreateStandardProject("valid");
 
-        string texturePath = Path.Combine(project, "Assets", "textures", "player.png");
+        string texturePath = Path.Combine(project, "Assets", "art", "player.png");
         Directory.CreateDirectory(Path.GetDirectoryName(texturePath)!);
         File.WriteAllBytes(texturePath, TextureImageFactory.RgbaPng());
 

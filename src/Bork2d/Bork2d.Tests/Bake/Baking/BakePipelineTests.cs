@@ -44,11 +44,11 @@ public sealed class BakePipelineTests
         Assert.Equal(
             new[]
             {
+                BakeProjectFixture.TexturePath,
+                BakeProjectFixture.TexturePayloadPath,
                 BakeProjectFixture.GamePath,
                 BakeProjectFixture.StatsPath,
                 BakeProjectFixture.SpritePath,
-                BakeProjectFixture.TexturePath,
-                BakeProjectFixture.TexturePayloadPath,
             },
             result.Entries.Select(entry => entry.Path));
 
@@ -352,7 +352,7 @@ public sealed class BakePipelineTests
             """
             health = "many"
             bogus = true
-            texture = "Textures/Player"
+            texture = "Art/Player"
 
             [stats]
             attack = "strong"
@@ -388,15 +388,15 @@ public sealed class BakePipelineTests
             BakeDiagnosticCodes.BinderNumericRange
         },
         {
-            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"textures/missing\"\n" + TypeTable,
+            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"art/missing\"\n" + TypeTable,
             BakeDiagnosticCodes.ReferenceMissing
         },
         {
-            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"Textures/Player\"\n" + TypeTable,
+            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"Art/Player\"\n" + TypeTable,
             BakeDiagnosticCodes.ReferenceNotCanonical
         },
         {
-            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"textures/player-raw\"\n" + TypeTable,
+            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"art/player-raw\"\n" + TypeTable,
             BakeDiagnosticCodes.ReferenceWrongKind
         },
         {
