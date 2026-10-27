@@ -9,8 +9,8 @@
 > `Planned`. Status detail is in [the roadmap](../roadmap.md).
 >
 > **Post-M4 target (D-036/D-037, Planned on `task/file-processors`).** Source file types become
-> registered asset processors with optional `[GenerateShape]` sidecars; the built-in texture
-> importer is one processor. The project descriptor is removed and the game-owned `MyGame.Assets`
+> registered asset processors with `[GenerateShape]` sidecars when settings are required; the
+> built-in texture importer is one processor. The project descriptor is removed and the game-owned `MyGame.Assets`
 > executable configures/bakes through `BakeApplicationBuilder`. The runtime model is unchanged.
 
 ## 1. Purpose
@@ -37,9 +37,9 @@ compiled `[GenerateShape]` shapes and no TOML or reflection. See
 [M4 spec](../specs/m4-serialization-and-bake.md).
 
 **Target (D-036/D-037).** A game-owned `MyGame.Assets` executable contains the asset roots and
-registers processors by extension; each processor has an optional `[GenerateShape]` sidecar and
-emits base-path-derived shaped asset instances and optional raw data (the engine serializes
-MessagePack). The built-in texture importer is one processor.
+registers processors by extension; each processor has a `[GenerateShape]` sidecar when settings are
+required and emits base-path-derived shaped asset instances and optional raw data (the engine
+serializes MessagePack). The built-in texture importer is one processor.
 The builder configures the ordered packs and bakes when the assets project builds; there is no
 descriptor. See [asset processors](asset-processors.md).
 

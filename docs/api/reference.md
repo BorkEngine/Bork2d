@@ -446,8 +446,8 @@ reference.
   same canonical path may exist in different packs (a deliberate overlay); the runtime resolves it
   with `LoadPack` later-wins semantics. Duplicates inside one pack remain pack build errors.
 - **Asset processors (target D-036).** A non-TOML source type is handled by an `IAssetProcessor`
-  registered in `MyGame.Assets`: extension set, optional `[GenerateShape]` sidecar
-  (`<source>.toml`), sidecar policy (`None`/`Optional`/`Required`), and processing code. A processor
+  registered in `MyGame.Assets`: extension set, a `[GenerateShape]` sidecar (`<source>.toml`) when
+  required, sidecar policy (`None`/`Required`), and processing code. A processor
   may emit any number of outputs; a shaped asset is an instance through `AddAsset<T>` and the engine
   serializes MessagePack (the processor never serializes it), while `AddData` is only for opaque
   bytes. Outputs are base-path-derived. The built-in texture importer is a processor. Processor

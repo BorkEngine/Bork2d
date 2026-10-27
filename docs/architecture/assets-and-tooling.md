@@ -26,10 +26,10 @@
 > the bake pipeline.
 >
 > **Post-M4 target (D-036/D-037, planned on `task/file-processors`).** Source file types become
-> registered **asset processors** with an optional `[GenerateShape]` sidecar; the built-in texture
-> importer becomes one processor. The project descriptor (`bork2d.project.toml`) is removed and all
-> bake configuration moves into a builder in a game-owned `MyGame.Assets` executable, which is also
-> the CLI and bakes automatically when built. The [asset processors](asset-processors.md) design
+> registered **asset processors** with a `[GenerateShape]` sidecar when settings are required; the
+> built-in texture importer becomes one processor. The project descriptor (`bork2d.project.toml`) is
+> removed and all bake configuration moves into a builder in a game-owned `MyGame.Assets` executable,
+> which is also the CLI and bakes automatically when built. The [asset processors](asset-processors.md) design
 > doc owns that contract. Until the task lands, the M4 sections below that mention the descriptor,
 > the hand-written texture sidecar parser, or texture-specific discovery are the **as-built M4**
 > behavior; the target replaces them.
@@ -39,8 +39,8 @@
 ```
 MyGame.Assets/Assets/ (main) + DLC1/ (overlay)
   data/**.toml                 custom data (typed [bork2d]); bound by the generated host
-  art/**.png|jpg|...           built-in texture processor + optional <source>.toml sidecar
-  data/**.ppm|**.unit|...      custom processor sources + optional <source>.toml sidecar
+  art/**.png|jpg|...           built-in texture processor + <source>.toml sidecar
+  data/**.ppm|**.unit|...      custom processor sources + <source>.toml sidecar
     │ MyGame.Assets executable:
     │   BakeApplicationBuilder (packs, roots, host, common assembly, texture defaults, processors)
     │   → processor discovery + sidecar binding → generated host for data TOML
@@ -471,16 +471,16 @@ attribute provider.
 `Status: Planned on task/file-processors (D-036). Current M4 has a texture-specific sidecar parser.`
 
 Every non-TOML source extension is handled by an `IAssetProcessor` registered in the
-`MyGame.Assets` builder. A processor declares its extension set, a sidecar policy, an optional
-`[GenerateShape]` sidecar type, and processing code. The built-in texture importer is one processor;
+`MyGame.Assets` builder. A processor declares its extension set, a sidecar policy, a
+`[GenerateShape]` sidecar type when settings are required, and processing code. The built-in texture importer is one processor;
 users add `.ppm`, `.unit`, or any other format without touching engine code. The processor contract,
 registration/override rules, sidecar policies, output path rules, and diagnostics are owned by
 [asset processors](asset-processors.md).
 
 - A sidecar is `<source file>.toml`; the shared TOML binder binds it from the processor's sidecar
   shape. Sidecar binding errors are `BK2xxx`; processor errors are `BK7xxx`.
-- `Optional` sidecars may be absent (defaults/no file); `Required` sidecars are created once from the
-  processor's default when missing; `None` has no sidecar.
+- Sidecar policies are only `None` and `Required`; `Required` sidecars are created once through the
+  processor's separate `CreateDefaultSidecar` function when missing, and `None` has no sidecar.
 - A later registration overrides an earlier one for the same extension. Extensions are
   case-insensitive, accept `"png"`/`".png"`, and support compound suffixes.
 - A processor may emit any number of outputs at `BaseAssetPath` or `BaseAssetPath + "-<suffix>"`.
@@ -507,7 +507,6 @@ return await new BakeApplicationBuilder()
     .WithProjectRoot(".")                      // MSBuild passes $(MSBuildProjectDirectory)
     .WithPack("assets.pck", "Assets")          // first pack = main
     .WithPack("dlc1.pck", "DLC1")              // later pack = overlay
-    .WithHostDirectory("obj/bork2d/bakehost")
     .WithCommonAssembly(typeof(GameConfig).Assembly)
     .WithTextureDefaults(TextureFilter.Linear, TextureWrap.Clamp)
     .AddProcessor(new PpmProcessor())
@@ -518,8 +517,9 @@ return await new BakeApplicationBuilder()
 
 At least one pack is required; the first is main and later packs are DLC/overlay. Roots and pack
 paths are relative, canonical-safe, and contained by the project root. `WithCommonAssembly` replaces
-the descriptor's common-assembly input, `WithHostDirectory` replaces `[bake].host`, and
-`WithTextureDefaults` replaces `[textures]`. `AddProcessor` registers custom processors; the
+the descriptor's common-assembly input, and `WithTextureDefaults` replaces `[textures]`. The
+generated-host project lives at the internal working path `obj/bork2d/bakehost`; it is not builder
+configuration. `AddProcessor` registers custom processors; the
 built-in texture processor is pre-registered and a later registration overrides it for an extension.
 Output root, mode, `--force`, `--check`, and verbosity are invocation options, not project
 configuration. A builder configuration failure is a `BK1xxx` diagnostic and exit code `2`.
@@ -536,9 +536,9 @@ configuration. A builder configuration failure is a `BK1xxx` diagnostic and exit
   available for manual use.
 - The generated host still exists for **custom-data TOML**. It scans every pack root for
   `[bork2d].type`, resolves the types against the builder's common assembly and its closure with
-  `MetadataLoadContext`, and emits the single `Bork2d.BakeHost` project/manifest with the data
-  `Bind`/`AddToPack` code. It does not know processors; the engine serializes processor
-  `AddAsset<T>` instances through `PackBuilder`.
+  `MetadataLoadContext`, and emits the single `Bork2d.BakeHost` project/manifest under the internal
+  `obj/bork2d/bakehost` path with the data `Bind`/`AddToPack` code. It does not know processors; the
+  engine serializes processor `AddAsset<T>` instances through `PackBuilder`.
 - Host generation is content-hash gated in `obj/bork2d/bake/host-generation.json` by the builder
   configuration hash, the common-assembly hash, the source-type declaration hash (including pack
   identity/root), the processor-registration hash, the generator version, configuration, output
@@ -558,16 +558,16 @@ configuration. A builder configuration failure is a `BK1xxx` diagnostic and exit
   pack root. The canonical base path is the source path minus the matched processor extension;
   processor outputs are `BaseAssetPath` or `BaseAssetPath + "-<suffix>"`.
 - The built-in texture processor registers PNG/JPG/JPEG/BMP/TGA, keeps the StbImageSharp
-  normalization and `BK4xxx` decode/probe rules, and emits `TextureDescriptor` + raw RGBA8 payload.
-  It uses an optional `[GenerateShape]` sidecar for `filter`/`wrap`; a missing sidecar applies the
-  builder's texture defaults.
+  normalization and `BK4xxx` decode/probe rules, and emits a `TextureDescriptor` instance + raw
+  RGBA8 payload. It is a `Required` sidecar processor for `filter`/`wrap`; a missing sidecar is
+  created from the builder's `WithTextureDefaults` values before processing.
 - Custom-data TOML is unchanged: the generated host's shape-driven DOM binder reads it, records
   reference spans, rejects unknown keys, and adds values with the generated per-type writer. Sprite
   TOML is ordinary custom data.
 - Processor sidecars are bound by the same shape-driven binder from the processor's
-  `[GenerateShape]` type. `Optional` sidecars may be absent; `Required` sidecars are created once
-  from the processor's default when missing; `None` has no sidecar. Processor errors are `BK7xxx`;
-  sidecar binding errors are `BK2xxx`.
+  `[GenerateShape]` type. There are only `None` and `Required` policies; `Required` sidecars are
+  created once by the processor's separate `CreateDefaultSidecar` function when missing. Processor
+  errors are `BK7xxx`; sidecar binding errors are `BK2xxx`.
 - Processors emit shaped asset instances through `AddAsset<T>` and opaque data through `AddData`.
   The engine serializes MessagePack; the processor does not. References are collected by the shape
   walk, and outputs join the same baked index as custom data, so collision and reference rules are
@@ -604,8 +604,8 @@ deterministic.
 
 - The internal, non-committed manifest is `<project root>/obj/bork2d/bake/manifest.json`: JSON
   schema 3, XXH3-128 uppercase hex, explicit field framing, deterministic field order. It records
-  the builder configuration hash (packs/roots/output paths, host directory, common assembly, texture
-  defaults, processor identities and assembly hash), the sorted tracked inputs across every pack root
+  the builder configuration hash (packs/roots/output paths, common assembly, texture defaults,
+  processor identities and assembly hash), the sorted tracked inputs across every pack root
   (every `.toml` plus every file whose suffix is in the registered extension set), the game-side
   assembly closure next to the host, the host assembly hash, tool version, mode, every pack output
   path/hash in builder order, and aggregate counts.
@@ -797,7 +797,7 @@ that in exchange for no arbitrary caps, and fails cleanly rather than reading ou
 | `Bork2d.Bake` / `Bork2d.Bake.Cli` | `Current` (M4/D-M4-13/D-M4-14): internal JIT tooling; no public types; `generate-host` (all-root source scan + type resolution), `bake` (every pack, `--output-root`), `validate` (every pack) with exit codes `0`–`3`. **Post-M4 target: public `Bork2d.Bake.Builder` hosts the builder/processor contract; `Bork2d.Bake.Cli` is retired for games; `MyGame.Assets` is the CLI.** |
 | `build/Bork2d.Bake.targets` | `Current` (M4/D-M4-14): build/publish/clean integration for every declared pack, fixture preparation (`Assets` + `DLC1`), property overrides. **Post-M4 target: `build/Bork2d.Assets.targets` runs the assets executable; no descriptor properties or pack-path list.** |
 | `Bork2d.BakeFixture` | `Current` (M4, Q-16/D-M4-14; committed source PNG): game-side `Project.Common`-like fixture with `[GenerateShape] partial` types, a main `Assets/` tree, and a `DLC1/` tree whose `data/dlc.toml` references the main `art/player`; referenced by tests and the AOT smoke, never by the runtime. **Post-M4 target: add `Bork2d.BakeFixture.Assets` executable for the builder flow; fixture data types remain in `Bork2d.BakeFixture`.** |
-| Texture sidecars | `Current` (M4/D-M4-15): `<source>.toml` remains the minimal authoring-only `filter`/`wrap` settings file; no normal typed `TextureDescriptor` TOML and no runtime/API change. **Post-M4 target (D-036, planned): sidecar is a `[GenerateShape]` type bound by the shared TOML binder; policies None/Optional/Required; no hand-written parser.** |
+| Texture sidecars | `Current` (M4/D-M4-15): `<source>.toml` remains the minimal authoring-only `filter`/`wrap` settings file; no normal typed `TextureDescriptor` TOML and no runtime/API change. **Post-M4 target (D-036, planned): sidecar is a `[GenerateShape]` type bound by the shared TOML binder; policies None/Required with `CreateDefaultSidecar`; no hand-written parser.** |
 | Asset processors and `MyGame.Assets` | `Planned` (`task/file-processors`, D-036/D-037): `Bork2d.Bake.Builder`, `IAssetProcessor`/`AssetProcessor<TSidecar>`, sidecar policies, base-path outputs, extension override, engine-side MessagePack serialization from `AddAsset<T>`, built-in texture processor, PPM/Unit test processors, `MyGame.Assets` auto-bake. Design: [asset processors](asset-processors.md). |
 | Serialization policy | `Current` (M3/D-035): Nerdbank.MessagePack `1.4.95` pinned with generated-shape smoke in Common, tests, and AOT smoke; pack header/entry and public `SpriteAsset`/`TextureDescriptor` shapes are generated; `AssetRef<T>`/`DataRef` use public PolyType path marshalers; `Bork2d.Api` references PolyType `1.4.1`; `LoadAsset<T>` passes the shape from `T.GetTypeShape()` |
 | `IAssets` load members | `Current` (M3/D-035): declarations, XML docs, the `IShapeable<T>` constraint, deserialize-only loader bodies, and `AssetRef<T>`/`DataRef` overloads; `IEngine.Assets` returns the real service in every mode |

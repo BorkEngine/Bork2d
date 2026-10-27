@@ -16,20 +16,21 @@
 
 Make file-type support an extension point, not a set of engine-owned special cases:
 
-- a source type is handled by a registered **asset processor** with an extension set, an optional
-  **sidecar shape** (a normal `[GenerateShape]` type), and processing code;
+- a source type is handled by a registered **asset processor** with an extension set, a **sidecar
+  shape** when it requires settings (a normal `[GenerateShape]` type), and processing code;
 - the engine's PNG/JPG/JPEG/BMP/TGA support is one processor among others;
 - an engine user registers a processor for a new format in their game's assets executable without
   editing engine code;
 - no file type is hardcoded in discovery, path mapping, the baked index, the pack composer, or the
   incremental input list;
-- the project descriptor is gone: packs, roots, output root, host directory, common assembly,
-  texture defaults, and processors are configured through a builder in `MyGame.Assets`;
+- the project descriptor is gone: packs, roots, output root, common assembly, texture defaults, and
+  processors are configured through a builder in `MyGame.Assets`; the generated-host directory is
+  an internal working path, not project configuration;
 - `MyGame.Assets` is the game's bake CLI and its build bakes the packs automatically.
 
 The design is proved by two test processors: **PPM** (a simple image format reusing
 `TextureDescriptor`) and **Unit** (a JSON source that emits a custom `[GenerateShape]` data type with
-an optional sidecar).
+a required sidecar).
 
 ## 2. Non-goals
 
@@ -53,8 +54,8 @@ MyGame/
     MyGame.Assets/             executable, JIT, build-time only; owns assets and processors
       Assets/                  main pack root
         data/*.toml            custom data ([bork2d].type)
-        art/*.png              texture sources + optional <source>.toml sidecars
-        data/*.unit            Unit processor sources
+        art/*.png              texture sources + <source>.toml sidecars
+        data/*.unit            Unit processor sources + <source>.toml sidecars
       DLC1/                    optional overlay pack root
       Program.cs               BakeApplicationBuilder configuration
     Project.Desktop/           runtime app; references Bork2d.Runtime + Project.Common
@@ -87,7 +88,6 @@ return await new BakeApplicationBuilder()
     .WithProjectRoot(".")                      // MSBuild passes $(MSBuildProjectDirectory)
     .WithPack("assets.pck", "Assets")          // first pack = main
     .WithPack("dlc1.pck", "DLC1")              // later pack = overlay
-    .WithHostDirectory("obj/bork2d/bakehost")
     .WithCommonAssembly(typeof(GameConfig).Assembly)
     .WithTextureDefaults(TextureFilter.Linear, TextureWrap.Clamp)
     .AddProcessor(new PpmProcessor())
@@ -104,7 +104,9 @@ Configuration rules:
   containment rules as M4, now validated by the builder instead of the descriptor parser).
 - `WithCommonAssembly` supplies the data/shape assembly the generated host references. It replaces
   the descriptor's common-assembly input.
-- `WithHostDirectory` replaces `[bake].host`.
+- The generated-host project is an internal working artifact at
+  `<project root>/obj/bork2d/bakehost`; it is not builder configuration and has no public
+  `WithHostDirectory` option.
 - `WithTextureDefaults` replaces `[textures]`; it configures the built-in texture processor, not
   the pipeline.
 - `AddProcessor` registers custom processors. The built-in texture processor is pre-registered.
@@ -143,7 +145,7 @@ public interface IAssetProcessor
 {
     string Name { get; }                          // stable; defaults to the CLR full name
     IReadOnlyList<string> Extensions { get; }     // "png" / ".PNG" both accepted
-    SidecarPolicy Policy { get; }                 // None | Optional | Required
+    SidecarPolicy Policy { get; }                 // None | Required
     ITypeShape? SidecarShape { get; }             // null when Policy is None
     void Process(AssetProcessorContext context);
 }
@@ -152,16 +154,18 @@ public abstract class AssetProcessor<TSidecar> : IAssetProcessor
     where TSidecar : IShapeable<TSidecar>
 {
     public ITypeShape SidecarShape => TSidecar.GetTypeShape();
-    public abstract SidecarPolicy Policy { get; }   // Optional or Required
+    public SidecarPolicy Policy => SidecarPolicy.Required;
+
+    // Called only when the Required sidecar file is missing; the builder writes the returned
+    // object to <source>.toml, then binds it and calls Process.
+    protected abstract TSidecar CreateDefaultSidecar(AssetProcessorContext context);
+
     protected abstract void Process(AssetProcessorContext context, TSidecar sidecar);
-    protected virtual TSidecar CreateDefaultSidecar(AssetProcessorContext context)
-        => throw new NotSupportedException("This processor has no default sidecar.");
 }
 
 public enum SidecarPolicy
 {
     None,
-    Optional,
     Required,
 }
 
@@ -195,9 +199,12 @@ public interface IAssetProcessorDiagnostics
 
 Key properties:
 
-- A processor with no sidecar (`SidecarPolicy.None`) implements `IAssetProcessor` directly (or a
-  non-generic base); `AssetProcessor<TSidecar>` is for `Optional`/`Required` processors and always
-  exposes a sidecar shape.
+- There are exactly two policies: `None` (no sidecar) and `Required` (a sidecar is always used). A
+  processor with no sidecar implements `IAssetProcessor` directly; `AssetProcessor<TSidecar>` is the
+  `Required` base and always exposes a sidecar shape.
+- `AssetProcessor<TSidecar>` has a **separate** abstract `CreateDefaultSidecar(context)` function.
+  The builder calls it only when a `Required` sidecar file is missing, writes the returned object as
+  `<source>.toml`, then binds that file and calls `Process`. It never calls it when the file exists.
 - The sidecar is a normal `[GenerateShape]`/`partial` type. The framework binds it through the
   existing shape-driven `TomlShapeBinder`, using a non-generic `Bind(ITypeShape, …)` entry point.
   There is no hand-written sidecar parser, no per-processor generated binder, and no reflection
@@ -276,12 +283,13 @@ for each file under each pack root (sorted, reparse points skipped):
 | Policy | Missing sidecar | Existing sidecar | Default creation |
 | --- | --- | --- | --- |
 | `None` | Fine; no sidecar lookup | Not a sidecar; ordinary TOML rules | Never |
-| `Optional` | Bind an empty document; C# defaults apply | Bind and pass to the processor | Never |
-| `Required` | Ask the processor for its default sidecar, write `<source>.toml`, then bind | Bind and pass | Once, only when missing |
+| `Required` | Call `CreateDefaultSidecar`, write `<source>.toml`, then bind it | Bind and pass to the processor | Once, only when missing |
 
-- `AssetProcessor<TSidecar>` exposes a protected `CreateDefaultSidecar(AssetProcessorContext)`
-  hook. `Required` processors must return a valid default; the base implementation for a
-  parameterless sidecar shape binds an empty document.
+- `AssetProcessor<TSidecar>` is the `Required` base. Its abstract
+  `CreateDefaultSidecar(AssetProcessorContext)` is a **separate function** from `Process`; the
+  builder calls it only when the sidecar file is missing. The processor returns the default object,
+  the builder writes it, then the normal binder reads it back. There is no “optional, use C#
+  defaults without a file” policy.
 - A required sidecar that cannot be created is a `BK7xxx` error; the source is not baked.
 - Default creation is deterministic, writes a canonical TOML file, never overwrites an existing
   file, and reports `Info` with the path. This is the only bake-time source-tree write; it is
@@ -296,7 +304,8 @@ for each file under each pack root (sorted, reparse points skipped):
   ranges, and value spans where the binder has them.
 - Sidecar binding uses `BK2xxx` codes (the M4 hand-written texture sidecar codes `BK4011`/`BK4012`
   are retired). The built-in texture processor keeps its decode/probe/dimension errors in `BK4xxx`.
-- A missing optional sidecar is not an error and produces no diagnostic.
+- A missing `Required` sidecar is created and reports `Info`; it is not an error unless creation
+  fails.
 - A sidecar with a syntax error uses the shared `BK2001` TOML syntax code.
 
 ## 9. Outputs and asset paths
@@ -326,8 +335,9 @@ for each file under each pack root (sorted, reparse points skipped):
 The existing texture behavior moves behind the same contract; it does not keep a privileged path.
 
 - `TextureProcessor : AssetProcessor<TextureSidecar>` registers `png`, `jpg`, `jpeg`, `bmp`, `tga`.
-- `TextureSidecar` is a `[GenerateShape]` type with optional `filter` and `wrap` members; defaults
-  come from `WithTextureDefaults`. A missing sidecar is allowed (`Optional`).
+- `TextureSidecar` is a `[GenerateShape]` type with `filter` and `wrap` members. The processor is
+  `Required`; when a texture has no sidecar, `CreateDefaultSidecar` returns the builder's
+  `WithTextureDefaults` values and the builder writes `<source>.toml` before processing.
 - The processor keeps the existing decoding rules: StbImageSharp to straight-alpha RGBA8, no
   premultiplication/gamma/ICC/flipping/resampling; explicit 16-bit PNG rejection, truncation
   probing, dimension/payload checks, and `BK4xxx` diagnostics.
@@ -344,9 +354,9 @@ The existing texture behavior moves behind the same contract; it does not keep a
 
 ### 11.1 PPM (image extension point)
 
-- `PpmProcessor : AssetProcessor<PpmSidecar>` with extension `ppm`; optional sidecar with
-  `filter`/`wrap`; simple P6 (binary) support with header comments/whitespace, max value 255,
-  dimension validation, RGB→RGBA8 conversion (alpha 255).
+- `PpmProcessor : AssetProcessor<PpmSidecar>` with extension `ppm`; required sidecar with
+  `filter`/`wrap` (default values created when missing); simple P6 (binary) support with header
+  comments/whitespace, max value 255, dimension validation, RGB→RGBA8 conversion (alpha 255).
 - Emits a `TextureDescriptor` instance (engine-serialized) + raw payload, reusing the public runtime
   descriptor so the test proves a user processor produces a loadable asset.
 - Tests: extension discovery, sidecar binding/unknown key, exact RGBA bytes, descriptor/payload
@@ -354,8 +364,9 @@ The existing texture behavior moves behind the same contract; it does not keep a
 
 ### 11.2 Unit (custom data extension point)
 
-- `UnitProcessor : AssetProcessor<UnitSidecar>` with extension `unit`; sidecar optional with an
-  optional `name` member; JSON payload shape:
+- `UnitProcessor : AssetProcessor<UnitSidecar>` with extension `unit`; required sidecar with an
+  optional `name` member. When missing, `CreateDefaultSidecar` returns
+  `new UnitSidecar { Name = context.SourceFileNameWithoutExtension }`; JSON payload shape:
 
 ```json
 {
@@ -365,7 +376,8 @@ The existing texture behavior moves behind the same contract; it does not keep a
 ```
 
 - The source is `Assets/data/archer.unit`; the sidecar is `Assets/data/archer.unit.toml`. The name
-  is the sidecar `name` when present, otherwise `SourceFileNameWithoutExtension` (`archer`).
+  is the sidecar `name` when present, otherwise `SourceFileNameWithoutExtension` (`archer`). A
+  missing sidecar is created with `name = "archer"` before binding.
 - The output type is a runtime data type in the fixture common assembly:
 
 ```csharp
@@ -376,8 +388,8 @@ public readonly partial record struct Unit(string Name, int Health, int Attack);
 - The processor emits `context.Outputs.AddAsset(context.BaseAssetPath, new Unit(name, health, attack))`
   at `data/archer`. It never serializes MessagePack. It uses `System.Text.Json` in the JIT assets
   executable; JSON parsing is processor-owned, not an engine format.
-- Tests: default name from filename, sidecar override, JSON parse/validation, struct round-trip
-  through `LoadAsset<Unit>`, and the sidecar-optional path.
+- Tests: default-sidecar creation with the filename name, sidecar override, JSON parse/validation,
+  and struct round-trip through `LoadAsset<Unit>`.
 - This test proves a custom processor can emit a custom `[GenerateShape]` type, not only a texture
   descriptor, and that no host registration is needed for processor outputs.
 
@@ -391,9 +403,10 @@ public readonly partial record struct Unit(string Name, int Health, int Attack);
   sidecars are bound by the tooling binder. The engine serializes each `AddAsset<T>` instance
   through `PackBuilder`; the host does not know processors.
 - `bake` (or `generate-host` + a host build) generates `BakeHost.csproj`/`BakeManifest.g.cs` under
-  the configured host directory, builds the host, then bakes. The executable orchestrates the host
-  build so the game build target runs one command. The generated host project is independent, so
-  this is not a recursive build of `MyGame.Assets`.
+  `<project root>/obj/bork2d/bakehost`, builds the host, then bakes. The path is an internal working
+  directory, not builder configuration. The executable orchestrates the host build so the game
+  build target runs one command. The generated host project is independent, so this is not a
+  recursive build of `MyGame.Assets`.
 - The host-generation state is keyed by the builder configuration hash, the common assembly hash,
   the generated-content hash, processor-registration hash (extensions/sidecar policy/sidecar type),
   and the tool version. There is no descriptor hash.
@@ -402,8 +415,8 @@ public readonly partial record struct Unit(string Name, int Health, int Attack);
 
 The manifest (`<project root>/obj/bork2d/bake/manifest.json`, schema bumped) records:
 
-- builder configuration hash: packs/roots/output paths, host directory, common assembly, texture
-  defaults, processor identities, and processor assembly hash;
+- builder configuration hash: packs/roots/output paths, common assembly, texture defaults, processor
+  identities, and processor assembly hash;
 - every tracked input: every `.toml` under every pack root plus every file whose suffix is in the
   registered extension set (so `.ppm`/`.unit` are tracked automatically);
 - the game-side assembly closure next to the generated host;
@@ -497,7 +510,8 @@ Planned sequence on `task/file-processors`:
 - A test registers a `.ppm` processor and bakes/loads a `TextureDescriptor` + exact RGBA payload.
 - A test registers a `.unit` processor, reads JSON, defaults the name to the file name, honors a
   sidecar override, and loads a `Unit` struct.
-- Required sidecars are created once when missing; optional sidecars do not require a file.
+- `Required` sidecars are created once when missing through `CreateDefaultSidecar`; `None` has no
+  sidecar file.
 - A later processor registration overrides an earlier one for the same extension.
 - Processor errors are `BK7xxx`; sidecar binding errors are `BK2xxx`; texture decode errors stay
   `BK4xxx`.

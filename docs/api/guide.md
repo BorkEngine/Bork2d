@@ -460,7 +460,6 @@ roots and processors. Its `Program.cs` configures the bake; there is no `bork2d.
 return await new BakeApplicationBuilder()
     .WithPack("assets.pck", "Assets")          // first = main
     .WithPack("dlc1.pck", "DLC1")              // later = overlay
-    .WithHostDirectory("obj/bork2d/bakehost")
     .WithCommonAssembly(typeof(GameConfig).Assembly)
     .WithTextureDefaults(TextureFilter.Linear, TextureWrap.Clamp)
     .AddProcessor(new PpmProcessor())
@@ -548,8 +547,8 @@ type = "MyGame.Data.GameConfig"
 `Status: Planned on task/file-processors. The current M4 tree has the texture-specific pipeline.`
 
 A non-TOML source type is handled by a processor registered in `MyGame.Assets`. The processor
-declares extensions, a sidecar policy, an optional `[GenerateShape]` sidecar type, and code that
-emits shaped asset instances and optional raw data (the engine serializes MessagePack):
+declares extensions, a sidecar policy, a `[GenerateShape]` sidecar type when it needs settings, and
+code that emits shaped asset instances and optional raw data (the engine serializes MessagePack):
 
 ```csharp
 [GenerateShape]
@@ -561,12 +560,17 @@ public sealed partial class UnitSidecar
 public sealed class UnitProcessor : AssetProcessor<UnitSidecar>
 {
     public override IReadOnlyList<string> Extensions => ["unit"];
-    public override SidecarPolicy Policy => SidecarPolicy.Optional;
+
+    // Called only when archer.unit.toml does not exist.
+    protected override UnitSidecar CreateDefaultSidecar(AssetProcessorContext context)
+        => new() { Name = context.SourceFileNameWithoutExtension };
 
     protected override void Process(AssetProcessorContext context, UnitSidecar sidecar)
     {
         var json = ParseJson(context.SourcePath); // pseudo-helper; processor-owned JSON
-        string name = sidecar.Name ?? context.SourceFileNameWithoutExtension;
+        string name = string.IsNullOrWhiteSpace(sidecar.Name)
+            ? context.SourceFileNameWithoutExtension
+            : sidecar.Name;
         context.Outputs.AddAsset(
             context.BaseAssetPath,
             new Unit(name, json.Health, json.Attack)); // Unit is [GenerateShape] in Project.Common
@@ -582,7 +586,7 @@ public sealed class UnitProcessor : AssetProcessor<UnitSidecar>
 ```
 
 ```toml
-# Assets/data/archer.unit.toml (optional; name defaults to "archer")
+# Assets/data/archer.unit.toml (created with name = "archer" if missing)
 name = "archer"
 ```
 
@@ -601,9 +605,9 @@ public readonly partial record struct Unit(string Name, int Health, int Attack);
 - Processor outputs do not need to be registered with the generated host; `AddAsset<T>` uses the
   type's compiled shape. The runtime can load them with `LoadAsset<T>` when the type lives in a
   runtime assembly such as `Project.Common`.
-- Sidecar binding uses the same camelCase/unknown-key/required rules as data TOML. `Optional`
-  sidecars may be absent; `Required` sidecars are created once from the processor default when
-  missing; `None` has no sidecar.
+- Sidecar binding uses the same camelCase/unknown-key/required rules as data TOML. There are only
+  two policies: `Required` sidecars are created once through `CreateDefaultSidecar` when missing;
+  `None` has no sidecar. There is no optional-without-file policy.
 - Processor errors use `BK7xxx`; sidecar binding errors use `BK2xxx`; texture decode/probe errors
   remain `BK4xxx`.
 - The full contract is in [asset processors](../architecture/asset-processors.md).

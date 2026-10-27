@@ -16,8 +16,8 @@
 > target designs for later milestones. Check status markers before treating an API as implemented.
 >
 > **Post-M4 target (D-036/D-037, Planned on `task/file-processors`).** File types become registered
-> **asset processors** with optional `[GenerateShape]` sidecars; the built-in texture importer is one
-> processor. The project descriptor is removed, and a game-owned `MyGame.Assets` executable
+> **asset processors** with `[GenerateShape]` sidecars when settings are required; the built-in
+> texture importer is one processor. The project descriptor is removed, and a game-owned `MyGame.Assets` executable
 > configures the bake through `BakeApplicationBuilder`, serves as the CLI, and bakes automatically
 > when built. The [asset processors](architecture/asset-processors.md) design doc owns the target;
 > the M4 text below remains the as-built behavior until the task lands.
@@ -132,7 +132,7 @@ One fact has one owner. Update the owner and link to it; do not copy.
   requirement, not a Bork2d attribute or generator. Registration is each data TOML's own
   `[bork2d].type`; there is no type list.
 - **Target (D-036/D-037):** a non-TOML source type is an `IAssetProcessor` registered in
-  `MyGame.Assets`; its optional sidecar is `<source>.toml` with a `[GenerateShape]` type. The
+  `MyGame.Assets`; its sidecar, when required, is `<source>.toml` with a `[GenerateShape]` type. The
   builder configures ordered packs: the first is the main/base pack and later entries are
   DLC/overlay packs; a DLC reference may resolve locally or in main only. The M4 project descriptor
   (`bork2d.project.toml`) is removed.
@@ -169,8 +169,8 @@ One fact has one owner. Update the owner and link to it; do not copy.
 | **Bake** | The JIT tooling pipeline that turns TOML sources and textures into MessagePack/raw pack entries; never in the runtime. |
 | **Bake host** | The single generated `Bork2d.BakeHost` assembly that statically knows the mapped types and calls generated bind/pack code; not a solution project. |
 | **Project descriptor (M4)** | `bork2d.project.toml`: M4's ordered `[[assets]]` entries with `root` + `pack`, plus host/texture defaults. **Removed by D-037**; the builder in `MyGame.Assets` replaces it. |
-| **Asset processor** | A registered `IAssetProcessor` for a source extension set with optional `[GenerateShape]` sidecar, sidecar policy, and processing code that emits base-path-derived shaped asset instances (`AddAsset<T>`; the engine serializes MessagePack) and optional raw data (`AddData`). |
-| **Sidecar** | `<source file>.toml` settings file for a processor source; bound by the shared TOML binder from the processor's `[GenerateShape]` type. Optional, required-with-default-creation, or absent per policy. |
+| **Asset processor** | A registered `IAssetProcessor` for a source extension set with a `[GenerateShape]` sidecar when settings are required, a `None`/`Required` policy, and processing code that emits base-path-derived shaped asset instances (`AddAsset<T>`; the engine serializes MessagePack) and optional raw data (`AddData`). |
+| **Sidecar** | `<source file>.toml` settings file for a processor source; bound by the shared TOML binder from the processor's `[GenerateShape]` type. `Required` sidecars are created by `CreateDefaultSidecar` when missing; `None` has no sidecar. |
 | **`MyGame.Assets`** | Game-owned build-time executable that contains the asset roots/processors, configures the bake with `BakeApplicationBuilder`, acts as the CLI, and bakes when built. Never shipped with the runtime. |
 | **Main / DLC pack** | In the builder's ordered pack list, the first pack / every later entry; there is no `main` flag. |
 | **Source type metadata** | The reserved top-level `[bork2d] type = "Full.Type.Name"` table in a custom-data TOML (D-M4-13); the root table is binder-ignored metadata. |
