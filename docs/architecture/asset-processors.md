@@ -35,9 +35,9 @@ an optional sidecar).
 
 - No runtime change: the NativeAOT runtime still reads packs only, with generated shapes and no
   TOML, no reflection resolver, and no processor assembly.
-- No multi-file processors (atlas + metadata, font + glyph list) in this task; one source file maps
-  to zero or more outputs owned by that source. The contract leaves room for a later companion-file
-  concept.
+- No multi-input processors (atlas + metadata, font + glyph list) in this task; one source file may
+  emit any number of outputs owned by that source. The contract leaves room for a later
+  companion-file concept.
 - No editor work. M5 consumes the builder and processor contracts later.
 - No general TOML writer. The only new write is a missing required sidecar, written once from the
   processor's default shape.
@@ -178,8 +178,11 @@ public sealed class AssetProcessorContext
 
 public interface IAssetOutputSink
 {
-    void AddMessagePack<T>(string assetPath, T value) where T : IShapeable<T>;
-    void AddRaw(string assetPath, ReadOnlySpan<byte> payload);
+    // The processor supplies a typed instance; the engine serializes it as MessagePack.
+    void AddAsset<T>(string assetPath, T value) where T : IShapeable<T>;
+
+    // Raw bytes are only for opaque data assets (texture payloads, future audio, etc.).
+    void AddData(string assetPath, ReadOnlySpan<byte> payload);
 }
 
 public interface IAssetProcessorDiagnostics
@@ -199,10 +202,16 @@ Key properties:
   existing shape-driven `TomlShapeBinder`, using a non-generic `Bind(ITypeShape, …)` entry point.
   There is no hand-written sidecar parser, no per-processor generated binder, and no reflection
   over sidecar members.
-- `AddMessagePack<T>` uses the compiled shape `T.GetTypeShape()` and the existing `PackBuilder`
-  path. The output type can be a public runtime type (`TextureDescriptor`, `Unit`) or any other
-  shapeable type; it does **not** need to be registered with the generated host. The host only maps
-  custom-data TOML types.
+- **MessagePack is the engine's responsibility.** `AddAsset<T>` takes a typed instance; the engine
+  serializes it with `T.GetTypeShape()` through the existing `PackBuilder.AddMessagePack<T>` path.
+  A processor never serializes MessagePack, never sees MessagePack bytes, and never calls
+  `PackBuilder`. The output type can be a public runtime type (`TextureDescriptor`, `Unit`) or any
+  other shapeable type; it does **not** need to be registered with the generated host. The host only
+  maps custom-data TOML types.
+- `AddData` is only for opaque raw payloads. A `[GenerateShape]` asset must come through
+  `AddAsset<T>` as an instance; a processor cannot emit pre-serialized bytes for a shaped asset.
+- A processor may emit any number of assets and data entries for one source; there is no fixed
+  output count. The texture processor uses two: a `TextureDescriptor` asset and its raw payload.
 - References in processor output are collected automatically by the existing
   `AssetReferenceCollector` shape walk; a processor does not declare references by hand.
 - A processor is synchronous and runs on the single bake thread. It must not start work that
@@ -294,14 +303,14 @@ for each file under each pack root (sorted, reparse points skipped):
 
 - `BaseAssetPath` is the source path relative to its pack root, lowercased, with the matched
   extension removed. `art/Player.PNG` → `art/player`.
-- A processor may emit zero or more outputs. Every output path must be **base-path-derived**:
-  `BaseAssetPath` itself or `BaseAssetPath + "-" + suffix`, where `suffix` is one canonical segment
-  of `[a-z0-9_-]+`. This prevents a processor from writing outside its source's directory or
-  inventing unrelated paths. Multiple outputs are allowed (`art/player` and `art/player-raw` for
-  the texture processor).
-- A MessagePack output is added with `AddMessagePack<T>`; a raw output with `AddRaw`. The path must
-  be canonical; the name must be base-path-derived; duplicate paths from the same source are a
-  `BK7xxx` error.
+- A processor may emit **any number of outputs**. Every output path must be
+  **base-path-derived**: `BaseAssetPath` itself or `BaseAssetPath + "-" + suffix`, where `suffix` is
+  one canonical segment of `[a-z0-9_-]+`. This prevents a processor from writing outside its
+  source's directory or inventing unrelated paths. Multiple outputs are expected: the texture
+  processor emits `textures/image` and `textures/image-raw` for `textures/image.png`.
+- A shaped asset output is added with `AddAsset<T>` as an instance; the engine serializes it. A raw
+  payload is added with `AddData`. The path must be canonical; the name must be base-path-derived;
+  duplicate paths from the same source are a `BK7xxx` error.
 - Outputs from different sources, data TOML, and other processors share the same baked index.
   Cross-processor collisions are `BK3005`, exactly as data/texture collisions are today.
 - Outputs are added to the pack whose root contains the source. Overlay/DLC rules are unchanged:
@@ -322,9 +331,9 @@ The existing texture behavior moves behind the same contract; it does not keep a
 - The processor keeps the existing decoding rules: StbImageSharp to straight-alpha RGBA8, no
   premultiplication/gamma/ICC/flipping/resampling; explicit 16-bit PNG rejection, truncation
   probing, dimension/payload checks, and `BK4xxx` diagnostics.
-- It emits `TextureDescriptor` at `BaseAssetPath` and the raw RGBA8 payload at
-  `BaseAssetPath + "-raw"`; `Payload` points at the raw path. This preserves the M3/M4 runtime
-  contract.
+- It emits a `TextureDescriptor` instance at `BaseAssetPath` and the raw RGBA8 payload at
+  `BaseAssetPath + "-raw"`; `Payload` points at the raw path. The engine serializes the descriptor;
+  this preserves the M3/M4 runtime contract.
 - The descriptor's `filter`/`wrap` values come from the sidecar or the builder defaults. There is
   no `[textures]` table and no descriptor parser.
 - `TexturePipeline`, `TextureSidecarParser`, `BakedTexture`, `TextureSourceEntry`, and the
@@ -338,8 +347,8 @@ The existing texture behavior moves behind the same contract; it does not keep a
 - `PpmProcessor : AssetProcessor<PpmSidecar>` with extension `ppm`; optional sidecar with
   `filter`/`wrap`; simple P6 (binary) support with header comments/whitespace, max value 255,
   dimension validation, RGB→RGBA8 conversion (alpha 255).
-- Emits `TextureDescriptor` + raw payload, reusing the public runtime descriptor so the test proves
-  a user processor produces a loadable asset.
+- Emits a `TextureDescriptor` instance (engine-serialized) + raw payload, reusing the public runtime
+  descriptor so the test proves a user processor produces a loadable asset.
 - Tests: extension discovery, sidecar binding/unknown key, exact RGBA bytes, descriptor/payload
   paths, collisions, unregistered extension ignored, full bake → `LoadAsset<TextureDescriptor>`.
 
@@ -364,9 +373,9 @@ The existing texture behavior moves behind the same contract; it does not keep a
 public readonly partial record struct Unit(string Name, int Health, int Attack);
 ```
 
-- The processor emits `AddMessagePack<Unit>(context.BaseAssetPath, new Unit(name, health, attack))`
-  at `data/archer`. It uses `System.Text.Json` in the JIT assets executable; JSON parsing is
-  processor-owned, not an engine format.
+- The processor emits `context.Outputs.AddAsset(context.BaseAssetPath, new Unit(name, health, attack))`
+  at `data/archer`. It never serializes MessagePack. It uses `System.Text.Json` in the JIT assets
+  executable; JSON parsing is processor-owned, not an engine format.
 - Tests: default name from filename, sidecar override, JSON parse/validation, struct round-trip
   through `LoadAsset<Unit>`, and the sidecar-optional path.
 - This test proves a custom processor can emit a custom `[GenerateShape]` type, not only a texture
@@ -379,8 +388,8 @@ public readonly partial record struct Unit(string Name, int Health, int Attack);
 - The generated host still exists for **custom-data TOML** types. The builder knows the common
   assembly and scans every pack root's data TOMLs for `[bork2d].type`.
 - The host contains data bind/write code only. Processors are compiled into `MyGame.Assets`; their
-  sidecars are bound by the tooling binder and their outputs use `PackBuilder` directly. The host
-  does not know processors.
+  sidecars are bound by the tooling binder. The engine serializes each `AddAsset<T>` instance
+  through `PackBuilder`; the host does not know processors.
 - `bake` (or `generate-host` + a host build) generates `BakeHost.csproj`/`BakeManifest.g.cs` under
   the configured host directory, builds the host, then bakes. The executable orchestrates the host
   build so the game build target runs one command. The generated host project is independent, so

@@ -169,7 +169,7 @@ One fact has one owner. Update the owner and link to it; do not copy.
 | **Bake** | The JIT tooling pipeline that turns TOML sources and textures into MessagePack/raw pack entries; never in the runtime. |
 | **Bake host** | The single generated `Bork2d.BakeHost` assembly that statically knows the mapped types and calls generated bind/pack code; not a solution project. |
 | **Project descriptor (M4)** | `bork2d.project.toml`: M4's ordered `[[assets]]` entries with `root` + `pack`, plus host/texture defaults. **Removed by D-037**; the builder in `MyGame.Assets` replaces it. |
-| **Asset processor** | A registered `IAssetProcessor` for a source extension set with optional `[GenerateShape]` sidecar, sidecar policy, and processing code that emits base-path-derived MessagePack/raw outputs. |
+| **Asset processor** | A registered `IAssetProcessor` for a source extension set with optional `[GenerateShape]` sidecar, sidecar policy, and processing code that emits base-path-derived shaped asset instances (`AddAsset<T>`; the engine serializes MessagePack) and optional raw data (`AddData`). |
 | **Sidecar** | `<source file>.toml` settings file for a processor source; bound by the shared TOML binder from the processor's `[GenerateShape]` type. Optional, required-with-default-creation, or absent per policy. |
 | **`MyGame.Assets`** | Game-owned build-time executable that contains the asset roots/processors, configures the bake with `BakeApplicationBuilder`, acts as the CLI, and bakes when built. Never shipped with the runtime. |
 | **Main / DLC pack** | In the builder's ordered pack list, the first pack / every later entry; there is no `main` flag. |

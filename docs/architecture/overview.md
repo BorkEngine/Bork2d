@@ -38,7 +38,8 @@ compiled `[GenerateShape]` shapes and no TOML or reflection. See
 
 **Target (D-036/D-037).** A game-owned `MyGame.Assets` executable contains the asset roots and
 registers processors by extension; each processor has an optional `[GenerateShape]` sidecar and
-emits base-path-derived MessagePack/raw outputs. The built-in texture importer is one processor.
+emits base-path-derived shaped asset instances and optional raw data (the engine serializes
+MessagePack). The built-in texture importer is one processor.
 The builder configures the ordered packs and bakes when the assets project builds; there is no
 descriptor. See [asset processors](asset-processors.md).
 

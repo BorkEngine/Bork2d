@@ -549,7 +549,7 @@ type = "MyGame.Data.GameConfig"
 
 A non-TOML source type is handled by a processor registered in `MyGame.Assets`. The processor
 declares extensions, a sidecar policy, an optional `[GenerateShape]` sidecar type, and code that
-emits MessagePack/raw outputs:
+emits shaped asset instances and optional raw data (the engine serializes MessagePack):
 
 ```csharp
 [GenerateShape]
@@ -567,7 +567,7 @@ public sealed class UnitProcessor : AssetProcessor<UnitSidecar>
     {
         var json = ParseJson(context.SourcePath); // pseudo-helper; processor-owned JSON
         string name = sidecar.Name ?? context.SourceFileNameWithoutExtension;
-        context.Outputs.AddMessagePack(
+        context.Outputs.AddAsset(
             context.BaseAssetPath,
             new Unit(name, json.Health, json.Attack)); // Unit is [GenerateShape] in Project.Common
     }
@@ -591,12 +591,15 @@ name = "archer"
 public readonly partial record struct Unit(string Name, int Health, int Attack);
 ```
 
-- The output path is base-path-derived (`data/archer`); a processor may add a `-suffix` output, but it
-  cannot write outside its source's base path.
+- A processor may emit any number of outputs. The output path is base-path-derived
+  (`data/archer`); a processor may add `-suffix` outputs such as a raw payload, but it cannot write
+  outside its source's base path.
+- `AddAsset<T>` supplies a typed instance; the engine serializes it as MessagePack. `AddData` is only
+  for opaque raw bytes. A processor never serializes MessagePack or calls `PackBuilder`.
 - The built-in PNG/JPG/JPEG/BMP/TGA importer is a processor registered automatically. A later
   registration overrides it for a duplicate extension.
-- Processor outputs do not need to be registered with the generated host; `AddMessagePack<T>` uses
-  the type's compiled shape. The runtime can load them with `LoadAsset<T>` when the type lives in a
+- Processor outputs do not need to be registered with the generated host; `AddAsset<T>` uses the
+  type's compiled shape. The runtime can load them with `LoadAsset<T>` when the type lives in a
   runtime assembly such as `Project.Common`.
 - Sidecar binding uses the same camelCase/unknown-key/required rules as data TOML. `Optional`
   sidecars may be absent; `Required` sidecars are created once from the processor default when

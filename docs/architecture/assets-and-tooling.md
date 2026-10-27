@@ -44,7 +44,7 @@ MyGame.Assets/Assets/ (main) + DLC1/ (overlay)
     │ MyGame.Assets executable:
     │   BakeApplicationBuilder (packs, roots, host, common assembly, texture defaults, processors)
     │   → processor discovery + sidecar binding → generated host for data TOML
-    │   → PolyType generated-shape MessagePack / processor outputs
+    │   → PolyType generated-shape MessagePack (data + processor AddAsset instances) / AddData
     │   → binding/reference validation with file:line:column
     ▼
 MessagePack assets + raw payloads
@@ -483,8 +483,10 @@ registration/override rules, sidecar policies, output path rules, and diagnostic
   processor's default when missing; `None` has no sidecar.
 - A later registration overrides an earlier one for the same extension. Extensions are
   case-insensitive, accept `"png"`/`".png"`, and support compound suffixes.
-- Processor outputs are MessagePack/raw entries at `BaseAssetPath` or `BaseAssetPath + "-<suffix>"`;
-  they flow through the same baked index, reference validation, and pack composer as custom data.
+- A processor may emit any number of outputs at `BaseAssetPath` or `BaseAssetPath + "-<suffix>"`.
+  A `[GenerateShape]` output is an instance (the engine serializes MessagePack); raw bytes are only
+  for opaque data. They flow through the same baked index, reference validation, and pack composer
+  as custom data.
 - There is no hardcoded source-extension list, no texture-specific sidecar parser, and no
   texture-specific entry kind in the generic index/composer.
 
@@ -535,7 +537,8 @@ configuration. A builder configuration failure is a `BK1xxx` diagnostic and exit
 - The generated host still exists for **custom-data TOML**. It scans every pack root for
   `[bork2d].type`, resolves the types against the builder's common assembly and its closure with
   `MetadataLoadContext`, and emits the single `Bork2d.BakeHost` project/manifest with the data
-  `Bind`/`AddToPack` code. It does not know processors; processor outputs use `PackBuilder` directly.
+  `Bind`/`AddToPack` code. It does not know processors; the engine serializes processor
+  `AddAsset<T>` instances through `PackBuilder`.
 - Host generation is content-hash gated in `obj/bork2d/bake/host-generation.json` by the builder
   configuration hash, the common-assembly hash, the source-type declaration hash (including pack
   identity/root), the processor-registration hash, the generator version, configuration, output
@@ -565,9 +568,10 @@ configuration. A builder configuration failure is a `BK1xxx` diagnostic and exit
   `[GenerateShape]` type. `Optional` sidecars may be absent; `Required` sidecars are created once
   from the processor's default when missing; `None` has no sidecar. Processor errors are `BK7xxx`;
   sidecar binding errors are `BK2xxx`.
-- Processors emit MessagePack/raw entries through the sink. Their references are collected by the
-  shape walk, and their outputs join the same baked index as custom data, so collision and
-  reference rules are identical. The generic index/composer has no texture-specific entry kind.
+- Processors emit shaped asset instances through `AddAsset<T>` and opaque data through `AddData`.
+  The engine serializes MessagePack; the processor does not. References are collected by the shape
+  walk, and outputs join the same baked index as custom data, so collision and reference rules are
+  identical. The generic index/composer has no texture-specific entry kind.
 - **Per-pack rules are unchanged.** The main pack is strict; a DLC may reference locally or in main;
   DLC→DLC is an error; duplicate canonical paths are allowed across packs and forbidden inside one
   pack (`BK3005`). `PackBuilder` still receives the external-main paths/kinds through its internal
@@ -794,7 +798,7 @@ that in exchange for no arbitrary caps, and fails cleanly rather than reading ou
 | `build/Bork2d.Bake.targets` | `Current` (M4/D-M4-14): build/publish/clean integration for every declared pack, fixture preparation (`Assets` + `DLC1`), property overrides. **Post-M4 target: `build/Bork2d.Assets.targets` runs the assets executable; no descriptor properties or pack-path list.** |
 | `Bork2d.BakeFixture` | `Current` (M4, Q-16/D-M4-14; committed source PNG): game-side `Project.Common`-like fixture with `[GenerateShape] partial` types, a main `Assets/` tree, and a `DLC1/` tree whose `data/dlc.toml` references the main `art/player`; referenced by tests and the AOT smoke, never by the runtime. **Post-M4 target: add `Bork2d.BakeFixture.Assets` executable for the builder flow; fixture data types remain in `Bork2d.BakeFixture`.** |
 | Texture sidecars | `Current` (M4/D-M4-15): `<source>.toml` remains the minimal authoring-only `filter`/`wrap` settings file; no normal typed `TextureDescriptor` TOML and no runtime/API change. **Post-M4 target (D-036, planned): sidecar is a `[GenerateShape]` type bound by the shared TOML binder; policies None/Optional/Required; no hand-written parser.** |
-| Asset processors and `MyGame.Assets` | `Planned` (`task/file-processors`, D-036/D-037): `Bork2d.Bake.Builder`, `IAssetProcessor`/`AssetProcessor<TSidecar>`, sidecar policies, base-path outputs, extension override, built-in texture processor, PPM/Unit test processors, `MyGame.Assets` auto-bake. Design: [asset processors](asset-processors.md). |
+| Asset processors and `MyGame.Assets` | `Planned` (`task/file-processors`, D-036/D-037): `Bork2d.Bake.Builder`, `IAssetProcessor`/`AssetProcessor<TSidecar>`, sidecar policies, base-path outputs, extension override, engine-side MessagePack serialization from `AddAsset<T>`, built-in texture processor, PPM/Unit test processors, `MyGame.Assets` auto-bake. Design: [asset processors](asset-processors.md). |
 | Serialization policy | `Current` (M3/D-035): Nerdbank.MessagePack `1.4.95` pinned with generated-shape smoke in Common, tests, and AOT smoke; pack header/entry and public `SpriteAsset`/`TextureDescriptor` shapes are generated; `AssetRef<T>`/`DataRef` use public PolyType path marshalers; `Bork2d.Api` references PolyType `1.4.1`; `LoadAsset<T>` passes the shape from `T.GetTypeShape()` |
 | `IAssets` load members | `Current` (M3/D-035): declarations, XML docs, the `IShapeable<T>` constraint, deserialize-only loader bodies, and `AssetRef<T>`/`DataRef` overloads; `IEngine.Assets` returns the real service in every mode |
 | `IAssets.LoadPack`/`Browse`/`Exists`, `AssetInfo` | `Current` (M3): `AssetInfo`, the internal VFS/lookup, and public delegation |

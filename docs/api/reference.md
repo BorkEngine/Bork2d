@@ -447,8 +447,10 @@ reference.
   with `LoadPack` later-wins semantics. Duplicates inside one pack remain pack build errors.
 - **Asset processors (target D-036).** A non-TOML source type is handled by an `IAssetProcessor`
   registered in `MyGame.Assets`: extension set, optional `[GenerateShape]` sidecar
-  (`<source>.toml`), sidecar policy (`None`/`Optional`/`Required`), and processing code that emits
-  base-path-derived MessagePack/raw outputs. The built-in texture importer is a processor. Processor
+  (`<source>.toml`), sidecar policy (`None`/`Optional`/`Required`), and processing code. A processor
+  may emit any number of outputs; a shaped asset is an instance through `AddAsset<T>` and the engine
+  serializes MessagePack (the processor never serializes it), while `AddData` is only for opaque
+  bytes. Outputs are base-path-derived. The built-in texture importer is a processor. Processor
   errors are `BK7xxx`; sidecar binding errors are `BK2xxx`; texture decode/probe errors remain
   `BK4xxx`. See [asset processors](../architecture/asset-processors.md).
 - **Tooling commands (not in the runtime).** M4: `bork2d-bake generate-host`/`bake`/`validate`.
