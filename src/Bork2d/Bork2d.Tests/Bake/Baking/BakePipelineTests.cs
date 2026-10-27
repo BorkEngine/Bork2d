@@ -201,13 +201,13 @@ public sealed class BakePipelineTests
         var options = new BakeOptions(
             descriptorPath,
             _fixture.HostAssemblyPath,
-            outputPath: null,
+            outputRoot: null,
             BakeMode.Debug,
             check: false,
             force: false);
         BakeResult result = BakePipeline.Run(options, new BakeDiagnostics());
 
-        string expectedPath = Path.Combine(project, "out", "assets.pck");
+        string expectedPath = Path.Combine(project, "assets.pck");
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.True(result.PackWritten);
         Assert.Equal(expectedPath, result.PackPath);
@@ -416,7 +416,7 @@ public sealed class BakePipelineTests
         var options = new BakeOptions(
             projectPath,
             hostPath ?? _fixture.HostAssemblyPath,
-            outputPath,
+            Path.GetDirectoryName(outputPath),
             BakeMode.Debug,
             check,
             force: false);

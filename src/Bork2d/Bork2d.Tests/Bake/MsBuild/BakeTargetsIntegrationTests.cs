@@ -17,14 +17,17 @@ public sealed class BakeTargetsIntegrationTests
 {
     private const string Descriptor = """
         schema = 1
-        name = "TargetsFixture"
 
-        [assets]
+        [[assets]]
         root = "Assets"
+        pack = "assets.pck"
+
+        [[assets]]
+        root = "DLC1"
+        pack = "dlc1.pck"
 
         [bake]
         host = "obj/bork2d/bakehost"
-        pack = "assets.pck"
 
         [textures]
         filter = "linear"
@@ -67,6 +70,16 @@ public sealed class BakeTargetsIntegrationTests
         type = "Bork2d.Api.Assets.SpriteAsset"
         """;
 
+    private const string DlcToml = """
+        name = "dlc"
+        health = 10
+        must = "overlay"
+        texture = "art/player"
+
+        [bork2d]
+        type = "Bork2d.BakeFixture.GameConfig"
+        """;
+
     private const string SidecarToml = """
         filter = "nearest"
         wrap = "repeat"
@@ -91,10 +104,14 @@ public sealed class BakeTargetsIntegrationTests
         Assert.True(build.ExitCode == 0, build.Output);
         Assert.Contains("baked '", build.Output, StringComparison.Ordinal);
         Assert.True(File.Exists(app.PackPath));
+        Assert.True(File.Exists(app.DlcPackPath));
         Assert.True(File.Exists(app.HostProjectPath));
         Assert.True(File.Exists(app.HostManifestPath));
         Assert.True(File.Exists(app.IncrementalManifestPath));
         Assert.Equal(_expectedEntries, BakedPackAssertions.Shapes(app.PackPath).Select(shape => shape.Path));
+        Assert.Equal(
+            new[] { BakeProjectFixture.DlcGamePath },
+            BakedPackAssertions.Shapes(app.DlcPackPath).Select(shape => shape.Path));
         Assert.Equal(
             BakeProjectFixture.ExpectedTexturePayload,
             ReadRawPayload(app.PackPath, BakeProjectFixture.TexturePayloadPath));
@@ -116,14 +133,18 @@ public sealed class BakeTargetsIntegrationTests
 
         Assert.True(publish.ExitCode == 0, publish.Output);
         string publishedPack = Path.Combine(app.PublishDirectory, "assets.pck");
+        string publishedDlcPack = Path.Combine(app.PublishDirectory, "dlc1.pck");
         Assert.True(File.Exists(publishedPack), publish.Output);
+        Assert.True(File.Exists(publishedDlcPack), publish.Output);
         Assert.Equal(packBytes, File.ReadAllBytes(publishedPack));
+        Assert.Equal(File.ReadAllBytes(app.DlcPackPath), File.ReadAllBytes(publishedDlcPack));
         AssertNoToolingAssemblies(app.PublishDirectory);
 
         TempProcessRunner.Result clean = app.Clean();
 
         Assert.True(clean.ExitCode == 0, clean.Output);
         Assert.False(File.Exists(app.PackPath));
+        Assert.False(File.Exists(app.DlcPackPath));
         Assert.False(Directory.Exists(app.HostDirectory));
         Assert.False(Directory.Exists(app.IncrementalDirectory));
     }
@@ -212,6 +233,13 @@ public sealed class BakeTargetsIntegrationTests
             "net11.0",
             "assets.pck");
 
+        internal string DlcPackPath => Path.Combine(
+            ProjectDirectory,
+            "bin",
+            "Debug",
+            "net11.0",
+            "dlc1.pck");
+
         internal string HostDirectory => Path.Combine(
             ProjectDirectory,
             "obj",
@@ -237,6 +265,12 @@ public sealed class BakeTargetsIntegrationTests
             "Assets",
             "data",
             "game.toml");
+
+        internal string DlcSourcePath => Path.Combine(
+            ProjectDirectory,
+            "DLC1",
+            "data",
+            "dlc.toml");
 
         internal static TemporaryBakeApp Create()
         {
@@ -264,6 +298,7 @@ public sealed class BakeTargetsIntegrationTests
             app.WriteAsset("sprites/player.toml", SpriteToml);
             app.WriteAsset("art/player.png.toml", SidecarToml);
             app.WriteAssetBytes("art/player.png", TextureImageFactory.RgbaPng());
+            app.WriteDlcAsset("data/dlc.toml", DlcToml);
 
             return app;
         }
@@ -319,6 +354,7 @@ public sealed class BakeTargetsIntegrationTests
                         <AssemblyName>BakeApp</AssemblyName>
                         <Bork2dProjectDescriptor>$(MSBuildProjectDirectory)\bork2d.project.toml</Bork2dProjectDescriptor>
                         <Bork2dBakeCommonAssemblyName>Bork2d.BakeFixture</Bork2dBakeCommonAssemblyName>
+                        <Bork2dBakePackPaths>assets.pck;dlc1.pck</Bork2dBakePackPaths>
                     </PropertyGroup>
                     <ItemGroup>
                         <ProjectReference Include="{fixtureProject}" />
@@ -336,6 +372,16 @@ public sealed class BakeTargetsIntegrationTests
             string fullPath = Path.Combine(
                 ProjectDirectory,
                 "Assets",
+                relativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            File.WriteAllText(fullPath, content);
+        }
+
+        private void WriteDlcAsset(string relativePath, string content)
+        {
+            string fullPath = Path.Combine(
+                ProjectDirectory,
+                "DLC1",
                 relativePath.Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
             File.WriteAllText(fullPath, content);

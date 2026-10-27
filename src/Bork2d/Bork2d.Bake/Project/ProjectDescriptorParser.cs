@@ -8,7 +8,7 @@ using Tomlyn.Syntax;
 namespace Bork2d.Bake.Project;
 
 /// <summary>
-/// Parses and strictly validates <c>bork2d.project.toml</c> (schema 1).
+/// Parses and strictly validates <c>bork2d.project.toml</c> (schema 1, D-M4-14).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -16,9 +16,16 @@ namespace Bork2d.Bake.Project;
 /// (0-based positions converted to the 1-based <see cref="BakeDiagnostic"/> model) and the Tomlyn
 /// model for values. Unknown keys are errors, every relative path resolves against the descriptor's
 /// directory, and mapped type declarations are deliberately not part of this model (D-M4-13): each
-/// custom-data TOML declares its type in its own <c>[bork2d]</c> table. A <c>types</c> key is an
-/// unknown key, so the removed prefix model cannot silently linger. Texture defaults are
+/// custom-data TOML declares its type in its own <c>[bork2d]</c> table. Texture defaults are
 /// <c>linear</c>/<c>clamp</c> (the schema example in the M4 spec §6); a sidecar may override them.
+/// </para>
+/// <para>
+/// The schema is an ordered <c>[[assets]]</c> list. The first entry is the main/base pack; later
+/// entries are DLC/overlay packs (D-M4-14). Each entry requires <c>root</c> and <c>pack</c>, both
+/// relative to the descriptor. Root and pack paths may not be rooted and may not contain <c>.</c> or
+/// <c>..</c> segments; the pack path may contain subdirectories. Pack paths must be unique, roots
+/// must be unique and exist, and at least one entry is required. The removed project <c>name</c>,
+/// <c>[assets]</c> (single table), and <c>[bake].pack</c> keys are unknown-key errors.
 /// </para>
 /// <para>
 /// The parser aggregates descriptor errors; it returns <see langword="null"/> when any error was
@@ -27,19 +34,22 @@ namespace Bork2d.Bake.Project;
 /// </remarks>
 internal static class ProjectDescriptorParser
 {
-    private const string DefaultPackPath = "assets.pck";
     private const string DefaultHostPath = "obj/bork2d/bakehost";
 
     private static readonly HashSet<string> _rootKeys = new(
-        ["schema", "name", "assets", "bake", "textures"],
+        ["schema", "assets", "bake", "textures"],
         StringComparer.Ordinal);
-    private static readonly HashSet<string> _assetsKeys = new(["root"], StringComparer.Ordinal);
-    private static readonly HashSet<string> _bakeKeys = new(
-        ["pack", "host"],
+    private static readonly HashSet<string> _assetsKeys = new(
+        ["root", "pack"],
         StringComparer.Ordinal);
+    private static readonly HashSet<string> _bakeKeys = new(["host"], StringComparer.Ordinal);
     private static readonly HashSet<string> _textureKeys = new(
         ["filter", "wrap"],
         StringComparer.Ordinal);
+
+    private static readonly StringComparison _pathComparison = OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
 
     /// <summary>
     /// Parses and validates a project descriptor.
@@ -194,33 +204,13 @@ internal static class ProjectDescriptorParser
 
         valid &= ValidateSchema(diagnostics, syntax, fullPath, root);
 
-        string? name = null;
-        if (root.TryGetValue("name", out object? nameValue))
-        {
-            if (nameValue is string nameString)
-            {
-                name = nameString;
-            }
-            else
-            {
-                AddValueError(
-                    diagnostics,
-                    syntax,
-                    fullPath,
-                    BakeDiagnosticCodes.DescriptorInvalidValue,
-                    "'name' must be a string.",
-                    TomlPath.Root.Child("name"));
-                valid = false;
-            }
-        }
-
         valid &= TryValidateAssets(
             diagnostics,
             syntax,
             fullPath,
             directory,
             root,
-            out string assetsRoot);
+            out IReadOnlyList<ProjectPack> packs);
 
         valid &= TryValidateBake(
             diagnostics,
@@ -228,7 +218,6 @@ internal static class ProjectDescriptorParser
             fullPath,
             directory,
             root,
-            out string packPath,
             out string hostPath);
 
         valid &= TryValidateTextures(
@@ -246,9 +235,7 @@ internal static class ProjectDescriptorParser
 
         return new ProjectDescriptor(
             fullPath,
-            name,
-            assetsRoot,
-            packPath,
+            packs,
             hostPath,
             textureFilter,
             textureWrap);
@@ -305,9 +292,9 @@ internal static class ProjectDescriptorParser
         string fullPath,
         string directory,
         TomlTable root,
-        out string assetsRoot)
+        out IReadOnlyList<ProjectPack> packs)
     {
-        assetsRoot = string.Empty;
+        packs = [];
 
         if (!root.TryGetValue("assets", out object? assetsValue))
         {
@@ -315,40 +302,138 @@ internal static class ProjectDescriptorParser
                 diagnostics,
                 syntax,
                 fullPath,
-                "assets.root",
+                "assets",
                 TomlPath.Root);
             return false;
         }
 
-        if (assetsValue is not TomlTable assets)
+        if (assetsValue is not TomlTableArray assets)
         {
             AddValueError(
                 diagnostics,
                 syntax,
                 fullPath,
                 BakeDiagnosticCodes.DescriptorInvalidValue,
-                "'assets' must be a table.",
+                "'assets' must be an array of tables: declare at least one [[assets]] entry with "
+                    + "'root' and 'pack' (the first entry is the main pack).",
                 TomlPath.Root.Child("assets"));
             return false;
         }
 
-        bool valid = AddUnknownKeys(
-            diagnostics,
-            syntax,
-            fullPath,
-            assets,
-            TomlPath.Root.Child("assets"),
-            parentDisplay: "assets",
-            _assetsKeys);
+        if (assets.Count == 0)
+        {
+            AddValueError(
+                diagnostics,
+                syntax,
+                fullPath,
+                BakeDiagnosticCodes.DescriptorInvalidValue,
+                "'assets' must declare at least one [[assets]] entry; the first entry is the main "
+                    + "pack.",
+                TomlPath.Root.Child("assets"));
+            return false;
+        }
 
-        if (!assets.TryGetValue("root", out object? rootValue))
+        bool valid = true;
+        var result = new List<ProjectPack>(assets.Count);
+        var roots = new HashSet<string>(StringComparer.FromComparison(_pathComparison));
+        var packPaths = new HashSet<string>(StringComparer.FromComparison(_pathComparison));
+
+        for (int index = 0; index < assets.Count; index++)
+        {
+            if (assets[index] is not TomlTable entry)
+            {
+                AddValueError(
+                    diagnostics,
+                    syntax,
+                    fullPath,
+                    BakeDiagnosticCodes.DescriptorInvalidValue,
+                    $"'assets[{index}]' must be a table.",
+                    TomlPath.Root.Child("assets").Element(index));
+                valid = false;
+                continue;
+            }
+
+            TomlPath entryPath = TomlPath.Root.Child("assets").Element(index);
+            string entryDisplay = $"assets[{index}]";
+
+            valid &= AddUnknownKeys(
+                diagnostics,
+                syntax,
+                fullPath,
+                entry,
+                entryPath,
+                parentDisplay: entryDisplay,
+                _assetsKeys);
+
+            if (!TryValidateRoot(
+                diagnostics,
+                syntax,
+                fullPath,
+                directory,
+                entry,
+                entryPath,
+                entryDisplay,
+                index,
+                roots,
+                out string assetsRoot,
+                out string relativeRoot))
+            {
+                valid = false;
+            }
+
+            if (!TryValidatePack(
+                diagnostics,
+                syntax,
+                fullPath,
+                directory,
+                entry,
+                entryPath,
+                entryDisplay,
+                index,
+                packPaths,
+                out string packPath))
+            {
+                valid = false;
+            }
+
+            if (valid)
+            {
+                result.Add(new ProjectPack(index, assetsRoot, relativeRoot, packPath));
+            }
+        }
+
+        if (valid)
+        {
+            packs = result;
+        }
+
+        return valid;
+    }
+
+    private static bool TryValidateRoot(
+        BakeDiagnostics diagnostics,
+        TomlSyntaxIndex syntax,
+        string fullPath,
+        string directory,
+        TomlTable entry,
+        TomlPath entryPath,
+        string entryDisplay,
+        int index,
+        HashSet<string> roots,
+        out string assetsRoot,
+        out string relativeRoot)
+    {
+        assetsRoot = string.Empty;
+        relativeRoot = string.Empty;
+
+        if (!entry.TryGetValue("root", out object? rootValue))
         {
             AddMissingKey(
                 diagnostics,
                 syntax,
                 fullPath,
-                "assets.root",
-                TomlPath.Root.Child("assets"));
+                $"{entryDisplay}.root",
+                entryPath);
             return false;
         }
 
@@ -359,37 +444,126 @@ internal static class ProjectDescriptorParser
                 syntax,
                 fullPath,
                 BakeDiagnosticCodes.DescriptorInvalidValue,
-                "'assets.root' must be a non-empty path string.",
-                TomlPath.Root.Child("assets").Child("root"));
+                $"'{entryDisplay}.root' must be a non-empty path string.",
+                entryPath.Child("root"));
             return false;
         }
 
-        if (!TryResolvePath(directory, rootString, out string resolved, out string? reason))
+        if (!TryResolveRelativeDirectory(
+            directory,
+            rootString,
+            out assetsRoot,
+            out relativeRoot,
+            out string? reason))
         {
             AddValueError(
                 diagnostics,
                 syntax,
                 fullPath,
                 BakeDiagnosticCodes.DescriptorInvalidValue,
-                $"'assets.root' is not a valid path: {reason}.",
-                TomlPath.Root.Child("assets").Child("root"));
+                $"'{entryDisplay}.root' is not a valid asset root: {reason}.",
+                entryPath.Child("root"));
             return false;
         }
 
-        if (!Directory.Exists(resolved))
+        if (!Directory.Exists(assetsRoot))
         {
             AddValueError(
                 diagnostics,
                 syntax,
                 fullPath,
                 BakeDiagnosticCodes.DescriptorAssetsRoot,
-                $"The assets root '{resolved}' does not exist or is not a directory.",
-                TomlPath.Root.Child("assets").Child("root"));
+                $"The assets root '{assetsRoot}' of '{entryDisplay}' does not exist or is not a "
+                    + "directory.",
+                entryPath.Child("root"));
             return false;
         }
 
-        assetsRoot = resolved;
-        return valid;
+        if (!roots.Add(assetsRoot))
+        {
+            AddValueError(
+                diagnostics,
+                syntax,
+                fullPath,
+                BakeDiagnosticCodes.DescriptorDuplicateRoot,
+                $"The assets root '{assetsRoot}' is declared by more than one [[assets]] entry; "
+                    + "each pack must have its own root.",
+                entryPath.Child("root"));
+            return false;
+        }
+
+        _ = index;
+        return true;
+    }
+
+    private static bool TryValidatePack(
+        BakeDiagnostics diagnostics,
+        TomlSyntaxIndex syntax,
+        string fullPath,
+        string directory,
+        TomlTable entry,
+        TomlPath entryPath,
+        string entryDisplay,
+        int index,
+        HashSet<string> packPaths,
+        out string packPath)
+    {
+        packPath = string.Empty;
+
+        if (!entry.TryGetValue("pack", out object? packValue))
+        {
+            AddMissingKey(
+                diagnostics,
+                syntax,
+                fullPath,
+                $"{entryDisplay}.pack",
+                entryPath);
+            return false;
+        }
+
+        if (packValue is not string packString || string.IsNullOrWhiteSpace(packString))
+        {
+            AddValueError(
+                diagnostics,
+                syntax,
+                fullPath,
+                BakeDiagnosticCodes.DescriptorInvalidValue,
+                $"'{entryDisplay}.pack' must be a non-empty path string.",
+                entryPath.Child("pack"));
+            return false;
+        }
+
+        if (!TryNormalizePackPath(
+            directory,
+            packString,
+            out packPath,
+            out string? reason))
+        {
+            AddValueError(
+                diagnostics,
+                syntax,
+                fullPath,
+                BakeDiagnosticCodes.DescriptorInvalidValue,
+                $"'{entryDisplay}.pack' is not a valid pack path: {reason}.",
+                entryPath.Child("pack"));
+            return false;
+        }
+
+        if (!packPaths.Add(packPath))
+        {
+            AddValueError(
+                diagnostics,
+                syntax,
+                fullPath,
+                BakeDiagnosticCodes.DescriptorDuplicatePack,
+                $"The pack path '{packPath}' is declared by more than one [[assets]] entry; every "
+                    + "pack output must be unique.",
+                entryPath.Child("pack"));
+            return false;
+        }
+
+        _ = index;
+        return true;
     }
 
     private static bool TryValidateBake(
@@ -398,10 +572,8 @@ internal static class ProjectDescriptorParser
         string fullPath,
         string directory,
         TomlTable root,
-        out string packPath,
         out string hostPath)
     {
-        packPath = ResolveDefault(directory, DefaultPackPath);
         hostPath = ResolveDefault(directory, DefaultHostPath);
 
         if (!root.TryGetValue("bake", out object? bakeValue))
@@ -429,19 +601,6 @@ internal static class ProjectDescriptorParser
             TomlPath.Root.Child("bake"),
             parentDisplay: "bake",
             _bakeKeys);
-
-        if (bake.TryGetValue("pack", out object? packValue))
-        {
-            valid &= TryReadPath(
-                diagnostics,
-                syntax,
-                fullPath,
-                directory,
-                "bake.pack",
-                TomlPath.Root.Child("bake").Child("pack"),
-                packValue,
-                out packPath);
-        }
 
         if (bake.TryGetValue("host", out object? hostValue))
         {
@@ -766,6 +925,120 @@ internal static class ProjectDescriptorParser
             reason = exception.Message;
             return false;
         }
+    }
+
+    /// <summary>
+    /// Resolves a descriptor-relative asset root and proves it is a normal descendant of the
+    /// descriptor directory.
+    /// </summary>
+    private static bool TryResolveRelativeDirectory(
+        string directory,
+        string value,
+        out string resolved,
+        out string relative,
+        out string? reason)
+    {
+        resolved = string.Empty;
+        relative = string.Empty;
+
+        if (Path.IsPathRooted(value))
+        {
+            reason = "the path must be relative to the descriptor";
+            return false;
+        }
+
+        if (HasParentSegment(value))
+        {
+            reason = "the path must not contain '..' segments";
+            return false;
+        }
+
+        if (!TryResolvePath(directory, value, out resolved, out reason))
+        {
+            return false;
+        }
+
+        relative = Path.GetRelativePath(directory, resolved).Replace('\\', '/');
+        if (relative.Length == 0
+            || relative.StartsWith("../", StringComparison.Ordinal)
+            || relative == ".."
+            || Path.IsPathRooted(relative))
+        {
+            reason = "the path must resolve to a directory under the descriptor";
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Normalizes a descriptor-relative pack path and proves it is a normal relative path that may
+    /// contain subdirectories.
+    /// </summary>
+    private static bool TryNormalizePackPath(
+        string directory,
+        string value,
+        out string normalized,
+        out string? reason)
+    {
+        normalized = string.Empty;
+
+        if (Path.IsPathRooted(value))
+        {
+            reason = "the path must be relative to the output root";
+            return false;
+        }
+
+        string candidate = value.Replace('\\', '/');
+        if (candidate.StartsWith('/'))
+        {
+            reason = "the path must be relative to the output root";
+            return false;
+        }
+
+        string[] segments = candidate.Split('/');
+        foreach (string segment in segments)
+        {
+            if (segment.Length == 0)
+            {
+                reason = "the path must not contain empty segments";
+                return false;
+            }
+
+            if (segment is "." or "..")
+            {
+                reason = "the path must not contain '.' or '..' segments";
+                return false;
+            }
+        }
+
+        try
+        {
+            _ = Path.GetFullPath(candidate, directory);
+        }
+        catch (Exception exception) when (IsPathFailure(exception))
+        {
+            reason = exception.Message;
+            return false;
+        }
+
+        normalized = candidate;
+        reason = null;
+        return true;
+    }
+
+    private static bool HasParentSegment(string value)
+    {
+        string[] segments = value.Split(['/', '\\'], StringSplitOptions.None);
+        foreach (string segment in segments)
+        {
+            if (segment == "..")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsPathFailure(Exception exception)

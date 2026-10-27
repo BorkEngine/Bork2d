@@ -32,6 +32,7 @@ public sealed class PackBuilder
 {
     private readonly PackCompressionMode _mode;
     private readonly Dictionary<string, PackSourceEntry> _entries = new(StringComparer.Ordinal);
+    private Dictionary<string, bool>? _externalAssets;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PackBuilder"/> class.
@@ -219,6 +220,34 @@ public sealed class PackBuilder
         }
     }
 
+    /// <summary>
+    /// Declares assets that live in another pack (the main/base pack) for reference validation.
+    /// </summary>
+    /// <remarks>
+    /// This is the internal multi-pack tooling seam (D-M4-14). A DLC pack may reference an asset in
+    /// the main pack; the baker supplies the main pack's entries here and the runtime resolves the
+    /// reference against the mounted pack stack. The main pack never calls this, so its references
+    /// remain strictly local. The on-disk format and the public surface do not change.
+    /// </remarks>
+    /// <param name="assets">The external assets available to this pack's references.</param>
+    internal void SetExternalAssets(IReadOnlyList<PackExternalAsset> assets)
+    {
+        ArgumentNullException.ThrowIfNull(assets);
+
+        var external = new Dictionary<string, bool>(assets.Count, StringComparer.Ordinal);
+        foreach (PackExternalAsset asset in assets)
+        {
+            string canonicalPath = AssetPath.Normalize(asset.Path);
+            if (!external.TryAdd(canonicalPath, asset.IsRaw))
+            {
+                throw new Bork2dException(
+                    $"Duplicate external asset path '{canonicalPath}'.");
+            }
+        }
+
+        _externalAssets = external;
+    }
+
     private void ValidateReferences()
     {
         foreach (PackSourceEntry entry in _entries.Values)
@@ -247,25 +276,42 @@ public sealed class PackBuilder
                             + $"'{reference.Path}': {reason}");
                 }
 
-                if (!_entries.TryGetValue(reference.Path, out PackSourceEntry? target))
+                if (_entries.TryGetValue(reference.Path, out PackSourceEntry? target))
                 {
+                    if (reference.IsData == target.IsRaw)
+                    {
+                        continue;
+                    }
+
+                    string expected = reference.IsData
+                        ? "raw data"
+                        : "a MessagePack asset";
+                    string actual = target.IsRaw ? "raw data" : "a MessagePack asset";
                     throw new Bork2dException(
-                        $"{location} references '{reference.Path}', which is not present in the "
-                            + "pack.");
+                        $"{location} references '{reference.Path}' as {expected}, but the entry is "
+                            + $"{actual}.");
                 }
 
-                if (reference.IsData == target.IsRaw)
+                if (_externalAssets is not null
+                    && _externalAssets.TryGetValue(reference.Path, out bool externalIsRaw))
                 {
-                    continue;
+                    if (reference.IsData == externalIsRaw)
+                    {
+                        continue;
+                    }
+
+                    string expected = reference.IsData
+                        ? "raw data"
+                        : "a MessagePack asset";
+                    string actual = externalIsRaw ? "raw data" : "a MessagePack asset";
+                    throw new Bork2dException(
+                        $"{location} references the external asset '{reference.Path}' as "
+                            + $"{expected}, but the entry is {actual}.");
                 }
 
-                string expected = reference.IsData
-                    ? "raw data"
-                    : "a MessagePack asset";
-                string actual = target.IsRaw ? "raw data" : "a MessagePack asset";
                 throw new Bork2dException(
-                    $"{location} references '{reference.Path}' as {expected}, but the entry is "
-                        + $"{actual}.");
+                    $"{location} references '{reference.Path}', which is not present in the "
+                        + "pack.");
             }
         }
     }

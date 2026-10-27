@@ -286,8 +286,9 @@ public sealed class HostGenerationTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
         File.WriteAllText(
             Path.Combine(directory, "Assets", "data", "source.toml"),

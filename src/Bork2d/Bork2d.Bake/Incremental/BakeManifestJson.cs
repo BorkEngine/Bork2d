@@ -9,6 +9,7 @@ namespace Bork2d.Bake.Incremental;
 /// The writer is explicit (no reflection) and fixes the property order, indentation, and LF newlines,
 /// so a manifest is byte-stable for the same model. The reader returns <see langword="null"/> for any
 /// structural mismatch; the caller treats that exactly like a missing manifest (a full bake).
+/// Version 2 records every pack output, so a version-1 manifest is a structural mismatch.
 /// </remarks>
 internal static class BakeManifestJson
 {
@@ -18,8 +19,7 @@ internal static class BakeManifestJson
     private const string CommonAssemblyHashProperty = "commonAssemblyHash";
     private const string HostHashProperty = "hostHash";
     private const string ModeProperty = "mode";
-    private const string OutputPathProperty = "outputPath";
-    private const string OutputHashProperty = "outputHash";
+    private const string OutputsProperty = "outputs";
     private const string AssetCountProperty = "assetCount";
     private const string TextureCountProperty = "textureCount";
     private const string ReferenceCountProperty = "referenceCount";
@@ -50,11 +50,20 @@ internal static class BakeManifestJson
             writer.WriteString(CommonAssemblyHashProperty, manifest.CommonAssemblyHash);
             writer.WriteString(HostHashProperty, manifest.HostHash);
             writer.WriteString(ModeProperty, manifest.Mode);
-            writer.WriteString(OutputPathProperty, manifest.OutputPath);
-            writer.WriteString(OutputHashProperty, manifest.OutputHash);
             writer.WriteNumber(AssetCountProperty, manifest.AssetCount);
             writer.WriteNumber(TextureCountProperty, manifest.TextureCount);
             writer.WriteNumber(ReferenceCountProperty, manifest.ReferenceCount);
+
+            writer.WriteStartArray(OutputsProperty);
+            foreach (BakeOutputHash output in manifest.Outputs)
+            {
+                writer.WriteStartObject();
+                writer.WriteString(PathProperty, output.Path);
+                writer.WriteString(HashProperty, output.Hash);
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
 
             writer.WriteStartArray(InputsProperty);
             foreach (BakeInputHash input in manifest.Inputs)
@@ -93,43 +102,80 @@ internal static class BakeManifestJson
             || !TryGetString(root, CommonAssemblyHashProperty, out string? commonAssemblyHash)
             || !TryGetString(root, HostHashProperty, out string? hostHash)
             || !TryGetString(root, ModeProperty, out string? mode)
-            || !TryGetString(root, OutputPathProperty, out string? outputPath)
-            || !TryGetString(root, OutputHashProperty, out string? outputHash)
             || !TryGetInt32(root, AssetCountProperty, out int assetCount)
             || !TryGetInt32(root, TextureCountProperty, out int textureCount)
             || !TryGetInt32(root, ReferenceCountProperty, out int referenceCount)
-            || !root.TryGetProperty(InputsProperty, out JsonElement inputsElement)
-            || inputsElement.ValueKind != JsonValueKind.Array)
+            || !TryGetOutputHashes(root, out List<BakeOutputHash>? outputs)
+            || !TryGetInputHashes(root, out List<BakeInputHash>? inputs))
         {
             return null;
-        }
-
-        var inputs = new List<BakeInputHash>(inputsElement.GetArrayLength());
-        foreach (JsonElement input in inputsElement.EnumerateArray())
-        {
-            if (input.ValueKind != JsonValueKind.Object
-                || !TryGetString(input, PathProperty, out string? path)
-                || !TryGetString(input, HashProperty, out string? hash))
-            {
-                return null;
-            }
-
-            inputs.Add(new BakeInputHash(path!, hash!));
         }
 
         return new BakeIncrementalManifest(
             version,
             toolVersion!,
             descriptorHash!,
-            inputs,
+            inputs!,
             commonAssemblyHash!,
             hostHash!,
             mode!,
-            outputPath!,
-            outputHash!,
+            outputs!,
             assetCount,
             textureCount,
             referenceCount);
+    }
+
+    private static bool TryGetInputHashes(JsonElement element, out List<BakeInputHash>? hashes)
+    {
+        hashes = null;
+        if (!TryGetHashEntries(element, InputsProperty, out List<(string Path, string Hash)>? entries))
+        {
+            return false;
+        }
+
+        hashes = [.. entries!.Select(entry => new BakeInputHash(entry.Path, entry.Hash))];
+        return true;
+    }
+
+    private static bool TryGetOutputHashes(JsonElement element, out List<BakeOutputHash>? hashes)
+    {
+        hashes = null;
+        if (!TryGetHashEntries(element, OutputsProperty, out List<(string Path, string Hash)>? entries))
+        {
+            return false;
+        }
+
+        hashes = [.. entries!.Select(entry => new BakeOutputHash(entry.Path, entry.Hash))];
+        return true;
+    }
+
+    private static bool TryGetHashEntries(
+        JsonElement element,
+        string property,
+        out List<(string Path, string Hash)>? entries)
+    {
+        entries = null;
+        if (!element.TryGetProperty(property, out JsonElement arrayElement)
+            || arrayElement.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var result = new List<(string Path, string Hash)>(arrayElement.GetArrayLength());
+        foreach (JsonElement item in arrayElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object
+                || !TryGetString(item, PathProperty, out string? path)
+                || !TryGetString(item, HashProperty, out string? hash))
+            {
+                return false;
+            }
+
+            result.Add((path!, hash!));
+        }
+
+        entries = result;
+        return true;
     }
 
     private static bool TryGetString(JsonElement element, string property, out string? value)

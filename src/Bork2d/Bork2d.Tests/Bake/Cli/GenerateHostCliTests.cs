@@ -71,6 +71,63 @@ public sealed class GenerateHostCliTests
     }
 
     [Fact]
+    public void ScansEveryPackRootForDistinctTypes()
+    {
+        string project = Path.Combine(
+            Path.GetTempPath(),
+            $"bork2d-bake-host-roots-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(project, "Assets", "data"));
+        Directory.CreateDirectory(Path.Combine(project, "DLC1", "data"));
+        File.WriteAllText(
+            Path.Combine(project, TempBakeFixture.DescriptorFileName),
+            """
+            schema = 1
+
+            [[assets]]
+            root = "Assets"
+            pack = "assets.pck"
+
+            [[assets]]
+            root = "DLC1"
+            pack = "dlc1.pck"
+            """);
+        File.WriteAllText(
+            Path.Combine(project, "Assets", "data", "main.toml"),
+            """
+            name = "main"
+            health = 1
+            must = "m"
+
+            [bork2d]
+            type = "BakeFixture.Common.GameConfig"
+            """);
+        File.WriteAllText(
+            Path.Combine(project, "DLC1", "data", "dlc.toml"),
+            """
+            attack = 1
+            defense = 2
+
+            [bork2d]
+            type = "BakeFixture.Common.StatsRoot"
+            """);
+        string outputDirectory = CreateOutputDirectory();
+
+        Result result = Run(
+            "generate-host",
+            "--project",
+            Path.Combine(project, TempBakeFixture.DescriptorFileName),
+            "--common",
+            _fixture.ProjectCommonAssemblyPath,
+            "--output",
+            outputDirectory);
+
+        Assert.Equal(CliApplication.SuccessExitCode, result.ExitCode);
+        string manifest = File.ReadAllText(Path.Combine(outputDirectory, "BakeManifest.g.cs"));
+        Assert.Contains("\"BakeFixture.Common.GameConfig\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("\"BakeFixture.Common.StatsRoot\"", manifest, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MissingCommonIsAUsageError()
     {
         Result result = Run(
@@ -164,8 +221,9 @@ public sealed class GenerateHostCliTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
         File.WriteAllText(
             Path.Combine(directory, "Assets", "data", "bad.toml"),
@@ -201,8 +259,9 @@ public sealed class GenerateHostCliTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
         File.WriteAllText(
             Path.Combine(directory, "Assets", "art", "player.png.toml"),
@@ -246,8 +305,9 @@ public sealed class GenerateHostCliTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
         File.WriteAllText(
             Path.Combine(directory, "Assets", "data", "source.toml"),

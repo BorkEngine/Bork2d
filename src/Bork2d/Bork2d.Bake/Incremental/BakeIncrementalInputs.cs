@@ -1,4 +1,5 @@
 using Bork2d.Bake.Baking;
+using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Hosting;
 using Bork2d.Bake.Paths;
 using Bork2d.Bake.Project;
@@ -6,22 +7,22 @@ using Bork2d.Bake.Project;
 namespace Bork2d.Bake.Incremental;
 
 /// <summary>
-/// The inputs recomputed before a bake so it can skip an unchanged project.
+/// The inputs recomputed before a bake so it can skip an unchanged multi-pack project.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The tracked inputs are every <c>.toml</c> source anywhere under the asset root (custom data and
-/// texture sidecars) plus every accepted texture source anywhere under the asset root (D-M4-13:
-/// there is no special <c>textures/</c> folder). Paths are project-relative with <c>/</c> separators
-/// when the file is under the descriptor directory, otherwise absolute, and the list is sorted
-/// ordinal, so the digest is independent of filesystem enumeration order. Non-asset files are
-/// ignored, matching discovery (Q-13).
+/// The tracked inputs are every <c>.toml</c> source under every <c>[[assets]]</c> root (custom data and
+/// texture sidecars) plus every accepted texture source under every root (D-M4-13/D-M4-14). Paths are
+/// descriptor-relative with <c>/</c> separators when the file is under the descriptor directory,
+/// otherwise absolute, and the list is sorted ordinal, so the digest is independent of filesystem and
+/// pack enumeration order. Non-asset files are ignored, matching discovery (Q-13).
 /// </para>
 /// <para>
-/// The "common" hash covers the game-side assembly closure copied next to the generated host
-/// (<c>Project.Common</c> and any data library it references). The host output directory contains
-/// exactly the assemblies the generated host references, and the host assembly covers the generated
-/// host itself. Both are content hashes, so no timestamp is ever trusted.
+/// <see cref="Outputs"/> is every resolved pack path in descriptor order. The skip decision requires
+/// all of them to exist with their recorded hashes; a missing or changed one re-bakes the whole
+/// project. The "common" hash covers the game-side assembly closure copied next to the generated host,
+/// and the host hash covers the generated host assembly itself. Both are content hashes, so no
+/// timestamp is ever trusted.
 /// </para>
 /// </remarks>
 internal sealed class BakeIncrementalInputs
@@ -41,28 +42,32 @@ internal sealed class BakeIncrementalInputs
     /// <param name="commonAssemblyHash">The game-side assembly closure hash.</param>
     /// <param name="hostHash">The generated host assembly hash.</param>
     /// <param name="mode">The pack compression mode name.</param>
-    /// <param name="outputPath">The absolute pack target path.</param>
+    /// <param name="outputs">The absolute pack targets in descriptor order.</param>
     internal BakeIncrementalInputs(
         string descriptorHash,
         IReadOnlyList<BakeInputHash> inputs,
         string commonAssemblyHash,
         string hostHash,
         string mode,
-        string outputPath)
+        IReadOnlyList<string> outputs)
     {
         ArgumentNullException.ThrowIfNull(descriptorHash);
         ArgumentNullException.ThrowIfNull(inputs);
         ArgumentNullException.ThrowIfNull(commonAssemblyHash);
         ArgumentNullException.ThrowIfNull(hostHash);
         ArgumentNullException.ThrowIfNull(mode);
-        ArgumentNullException.ThrowIfNull(outputPath);
+        ArgumentNullException.ThrowIfNull(outputs);
+        if (outputs.Count == 0)
+        {
+            throw new ArgumentException("A bake must produce at least one pack.", nameof(outputs));
+        }
 
         DescriptorHash = descriptorHash;
         Inputs = inputs;
         CommonAssemblyHash = commonAssemblyHash;
         HostHash = hostHash;
         Mode = mode;
-        OutputPath = outputPath;
+        Outputs = [.. outputs];
     }
 
     /// <summary>Gets the descriptor file hash.</summary>
@@ -80,24 +85,33 @@ internal sealed class BakeIncrementalInputs
     /// <summary>Gets the pack compression mode name.</summary>
     internal string Mode { get; }
 
-    /// <summary>Gets the absolute pack target path.</summary>
-    internal string OutputPath { get; }
+    /// <summary>Gets the absolute pack targets in descriptor order; the first is the main pack.</summary>
+    internal IReadOnlyList<string> Outputs { get; }
 
     /// <summary>Computes the current inputs, or <see langword="null"/> when they cannot be hashed.</summary>
     /// <param name="descriptor">The parsed project descriptor.</param>
     /// <param name="hostAssemblyPath">The generated host assembly passed to the bake.</param>
     /// <param name="mode">The requested compression mode.</param>
-    /// <param name="packPath">The resolved absolute pack target.</param>
+    /// <param name="outputRoot">The requested output root, or <see langword="null"/> for the descriptor directory.</param>
     /// <returns>The current inputs, or <see langword="null"/> when a file is missing or unreadable.</returns>
     internal static BakeIncrementalInputs? TryCollect(
         ProjectDescriptor descriptor,
         string hostAssemblyPath,
         BakeMode mode,
-        string packPath)
+        string? outputRoot)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentException.ThrowIfNullOrWhiteSpace(hostAssemblyPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(packPath);
+
+        if (!BakeOutputLayout.TryResolve(
+            descriptor,
+            outputRoot,
+            new BakeDiagnostics(),
+            out _,
+            out IReadOnlyList<BakePackOutput> outputs))
+        {
+            return null;
+        }
 
         try
         {
@@ -119,7 +133,7 @@ internal sealed class BakeIncrementalInputs
                 commonHash,
                 hostHash,
                 ModeName(mode),
-                Path.GetFullPath(packPath));
+                [.. outputs.Select(output => output.Path)]);
         }
         catch (Exception exception) when (IsIoFailure(exception))
         {
@@ -135,22 +149,23 @@ internal sealed class BakeIncrementalInputs
 
     private static List<BakeInputHash> CollectInputs(ProjectDescriptor descriptor)
     {
-        var inputs = new List<BakeInputHash>();
+        var byPath = new SortedDictionary<string, string>(StringComparer.Ordinal);
 
-        foreach (string file in BakeSourcePath.EnumerateFilesSorted(descriptor.AssetsRoot))
+        foreach (ProjectPack pack in descriptor.Packs)
         {
-            if (!IsTrackedInput(file))
+            foreach (string file in BakeSourcePath.EnumerateFilesSorted(pack.Root))
             {
-                continue;
-            }
+                if (!IsTrackedInput(file))
+                {
+                    continue;
+                }
 
-            inputs.Add(new BakeInputHash(
-                BakeDiagnosticPath.ForSource(descriptor.DescriptorDirectory, file),
-                BakeHash.HashFile(file)));
+                byPath[BakeDiagnosticPath.ForSource(descriptor.DescriptorDirectory, file)]
+                    = BakeHash.HashFile(file);
+            }
         }
 
-        inputs.Sort(static (left, right) => string.CompareOrdinal(left.Path, right.Path));
-        return inputs;
+        return [.. byPath.Select(pair => new BakeInputHash(pair.Key, pair.Value))];
     }
 
     private static bool IsTrackedInput(string fullPath)

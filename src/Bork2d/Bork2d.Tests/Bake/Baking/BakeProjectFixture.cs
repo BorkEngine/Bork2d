@@ -45,6 +45,9 @@ public sealed class BakeProjectFixture : IDisposable
     /// <summary>The canonical raw texture payload path.</summary>
     internal const string TexturePayloadPath = "art/player-raw";
 
+    /// <summary>The canonical path of the DLC custom data (the DLC pack's only entry).</summary>
+    internal const string DlcGamePath = "data/dlc";
+
     /// <summary>The exact RGBA8 payload the test-generated PNG decodes to.</summary>
     internal static readonly byte[] ExpectedTexturePayload =
     [
@@ -56,14 +59,13 @@ public sealed class BakeProjectFixture : IDisposable
 
     private const string Descriptor = """
         schema = 1
-        name = "BakeFixture"
 
-        [assets]
+        [[assets]]
         root = "Assets"
+        pack = "assets.pck"
 
         [bake]
         host = "host"
-        pack = "out/assets.pck"
 
         [textures]
         filter = "linear"
@@ -108,10 +110,10 @@ public sealed class BakeProjectFixture : IDisposable
 
     private const string EmptyDescriptor = """
         schema = 1
-        name = "EmptyFixture"
 
-        [assets]
+        [[assets]]
         root = "Assets"
+        pack = "assets.pck"
 
         [bake]
         host = "host"
@@ -236,7 +238,7 @@ public sealed class BakeProjectFixture : IDisposable
         => typeof(Bork2d.BakeFixture.GameConfig).Assembly.Location;
 
     /// <summary>Gets the descriptor's default pack path.</summary>
-    internal string DefaultPackPath => Path.Combine(_rootPath, "out", "assets.pck");
+    internal string DefaultPackPath => Path.Combine(_rootPath, "assets.pck");
 
     /// <summary>Gets the loaded generated host.</summary>
     internal BakeHostHandle Handle { get; }
@@ -264,6 +266,76 @@ public sealed class BakeProjectFixture : IDisposable
         Directory.CreateDirectory(Path.Combine(directory, "Assets"));
         File.WriteAllText(Path.Combine(directory, DescriptorFileName), Descriptor);
         return directory;
+    }
+
+    /// <summary>
+    /// Creates an independent multi-pack project with the supplied ordered pack roots and outputs.
+    /// The first entry is the main pack; later entries are DLC packs (D-M4-14).
+    /// </summary>
+    /// <param name="name">A folder-name fragment that identifies the test.</param>
+    /// <param name="packs">The ordered <c>(root, pack)</c> entries.</param>
+    /// <returns>The new project directory.</returns>
+    internal static string CreatePackProject(
+        string name,
+        params (string Root, string Pack)[] packs)
+    {
+        string directory = Path.Combine(
+            Path.GetTempPath(),
+            $"bork2d-bake-{name}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+
+        var toml = new System.Text.StringBuilder("schema = 1\n");
+        foreach ((string root, string pack) in packs)
+        {
+            toml.Append('\n');
+            toml.Append("[[assets]]\n");
+            toml.Append($"root = \"{root}\"\n");
+            toml.Append($"pack = \"{pack}\"\n");
+            Directory.CreateDirectory(Path.Combine(directory, root));
+        }
+
+        toml.Append("\n[bake]\nhost = \"host\"\n");
+        toml.Append("\n[textures]\nfilter = \"linear\"\nwrap = \"clamp\"\n");
+        File.WriteAllText(Path.Combine(directory, DescriptorFileName), toml.ToString());
+        return directory;
+    }
+
+    /// <summary>Writes a text file under a pack root of a project copy.</summary>
+    /// <param name="projectDirectory">The project copy returned by <see cref="CreatePackProject"/>.</param>
+    /// <param name="root">The pack root directory name.</param>
+    /// <param name="relativePath">The root-relative path.</param>
+    /// <param name="content">The text contents.</param>
+    internal static void WriteAssetUnder(
+        string projectDirectory,
+        string root,
+        string relativePath,
+        string content)
+    {
+        string fullPath = Path.Combine(
+            projectDirectory,
+            root,
+            relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllText(fullPath, content);
+    }
+
+    /// <summary>Writes a binary file under a pack root of a project copy.</summary>
+    /// <param name="projectDirectory">The project copy returned by <see cref="CreatePackProject"/>.</param>
+    /// <param name="root">The pack root directory name.</param>
+    /// <param name="relativePath">The root-relative path.</param>
+    /// <param name="bytes">The file contents.</param>
+    internal static void WriteAssetBytesUnder(
+        string projectDirectory,
+        string root,
+        string relativePath,
+        byte[] bytes)
+    {
+        string fullPath = Path.Combine(
+            projectDirectory,
+            root,
+            relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllBytes(fullPath, bytes);
     }
 
     /// <summary>Writes a text file under a project copy's <c>Assets/</c> tree.</summary>

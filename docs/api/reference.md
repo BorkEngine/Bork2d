@@ -426,15 +426,23 @@ the JIT tooling; the runtime has no TOML parser, reflection serializer, or bake 
   `[TypeShape(Marshaler = typeof(ColorMarshaler))]`; its packed form is the linear float surrogate
   `[r, g, b, a]`, and a `null` surrogate is a `Decode` fault. `ColorMarshaler` is public
   serialization infrastructure, not game-facing API.
-- **Tooling commands (not in the runtime).** `bork2d-bake generate-host` writes the generated host,
-  `bake` runs the full pipeline and atomically writes `assets.pck`, and `validate` checks the
-  descriptor and sources (and binding/references with `--host`). Exit codes are `0` success/up to
-  date, `1` source diagnostics, `2` usage/descriptor/host error, `3` internal failure. The build
-  pipeline is described in
+- **Packs and overlays (D-M4-14).** `bork2d.project.toml` declares ordered `[[assets]]` entries:
+  the first is the main/base pack and later entries are DLC packs. Each entry owns a `root` and a
+  `pack` path; there is no project `name` and no `[bake].pack`. A DLC reference may resolve inside
+  itself or in the main pack; a main reference must resolve inside main, and DLC-to-DLC references
+  are errors. The same canonical path may exist in different packs (a deliberate overlay); the
+  runtime resolves it with `LoadPack` later-wins semantics. Duplicates inside one pack remain pack
+  build errors.
+- **Tooling commands (not in the runtime).** `bork2d-bake generate-host` writes one generated host
+  from every declared pack root; `bake` runs the full pipeline for every `[[assets]]` pack and
+  atomically writes them under `--output-root` (the descriptor directory by default), and `validate`
+  checks the descriptor and all roots (and binding/references with `--host`). Exit codes are `0`
+  success/up to date, `1` source diagnostics, `2` usage/descriptor/host error, `3` internal failure.
+  The build pipeline is described in
   [Assets and tooling §11](../architecture/assets-and-tooling.md#11-build-pipeline), the TOML model
   and leaves in [Assets and tooling §10](../architecture/assets-and-tooling.md#10-toml-source-model),
   and the as-built evidence in the
-  [M4 spec §22](../specs/m4-serialization-and-bake.md#22-as-built-evidence-m-4fix-2-revision).
+  [M4 spec §22](../specs/m4-serialization-and-bake.md#22-as-built-evidence-m-4fix-3-revision).
 
 ## 8. `ICamera<TLayer>`
 
@@ -685,6 +693,10 @@ builder.Write("assets.pck");   // overwrites; relative to the current directory
   the path must be canonical and present, an `AssetRef<T>` must target a MessagePack entry, and a
   `DataRef` must target a raw entry. A violation throws `Bork2dException` with the source asset,
   property path, and reference path. `null` is an absent reference and is valid.
+- The multi-pack baker passes the main pack's entries to a DLC build through the **internal**
+  `SetExternalAssets` seam (D-M4-14): a DLC reference may target a main-pack path, while the main
+  builder never receives external assets. This is not public API and does not change the on-disk
+  format; the runtime still resolves the reference through the mounted overlay stack.
 - Paths are normalized and validated with the canonical asset-path rules: `\` becomes `/`,
   invariant lowercase, and segments contain only lowercase letters, digits, `_`, and `-`.
   Null paths throw `ArgumentNullException`; other invalid paths throw `ArgumentException`.

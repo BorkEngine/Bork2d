@@ -5,21 +5,22 @@ using Bork2d.Bake.Project;
 namespace Bork2d.Bake.Incremental;
 
 /// <summary>
-/// Wraps the full bake pipeline with the incremental skip decision and the manifest record.
+/// Wraps the full multi-pack bake pipeline with the incremental skip decision and the manifest record.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The pipeline stays a full bake (WP4); this planner decides whether that full bake can be skipped
-/// (M4 §10.3, Q-09), runs it otherwise, and records a successful run in the manifest. A skip requires
-/// all of: a manifest with the current schema version and tool version, the same descriptor hash, the
-/// same tracked input list, the same game-side assembly closure, the same generated host assembly,
-/// the same mode and output path, and an output pack that exists with the recorded hash.
+/// The pipeline stays a full bake; this planner decides whether it can be skipped (M4 §10.3, Q-09),
+/// runs it otherwise, and records a successful run in the manifest. A skip requires all of: a manifest
+/// with the current schema version and tool version, the same descriptor hash, the same tracked input
+/// list across every pack root, the same game-side assembly closure, the same generated host assembly,
+/// the same mode, the same ordered output paths, and every output pack present with its recorded hash.
 /// </para>
 /// <para>
-/// <c>--check</c> never skips and never writes a manifest. <c>--force</c> always runs the full bake.
-/// A missing, corrupt, or unreadable manifest, a missing pack, or an externally modified pack all
-/// fall through to a full bake. A failed bake returns before the manifest write, so the previous pack
-/// and manifest both stay unchanged.
+/// The decision is all-or-nothing (D-M4-14): one missing or changed pack re-bakes every pack. There is
+/// no per-pack cache in M4. <c>--check</c> never skips and never writes a manifest. <c>--force</c>
+/// always runs the full bake. A missing, corrupt, or unreadable manifest, a missing pack, or an
+/// externally modified pack all fall through to a full bake. A failed bake returns before the manifest
+/// write, so the previous packs and manifest stay unchanged.
 /// </para>
 /// </remarks>
 internal static class BakeIncrementalPlanner
@@ -48,12 +49,11 @@ internal static class BakeIncrementalPlanner
             return BakePipeline.Run(options, diagnostics);
         }
 
-        string packPath = options.OutputPath ?? descriptor.PackPath;
         BakeIncrementalInputs? current = BakeIncrementalInputs.TryCollect(
             descriptor,
             options.HostPath,
             options.Mode,
-            packPath);
+            options.OutputRoot);
 
         if (!options.Force && current is not null)
         {
@@ -75,22 +75,22 @@ internal static class BakeIncrementalPlanner
         return result;
     }
 
-    /// <summary>Tests a manifest against the current inputs (the pure skip rule).</summary>
+    /// <summary>Tests a manifest against the current inputs and output hashes (the pure skip rule).</summary>
     /// <param name="manifest">The recorded manifest.</param>
     /// <param name="current">The recomputed inputs.</param>
     /// <param name="toolVersion">The current bake tool version.</param>
-    /// <param name="packHash">The current output pack hash.</param>
+    /// <param name="outputHashes">The current output pack paths and hashes, in descriptor order.</param>
     /// <returns><see langword="true"/> when the bake can be skipped.</returns>
     internal static bool Matches(
         BakeIncrementalManifest manifest,
         BakeIncrementalInputs current,
         string toolVersion,
-        string packHash)
+        IReadOnlyList<BakeOutputHash> outputHashes)
     {
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(toolVersion);
-        ArgumentNullException.ThrowIfNull(packHash);
+        ArgumentNullException.ThrowIfNull(outputHashes);
 
         if (manifest.Version != BakeIncrementalManifest.CurrentVersion
             || !string.Equals(manifest.ToolVersion, toolVersion, StringComparison.Ordinal)
@@ -101,11 +101,23 @@ internal static class BakeIncrementalPlanner
                 StringComparison.Ordinal)
             || !string.Equals(manifest.HostHash, current.HostHash, StringComparison.Ordinal)
             || !string.Equals(manifest.Mode, current.Mode, StringComparison.Ordinal)
-            || !string.Equals(manifest.OutputHash, packHash, StringComparison.Ordinal)
-            || !PathEquals(manifest.OutputPath, current.OutputPath)
+            || manifest.Outputs.Count != current.Outputs.Count
+            || manifest.Outputs.Count != outputHashes.Count
             || manifest.Inputs.Count != current.Inputs.Count)
         {
             return false;
+        }
+
+        for (int i = 0; i < manifest.Outputs.Count; i++)
+        {
+            BakeOutputHash recorded = manifest.Outputs[i];
+            BakeOutputHash actual = outputHashes[i];
+            if (!PathEquals(recorded.Path, current.Outputs[i])
+                || !string.Equals(recorded.Path, actual.Path, StringComparison.Ordinal)
+                || !string.Equals(recorded.Hash, actual.Hash, StringComparison.Ordinal))
+            {
+                return false;
+            }
         }
 
         for (int i = 0; i < manifest.Inputs.Count; i++)
@@ -126,34 +138,56 @@ internal static class BakeIncrementalPlanner
     {
         BakeIncrementalManifest? manifest = BakeManifestStore.TryRead(
             BakeManifestPaths.ManifestPath(descriptor.DescriptorDirectory));
-        if (manifest is null || !File.Exists(current.OutputPath))
+        if (manifest is null)
         {
             return null;
         }
 
-        string packHash;
-        try
+        var outputHashes = new List<BakeOutputHash>(current.Outputs.Count);
+        foreach (string outputPath in current.Outputs)
         {
-            packHash = BakeHash.HashFile(current.OutputPath);
+            if (!File.Exists(outputPath))
+            {
+                return null;
+            }
+
+            try
+            {
+                outputHashes.Add(new BakeOutputHash(outputPath, BakeHash.HashFile(outputPath)));
+            }
+            catch (Exception exception) when (IsIoFailure(exception))
+            {
+                return null;
+            }
         }
-        catch (Exception exception) when (IsIoFailure(exception))
+
+        if (!Matches(manifest, current, BakeToolInfo.Version, outputHashes))
         {
             return null;
         }
 
-        if (!Matches(manifest, current, BakeToolInfo.Version, packHash))
+        var packs = new List<BakedPackResult>(descriptor.Packs.Count);
+        for (int i = 0; i < descriptor.Packs.Count; i++)
         {
-            return null;
+            packs.Add(new BakedPackResult(
+                descriptor.Packs[i],
+                current.Outputs[i],
+                packWritten: false,
+                assetCount: 0,
+                textureCount: 0,
+                referenceCount: 0,
+                entries: []));
         }
 
         return new BakeResult(
             BakeStatus.UpToDate,
             BakeFailureStage.None,
-            current.OutputPath,
+            current.Outputs[0],
             packWritten: false,
             manifest.AssetCount,
             manifest.TextureCount,
             manifest.ReferenceCount,
+            packs,
             entries: [],
             diagnostics: []);
     }
@@ -164,27 +198,24 @@ internal static class BakeIncrementalPlanner
         BakeResult result,
         BakeDiagnostics diagnostics)
     {
-        if (result.PackPath is null)
+        var outputs = new List<BakeOutputHash>(result.Packs.Count);
+        foreach (BakedPackResult pack in result.Packs)
         {
-            return;
-        }
-
-        string packPath;
-        string packHash;
-        try
-        {
-            packPath = Path.GetFullPath(result.PackPath);
-            packHash = BakeHash.HashFile(packPath);
-        }
-        catch (Exception exception) when (IsIoFailure(exception))
-        {
-            diagnostics.Add(
-                BakeSeverity.Warning,
-                BakeDiagnosticCodes.IncrementalManifestWriteFailed,
-                $"The incremental manifest could not record the pack '{result.PackPath}': "
-                    + $"{exception.Message}; the next bake runs fully.",
-                result.PackPath);
-            return;
+            try
+            {
+                string packPath = Path.GetFullPath(pack.PackPath);
+                outputs.Add(new BakeOutputHash(packPath, BakeHash.HashFile(packPath)));
+            }
+            catch (Exception exception) when (IsIoFailure(exception))
+            {
+                diagnostics.Add(
+                    BakeSeverity.Warning,
+                    BakeDiagnosticCodes.IncrementalManifestWriteFailed,
+                    $"The incremental manifest could not record the pack '{pack.PackPath}': "
+                        + $"{exception.Message}; the next bake runs fully.",
+                    pack.PackPath);
+                return;
+            }
         }
 
         var manifest = new BakeIncrementalManifest(
@@ -195,8 +226,7 @@ internal static class BakeIncrementalPlanner
             current.CommonAssemblyHash,
             current.HostHash,
             current.Mode,
-            packPath,
-            packHash,
+            outputs,
             result.AssetCount,
             result.TextureCount,
             result.ReferenceCount);

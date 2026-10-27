@@ -30,8 +30,9 @@ public sealed class HostCommonAssemblyNameTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
 
         string commonPath = typeof(Bork2d.BakeFixture.GameConfig).Assembly.Location;

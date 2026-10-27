@@ -6,21 +6,23 @@ using Bork2d.Bake.Toml;
 namespace Bork2d.Bake.Sources;
 
 /// <summary>
-/// Discovers custom-data <c>.toml</c> sources under the asset root and reads each source's own
-/// <c>[bork2d].type</c> declaration (D-M4-13).
+/// Discovers custom-data <c>.toml</c> sources under every pack root and reads each source's own
+/// <c>[bork2d].type</c> declaration (D-M4-13, D-M4-14).
 /// </summary>
 /// <remarks>
 /// <para>
-/// Discovery walks the whole asset root in ordinal path order (skipping reparse points so a link
-/// cannot leave the root), excludes the descriptor itself, and uses <see cref="BakeSourcePath"/> as
-/// the only path grammar. There is no prefix mapping: a data source loses its <c>.toml</c> suffix and
-/// its canonical asset path is the source path relative to the asset root, wherever it lives.
+/// Discovery walks every <c>[[assets]]</c> root in descriptor order and, within a root, the whole tree
+/// in ordinal path order (skipping reparse points so a link cannot leave the root), excludes the
+/// descriptor itself, and uses <see cref="BakeSourcePath"/> as the only path grammar. There is no
+/// prefix mapping: a data source loses its <c>.toml</c> suffix and its canonical asset path is the
+/// source path relative to that pack's root, wherever it lives.
 /// </para>
 /// <para>
 /// A <c>.toml</c> whose name is <c>&lt;image&gt;.toml</c> and that has no root <c>bork2d</c> table is a
 /// texture sidecar and is left to the texture pipeline; a typed <c>.toml</c> with that shape is data.
-/// A type-less <c>.toml</c> that is not sidecar-shaped is a missing-type error. Two data sources that
-/// canonicalize to the same asset path are a duplicate error.
+/// A type-less <c>.toml</c> that is not sidecar-shaped is a missing-type error. Two data sources in
+/// the same pack that canonicalize to the same asset path are a duplicate error; the same canonical
+/// path in different packs is allowed (the runtime overlays packs, D-M4-14).
 /// </para>
 /// </remarks>
 internal static class BakeSourceDiscovery
@@ -31,7 +33,7 @@ internal static class BakeSourceDiscovery
 
     private const string TomlSuffix = ".toml";
 
-    /// <summary>Discovers the custom-data sources of a project.</summary>
+    /// <summary>Discovers the custom-data sources of every pack in a project.</summary>
     /// <param name="descriptor">The parsed project descriptor.</param>
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
     /// <param name="validateSidecarSyntax">
@@ -40,7 +42,9 @@ internal static class BakeSourceDiscovery
     /// written; the bake/full pipeline leaves sidecar syntax to the texture parser to avoid a
     /// duplicate diagnostic.
     /// </param>
-    /// <returns>The discovered sources, sorted ordinal by canonical asset path.</returns>
+    /// <returns>
+    /// The discovered sources, ordered by pack index and then by canonical asset path.
+    /// </returns>
     internal static IReadOnlyList<BakeSource> Discover(
         ProjectDescriptor descriptor,
         BakeDiagnostics diagnostics,
@@ -49,10 +53,35 @@ internal static class BakeSourceDiscovery
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
+        var sources = new List<BakeSource>();
+        foreach (ProjectPack pack in descriptor.Packs)
+        {
+            sources.AddRange(DiscoverPack(descriptor, pack, diagnostics, validateSidecarSyntax));
+        }
+
+        return sources;
+    }
+
+    /// <summary>Discovers the custom-data sources of one pack root.</summary>
+    /// <param name="descriptor">The parsed project descriptor.</param>
+    /// <param name="pack">The pack whose root is scanned.</param>
+    /// <param name="diagnostics">The diagnostics bag to append to.</param>
+    /// <param name="validateSidecarSyntax">Whether to validate a sidecar-shaped document's syntax.</param>
+    /// <returns>The pack's discovered sources, sorted ordinal by canonical asset path.</returns>
+    internal static IReadOnlyList<BakeSource> DiscoverPack(
+        ProjectDescriptor descriptor,
+        ProjectPack pack,
+        BakeDiagnostics diagnostics,
+        bool validateSidecarSyntax = false)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(pack);
+        ArgumentNullException.ThrowIfNull(diagnostics);
+
         var byAssetPath = new Dictionary<string, BakeSource>(StringComparer.Ordinal);
         string descriptorPath = Path.GetFullPath(descriptor.DescriptorPath);
 
-        foreach (string file in BakeSourcePath.EnumerateFilesSorted(descriptor.AssetsRoot))
+        foreach (string file in BakeSourcePath.EnumerateFilesSorted(pack.Root))
         {
             if (!file.EndsWith(TomlSuffix, StringComparison.OrdinalIgnoreCase)
                 || PathEquals(file, descriptorPath))
@@ -65,7 +94,7 @@ internal static class BakeSourceDiscovery
                 file);
 
             if (!BakeSourcePath.TryMakeRelative(
-                descriptor.AssetsRoot,
+                pack.Root,
                 file,
                 out string relativePath,
                 out string? relativeReason))
@@ -73,7 +102,7 @@ internal static class BakeSourceDiscovery
                 diagnostics.Add(
                     BakeSeverity.Error,
                     BakeDiagnosticCodes.SourceReadFailed,
-                    $"The source '{file}' is not usable: {relativeReason}.",
+                    $"The source '{file}' in pack '{pack.PackPath}' is not usable: {relativeReason}.",
                     diagnosticPath);
                 continue;
             }
@@ -121,9 +150,9 @@ internal static class BakeSourceDiscovery
                     diagnostics.Add(
                         BakeSeverity.Error,
                         BakeDiagnosticCodes.SourceTypeMissing,
-                        $"The source '{relativePath}' has no root '[bork2d]' table; every "
-                            + "custom-data TOML must declare its full CLR type name as "
-                            + "[bork2d] type = \"Full.Type.Name\".",
+                        $"The source '{relativePath}' in pack '{pack.PackPath}' has no root "
+                            + "'[bork2d]' table; every custom-data TOML must declare its full CLR "
+                            + "type name as [bork2d] type = \"Full.Type.Name\".",
                         diagnosticPath);
                 }
 
@@ -144,8 +173,9 @@ internal static class BakeSourceDiscovery
                 diagnostics.Add(
                     BakeSeverity.Error,
                     BakeDiagnosticCodes.SourceInvalidAssetPath,
-                    $"The source '{relativePath}' does not map to a canonical asset path: "
-                        + $"{pathReason}. A data TOML name must not contain an extension or dot.",
+                    $"The source '{relativePath}' in pack '{pack.PackPath}' does not map to a "
+                        + $"canonical asset path: {pathReason}. A data TOML name must not contain an "
+                        + "extension or dot.",
                     diagnosticPath,
                     metadata.TypeLine,
                     metadata.TypeColumn);
@@ -153,6 +183,7 @@ internal static class BakeSourceDiscovery
             }
 
             var source = new BakeSource(
+                pack,
                 relativePath,
                 file,
                 assetPath,
@@ -165,8 +196,8 @@ internal static class BakeSourceDiscovery
                 diagnostics.Add(
                     BakeSeverity.Error,
                     BakeDiagnosticCodes.SourceDuplicate,
-                    $"The sources '{existing.RelativePath}' and '{relativePath}' both map to the "
-                        + $"canonical asset path '{assetPath}'.",
+                    $"The sources '{existing.RelativePath}' and '{relativePath}' in pack "
+                        + $"'{pack.PackPath}' both map to the canonical asset path '{assetPath}'.",
                     diagnosticPath,
                     assetPath: assetPath);
                 continue;

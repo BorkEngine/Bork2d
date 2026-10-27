@@ -48,31 +48,55 @@ internal static class TexturePipeline
         StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Imports every texture in a project using the StbImageSharp decoder.
+    /// Imports every texture of the main pack using the StbImageSharp decoder.
     /// </summary>
     /// <param name="project">The validated project descriptor.</param>
     /// <returns>The baked textures and every diagnostic, in deterministic order.</returns>
     internal static TextureBakeResult Import(ProjectDescriptor project)
-        => Import(project, StbTextureDecoder.Instance);
+        => Import(project, project.MainPack);
 
     /// <summary>
-    /// Imports every texture in a project with an explicit decoder seam.
+    /// Imports every texture of one pack using the StbImageSharp decoder.
+    /// </summary>
+    /// <param name="project">The validated project descriptor.</param>
+    /// <param name="pack">The pack whose root is imported.</param>
+    /// <returns>The baked textures and every diagnostic, in deterministic order.</returns>
+    internal static TextureBakeResult Import(ProjectDescriptor project, ProjectPack pack)
+        => Import(project, pack, StbTextureDecoder.Instance);
+
+    /// <summary>
+    /// Imports every texture of the main pack with an explicit decoder seam.
     /// </summary>
     /// <param name="project">The validated project descriptor.</param>
     /// <param name="decoder">The decoder implementation.</param>
     /// <returns>The baked textures and every diagnostic, in deterministic order.</returns>
     internal static TextureBakeResult Import(ProjectDescriptor project, ITextureDecoder decoder)
+        => Import(project, project.MainPack, decoder);
+
+    /// <summary>
+    /// Imports every texture of one pack with an explicit decoder seam.
+    /// </summary>
+    /// <param name="project">The validated project descriptor.</param>
+    /// <param name="pack">The pack whose root is imported.</param>
+    /// <param name="decoder">The decoder implementation.</param>
+    /// <returns>The baked textures and every diagnostic, in deterministic order.</returns>
+    internal static TextureBakeResult Import(
+        ProjectDescriptor project,
+        ProjectPack pack,
+        ITextureDecoder decoder)
     {
         ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(pack);
         ArgumentNullException.ThrowIfNull(decoder);
 
         var diagnostics = new BakeDiagnostics();
-        List<BakedTexture> textures = ImportCore(project, decoder, diagnostics);
+        List<BakedTexture> textures = ImportCore(project, pack, decoder, diagnostics);
         return new TextureBakeResult(textures, diagnostics.GetSorted());
     }
 
     private static List<BakedTexture> ImportCore(
         ProjectDescriptor project,
+        ProjectPack pack,
         ITextureDecoder decoder,
         BakeDiagnostics diagnostics)
     {
@@ -81,7 +105,7 @@ internal static class TexturePipeline
         var sourcePaths = new HashSet<string>(StringComparer.Ordinal);
         var sidecars = new List<string>();
 
-        foreach (string file in BakeSourcePath.EnumerateFilesSorted(project.AssetsRoot))
+        foreach (string file in BakeSourcePath.EnumerateFilesSorted(pack.Root))
         {
             string extension = Path.GetExtension(file);
             if (extension.Equals(TomlSuffix, StringComparison.OrdinalIgnoreCase))
@@ -90,11 +114,11 @@ internal static class TexturePipeline
             }
             else if (_textureExtensions.Contains(extension))
             {
-                AddSource(project, file, sources, sourcesByAssetPath, sourcePaths, diagnostics);
+                AddSource(project, pack, file, sources, sourcesByAssetPath, sourcePaths, diagnostics);
             }
         }
 
-        AttachSidecars(project, sidecars, sourcesByAssetPath, sourcePaths, diagnostics);
+        AttachSidecars(project, pack, sidecars, sourcesByAssetPath, sourcePaths, diagnostics);
         MarkCollisions(sources, diagnostics);
 
         var textures = new List<BakedTexture>();
@@ -105,7 +129,7 @@ internal static class TexturePipeline
                 continue;
             }
 
-            BakedTexture? texture = BakeSource(project, entry, decoder, diagnostics);
+            BakedTexture? texture = BakeSource(project, pack, entry, decoder, diagnostics);
             if (texture is not null)
             {
                 textures.Add(texture);
@@ -133,6 +157,7 @@ internal static class TexturePipeline
 
     private static void AddSource(
         ProjectDescriptor project,
+        ProjectPack pack,
         string sourcePath,
         List<TextureSourceEntry> sources,
         Dictionary<string, TextureSourceEntry> sourcesByAssetPath,
@@ -140,7 +165,7 @@ internal static class TexturePipeline
         BakeDiagnostics diagnostics)
     {
         if (!BakeSourcePath.TryMakeRelative(
-                project.AssetsRoot,
+                pack.Root,
                 sourcePath,
                 out string relativePath,
                 out string? reason))
@@ -199,6 +224,7 @@ internal static class TexturePipeline
 
     private static void AttachSidecars(
         ProjectDescriptor project,
+        ProjectPack pack,
         List<string> sidecars,
         Dictionary<string, TextureSourceEntry> sourcesByAssetPath,
         HashSet<string> sourcePaths,
@@ -210,7 +236,7 @@ internal static class TexturePipeline
             TextureSourceEntry? entry = null;
 
             if (BakeSourcePath.TryMakeRelative(
-                    project.AssetsRoot,
+                    pack.Root,
                     sidecarPath,
                     out string relativePath,
                     out _)
@@ -294,6 +320,7 @@ internal static class TexturePipeline
 
     private static BakedTexture? BakeSource(
         ProjectDescriptor project,
+        ProjectPack pack,
         TextureSourceEntry entry,
         ITextureDecoder decoder,
         BakeDiagnostics diagnostics)

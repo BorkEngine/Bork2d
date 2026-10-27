@@ -163,6 +163,73 @@ public sealed class PackReferenceValidationTests
         Assert.True(archive.TryGetEntry("data/refs", out _));
     }
 
+    [Fact]
+    public void ExternalMainAssetAllowsADlcReferenceWithoutChangingThePack()
+    {
+        var builder = new PackBuilder(PackCompressionMode.Debug);
+        builder.AddMessagePack(
+            "data/dlc",
+            new ReferencePackData
+            {
+                Asset = new AssetRef<PackTestData>("art/player"),
+            });
+        builder.SetExternalAssets([new PackExternalAsset("art/player", IsRaw: false)]);
+
+        using PackArchive archive = OpenBuilt(builder);
+        Assert.True(archive.TryGetEntry("data/dlc", out _));
+        Assert.False(archive.TryGetEntry("art/player", out _));
+    }
+
+    [Fact]
+    public void ExternalRawAssetAllowsADlcDataReference()
+    {
+        var builder = new PackBuilder(PackCompressionMode.Debug);
+        builder.AddMessagePack(
+            "data/dlc",
+            new ReferencePackData
+            {
+                Data = new DataRef("art/player-raw"),
+            });
+        builder.SetExternalAssets([new PackExternalAsset("art/player-raw", IsRaw: true)]);
+
+        using PackArchive archive = OpenBuilt(builder);
+        Assert.True(archive.TryGetEntry("data/dlc", out _));
+    }
+
+    [Fact]
+    public void ExternalMainAssetStillEnforcesTheReferenceKind()
+    {
+        var builder = new PackBuilder(PackCompressionMode.Debug);
+        builder.AddMessagePack(
+            "data/dlc",
+            new ReferencePackData
+            {
+                Asset = new AssetRef<PackTestData>("art/player-raw"),
+            });
+        builder.SetExternalAssets([new PackExternalAsset("art/player-raw", IsRaw: true)]);
+
+        Bork2dException exception = Assert.Throws<Bork2dException>(() => builder.Build());
+
+        Assert.Contains("external asset", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("MessagePack asset", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingExternalAssetFailsWithoutAReferenceTarget()
+    {
+        var builder = new PackBuilder(PackCompressionMode.Debug);
+        builder.AddMessagePack(
+            "data/dlc",
+            new ReferencePackData
+            {
+                Asset = new AssetRef<PackTestData>("art/player"),
+            });
+
+        Bork2dException exception = Assert.Throws<Bork2dException>(() => builder.Build());
+
+        Assert.Contains("not present in the pack", exception.Message, StringComparison.Ordinal);
+    }
+
     private static PackBuilder CreateBaseBuilder()
     {
         var builder = new PackBuilder(PackCompressionMode.Debug);

@@ -17,8 +17,9 @@ public sealed class TextureSidecarTests
             """
             schema = 1
 
-            [assets]
+            [[assets]]
             root = "Assets"
+            pack = "assets.pck"
             """);
 
         var diagnostics = new BakeDiagnostics();

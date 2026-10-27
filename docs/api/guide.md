@@ -1,7 +1,8 @@
 # API Guide
 
 > **Status:** implemented M3 plus the D-035 asset-reference refactor (merged, PR #6); **M4
-> serialization and bake is implementation complete on `m-4/common` (final PR pending, not
+> serialization and bake is implementation complete on `m-4/common`; the D-M4-13 revision is on
+> `m-4/fix-2` and the D-M4-14/D-M4-15 multi-pack revision is on `m-4/fix-3` (final PR pending, not
 > merged)**. M1 (foundation), M2 (SDL windowed host), and M3 (pack, VFS, runtime integration) exist
 > in `Bork2d.Runtime`/`Bork2d.Assets` and are merged into `develop`. `Build()` validates and `Run()`
 > runs the uncapped windowed loop (window, input, time) or the one-tick headless/offscreen sequence,
@@ -441,7 +442,33 @@ byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
 ### Data serialization and bake
 
 `Status: Current (M4) for custom data and sprite-as-data; sprite field validation and slicing are
-M5.` Author data as TOML in `Project.Common/Assets`, declare each type in its own `[bork2d]` table, and let the M4 tooling bake `assets.pck`. The runtime never sees TOML.
+M5.` Author data as TOML in the pack roots declared by `Project.Common/Assets` (and optional DLC
+roots), declare each type in its own `[bork2d]` table, and let the M4 tooling bake the main pack and
+any DLC packs. The runtime never sees TOML.
+
+The descriptor declares ordered `[[assets]]` entries (D-M4-14); the first is the main/base pack and
+later entries are DLC/overlay packs:
+
+```toml
+schema = 1
+
+[[assets]]
+root = "Assets"
+pack = "assets.pck"
+
+[[assets]]
+root = "DLC1"
+pack = "dlc1.pck"
+
+[bake]
+host = "obj/bork2d/bakehost"
+```
+
+There is no project `name` and no `[bake].pack`. A DLC pack may reference an asset in the main pack;
+the main pack may not reference a DLC asset, and DLC-to-DLC references are errors. The same
+canonical path may exist in different packs (the runtime overlays them with `LoadPack`; later wins);
+duplicates inside one pack are errors. `IAssets` is unchanged: mount the main pack with
+`WithAssetsPack`, then mount DLC packs with `IAssets.LoadPack` before the first tick when possible.
 
 ```csharp
 using System.Text.Json.Serialization;
@@ -496,9 +523,11 @@ type = "MyGame.Data.GameConfig"
 - **`Color`.** Stays non-`partial`, serializes as `[r, g, b, a]` through `ColorMarshaler`, and a
   `null` surrogate is a `Decode` fault.
 - **References.** `AssetRef<T>`/`DataRef` are canonical path strings; the bake validates every
-  present reference against the baked set before writing. An absent key is an absent reference.
+  present reference against the pack's local baked set and, for a DLC, the main pack. An absent key
+  is an absent reference.
 - **Commands (tooling only).** `bork2d-bake generate-host`, `bake`, and `validate`; MSBuild normally
-  drives them through `build/Bork2d.Bake.targets` (build/publish/clean). Exit codes: `0`
+  drives them through `build/Bork2d.Bake.targets` (build/publish/clean). `bake` writes every pack
+  under `--output-root` (the descriptor directory by default). Exit codes: `0`
   success/up to date, `1` source diagnostics, `2` usage/descriptor/host error, `3` internal failure.
   The runtime does not reference this tooling. See
   [Assets and tooling §10–§11](../architecture/assets-and-tooling.md#10-toml-source-model) for the
