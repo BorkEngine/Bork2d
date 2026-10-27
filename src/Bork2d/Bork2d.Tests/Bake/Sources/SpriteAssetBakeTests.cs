@@ -1,34 +1,28 @@
 using System.Numerics;
 using Bork2d.Api.Assets;
+using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Hosting;
+using Bork2d.Bake.Sources;
 using Bork2d.Bake.Toml;
 using Bork2d.Tests.Assets.Service;
 using Bork2d.Tests.Assets.Vfs;
-using Bork2d.Tests.Bake.Hosting;
+using Bork2d.Tests.Bake.Baking;
 using Tomlyn.Model;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Sources;
 
 /// <summary>
-/// D-M4-06/Q-14: <c>SpriteAsset</c> is ordinary custom data. It binds through the generated host,
-/// carries its texture reference, and round-trips through <see cref="PackBuilder"/> and the runtime
-/// loader; no UV/pivot/scale/topology validation exists in M4.
+/// <c>SpriteAsset</c> is ordinary custom data: it binds through the explicit default-asset
+/// registration, carries its texture reference, and round-trips through the pack writer and the
+/// runtime loader.
 /// </summary>
-[Collection(BakeHostFixtureCollection.Name)]
 public sealed class SpriteAssetBakeTests
 {
     private const string SpriteType = "Bork2d.Api.Assets.SpriteAsset";
     private const string SpritePath = "sprites/player";
     private const string TexturePath = "textures/player";
     private const string TexturePayloadPath = "textures/player-raw";
-
-    private readonly TempBakeFixture _fixture;
-
-    /// <summary>Initializes a new instance of the <see cref="SpriteAssetBakeTests"/> class.</summary>
-    /// <param name="fixture">The shared fixture.</param>
-    public SpriteAssetBakeTests(TempBakeFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task SpriteTomlWithAllPublicFieldsBindsAndRoundTripsThroughAPack()
@@ -42,9 +36,12 @@ public sealed class SpriteAssetBakeTests
             indices = [0, 1, 2, 0, 2, 3]
             """;
 
+        using var project = TestBakeProject.Create("sprite-bind");
+        BakeAssetTypeRegistration registration = project.Project.AssetTypes[SpriteType];
+
         var diagnostics = new BakeDiagnostics();
         BakeBindContext context = BindContext(toml, diagnostics);
-        object? value = _fixture.Manifest.Bind(SpriteType, context);
+        object? value = registration.Bind(context);
         Assert.Empty(diagnostics.GetSorted());
 
         var sprite = Assert.IsType<SpriteAsset>(value);
@@ -89,7 +86,7 @@ public sealed class SpriteAssetBakeTests
             {
                 builder.AddMessagePack(TexturePath, descriptor);
                 builder.AddRaw(TexturePayloadPath, new byte[16]);
-                _fixture.Manifest.AddToPack(builder, SpriteType, SpritePath, sprite);
+                registration.Write(builder, SpritePath, sprite);
             });
 
         using var host = new AssetServiceHost(packPath);
@@ -115,9 +112,12 @@ public sealed class SpriteAssetBakeTests
             topology = "triangles"
             """;
 
+        using var project = TestBakeProject.Create("sprite-invalid-fields");
+        BakeAssetTypeRegistration registration = project.Project.AssetTypes[SpriteType];
+
         var diagnostics = new BakeDiagnostics();
         BakeBindContext context = BindContext(toml, diagnostics);
-        object? value = _fixture.Manifest.Bind(SpriteType, context);
+        object? value = registration.Bind(context);
 
         Assert.Empty(diagnostics.GetSorted());
         var sprite = Assert.IsType<SpriteAsset>(value);

@@ -1,21 +1,20 @@
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Project;
 
 namespace Bork2d.Bake.Baking;
 
 /// <summary>
-/// The outcome of baking one pack: its descriptor entry, output path, counts, and entries.
+/// The outcome of baking one pack: its configured pack, output path, counts, and entries.
 /// </summary>
 /// <remarks>
-/// The main pack is the descriptor's first <c>[[assets]]</c> entry; every later entry is a DLC pack
-/// (D-M4-14). <see cref="PackWritten"/> is false for a <c>--check</c> run.
+/// The main pack is the first configured pack; every later entry is a DLC/overlay pack.
+/// <see cref="PackWritten"/> is false for a <c>--check</c> run.
 /// </remarks>
 internal sealed class BakedPackResult
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="BakedPackResult"/> class.
     /// </summary>
-    /// <param name="pack">The descriptor entry that produced the pack.</param>
+    /// <param name="pack">The configured pack the result describes.</param>
     /// <param name="packPath">The absolute pack output path.</param>
     /// <param name="packWritten">Whether the pack file was written.</param>
     /// <param name="assetCount">The number of bound custom-data assets in the pack.</param>
@@ -23,7 +22,7 @@ internal sealed class BakedPackResult
     /// <param name="referenceCount">The number of reference sites validated in the pack.</param>
     /// <param name="entries">The pack's complete baked entry set, in ordinal path order.</param>
     internal BakedPackResult(
-        ProjectPack pack,
+        BakePack pack,
         string packPath,
         bool packWritten,
         int assetCount,
@@ -44,8 +43,8 @@ internal sealed class BakedPackResult
         Entries = [.. entries];
     }
 
-    /// <summary>Gets the descriptor entry that produced the pack.</summary>
-    internal ProjectPack Pack { get; }
+    /// <summary>Gets the configured pack the result describes.</summary>
+    internal BakePack Pack { get; }
 
     /// <summary>Gets a value indicating whether this is the main/base pack.</summary>
     internal bool IsMain => Pack.IsMain;
@@ -92,7 +91,7 @@ internal sealed class BakeResult
     /// <param name="assetCount">The aggregate number of bound custom-data assets.</param>
     /// <param name="textureCount">The aggregate number of baked textures.</param>
     /// <param name="referenceCount">The aggregate number of reference sites validated.</param>
-    /// <param name="packs">The per-pack results, in descriptor order.</param>
+    /// <param name="packs">The per-pack results, in pack order.</param>
     /// <param name="entries">The aggregate baked entry set, or empty when the run failed early.</param>
     /// <param name="diagnostics">The sorted diagnostics.</param>
     internal BakeResult(
@@ -144,7 +143,7 @@ internal sealed class BakeResult
     /// <summary>Gets the aggregate number of reference sites validated.</summary>
     internal int ReferenceCount { get; }
 
-    /// <summary>Gets the per-pack results, in descriptor order.</summary>
+    /// <summary>Gets the per-pack results, in pack order.</summary>
     internal IReadOnlyList<BakedPackResult> Packs { get; }
 
     /// <summary>Gets the aggregate baked entry set in ordinal path order.</summary>

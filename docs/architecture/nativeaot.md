@@ -192,7 +192,7 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    dependency on `Bork2d.BakeFixture.Assets`, which owns the fixture source roots, explicit
    `RegisterAsset<T>()` types, and builder configuration; building that executable bakes
    `assets.pck`/`dlc1.pck` and the smoke copies them next to its output/publish. Current M4 runs the
-   bake targets ([`build/Bork2d.Bake.targets`](../../build/Bork2d.Bake.targets)): it builds the CLI
+   bake targets (`build/Bork2d.Bake.targets`): it builds the CLI
    out of process, copies the fixture project's committed `Assets/**` and `DLC1/**` trees (including
    the fixture **source asset** `Assets/art/player.png`; no texture generator script runs), and
    bakes the prepared fixture packs through the M4 host. The target has no host. The publish output

@@ -5,13 +5,13 @@ namespace Bork2d.Bake.Paths;
 /// separators when the file is under the project directory, absolute otherwise.
 /// </summary>
 /// <remarks>
-/// The descriptor's own diagnostics use the descriptor path; source diagnostics use this helper so a
-/// diagnostic reads <c>Assets/data/enemies/grunt.toml(12,17)</c> and stays stable across machines.
+/// Source diagnostics use this helper so a diagnostic reads
+/// <c>Assets/data/enemies/grunt.toml(12,17)</c> and stays stable across machines.
 /// </remarks>
 internal static class BakeDiagnosticPath
 {
     /// <summary>Renders a source file path for a diagnostic.</summary>
-    /// <param name="projectDirectory">The directory that contains the project descriptor.</param>
+    /// <param name="projectDirectory">The project root directory.</param>
     /// <param name="fullPath">The absolute source path.</param>
     /// <returns>The project-relative path when under the project directory, otherwise the input.</returns>
     internal static string ForSource(string projectDirectory, string fullPath)

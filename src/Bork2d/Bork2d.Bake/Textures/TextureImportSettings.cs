@@ -1,12 +1,10 @@
-using Bork2d.Bake.Project;
-
 namespace Bork2d.Bake.Textures;
 
 /// <summary>
 /// The resolved import settings for one texture: the sampler state plus where it came from.
 /// </summary>
 /// <remarks>
-/// Missing sidecar values fall back to the project descriptor's <c>[textures]</c> defaults. An
+/// Missing sidecar values fall back to the builder's texture defaults. An
 /// overridden value keeps the sidecar value span; a defaulted value has no span.
 /// </remarks>
 internal sealed class TextureImportSettings

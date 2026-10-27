@@ -69,7 +69,7 @@ dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "FullyQualifiedName~Bake"
 
 The M4 MSBuild integration test writes a temporary app project (two descriptor packs, sources, and a
 generated PNG in test code), references `Bork2d.BakeFixture`, imports
-[`build/Bork2d.Bake.targets`](../build/Bork2d.Bake.targets), and runs `dotnet build`, `dotnet publish`,
+`build/Bork2d.Bake.targets`, and runs `dotnet build`, `dotnet publish`,
 and `dotnet clean` as child processes. **Target (D-037/D-038):** the test uses a temporary
 `MyGame.Assets`-style executable with builder configuration, explicit `RegisterAsset<T>()` entries,
 and the assets build target; the descriptor, host build, and pack-path properties are removed. It
@@ -94,7 +94,7 @@ $smoke = 'src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.
 ```
 
 The publish must report zero AOT/trim warnings and contain `assets.pck`, `dlc1.pck`, and `SDL2.dll`.
-Current M4: the AOT smoke imports [`build/Bork2d.Bake.targets`](../build/Bork2d.Bake.targets), so its
+Current M4: the AOT smoke imports `build/Bork2d.Bake.targets`, so its
 build copies the committed `Bork2d.BakeFixture` `Assets/**` and `DLC1/**` trees (including the
 fixture source PNG `Assets/art/player.png`), bakes the prepared fixture packs to `$(TargetDir)`, and
 copies both next to the published executable. **Target (D-037/D-038):** the smoke takes a build-only

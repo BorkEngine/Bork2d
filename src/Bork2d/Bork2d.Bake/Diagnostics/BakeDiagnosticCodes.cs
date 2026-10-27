@@ -5,8 +5,8 @@ namespace Bork2d.Bake.Diagnostics;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Codes are stable once a range is released. The final published table belongs to the M4
-/// documentation work package; this class records the ranges and the codes WP1 uses.
+/// Codes are stable once a range is released. The final published table belongs to the documentation
+/// work package; this class records the ranges and the codes the bake uses.
 /// </para>
 /// <list type="table">
 /// <listheader>
@@ -15,7 +15,10 @@ namespace Bork2d.Bake.Diagnostics;
 /// </listheader>
 /// <item>
 /// <term><c>BK1xxx</c></term>
-/// <description>Descriptor, projects, type registration, generated host, host loading.</description>
+/// <description>
+/// Builder configuration and explicit data-type registration: project root, packs, registered asset
+/// types, source discovery metadata, and source paths.
+/// </description>
 /// </item>
 /// <item>
 /// <term><c>BK2xxx</c></term>
@@ -23,7 +26,7 @@ namespace Bork2d.Bake.Diagnostics;
 /// </item>
 /// <item>
 /// <term><c>BK3xxx</c></term>
-/// <description>Custom-data references and asset-graph validation.</description>
+/// <description>Asset references and baked-set validation.</description>
 /// </item>
 /// <item>
 /// <term><c>BK4xxx</c></term>
@@ -31,87 +34,52 @@ namespace Bork2d.Bake.Diagnostics;
 /// </item>
 /// <item>
 /// <term><c>BK5xxx</c></term>
-/// <description>Pack layout/write, incremental manifest, up-to-date/force.</description>
+/// <description>Pack layout/write, pack copy, and incremental state.</description>
 /// </item>
 /// <item>
 /// <term><c>BK6xxx</c></term>
-/// <description>MSBuild/target/host-build integration.</description>
+/// <description>MSBuild/build integration.</description>
+/// </item>
+/// <item>
+/// <term><c>BK7xxx</c></term>
+/// <description>Processor registration and processing.</description>
 /// </item>
 /// </list>
 /// </remarks>
 internal static class BakeDiagnosticCodes
 {
-    /// <summary>The project descriptor could not be read.</summary>
-    internal const string DescriptorReadFailed = "BK1001";
+    /// <summary>The project root path is not a valid path.</summary>
+    internal const string ProjectRootInvalid = "BK1001";
 
-    /// <summary>The required <c>schema</c> key is missing.</summary>
-    internal const string DescriptorSchemaMissing = "BK1002";
+    /// <summary>The project root is missing or is not a directory.</summary>
+    internal const string ProjectRootMissing = "BK1002";
 
-    /// <summary>The descriptor schema version is not supported.</summary>
-    internal const string DescriptorSchemaUnsupported = "BK1003";
+    /// <summary>No pack is configured.</summary>
+    internal const string PackRequired = "BK1003";
 
-    /// <summary>A descriptor key is not part of the schema.</summary>
-    internal const string DescriptorUnknownKey = "BK1004";
+    /// <summary>A pack path is empty, rooted, absolute, or contains an empty/<c>.</c>/<c>..</c> segment.</summary>
+    internal const string PackPathInvalid = "BK1004";
 
-    /// <summary>A required descriptor key is missing.</summary>
-    internal const string DescriptorMissingKey = "BK1005";
+    /// <summary>A pack root is rooted, absolute, escapes the project root, or has an empty/<c>.</c>/<c>..</c> segment.</summary>
+    internal const string PackRootInvalid = "BK1005";
 
-    /// <summary>A descriptor value has the wrong type or contents.</summary>
-    internal const string DescriptorInvalidValue = "BK1006";
+    /// <summary>A pack root does not exist as a directory.</summary>
+    internal const string PackRootMissing = "BK1006";
 
-    /// <summary>The assets root is missing or is not a directory.</summary>
-    internal const string DescriptorAssetsRoot = "BK1007";
+    /// <summary>The output root is not a valid path or a pack path escapes it.</summary>
+    internal const string OutputRootInvalid = "BK1007";
 
-    /// <summary>Two <c>[[assets]]</c> entries declare the same pack path.</summary>
-    internal const string DescriptorDuplicatePack = "BK1008";
+    /// <summary>Two packs declare the same pack path.</summary>
+    internal const string PackPathDuplicate = "BK1008";
 
-    /// <summary>Two <c>[[assets]]</c> entries declare the same asset root.</summary>
-    internal const string DescriptorDuplicateRoot = "BK1009";
+    /// <summary>Two packs declare the same asset root.</summary>
+    internal const string PackRootDuplicate = "BK1009";
 
-    /// <summary>A <c>[textures]</c> filter or wrap value is not supported.</summary>
-    internal const string DescriptorTextureSetting = "BK1010";
+    /// <summary>A data type is registered more than once.</summary>
+    internal const string AssetTypeDuplicate = "BK1010";
 
-    /// <summary>The <c>Project.Common</c> assembly or another required assembly was not found.</summary>
-    internal const string HostReferenceMissing = "BK1011";
-
-    /// <summary>A required assembly could not be read as managed metadata.</summary>
-    internal const string HostMetadataUnreadable = "BK1012";
-
-    /// <summary>The generated host file could not be written.</summary>
-    internal const string HostWriteFailed = "BK1013";
-
-    /// <summary>The generated host assembly is missing.</summary>
-    internal const string HostAssemblyMissing = "BK1014";
-
-    /// <summary>The generated host assembly, manifest, or ALC load failed.</summary>
-    internal const string HostLoadFailed = "BK1015";
-
-    /// <summary>The generated host does not expose an <c>IBakeManifest</c> implementation.</summary>
-    internal const string HostContractInvalid = "BK1016";
-
-    /// <summary>A tooling or asset type identity is not shared with the default load context.</summary>
-    internal const string HostTypeIdentityMismatch = "BK1017";
-
-    /// <summary>The generated host is stale for the current project descriptor.</summary>
-    internal const string HostStale = "BK1018";
-
-    /// <summary>A mapped root type has an unsupported shape kind at host load.</summary>
-    internal const string HostShapeUnsupported = "BK1019";
-
-    /// <summary>A mapped type full name was not found in any searched assembly.</summary>
-    internal const string TypeNotFound = "BK1020";
-
-    /// <summary>A mapped type full name exists in more than one candidate assembly.</summary>
-    internal const string TypeAmbiguous = "BK1021";
-
-    /// <summary>A mapped type name uses an unsupported form (assembly-qualified, nested, generic, ...).</summary>
-    internal const string TypeUnsupportedForm = "BK1022";
-
-    /// <summary>A mapped type does not implement <c>IShapeable&lt;T&gt;</c> for itself.</summary>
-    internal const string TypeNotShapeable = "BK1023";
-
-    /// <summary>A mapped type is not visible to the generated host.</summary>
-    internal const string TypeNotVisible = "BK1024";
+    /// <summary>A data TOML selects a <c>[bork2d].type</c> that was not registered.</summary>
+    internal const string AssetTypeNotRegistered = "BK1011";
 
     /// <summary>A TOML source path cannot be mapped to a canonical asset path (for example a dot).</summary>
     internal const string SourceInvalidAssetPath = "BK1025";
@@ -124,9 +92,6 @@ internal static class BakeDiagnosticCodes
 
     /// <summary>A TOML source is not valid UTF-8.</summary>
     internal const string SourceNotUtf8 = "BK1028";
-
-    /// <summary>The host-generation incremental state could not be written.</summary>
-    internal const string HostIncrementalStateWriteFailed = "BK1029";
 
     /// <summary>A non-sidecar data TOML has no <c>[bork2d].type</c> declaration.</summary>
     internal const string SourceTypeMissing = "BK1030";
@@ -182,6 +147,9 @@ internal static class BakeDiagnosticCodes
     /// <summary>A collection or dictionary shape cannot be constructed from TOML.</summary>
     internal const string BinderUnsupportedCollection = "BK2011";
 
+    /// <summary>An unexpected exception escaped a registered type's binder.</summary>
+    internal const string BinderUnexpected = "BK2012";
+
     /// <summary>
     /// The pack could not be composed because <c>PackBuilder</c> rejected an entry or reference. This
     /// is an internal baker error: reference validation runs first, so a correct bake never reaches it.
@@ -191,6 +159,6 @@ internal static class BakeDiagnosticCodes
     /// <summary>The pack could not be written or atomically replaced.</summary>
     internal const string PackWriteFailed = "BK5002";
 
-    /// <summary>The incremental manifest or pack record could not be written.</summary>
-    internal const string IncrementalManifestWriteFailed = "BK5003";
+    /// <summary>A configured pack could not be copied to the requested destination.</summary>
+    internal const string PackCopyFailed = "BK5004";
 }

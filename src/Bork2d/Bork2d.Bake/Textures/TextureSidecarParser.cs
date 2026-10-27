@@ -1,5 +1,4 @@
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Project;
 using Bork2d.Bake.Toml;
 using Tomlyn;
 using Tomlyn.Model;

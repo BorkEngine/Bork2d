@@ -1,8 +1,8 @@
 using Bork2d.Api.Assets;
 using Bork2d.Assets.Vfs;
+using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Paths;
-using Bork2d.Bake.Project;
 using Bork2d.Bake.Sources;
 
 namespace Bork2d.Bake.Textures;
@@ -25,15 +25,14 @@ namespace Bork2d.Bake.Textures;
 /// A <c>.toml</c> with a root <c>[bork2d]</c> table is data, even when its name looks like a sidecar,
 /// and is ignored here. A type-less <c>&lt;image&gt;.toml</c> is a sidecar; a type-less <c>.toml</c>
 /// that is neither is a missing-type data error reported by discovery. Canonical texture collisions
-/// and a sidecar without a source are errors. A missing sidecar is valid and applies the descriptor's
-/// <c>[textures]</c> defaults. Decoding normalizes to straight-alpha RGBA8 without premultiplication,
+/// and a sidecar without a source are errors. A missing sidecar is valid and applies the builder's
+/// texture defaults. Decoding normalizes to straight-alpha RGBA8 without premultiplication,
 /// gamma, ICC, flipping, or resampling; explicit 16-bit PNGs are rejected before decode (Q-12).
 /// Sources shorter than a derivable uncompressed BMP/TGA layout and JPEGs without an end-of-image
 /// marker are rejected as truncated (BK4015) before decode.
 /// </para>
 /// <para>
-/// This component does not write packs, validate custom-data references, or check cross-kind
-/// collisions; WP4 composes those on top of <see cref="TextureBakeResult"/>.
+/// This component does not write packs, validate custom-data references, or check cross-kind`n/// collisions; The pipeline composes those on top of <see cref="TextureBakeResult"/>.
 /// </para>
 /// </remarks>
 internal static class TexturePipeline
@@ -50,39 +49,39 @@ internal static class TexturePipeline
     /// <summary>
     /// Imports every texture of the main pack using the StbImageSharp decoder.
     /// </summary>
-    /// <param name="project">The validated project descriptor.</param>
+    /// <param name="project">The validated project configuration.</param>
     /// <returns>The baked textures and every diagnostic, in deterministic order.</returns>
-    internal static TextureBakeResult Import(ProjectDescriptor project)
+    internal static TextureBakeResult Import(BakeProject project)
         => Import(project, project.MainPack);
 
     /// <summary>
     /// Imports every texture of one pack using the StbImageSharp decoder.
     /// </summary>
-    /// <param name="project">The validated project descriptor.</param>
+    /// <param name="project">The validated project configuration.</param>
     /// <param name="pack">The pack whose root is imported.</param>
     /// <returns>The baked textures and every diagnostic, in deterministic order.</returns>
-    internal static TextureBakeResult Import(ProjectDescriptor project, ProjectPack pack)
+    internal static TextureBakeResult Import(BakeProject project, BakePack pack)
         => Import(project, pack, StbTextureDecoder.Instance);
 
     /// <summary>
     /// Imports every texture of the main pack with an explicit decoder seam.
     /// </summary>
-    /// <param name="project">The validated project descriptor.</param>
+    /// <param name="project">The validated project configuration.</param>
     /// <param name="decoder">The decoder implementation.</param>
     /// <returns>The baked textures and every diagnostic, in deterministic order.</returns>
-    internal static TextureBakeResult Import(ProjectDescriptor project, ITextureDecoder decoder)
+    internal static TextureBakeResult Import(BakeProject project, ITextureDecoder decoder)
         => Import(project, project.MainPack, decoder);
 
     /// <summary>
     /// Imports every texture of one pack with an explicit decoder seam.
     /// </summary>
-    /// <param name="project">The validated project descriptor.</param>
+    /// <param name="project">The validated project configuration.</param>
     /// <param name="pack">The pack whose root is imported.</param>
     /// <param name="decoder">The decoder implementation.</param>
     /// <returns>The baked textures and every diagnostic, in deterministic order.</returns>
     internal static TextureBakeResult Import(
-        ProjectDescriptor project,
-        ProjectPack pack,
+        BakeProject project,
+        BakePack pack,
         ITextureDecoder decoder)
     {
         ArgumentNullException.ThrowIfNull(project);
@@ -95,8 +94,8 @@ internal static class TexturePipeline
     }
 
     private static List<BakedTexture> ImportCore(
-        ProjectDescriptor project,
-        ProjectPack pack,
+        BakeProject project,
+        BakePack pack,
         ITextureDecoder decoder,
         BakeDiagnostics diagnostics)
     {
@@ -156,8 +155,8 @@ internal static class TexturePipeline
     }
 
     private static void AddSource(
-        ProjectDescriptor project,
-        ProjectPack pack,
+        BakeProject project,
+        BakePack pack,
         string sourcePath,
         List<TextureSourceEntry> sources,
         Dictionary<string, TextureSourceEntry> sourcesByAssetPath,
@@ -223,8 +222,8 @@ internal static class TexturePipeline
     }
 
     private static void AttachSidecars(
-        ProjectDescriptor project,
-        ProjectPack pack,
+        BakeProject project,
+        BakePack pack,
         List<string> sidecars,
         Dictionary<string, TextureSourceEntry> sourcesByAssetPath,
         HashSet<string> sourcePaths,
@@ -319,8 +318,8 @@ internal static class TexturePipeline
     }
 
     private static BakedTexture? BakeSource(
-        ProjectDescriptor project,
-        ProjectPack pack,
+        BakeProject project,
+        BakePack pack,
         TextureSourceEntry entry,
         ITextureDecoder decoder,
         BakeDiagnostics diagnostics)
@@ -525,9 +524,9 @@ internal static class TexturePipeline
             entry.DisplayPath,
             assetPath: entry.AssetPath);
 
-    private static string DisplayPath(ProjectDescriptor project, string fullPath)
+    private static string DisplayPath(BakeProject project, string fullPath)
         => BakeSourcePath.TryMakeRelative(
-            project.DescriptorDirectory,
+            project.ProjectRoot,
             fullPath,
             out string relativePath,
             out _)

@@ -8,11 +8,8 @@ internal enum BakeFailureStage
     /// <summary>The run succeeded.</summary>
     None,
 
-    /// <summary>The project descriptor could not be parsed or is invalid.</summary>
-    Descriptor,
-
-    /// <summary>The generated host could not be loaded or does not match the descriptor.</summary>
-    Host,
+    /// <summary>The output root or a pack output path is invalid.</summary>
+    Configuration,
 
     /// <summary>A custom-data source could not be read, parsed, or bound.</summary>
     Sources,

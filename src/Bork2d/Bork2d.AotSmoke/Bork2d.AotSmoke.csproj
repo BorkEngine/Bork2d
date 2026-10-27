@@ -17,20 +17,21 @@
     </PropertyGroup>
 
     <!--
-        M4 bake integration (D-M4-08, D-M4-09, D-M4-14, Q-10/Q-11/Q-22). This app owns the runtime
-        packs: the imported targets generate and build the bake host from the committed
-        Bork2d.BakeFixture project and its prepared Assets/ + DLC1/ copy, bake
-        $(TargetDir)assets.pck and $(TargetDir)dlc1.pck, copy both to PublishDir, and remove the
-        generated artifacts on Clean. The tool is built and executed out of process, so nothing from
-        Bork2d.Bake/Tomlyn/StbImageSharp enters this app's AOT publish graph. The default headless
-        smoke mounts $(TargetDir)assets.pck and overlays $(TargetDir)dlc1.pck; the fixture reference
-        below is the only bake-related assembly in the publish.
+        The fixture assets executable owns the fixture source trees, the explicit data-type
+        registrations, and the bake configuration. It is a build-time dependency only: the imported
+        copy target builds it out of process, bakes assets.pck/dlc1.pck next to its own executable,
+        and asks it to copy both packs to this app's output and publish directories. It is
+        deliberately not a ProjectReference: the SDK copies an executable reference's apphost,
+        deps.json, and runtimeconfig.json into the referencing app (transitive content) and rejects a
+        self-contained app referencing a JIT executable. Neither the builder nor the assets
+        executable enters this app's compile or AOT publish graph. The default headless smoke mounts
+        AppContext.BaseDirectory/assets.pck and overlays dlc1.pck.
     -->
     <PropertyGroup>
-        <Bork2dBakeUseFixtureAssets>true</Bork2dBakeUseFixtureAssets>
-        <Bork2dBakeCommonAssemblyName>Bork2d.BakeFixture</Bork2dBakeCommonAssemblyName>
-        <Bork2dProjectDescriptor>$(MSBuildProjectDirectory)\obj\bork2d\fixture\bork2d.project.toml</Bork2dProjectDescriptor>
-        <Bork2dBakePackPaths>assets.pck;dlc1.pck</Bork2dBakePackPaths>
+        <Bork2dAssetsProjectDirectory>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\Bork2d.BakeFixture.Assets'))</Bork2dAssetsProjectDirectory>
+        <Bork2dAssetsProjectFile>$(Bork2dAssetsProjectDirectory)\Bork2d.BakeFixture.Assets.csproj</Bork2dAssetsProjectFile>
+        <Bork2dAssetsExecutable>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\Bork2d.BakeFixture.Assets\bin\$(Configuration)\net11.0\Bork2d.BakeFixture.Assets.dll'))</Bork2dAssetsExecutable>
+        <Bork2dAssetsTargetFramework>net11.0</Bork2dAssetsTargetFramework>
     </PropertyGroup>
 
     <ItemGroup>
@@ -41,6 +42,6 @@
     </ItemGroup>
 
     <!-- Tooling only: imported, never referenced. -->
-    <Import Project="$(MSBuildThisFileDirectory)..\..\..\build\Bork2d.Bake.targets" />
+    <Import Project="$(MSBuildThisFileDirectory)..\..\..\build\Bork2d.Assets.Copy.targets" />
 
 </Project>

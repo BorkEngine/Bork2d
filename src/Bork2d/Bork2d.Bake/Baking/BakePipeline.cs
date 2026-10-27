@@ -1,22 +1,19 @@
 using Bork2d.Assets.Pack;
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Hosting;
-using Bork2d.Bake.Project;
 using Bork2d.Bake.Sources;
 using Bork2d.Bake.Textures;
 
 namespace Bork2d.Bake.Baking;
 
 /// <summary>
-/// The complete multi-pack bake pipeline: descriptor, generated host, per-pack custom-data binding,
-/// textures, baked asset index, reference validation, pack composition, and the atomic pack writes.
+/// The complete multi-pack bake pipeline: discovery, per-pack custom-data binding, textures, baked
+/// asset index, reference validation, pack composition, and the atomic pack writes.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The descriptor declares one or more ordered <c>[[assets]]</c> packs (D-M4-14). The first is the
-/// main/base pack; the rest are DLC/overlay packs. One generated host covers every root: discovery and
-/// manifest validation see the union of all <c>[bork2d].type</c> declarations. Each pack is then
-/// processed in descriptor order with its own root: sources are bound, textures imported, its index
+/// A <see cref="BakeProject"/> declares one or more ordered packs. The first is the main/base pack;
+/// the rest are DLC/overlay packs. Each pack is processed in order with its own root: sources are
+/// discovered and bound through the project's explicit registrations, textures imported, its index
 /// built, and its references validated. The main index is built first and is the only external index
 /// a DLC pack receives; the main pack is strict (local entries only).
 /// </para>
@@ -29,43 +26,34 @@ namespace Bork2d.Bake.Baking;
 /// </para>
 /// <para>
 /// Duplicate canonical paths are legal across packs (overlay) and illegal inside one pack. The
-/// pipeline is sequential and deterministic (Q-25): roots in descriptor order, discovery sorted,
-/// textures sorted, indexes sorted, diagnostics through the deterministic sorter. <c>--check</c>
-/// stops after validation and writes nothing.
+/// pipeline is sequential and deterministic: packs in configuration order, discovery sorted, textures
+/// sorted, indexes sorted, diagnostics through the deterministic sorter. <c>--check</c> stops after
+/// validation and writes nothing.
 /// </para>
 /// <para>
-/// The incremental manifest, skip/force behavior, and MSBuild integration are layered on top by
-/// <c>BakeIncrementalPlanner</c> (WP5); the pipeline itself always runs a full bake.
+/// The incremental manifest, skip/force behavior, and MSBuild integration are layered on top by WP5;
+/// the pipeline itself always runs a full bake. WP1 keeps the existing texture pipeline as the only
+/// texture producer; the registered processors are carried by the project for WP2.
 /// </para>
 /// </remarks>
 internal static class BakePipeline
 {
-    /// <summary>Runs one full or check-only bake of every descriptor pack.</summary>
+    /// <summary>Runs one full or check-only bake of every configured pack.</summary>
+    /// <param name="project">The validated project configuration.</param>
     /// <param name="options">The resolved invocation inputs.</param>
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
     /// <returns>The result, including per-pack counts and the deterministically ordered diagnostics.</returns>
-    internal static BakeResult Run(BakeOptions options, BakeDiagnostics diagnostics)
+    internal static BakeResult Run(
+        BakeProject project,
+        BakeOptions options,
+        BakeDiagnostics diagnostics)
     {
+        ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
-        ProjectDescriptor? descriptor = ProjectDescriptorParser.Parse(
-            options.ProjectPath,
-            diagnostics);
-        if (descriptor is null || diagnostics.HasErrors)
-        {
-            return Failure(
-                BakeStatus.ConfigurationError,
-                BakeFailureStage.Descriptor,
-                packPath: null,
-                assetCount: 0,
-                textureCount: 0,
-                referenceCount: 0,
-                diagnostics);
-        }
-
         if (!BakeOutputLayout.TryResolve(
-            descriptor,
+            project,
             options.OutputRoot,
             diagnostics,
             out _,
@@ -73,7 +61,7 @@ internal static class BakePipeline
         {
             return Failure(
                 BakeStatus.ConfigurationError,
-                BakeFailureStage.Descriptor,
+                BakeFailureStage.Configuration,
                 packPath: null,
                 assetCount: 0,
                 textureCount: 0,
@@ -82,7 +70,7 @@ internal static class BakePipeline
         }
 
         string mainPackPath = outputs[0].Path;
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(project, diagnostics);
         if (diagnostics.HasErrors)
         {
             return Failure(
@@ -95,45 +83,18 @@ internal static class BakePipeline
                 diagnostics);
         }
 
-        BakeHostHandle? handle = BakeHostLoader.TryLoad(options.HostPath, diagnostics);
-        if (handle is null)
-        {
-            return Failure(
-                BakeStatus.ConfigurationError,
-                BakeFailureStage.Host,
-                mainPackPath,
-                assetCount: 0,
-                textureCount: 0,
-                referenceCount: 0,
-                diagnostics);
-        }
-
-        if (!BakeHostManifestValidator.Validate(descriptor, sources, handle.Manifest, diagnostics)
-            || diagnostics.HasErrors)
-        {
-            return Failure(
-                BakeStatus.ConfigurationError,
-                BakeFailureStage.Host,
-                mainPackPath,
-                assetCount: 0,
-                textureCount: 0,
-                referenceCount: 0,
-                diagnostics);
-        }
-
         var packStates = new List<PackState>(outputs.Count);
         BakedAssetIndex? mainIndex = null;
 
         foreach (BakePackOutput output in outputs)
         {
-            ProjectPack pack = output.Pack;
+            BakePack pack = output.Pack;
             IReadOnlyList<BakeSource> packSources = [.. sources
                 .Where(source => source.Pack.Index == pack.Index)];
 
             IReadOnlyList<BoundAsset> assets = BakeSourceBinder.BindAll(
-                descriptor,
+                project,
                 packSources,
-                handle.Manifest,
                 diagnostics);
             if (diagnostics.HasErrors)
             {
@@ -147,7 +108,7 @@ internal static class BakePipeline
                     diagnostics);
             }
 
-            TextureBakeResult textures = TexturePipeline.Import(descriptor, pack);
+            TextureBakeResult textures = TexturePipeline.Import(project, pack);
             foreach (BakeDiagnostic diagnostic in textures.Diagnostics)
             {
                 diagnostics.Add(diagnostic);
@@ -174,7 +135,7 @@ internal static class BakePipeline
             BakedAssetIndex index = BakedAssetIndex.Build(
                 assets,
                 textures.Textures,
-                descriptor.DescriptorDirectory,
+                project.ProjectRoot,
                 diagnostics,
                 pack.PackPath);
             if (diagnostics.HasErrors)
@@ -196,7 +157,7 @@ internal static class BakePipeline
                 externalIndex,
                 pack.PackPath,
                 diagnostics,
-                descriptor.MainPack.PackPath))
+                project.MainPack.PackPath))
             {
                 return Failure(
                     BakeStatus.DiagnosticsError,
@@ -213,7 +174,7 @@ internal static class BakePipeline
             {
                 builder = PackComposer.Compose(
                     index,
-                    handle.Manifest,
+                    project,
                     options.Mode.ToCompressionMode(),
                     diagnostics,
                     externalIndex);

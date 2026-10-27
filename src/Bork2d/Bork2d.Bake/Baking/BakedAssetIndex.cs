@@ -11,10 +11,10 @@ namespace Bork2d.Bake.Baking;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Custom data contributes one MessagePack entry carrying its mapped type name; each baked texture
-/// contributes a <c>TextureDescriptor</c> MessagePack entry and a raw RGBA8 payload entry. Entries are
-/// sorted ordinal by path, so reference validation, collision reporting, and pack composition all see
-/// the same order regardless of discovery or dictionary order (D-M4-07).
+/// Custom data contributes one MessagePack entry carrying its registered type name; each baked
+/// texture contributes a <c>TextureDescriptor</c> MessagePack entry and a raw RGBA8 payload entry.
+/// Entries are sorted ordinal by path, so reference validation, collision reporting, and pack
+/// composition all see the same order regardless of discovery or dictionary order (D-M4-07).
 /// </para>
 /// <para>
 /// Building the index reports a <see cref="BakeDiagnosticCodes.AssetPathCollision"/> error for a path
@@ -49,7 +49,7 @@ internal sealed class BakedAssetIndex
     /// <summary>Builds the index and reports duplicate or cross-kind paths.</summary>
     /// <param name="assets">The bound custom-data assets, in discovery order.</param>
     /// <param name="textures">The successfully baked textures, in path order.</param>
-    /// <param name="projectDirectory">The descriptor directory, used to render texture source paths.</param>
+    /// <param name="projectDirectory">The project root, used to render texture source paths.</param>
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
     /// <param name="packPath">The pack label used in collision messages, or <see langword="null"/>.</param>
     /// <returns>The index, including the first entry for every colliding path.</returns>

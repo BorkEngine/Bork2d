@@ -1,9 +1,11 @@
-using Bork2d.Bake.Project;
+using Bork2d.Bake.Baking;
+using Bork2d.Bake.Textures;
 
 namespace Bork2d.Tests.Bake.Textures;
 
 /// <summary>
-/// A temporary project with an <c>Assets</c> root and a validated descriptor for texture tests.
+/// A temporary project with an <c>Assets</c> root and a validated project configuration for texture
+/// tests.
 /// </summary>
 /// <remarks>
 /// Paths passed to the write helpers are relative to the asset root (<c>textures/player.png</c>), and
@@ -16,23 +18,21 @@ internal sealed class TextureTestProject : IDisposable
 
     private readonly TempBakeDirectory _directory;
 
-    private TextureTestProject(TempBakeDirectory directory, ProjectDescriptor descriptor)
+    private TextureTestProject(TempBakeDirectory directory, BakeProject project)
     {
         _directory = directory;
-        Descriptor = descriptor;
+        Project = project;
     }
 
-    /// <summary>Gets the validated descriptor.</summary>
-    internal ProjectDescriptor Descriptor { get; }
+    /// <summary>Gets the validated project configuration.</summary>
+    internal BakeProject Project { get; }
 
     /// <summary>Gets the project root (the temp directory).</summary>
     internal string RootPath => _directory.RootPath;
 
-    /// <summary>
-    /// Creates a temporary project with the given descriptor texture defaults.
-    /// </summary>
-    /// <param name="filter">The descriptor default filter.</param>
-    /// <param name="wrap">The descriptor default wrap mode.</param>
+    /// <summary>Creates a temporary project with the given texture defaults.</summary>
+    /// <param name="filter">The default filter.</param>
+    /// <param name="wrap">The default wrap mode.</param>
     /// <returns>The test project.</returns>
     internal static TextureTestProject Create(
         BakeTextureFilter filter = BakeTextureFilter.Linear,
@@ -40,19 +40,21 @@ internal sealed class TextureTestProject : IDisposable
     {
         TempBakeDirectory directory = TempBakeDirectory.Create();
         string assetsRoot = directory.CreateDirectory(AssetsDirectoryName);
-        var pack = new ProjectPack(
+        var pack = new BakePack(
             index: 0,
             assetsRoot,
             relativeRoot: AssetsDirectoryName,
             packPath: "assets.pck");
-        var descriptor = new ProjectDescriptor(
-            directory.FullPath("bork2d.project.toml"),
+        var project = new BakeProject(
+            directory.RootPath,
             [pack],
-            directory.FullPath("obj/bork2d/bakehost"),
             filter,
-            wrap);
+            wrap,
+            new Dictionary<string, BakeAssetTypeRegistration>(StringComparer.Ordinal),
+            [],
+            useDefaultProcessors: false);
 
-        return new TextureTestProject(directory, descriptor);
+        return new TextureTestProject(directory, project);
     }
 
     /// <summary>Writes a texture source or sidecar byte array under the asset root.</summary>
@@ -94,7 +96,8 @@ internal sealed class TextureTestProject : IDisposable
     /// <summary>Creates a directory under the asset root.</summary>
     /// <param name="relativePath">The asset-root-relative directory path.</param>
     /// <returns>The absolute directory path.</returns>
-    internal string CreateDirectory(string relativePath) => _directory.CreateDirectory(ToAssetsPath(relativePath));
+    internal string CreateDirectory(string relativePath)
+        => _directory.CreateDirectory(ToAssetsPath(relativePath));
 
     /// <summary>Resolves a path relative to the project root (not the asset root).</summary>
     /// <param name="projectRelativePath">The project-relative path.</param>

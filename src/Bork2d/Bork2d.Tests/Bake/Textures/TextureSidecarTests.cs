@@ -1,5 +1,4 @@
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Project;
 using Bork2d.Bake.Textures;
 using Xunit;
 
@@ -8,33 +7,6 @@ namespace Bork2d.Tests.Bake.Textures;
 public sealed class TextureSidecarTests
 {
     [Fact]
-    public void ParsedProjectDescriptorDefaultsFlowIntoTextureDefaults()
-    {
-        using var project = TextureTestProject.Create();
-        project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
-        project.WriteProjectText(
-            "bork2d.project.toml",
-            """
-            schema = 1
-
-            [[assets]]
-            root = "Assets"
-            pack = "assets.pck"
-            """);
-
-        var diagnostics = new BakeDiagnostics();
-        ProjectDescriptor? descriptor = ProjectDescriptorParser.Parse(
-            project.ProjectPath("bork2d.project.toml"),
-            diagnostics);
-
-        Assert.NotNull(descriptor);
-        Assert.False(diagnostics.HasErrors);
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(descriptor!).Textures);
-        Assert.Equal("linear", texture.Descriptor.Filter);
-        Assert.Equal("clamp", texture.Descriptor.Wrap);
-    }
-
-    [Fact]
     public void MissingSidecarAppliesDescriptorDefaults()
     {
         using var project = TextureTestProject.Create(
@@ -42,7 +14,7 @@ public sealed class TextureSidecarTests
             BakeTextureWrap.Repeat);
         project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal("nearest", texture.Descriptor.Filter);
         Assert.Equal("repeat", texture.Descriptor.Wrap);
@@ -65,7 +37,7 @@ public sealed class TextureSidecarTests
             wrap = "repeat"
             """);
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal("nearest", texture.Descriptor.Filter);
         Assert.Equal("repeat", texture.Descriptor.Wrap);
@@ -87,7 +59,7 @@ public sealed class TextureSidecarTests
         project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
         project.WriteText("textures/player.png.toml", "filter = \"nearest\"\n");
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal("nearest", texture.Descriptor.Filter);
         Assert.Equal("clamp", texture.Descriptor.Wrap);
@@ -104,7 +76,7 @@ public sealed class TextureSidecarTests
         project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
         project.WriteText("textures/player.png.toml", string.Empty);
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal("linear", texture.Descriptor.Filter);
         Assert.Equal("repeat", texture.Descriptor.Wrap);
@@ -121,7 +93,7 @@ public sealed class TextureSidecarTests
         project.WriteImage("textures/enemy.png", TextureImageFactory.RgbaPng());
         project.WriteText("textures/player.png.toml", "filter = \"nearest\"\nwrap = \"repeat\"\n");
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         Assert.Equal(2, result.Textures.Count);
@@ -146,7 +118,7 @@ public sealed class TextureSidecarTests
             "textures/PLAYER.PNG.toml",
             "filter = \"nearest\"\nwrap = \"repeat\"\n");
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Diagnostics);
         BakedTexture texture = Assert.Single(result.Textures);
@@ -168,7 +140,7 @@ public sealed class TextureSidecarTests
         project.WriteImage("textures/tile.png", TextureImageFactory.RgbaPng());
         project.WriteText("textures/tile.jpeg.toml", "filter = \"nearest\"\n");
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal("nearest", texture.Descriptor.Filter);
         Assert.Equal("textures/tile", texture.AssetPath);
@@ -181,7 +153,7 @@ public sealed class TextureSidecarTests
         project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
         project.WriteText("textures/GHOST.PNG.toml", "filter = \"nearest\"\n");
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         BakedTexture texture = Assert.Single(result.Textures);
         Assert.Equal("textures/player", texture.AssetPath);
@@ -197,7 +169,7 @@ public sealed class TextureSidecarTests
         project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
         project.WriteText("textures/player.png.toml", "format = \"rgba8\"\n");
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -217,7 +189,7 @@ public sealed class TextureSidecarTests
         project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
         project.WriteText("textures/player.png.toml", toml);
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -233,7 +205,7 @@ public sealed class TextureSidecarTests
         project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
         project.WriteText("textures/player.png.toml", "filter = 1\n");
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -249,7 +221,7 @@ public sealed class TextureSidecarTests
         project.WriteImage("textures/player.png", TextureImageFactory.RgbaPng());
         project.WriteText("textures/player.png.toml", "filter = \n");
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -270,7 +242,7 @@ public sealed class TextureSidecarTests
             filter = "linear"
             """);
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -286,7 +258,7 @@ public sealed class TextureSidecarTests
             "textures/ghost.png.toml",
             "filter = \"nearest\"\n");
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
@@ -301,7 +273,7 @@ public sealed class TextureSidecarTests
         project.WriteImage("art/player.png", TextureImageFactory.RgbaPng());
         project.WriteText("art/player.png.toml", "filter = \"nearest\"\n");
 
-        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Project).Textures);
 
         Assert.Equal("art/player", texture.AssetPath);
         Assert.Equal("nearest", texture.Descriptor.Filter);
@@ -317,7 +289,7 @@ public sealed class TextureSidecarTests
         project.WriteImage("textures/bad name.png", TextureImageFactory.RgbaPng());
         project.WriteText("textures/bad name.png.toml", "filter = \"nearest\"\n");
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        TextureBakeResult result = TexturePipeline.Import(project.Project);
 
         Assert.Empty(result.Textures);
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
