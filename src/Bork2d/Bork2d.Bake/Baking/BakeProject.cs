@@ -17,8 +17,10 @@ namespace Bork2d.Bake.Baking;
 /// <para>
 /// <see cref="AssetTypes"/> is the compile-time registration dictionary keyed by
 /// <see cref="Type.FullName"/>. A data TOML's <c>[bork2d].type</c> selects one entry; an unregistered
-/// name is a configuration diagnostic. <see cref="Processors"/> is stored for the processor
-/// framework; the WP1 texture pipeline still produces textures.
+/// name is a configuration diagnostic. <see cref="Processors"/> is the registration-order list and
+/// <see cref="ProcessorRegistry"/> is the immutable normalized extension registry built from it; the
+/// pipeline runs those processors over the discovered processor sources. The legacy texture pipeline
+/// remains the producer for image sources that no registered processor claims until WP3.
 /// </para>
 /// </remarks>
 internal sealed class BakeProject
@@ -32,6 +34,7 @@ internal sealed class BakeProject
     /// <param name="textureWrap">The default sampler wrap mode for textures without a sidecar.</param>
     /// <param name="assetTypes">The explicitly registered data types keyed by full type name.</param>
     /// <param name="processors">The registered processors, in registration order.</param>
+    /// <param name="processorRegistry">The immutable extension registry built from the processors.</param>
     /// <param name="useDefaultProcessors">Whether the default processor registration was requested.</param>
     internal BakeProject(
         string projectRoot,
@@ -40,12 +43,14 @@ internal sealed class BakeProject
         BakeTextureWrap textureWrap,
         IReadOnlyDictionary<string, BakeAssetTypeRegistration> assetTypes,
         IReadOnlyList<IBakeAssetProcessor> processors,
+        BakeProcessorRegistry processorRegistry,
         bool useDefaultProcessors)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         ArgumentNullException.ThrowIfNull(packs);
         ArgumentNullException.ThrowIfNull(assetTypes);
         ArgumentNullException.ThrowIfNull(processors);
+        ArgumentNullException.ThrowIfNull(processorRegistry);
         if (packs.Count == 0)
         {
             throw new ArgumentException("A project must configure at least one asset pack.", nameof(packs));
@@ -59,6 +64,7 @@ internal sealed class BakeProject
             assetTypes,
             StringComparer.Ordinal);
         Processors = [.. processors];
+        ProcessorRegistry = processorRegistry;
         UseDefaultProcessors = useDefaultProcessors;
     }
 
@@ -82,6 +88,9 @@ internal sealed class BakeProject
 
     /// <summary>Gets the registered processors in registration order (executed by WP2+).</summary>
     internal IReadOnlyList<IBakeAssetProcessor> Processors { get; }
+
+    /// <summary>Gets the immutable extension registry built from <see cref="Processors"/>.</summary>
+    internal BakeProcessorRegistry ProcessorRegistry { get; }
 
     /// <summary>Gets a value indicating whether the default processor registration was requested.</summary>
     internal bool UseDefaultProcessors { get; }

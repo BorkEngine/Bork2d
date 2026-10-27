@@ -17,7 +17,10 @@ internal sealed class BakedPackResult
     /// <param name="pack">The configured pack the result describes.</param>
     /// <param name="packPath">The absolute pack output path.</param>
     /// <param name="packWritten">Whether the pack file was written.</param>
-    /// <param name="assetCount">The number of bound custom-data assets in the pack.</param>
+    /// <param name="assetCount">
+    /// The number of shaped assets in the pack: bound custom data plus processor outputs emitted with
+    /// <c>AddAsset&lt;T&gt;</c>.
+    /// </param>
     /// <param name="textureCount">The number of baked textures in the pack.</param>
     /// <param name="referenceCount">The number of reference sites validated in the pack.</param>
     /// <param name="entries">The pack's complete baked entry set, in ordinal path order.</param>
@@ -55,7 +58,10 @@ internal sealed class BakedPackResult
     /// <summary>Gets a value indicating whether the pack file was written.</summary>
     internal bool PackWritten { get; }
 
-    /// <summary>Gets the number of bound custom-data assets in the pack.</summary>
+    /// <summary>
+    /// Gets the number of shaped assets in the pack: bound custom data plus processor outputs emitted
+    /// with <c>AddAsset&lt;T&gt;</c>.
+    /// </summary>
     internal int AssetCount { get; }
 
     /// <summary>Gets the number of baked textures in the pack.</summary>
@@ -88,9 +94,15 @@ internal sealed class BakeResult
     /// <param name="failureStage">Where the run stopped.</param>
     /// <param name="packPath">The main pack target, when known.</param>
     /// <param name="packWritten">Whether every pack was written.</param>
-    /// <param name="assetCount">The aggregate number of bound custom-data assets.</param>
+    /// <param name="assetCount">
+    /// The aggregate number of shaped assets: bound custom data plus processor outputs emitted with
+    /// <c>AddAsset&lt;T&gt;</c>.
+    /// </param>
     /// <param name="textureCount">The aggregate number of baked textures.</param>
-    /// <param name="referenceCount">The aggregate number of reference sites validated.</param>
+    /// <param name="referenceCount">
+    /// The aggregate number of reference sites across every entry in every pack index (custom data and
+    /// processor shaped output).
+    /// </param>
     /// <param name="packs">The per-pack results, in pack order.</param>
     /// <param name="entries">The aggregate baked entry set, or empty when the run failed early.</param>
     /// <param name="diagnostics">The sorted diagnostics.</param>
@@ -134,7 +146,10 @@ internal sealed class BakeResult
     /// <summary>Gets a value indicating whether every pack was written.</summary>
     internal bool PackWritten { get; }
 
-    /// <summary>Gets the aggregate number of bound custom-data assets.</summary>
+    /// <summary>
+    /// Gets the aggregate number of shaped assets: bound custom data plus processor outputs emitted
+    /// with <c>AddAsset&lt;T&gt;</c>.
+    /// </summary>
     internal int AssetCount { get; }
 
     /// <summary>Gets the aggregate number of baked textures.</summary>

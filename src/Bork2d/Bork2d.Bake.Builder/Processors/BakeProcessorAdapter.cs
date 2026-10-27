@@ -5,14 +5,14 @@ namespace Bork2d.Bake.Builder.Processors;
 
 /// <summary>
 /// Adapts one public <see cref="IAssetProcessor"/> onto the internal processor contract the bake
-/// framework stores and (from WP2) executes.
+/// framework stores and executes.
 /// </summary>
 /// <remarks>
 /// A processor registered with <see cref="SidecarPolicy.None"/> runs directly through
 /// <see cref="IAssetProcessor.Process(AssetProcessorContext)"/>. A processor derived from
 /// <see cref="AssetProcessor{TSidecar}"/> is invoked through <see cref="ITypedAssetProcessor"/> so the
-/// framework can create, bind, and pass its sidecar. The adapter is complete even though WP1 does not
-/// execute processors: WP2 consumes it unchanged.
+/// framework can create, bind, and pass its sidecar. The adapter also carries the registration
+/// metadata the immutable processor registry validates.
 /// </remarks>
 internal sealed class BakeProcessorAdapter : IBakeAssetProcessor
 {

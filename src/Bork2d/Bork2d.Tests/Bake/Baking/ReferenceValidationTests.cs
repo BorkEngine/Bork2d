@@ -32,6 +32,7 @@ public sealed class ReferenceValidationTests
                 Custom("sprites/player", _spriteType),
                 Custom("data/game", _gameConfigType),
             ],
+            [],
             [Texture("textures/player")],
             _projectDirectory,
             diagnostics);
@@ -78,12 +79,13 @@ public sealed class ReferenceValidationTests
 
         BakedAssetIndex index = BakedAssetIndex.Build(
             assets,
+            [],
             [Texture("textures/player")],
             _projectDirectory,
             diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
-        Assert.True(BakeReferenceValidator.Validate(assets, index, diagnostics));
+        Assert.True(BakeReferenceValidator.Validate(index, diagnostics));
         Assert.Empty(diagnostics.GetSorted());
     }
 
@@ -150,11 +152,12 @@ public sealed class ReferenceValidationTests
         BakedAssetIndex index = BakedAssetIndex.Build(
             assets,
             [],
+            [],
             _projectDirectory,
             diagnostics);
         Assert.Empty(diagnostics.GetSorted());
 
-        Assert.False(BakeReferenceValidator.Validate(assets, index, diagnostics));
+        Assert.False(BakeReferenceValidator.Validate(index, diagnostics));
         BakeDiagnostic diagnostic = Assert.Single(
             diagnostics.GetSorted(),
             candidate => candidate.Code == BakeDiagnosticCodes.ReferenceWrongType);
@@ -175,6 +178,7 @@ public sealed class ReferenceValidationTests
                 Custom("data/dup", _spriteType),
             ],
             [],
+            [],
             _projectDirectory,
             diagnostics);
 
@@ -192,6 +196,7 @@ public sealed class ReferenceValidationTests
 
         _ = BakedAssetIndex.Build(
             [Custom("textures/player-raw", _gameConfigType)],
+            [],
             [Texture("textures/player")],
             _projectDirectory,
             diagnostics);
@@ -217,12 +222,13 @@ public sealed class ReferenceValidationTests
 
         BakedAssetIndex index = BakedAssetIndex.Build(
             assets,
+            [],
             [Texture("textures/player")],
             _projectDirectory,
             diagnostics);
         Assert.Empty(diagnostics.GetSorted());
 
-        Assert.False(BakeReferenceValidator.Validate(assets, index, diagnostics));
+        Assert.False(BakeReferenceValidator.Validate(index, diagnostics));
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
         Assert.Equal(BakeDiagnosticCodes.ReferenceMissing, diagnostic.Code);
         Assert.Equal("items[2].icon", diagnostic.MemberPath);
@@ -243,12 +249,13 @@ public sealed class ReferenceValidationTests
 
         BakedAssetIndex index = BakedAssetIndex.Build(
             assets,
+            [],
             [Texture("textures/player")],
             _projectDirectory,
             diagnostics);
         Assert.Empty(diagnostics.GetSorted());
 
-        Assert.False(BakeReferenceValidator.Validate(assets, index, diagnostics));
+        Assert.False(BakeReferenceValidator.Validate(index, diagnostics));
         return Assert.Single(diagnostics.GetSorted(), diagnostic => diagnostic.Code == expectedCode);
     }
 

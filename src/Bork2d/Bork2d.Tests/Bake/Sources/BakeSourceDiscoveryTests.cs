@@ -39,7 +39,7 @@ public sealed class BakeSourceDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
 
         Assert.Empty(diagnostics.GetSorted());
         Assert.Equal(2, sources.Count);
@@ -67,7 +67,7 @@ public sealed class BakeSourceDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
 
         Assert.Empty(diagnostics.GetSorted());
         Assert.Equal(
@@ -86,7 +86,7 @@ public sealed class BakeSourceDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
 
         Assert.Empty(diagnostics.GetSorted());
         BakeSource source = Assert.Single(sources);
@@ -102,7 +102,7 @@ public sealed class BakeSourceDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
 
         Assert.Empty(sources);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -124,7 +124,7 @@ public sealed class BakeSourceDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
 
         Assert.Empty(sources);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -149,7 +149,7 @@ public sealed class BakeSourceDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
 
         Assert.Empty(sources);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -173,7 +173,7 @@ public sealed class BakeSourceDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
 
         Assert.Empty(sources);
         Assert.Equal(
@@ -190,7 +190,7 @@ public sealed class BakeSourceDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
 
         Assert.Empty(sources);
         Assert.Equal(
@@ -207,7 +207,7 @@ public sealed class BakeSourceDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
 
         Assert.Empty(sources);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -230,7 +230,7 @@ public sealed class BakeSourceDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
 
         Assert.Empty(sources);
         Assert.Equal(
@@ -247,7 +247,7 @@ public sealed class BakeSourceDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
 
         Assert.Empty(sources);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -272,7 +272,7 @@ public sealed class BakeSourceDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
 
         Assert.Empty(sources);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -299,7 +299,7 @@ public sealed class BakeSourceDiscoveryTests
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
             project.Project,
-            diagnostics);
+            diagnostics).DataSources;
 
         Assert.Empty(diagnostics.GetSorted());
         Assert.Single(sources);

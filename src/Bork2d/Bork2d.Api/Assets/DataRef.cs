@@ -43,4 +43,7 @@ public readonly record struct DataRef(string? Path) : IAssetReference
 
     /// <inheritdoc/>
     bool IAssetReference.IsData => true;
+
+    /// <inheritdoc/>
+    string? IAssetReference.TargetTypeName => null;
 }

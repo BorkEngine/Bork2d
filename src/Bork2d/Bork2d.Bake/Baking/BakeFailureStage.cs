@@ -14,6 +14,9 @@ internal enum BakeFailureStage
     /// <summary>A custom-data source could not be read, parsed, or bound.</summary>
     Sources,
 
+    /// <summary>A processor source, output, required sidecar, or processor call failed.</summary>
+    Processors,
+
     /// <summary>A texture source, sidecar, or payload failed.</summary>
     Textures,
 

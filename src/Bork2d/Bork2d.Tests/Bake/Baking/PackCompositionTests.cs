@@ -36,6 +36,7 @@ public sealed class PackCompositionTests
 
         BakedAssetIndex index = BakedAssetIndex.Build(
             [Custom("data/game", game)],
+            [],
             [Texture(payload, directory.RootPath)],
             directory.RootPath,
             diagnostics);
@@ -141,6 +142,7 @@ public sealed class PackCompositionTests
         // composer converts the writer exception into an internal baker diagnostic.
         BakedAssetIndex index = BakedAssetIndex.Build(
             [Custom("Bad Path", value)],
+            [],
             [],
             directory.RootPath,
             diagnostics);

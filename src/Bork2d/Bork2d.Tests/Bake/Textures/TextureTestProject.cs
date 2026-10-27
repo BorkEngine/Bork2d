@@ -1,4 +1,5 @@
 using Bork2d.Bake.Baking;
+using Bork2d.Bake.Processors;
 using Bork2d.Bake.Textures;
 
 namespace Bork2d.Tests.Bake.Textures;
@@ -52,6 +53,7 @@ internal sealed class TextureTestProject : IDisposable
             wrap,
             new Dictionary<string, BakeAssetTypeRegistration>(StringComparer.Ordinal),
             [],
+            BakeProcessorRegistry.Empty,
             useDefaultProcessors: false);
 
         return new TextureTestProject(directory, project);

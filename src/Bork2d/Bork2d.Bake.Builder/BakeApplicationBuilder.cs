@@ -81,8 +81,9 @@ public sealed class BakeApplicationBuilder
 
     /// <summary>Records that the built-in processor registration was requested; idempotent.</summary>
     /// <remarks>
-    /// The built-in texture processor is registered for the later processor framework. In WP1 the
-    /// existing texture pipeline remains the only texture producer.
+    /// In WP2 this only records the request; there is no built-in processor yet. WP3 registers the
+    /// built-in texture processor here. Until then the legacy texture pipeline remains the producer
+    /// for image sources that no custom processor claims.
     /// </remarks>
     /// <returns>This builder.</returns>
     public BakeApplicationBuilder UseDefaultProcessors()
@@ -108,10 +109,12 @@ public sealed class BakeApplicationBuilder
         return this;
     }
 
-    /// <summary>Registers a custom processor for the later processor framework.</summary>
+    /// <summary>Registers a custom processor.</summary>
     /// <remarks>
-    /// Registrations are stored in order. The processor framework (WP2) validates extensions and runs
-    /// them; WP1 validates only that <paramref name="processor"/> is not <see langword="null"/>.
+    /// Registrations are stored in order. A later registration overrides an earlier one for the same
+    /// normalized extension and reports an informational diagnostic. Invalid registrations (an empty
+    /// name, no extensions, an invalid extension, or a sidecar policy/shape mismatch) are
+    /// configuration diagnostics with exit code <c>2</c>.
     /// </remarks>
     /// <param name="processor">The processor instance.</param>
     /// <returns>This builder.</returns>

@@ -49,4 +49,7 @@ public readonly record struct AssetRef<TAsset>(string? Path) : IAssetReference
 
     /// <inheritdoc/>
     bool IAssetReference.IsData => false;
+
+    /// <inheritdoc/>
+    string? IAssetReference.TargetTypeName => typeof(TAsset).FullName;
 }
