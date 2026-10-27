@@ -1,9 +1,11 @@
 # API Guide
 
-> **Status:** implemented M3 plus the D-035 asset-reference refactor (merged, PR #6). M1
-> (foundation), M2 (SDL windowed host), and M3 (pack, VFS, runtime integration) exist in
-> `Bork2d.Runtime`/`Bork2d.Assets` and are merged into `develop`. `Build()` validates and `Run()` runs
-> the uncapped windowed loop (window, input, time) or the one-tick headless/offscreen sequence,
+> **Status:** implemented M3 plus the D-035 asset-reference refactor (merged, PR #6); **M4
+> serialization and bake is implementation complete on `m-4/common`; the D-M4-13 revision is on
+> `m-4/fix-2` and the D-M4-14/D-M4-15 multi-pack revision is on `m-4/fix-3` (final PR pending, not
+> merged)**. M1 (foundation), M2 (SDL windowed host), and M3 (pack, VFS, runtime integration) exist
+> in `Bork2d.Runtime`/`Bork2d.Assets` and are merged into `develop`. `Build()` validates and `Run()`
+> runs the uncapped windowed loop (window, input, time) or the one-tick headless/offscreen sequence,
 > opening the base pack (or the `WithoutAssets()` empty filesystem) before the window and `Setup`.
 > The renderer is M8. See the [API reference](reference.md#12-runtime-surface).
 
@@ -18,7 +20,8 @@
 Do not reference `Bork2d.Render`, `Bork2d.Common`, or `Bork2d.Assets` from game code; they are
 implementation details ([Projects and dependencies](../architecture/projects.md)). **Tooling and
 tests** may reference `Bork2d.Assets` for the public `Bork2d.Assets.Pack.PackBuilder`/
-`PackCompressionMode` writer (§10); that surface is not part of the game contract.
+`PackCompressionMode` writer (§10); that surface is not part of the game contract. The M4 bake
+library/CLI are JIT tooling driven by `build/Bork2d.Bake.targets`; game code never references them.
 
 `Bork2d.Api` is split by area: engine/game in `Bork2d.Api`, scene types in `Bork2d.Api.Scene`,
 render value types in `Bork2d.Api.Rendering`, input in `Bork2d.Api.Input`, window/time in
@@ -356,6 +359,9 @@ public sealed partial class GameConfig
     public required string Name { get; set; }
     public int MaxPlayers { get; set; }
 }
+
+[GenerateShape]
+public readonly partial record struct LevelTuning(int Gravity, int JumpSpeed);
 ```
 
 ```csharp
@@ -368,7 +374,8 @@ IReadOnlyList<AssetInfo> sprites = _engine.Assets.Browse("sprites");
 
 // Typed assets need a compiled shape; raw bytes use LoadData.
 GameConfig config = await _engine.Assets.LoadAsset<GameConfig>("data/config");
-byte[] pixels = await _engine.Assets.LoadData("textures/raw/player");
+LevelTuning tuning = await _engine.Assets.LoadAsset<LevelTuning>("data/level-tuning");
+byte[] pixels = await _engine.Assets.LoadData("art/player-raw");
 
 // Sprites are normal public assets; reference links are typed path values.
 SpriteAsset player = await _engine.Assets.LoadAsset<SpriteAsset>("sprites/player/idle");
@@ -383,13 +390,22 @@ byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
   are mutually exclusive; a missing or malformed base pack fails `Run()` with `Bork2dException`
   before any window or `Setup`.
 - **Typed assets and references.** `LoadAsset<T>` requires a compiled `[GenerateShape]` shape
-  (`where T : class, IShapeable<T>`, D-M3-22); a missing shape is a compile-time error, not a
-  runtime fallback. `SpriteAsset.Texture` is an `AssetRef<TextureDescriptor>` and
+  (`where T : IShapeable<T>`, D-M3-22/D-M4-11); a missing shape is a compile-time error, not a
+  runtime fallback. `T` may be a class or a struct: a `readonly record struct` root loads through the
+  same path and can be referenced with `AssetRef<LevelTuning>`. A value-type root has no null value,
+  so a MessagePack `nil` payload is an `AssetException(Decode)` fault, never a silent `default`.
+  `SpriteAsset.Texture` is an `AssetRef<TextureDescriptor>` and
   `TextureDescriptor.Payload` is a `DataRef`; resolve them with the reference overloads. A `null`
   reference means absent and is not a load request (it throws `ArgumentException`). Both sprite and
-  descriptor are public MessagePack assets in `Bork2d.Api.Assets`; field validation (UV extents,
-  dimensions, pivot, topology) belongs to the M4 baker/editor, not the loader. `PackBuilder`
-  validates every non-null reference when it builds a pack; the runtime trusts the pack.
+  descriptor are public MessagePack assets in `Bork2d.Api.Assets`; the M4 baker validates descriptor
+  fields and binding/references, while sprite field validation (UV extents, pivot, topology,
+  indices) is M5 (D-M4-06), not the loader. `PackBuilder` validates every non-null reference when it
+  builds a pack; the runtime trusts the pack.
+- **Colors.** `Color` is linear RGBA and serializes as the float array `[r, g, b, a]` through the
+  public `ColorMarshaler` infrastructure, not as an object map; `Color` stays non-`partial`. The
+  marshaler is generated into the assembly that declares the containing asset type, so a game
+  assembly gets it automatically. A `nil` color surrogate is a `Decode` fault. Re-bake packs that
+  contain the older object-map color form; v1 packs have no per-asset schema version.
 - **Loading and errors.** A valid missing path, a raw entry passed to `LoadAsset<T>`, and
   decode/size failures fault the returned task instead of throwing:
 
@@ -423,6 +439,100 @@ byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
   tasks and joins the loader; after that every `IAssets` member throws `ObjectDisposedException`,
   while the `IEngine.Assets` getter keeps returning the disposed service and never throws.
 
+### Data serialization and bake
+
+`Status: Current (M4) for custom data and sprite-as-data; sprite field validation and slicing are
+M5.` Author data as TOML in the pack roots declared by `Project.Common/Assets` (and optional DLC
+roots), declare each type in its own `[bork2d]` table, and let the M4 tooling bake the main pack and
+any DLC packs. The runtime never sees TOML.
+
+The descriptor declares ordered `[[assets]]` entries (D-M4-14); the first is the main/base pack and
+later entries are DLC/overlay packs:
+
+```toml
+schema = 1
+
+[[assets]]
+root = "Assets"
+pack = "assets.pck"
+
+[[assets]]
+root = "DLC1"
+pack = "dlc1.pck"
+
+[bake]
+host = "obj/bork2d/bakehost"
+```
+
+There is no project `name` and no `[bake].pack`. A DLC pack may reference an asset in the main pack;
+the main pack may not reference a DLC asset, and DLC-to-DLC references are errors. The same
+canonical path may exist in different packs (the runtime overlays them with `LoadPack`; later wins);
+duplicates inside one pack are errors. `IAssets` is unchanged: mount the main pack with
+`WithAssetsPack`, then mount DLC packs with `IAssets.LoadPack` before the first tick when possible.
+
+```csharp
+using System.Text.Json.Serialization;
+using Bork2d.Api.Assets;
+using Bork2d.Api.Rendering;
+using PolyType;
+
+// The data TOML's [bork2d] table declares MyGame.Data.GameConfig; the descriptor has no type list.
+// [GenerateShape] + partial is PolyType's rule: it injects IShapeable<T> into the partial type.
+[GenerateShape]
+public sealed partial class GameConfig
+{
+    public required string Name { get; set; }
+    public int Health { get; set; }
+
+    [JsonPropertyName("max_players")]
+    public int MaxPlayers { get; set; }
+
+    [JsonRequired]
+    public string? Must { get; set; }
+
+    public Color Tint { get; set; }
+    public AssetRef<TextureDescriptor> Texture { get; set; }
+}
+
+[GenerateShape]
+public readonly partial record struct LevelTuning(int Gravity, int JumpSpeed);
+```
+
+```toml
+# Assets/data/game.toml -> data/game
+name = "campaign"
+health = 120
+max_players = 4          # [JsonPropertyName("max_players")]
+must = "present"         # [JsonRequired]
+tint = [1.0, 0.5, 0.25, 1.0]
+texture = "art/player"
+
+[bork2d]
+type = "MyGame.Data.GameConfig"
+```
+
+- **`partial` is PolyType's requirement.** On .NET 8+, `[GenerateShape]` emits
+  `IShapeable<T>` through a partial declaration. There is no `[Bork2dSerializable]` attribute and no
+  Bork2d source generator; each data TOML's `[bork2d] type = "Full.Type.Name"` entry is the registration (D-M4-13).
+- **Keys and leaves.** Keys are camelCase; `[JsonPropertyName]`, `[JsonIgnore]`, and
+  `[JsonRequired]` are honored. Supported leaves are booleans, integers, floats, strings, camelCase
+  enums, `Guid`, offset date-times, `Vector2/3/4`, `Color`, `AssetRef<T>`/`DataRef` path strings,
+  arrays/lists, `Dictionary<string, T>`, and nested tables. Unknown keys, missing required members,
+  type/range errors, and local date-times fail with `file:line:column`. A `readonly record struct` is
+  supported as a member and as a root; a `nil` struct-root payload is a `Decode` fault.
+- **`Color`.** Stays non-`partial`, serializes as `[r, g, b, a]` through `ColorMarshaler`, and a
+  `null` surrogate is a `Decode` fault.
+- **References.** `AssetRef<T>`/`DataRef` are canonical path strings; the bake validates every
+  present reference against the pack's local baked set and, for a DLC, the main pack. An absent key
+  is an absent reference.
+- **Commands (tooling only).** `bork2d-bake generate-host`, `bake`, and `validate`; MSBuild normally
+  drives them through `build/Bork2d.Bake.targets` (build/publish/clean). `bake` writes every pack
+  under `--output-root` (the descriptor directory by default). Exit codes: `0`
+  success/up to date, `1` source diagnostics, `2` usage/descriptor/host error, `3` internal failure.
+  The runtime does not reference this tooling. See
+  [Assets and tooling §10–§11](../architecture/assets-and-tooling.md#10-toml-source-model) for the
+  full mapping/pipeline and the [M4 spec](../specs/m4-serialization-and-bake.md) for scope.
+
 ### Building a pack (tooling only)
 
 The pack **writer** is the public tooling surface in `Bork2d.Assets.Pack`; tools, tests, and later
@@ -433,7 +543,7 @@ the editor use it to produce the runtime packs the app loads. Game code must not
 using Bork2d.Assets.Pack;
 
 var builder = new PackBuilder(PackCompressionMode.Release);
-builder.AddRaw("textures/raw/player", rgba8Bytes);
+builder.AddRaw("art/player-raw", rgba8Bytes);
 builder.AddMessagePack("data/config", new GameConfig { /* [GenerateShape] type */ });
 builder.Write("assets.pck"); // overwrites; relative paths resolve against the current directory
 ```
@@ -481,10 +591,12 @@ builder.Write("assets.pck"); // overwrites; relative paths resolve against the c
   code.
 - TOML is source/editor format only; the pack contains MessagePack/raw assets. The editor is JIT
   and not shipped with the game.
+- `partial` on a `[GenerateShape]` type is PolyType's rule, not a Bork2d attribute; a missing shape
+  is a compile-time error. There is no runtime TOML, reflection serializer, or bake reference.
 - The runtime libraries are `IsAotCompatible`; AOT publish/run is a required local gate. The
-  default AOT smoke builds a temporary pack with `PackBuilder`, loads raw data, generated-shape
-  MessagePack data, a public texture descriptor and sprite, browses/exists, and deletes it; the
-  windowed demo uses `WithoutAssets()`.
+  default AOT smoke loads the baked fixture pack (class root, struct root through
+  `AssetRef<StatsRoot>`, sprite, descriptor, and exact raw payload), browses/exists, and exits 0;
+  the windowed demo uses `WithoutAssets()`.
 
 See [NativeAOT](../architecture/nativeaot.md).
 

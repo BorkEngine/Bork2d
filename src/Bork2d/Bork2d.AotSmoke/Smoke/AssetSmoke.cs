@@ -1,105 +1,154 @@
 using System.Numerics;
 using Bork2d.Api.Assets;
-using Bork2d.Assets.Pack;
-using Bork2d.Common.Serialization;
+using Bork2d.Api.Rendering;
+using Bork2d.BakeFixture;
 
 namespace Bork2d.AotSmoke.Smoke;
 
 /// <summary>
-/// Builds the temporary pack used by the default NativeAOT smoke run and holds the expected values.
+/// Holds the canonical paths and the exact expected values of the baked fixture packs that the
+/// default NativeAOT smoke run loads.
 /// </summary>
 /// <remarks>
-/// The pack is written to an absolute temporary path with the public <see cref="PackBuilder"/>
-/// (D-M3-19), loaded by the app, and deleted by the caller after the app has disposed (which closes
-/// the pack handles). It contains raw data, a generated-shape data asset, a texture descriptor, its
-/// raw payload, and a public <see cref="SpriteAsset"/>, so the AOT run exercises the public asset
-/// shapes and their path references. No binary fixture is committed.
+/// The packs are produced by the imported <c>build/Bork2d.Bake.targets</c> from the fixture's
+/// committed <c>Bork2d.BakeFixture</c> asset trees (D-M4-14). The main pack
+/// <c>assets.pck</c> contains exactly five entries: <c>data/game</c>, the <c>roots/stats</c> struct
+/// root, <c>sprites/player</c>, <c>art/player</c>, and the raw <c>art/player-raw</c> payload. The DLC
+/// pack <c>dlc1.pck</c> contains exactly one entry, <c>data/dlc</c>, whose texture reference resolves
+/// to the main pack's <c>art/player</c> (an allowed DLC -> main reference). The smoke mounts the main
+/// pack as the base and <c>LoadPack("dlc1.pck")</c> as an overlay, both next to the published
+/// executable. The fixture's <c>Assets/art/player.png</c> is a committed fixture <em>source asset</em>;
+/// test packs and test images stay generated in temp directories (no committed test/pack binary
+/// fixture).
 /// </remarks>
 internal static class AssetSmoke
 {
-    /// <summary>The canonical path of the raw asset in the smoke pack.</summary>
-    internal const string RawPath = "data/smoke";
+    /// <summary>The baked main pack file name next to the app and in the publish directory.</summary>
+    internal const string PackFileName = "assets.pck";
 
-    /// <summary>The canonical path of the MessagePack asset in the smoke pack.</summary>
-    internal const string MessagePackPath = "data/smoke-data";
+    /// <summary>The baked DLC/overlay pack file name next to the app and in the publish directory.</summary>
+    internal const string DlcPackFileName = "dlc1.pck";
 
-    /// <summary>The canonical path of the texture descriptor in the smoke pack.</summary>
-    internal const string TexturePath = "textures/smoke";
+    /// <summary>The canonical path of the baked class-root custom data.</summary>
+    internal const string GamePath = "data/game";
 
-    /// <summary>The canonical path of the raw texture payload in the smoke pack.</summary>
-    internal const string TexturePayloadPath = "textures/raw/smoke";
+    /// <summary>The canonical path of the baked struct-root custom data.</summary>
+    internal const string StatsRootPath = "roots/stats";
 
-    /// <summary>The canonical path of the sprite asset in the smoke pack.</summary>
-    internal const string SpritePath = "sprites/smoke";
+    /// <summary>The canonical path of the baked sprite asset.</summary>
+    internal const string SpritePath = "sprites/player";
 
-    /// <summary>The expected value of the raw asset.</summary>
-    internal const string Name = "bork2d-aot-smoke";
+    /// <summary>The canonical path of the baked texture descriptor.</summary>
+    internal const string TexturePath = "art/player";
 
-    /// <summary>The expected integer value of the MessagePack asset.</summary>
-    internal const int Value = 42;
+    /// <summary>The canonical path of the baked raw texture payload.</summary>
+    internal const string TexturePayloadPath = "art/player-raw";
 
-    /// <summary>The expected scale of the MessagePack asset.</summary>
-    internal const float Scale = 1.5f;
+    /// <summary>The canonical path of the DLC pack's custom data.</summary>
+    internal const string DlcGamePath = "data/dlc";
 
-    /// <summary>The expected entry count of the smoke pack.</summary>
+    /// <summary>The exact entry count of the baked main pack.</summary>
     internal const int EntryCount = 5;
 
-    /// <summary>The known raw payload bytes stored in the pack.</summary>
-    internal static ReadOnlySpan<byte> RawPayload => [0x42, 0x4F, 0x52, 0x4B, 0x32, 0x44, 0x01, 0x7F];
+    /// <summary>The exact entry count of the baked DLC pack.</summary>
+    internal const int DlcEntryCount = 1;
 
-    /// <summary>The known RGBA8 texture payload stored in the pack.</summary>
-    internal static ReadOnlySpan<byte> TexturePayload => [0x11, 0x22, 0x33, 0xFF];
+    /// <summary>The exact visible entry count after the DLC overlay is mounted.</summary>
+    internal const int MergedEntryCount = EntryCount + DlcEntryCount;
 
-    /// <summary>Builds the smoke pack at a new absolute temporary path.</summary>
-    /// <returns>The absolute pack path; the caller deletes it.</returns>
-    internal static string CreatePack()
-    {
-        string path = Path.Combine(Path.GetTempPath(), $"bork2d-aot-{Guid.NewGuid():N}.pck");
+    /// <summary>The expected <c>name</c> of the baked <see cref="GameConfig"/>.</summary>
+    internal const string GameName = "campaign";
 
-        var builder = new PackBuilder(PackCompressionMode.Debug);
-        builder.AddRaw(RawPath, RawPayload);
-        builder.AddMessagePack(MessagePackPath, CreateData());
-        builder.AddMessagePack(TexturePath, CreateTextureDescriptor());
-        builder.AddRaw(TexturePayloadPath, TexturePayload);
-        builder.AddMessagePack(SpritePath, CreateSprite());
-        builder.Write(path);
+    /// <summary>The expected <c>name</c> of the baked DLC <see cref="GameConfig"/>.</summary>
+    internal const string DlcGameName = "dlc";
 
-        return path;
-    }
+    /// <summary>The expected <c>must</c> value of the baked DLC <see cref="GameConfig"/>.</summary>
+    internal const string DlcGameMust = "overlay";
 
-    /// <summary>Creates the expected MessagePack asset value.</summary>
-    internal static MessagePackSmokeData CreateData() => new()
-    {
-        Name = Name,
-        Value = Value,
-        Scale = Scale,
-    };
+    /// <summary>The expected <c>health</c> of the baked DLC <see cref="GameConfig"/>.</summary>
+    internal const int DlcGameHealth = 10;
 
-    /// <summary>Creates the public texture descriptor used by the sprite asset.</summary>
-    internal static TextureDescriptor CreateTextureDescriptor() => new()
-    {
-        Payload = TexturePayloadPath,
-        Width = 1,
-        Height = 1,
-        Format = "rgba8",
-        Filter = "nearest",
-        Wrap = "clamp",
-    };
+    /// <summary>The expected <c>health</c> of the baked <see cref="GameConfig"/>.</summary>
+    internal const int GameHealth = 120;
 
-    /// <summary>Creates the public sprite asset that references the texture descriptor.</summary>
-    internal static SpriteAsset CreateSprite() => new()
-    {
-        Texture = TexturePath,
-        Uvs =
-        [
-            new Vector2(0f, 0f),
-            new Vector2(1f, 0f),
-            new Vector2(1f, 1f),
-            new Vector2(0f, 1f),
-        ],
-        Scale = 1f,
-        Pivot = new Vector2(0.5f, 0.5f),
-        Topology = SpriteTopology.Quad,
-        Indices = null,
-    };
+    /// <summary>The expected <c>max_players</c> of the baked <see cref="GameConfig"/>.</summary>
+    internal const int GameMaxPlayers = 4;
+
+    /// <summary>The expected <c>must</c> value of the baked <see cref="GameConfig"/>.</summary>
+    internal const string GameMust = "present";
+
+    /// <summary>The expected nested struct of the baked <see cref="GameConfig"/>.</summary>
+    internal static Stats GameStats => new(Attack: 3, Defense: 7);
+
+    /// <summary>The expected linear tint of the baked <see cref="GameConfig"/>.</summary>
+    internal static Color GameTint => new(R: 1f, G: 0.5f, B: 0.25f, A: 1f);
+
+    /// <summary>The expected <c>attack</c> of the baked <see cref="StatsRoot"/>.</summary>
+    internal const int StatsRootAttack = 11;
+
+    /// <summary>The expected <c>defense</c> of the baked <see cref="StatsRoot"/>.</summary>
+    internal const int StatsRootDefense = 13;
+
+    /// <summary>The expected value of the baked <see cref="StatsRoot"/>.</summary>
+    internal static StatsRoot GameStatsRoot => new(Attack: StatsRootAttack, Defense: StatsRootDefense);
+
+    /// <summary>The expected four top-left-origin UVs of the baked <see cref="SpriteAsset"/>.</summary>
+    internal static Vector2[] SpriteUvs =>
+    [
+        new(0f, 0f),
+        new(1f, 0f),
+        new(1f, 1f),
+        new(0f, 1f),
+    ];
+
+    /// <summary>The expected pixels-per-world-unit scale of the baked <see cref="SpriteAsset"/>.</summary>
+    internal const float SpriteScale = 16f;
+
+    /// <summary>The expected normalized pivot of the baked <see cref="SpriteAsset"/>.</summary>
+    internal static Vector2 SpritePivot => new(0.5f, 0.5f);
+
+    /// <summary>The expected topology of the baked <see cref="SpriteAsset"/>.</summary>
+    internal const SpriteTopology SpriteAssetTopology = SpriteTopology.Triangles;
+
+    /// <summary>The expected index buffer of the baked <see cref="SpriteAsset"/>.</summary>
+    internal static ushort[] SpriteIndices => [0, 1, 2, 0, 2, 3];
+
+    /// <summary>The expected pixel width of the baked <see cref="TextureDescriptor"/>.</summary>
+    internal const uint TextureWidth = 2;
+
+    /// <summary>The expected pixel height of the baked <see cref="TextureDescriptor"/>.</summary>
+    internal const uint TextureHeight = 2;
+
+    /// <summary>The expected pixel format of the baked <see cref="TextureDescriptor"/>.</summary>
+    internal const string TextureFormat = "rgba8";
+
+    /// <summary>The expected sampler filter of the baked <see cref="TextureDescriptor"/>.</summary>
+    internal const string TextureFilter = "nearest";
+
+    /// <summary>The expected sampler wrap mode of the baked <see cref="TextureDescriptor"/>.</summary>
+    internal const string TextureWrap = "repeat";
+
+    /// <summary>
+    /// The exact 2x2 RGBA8 payload the baked <c>art/player-raw</c> entry stores: red opaque,
+    /// green half transparent, blue quarter transparent, white fully transparent.
+    /// </summary>
+    internal static ReadOnlySpan<byte> TexturePayload =>
+    [
+        255, 0, 0, 255,
+        0, 255, 0, 128,
+        0, 0, 255, 64,
+        255, 255, 255, 0,
+    ];
+
+    /// <summary>The name used by the in-memory generated-shape round trip (not the baked pack).</summary>
+    internal const string SmokeName = "bork2d-aot-smoke";
+
+    /// <summary>The integer used by the in-memory generated-shape round trip.</summary>
+    internal const int SmokeValue = 42;
+
+    /// <summary>The scale used by the in-memory generated-shape round trip.</summary>
+    internal const float SmokeScale = 1.5f;
+
+    /// <summary>The linear tint used by the in-memory generated-shape round trip.</summary>
+    internal static Color SmokeTint => new(R: 1f, G: 0.5f, B: 0.25f, A: 1f);
 }

@@ -10,18 +10,17 @@ namespace Bork2d.AotSmoke;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The default (no arguments) run proves the M1 scene path and the M3 asset path: it builds a small
-/// temporary pack with the public <see cref="Bork2d.Assets.Pack.PackBuilder"/>, runs a one-tick headless
-/// app against it with default logging, creates a parented transform/camera/sprite, loads a raw and
-/// a generated-shape MessagePack asset, browses/exists, checks root cleanup, and deletes the pack
-/// after the app has disposed. It never loads SDL.
+/// The default (no arguments) run proves the M1 scene path and the M4 baked-pack path: the imported
+/// <c>build/Bork2d.Bake.targets</c> bake the prepared <c>Bork2d.BakeFixture</c> asset tree into
+/// <c>AppContext.BaseDirectory/assets.pck</c>, which the run mounts with
+/// <see cref="Bork2d.Runtime.Bork2dAppBuilder{TLayer}.WithAssetsPack(string)"/>. It never loads SDL.
 /// </para>
 /// <para>
-/// <c>--windowed</c> runs the M2 SDL demo on the real windowed host with
-/// <c>WithoutAssets()</c>; <c>--ticks N</c> additionally turns it into the automated acceptance run
-/// that exits with code 0 after exactly <c>N</c> ticks. Invalid or unknown arguments print the usage
-/// and return 2. The app uses only the public <c>Bork2d.Api</c>/<c>Bork2d.Runtime</c> surface plus
-/// the tooling-only <c>PackBuilder</c>, so it stays NativeAOT-clean.
+/// <c>--windowed</c> runs the M2 SDL demo on the real windowed host with <c>WithoutAssets()</c>;
+/// <c>--ticks N</c> additionally turns it into the automated acceptance run that exits with code 0
+/// after exactly <c>N</c> ticks. Invalid or unknown arguments print the usage and return 2. The app
+/// uses only the public <c>Bork2d.Api</c>/<c>Bork2d.Runtime</c> surface, so it stays
+/// NativeAOT-clean.
 /// </para>
 /// </remarks>
 internal static class Program
@@ -29,8 +28,6 @@ internal static class Program
     private const string WindowTitle = "Bork2d M2 Demo";
     private const int WindowWidth = 1280;
     private const int WindowHeight = 720;
-    private const int Value = 42;
-    private const float Scale = 1.5f;
 
     internal static int Main(string[] args)
     {
@@ -47,72 +44,92 @@ internal static class Program
     private static void WriteUsage(TextWriter writer)
     {
         writer.WriteLine("usage: Bork2d.AotSmoke [--windowed [--ticks N]]");
-        writer.WriteLine("  (no arguments)  run the headless one-tick NativeAOT smoke with a temporary pack");
+        writer.WriteLine("  (no arguments)  run the headless one-tick NativeAOT smoke on the baked fixture pack");
         writer.WriteLine("  --windowed      run the interactive SDL windowed demo (Escape or close exits)");
         writer.WriteLine("  --ticks N       with --windowed: exit after exactly N completed ticks (N >= 1)");
     }
 
     /// <summary>
-    /// Runs the M1 scene checks and the M3 pack/load/browse proof against a temporary pack.
+    /// Runs the M1 scene checks and the M4 baked-pack proof against the packs next to the executable.
     /// </summary>
     /// <returns>0 when every assertion passes.</returns>
     private static int RunHeadless()
     {
-        string packPath = AssetSmoke.CreatePack();
-        try
+        string packPath = Path.Combine(AppContext.BaseDirectory, AssetSmoke.PackFileName);
+        string dlcPackPath = Path.Combine(AppContext.BaseDirectory, AssetSmoke.DlcPackFileName);
+        SmokeChecks.Require(
+            File.Exists(packPath),
+            $"the baked main pack must exist at '{packPath}'; the build's bake targets produce it "
+                + "next to the app and the publish copies it next to the published executable.");
+        SmokeChecks.Require(
+            File.Exists(dlcPackPath),
+            $"the baked DLC pack must exist at '{dlcPackPath}'; the build's bake targets produce it "
+                + "next to the app and the publish copies it next to the published executable.");
+
+        var game = new SmokeGame(loadAssets: true);
+
+        using (var app = new Bork2dAppBuilder<SmokeLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .WithAssetsPack(packPath)
+            .Build())
         {
-            var game = new SmokeGame(loadAssets: true);
+            app.Run();
 
-            using (var app = new Bork2dAppBuilder<SmokeLayer>()
-                .WithGame(game)
-                .WithHeadless()
-                .WithAssetsPack(packPath)
-                .Build())
-            {
-                app.Run();
-
-                SmokeChecks.Require(game.SetupCount == 1, "Setup must run exactly once.");
-                SmokeChecks.Require(game.TickCount == 1, "Tick must run exactly once.");
-                SmokeChecks.Require(game.TeardownCount == 1, "Teardown must run exactly once.");
-                var transform = game.ParentTransform;
-                SmokeChecks.Require(
-                    transform is not null && transform.Parent is null,
-                    "the game must detach the root's children during Teardown.");
-            }
-
+            SmokeChecks.Require(game.SetupCount == 1, "Setup must run exactly once.");
+            SmokeChecks.Require(game.TickCount == 1, "Tick must run exactly once.");
+            SmokeChecks.Require(game.TeardownCount == 1, "Teardown must run exactly once.");
+            var transform = game.ParentTransform;
             SmokeChecks.Require(
-                game.BrowsedEntryCount == AssetSmoke.EntryCount,
-                $"Browse must report {AssetSmoke.EntryCount} pack entries; got "
-                    + $"{game.BrowsedEntryCount}.");
-            SmokeChecks.Require(
-                game.RawByteCount == AssetSmoke.RawPayload.Length,
-                "LoadData must return the raw asset payload.");
-            SmokeChecks.Require(
-                game.LoadedName == AssetSmoke.Name,
-                "LoadAsset<MessagePackSmokeData> must return the generated-shape asset.");
-            SmokeChecks.Require(
-                game.LoadedSpriteTexturePath == AssetSmoke.TexturePath,
-                "LoadAsset<SpriteAsset> must return the public asset shape with its texture reference.");
-
-            VerifyMessagePackRoundTrip();
-            VerifyRootIsCleared(game);
-
-            Console.WriteLine(
-                $"Bork2d NativeAOT smoke passed: Setup/Tick/Teardown = 1/1/1, root cleared, "
-                + $"default logging, Nerdbank.MessagePack generated shape, public sprite asset, "
-                + $"pack entries={game.BrowsedEntryCount} ({AssetSmoke.RawPath}, "
-                + $"{AssetSmoke.MessagePackPath}, {AssetSmoke.SpritePath}), "
-                + $"rawBytes={game.RawByteCount}, messagePackName={game.LoadedName}, "
-                + $"spriteTexture={game.LoadedSpriteTexturePath}.");
-            return 0;
+                transform is not null && transform.Parent is null,
+                "the game must detach the root's children during Teardown.");
         }
-        finally
-        {
-            if (File.Exists(packPath))
-            {
-                File.Delete(packPath);
-            }
-        }
+
+        SmokeChecks.Require(
+            game.BrowsedEntryCount == AssetSmoke.EntryCount,
+            $"Browse must report {AssetSmoke.EntryCount} main-pack entries before the overlay; got "
+                + $"{game.BrowsedEntryCount}.");
+        SmokeChecks.Require(
+            game.MergedBrowsedEntryCount == AssetSmoke.MergedEntryCount,
+            $"Browse must report {AssetSmoke.MergedEntryCount} entries after the DLC overlay; got "
+                + $"{game.MergedBrowsedEntryCount}.");
+        SmokeChecks.Require(
+            game.RawByteCount == AssetSmoke.TexturePayload.Length,
+            "LoadData must return the baked raw texture payload.");
+        SmokeChecks.Require(
+            game.LoadedGameName == AssetSmoke.GameName,
+            "LoadAsset<GameConfig> must return the baked class-root custom data.");
+        SmokeChecks.Require(
+            game.LoadedDlcGameName == AssetSmoke.DlcGameName,
+            "LoadAsset<GameConfig> must return the DLC pack's custom data.");
+        SmokeChecks.Require(
+            game.LoadedDlcTexturePath == AssetSmoke.TexturePath,
+            "the DLC configuration's texture reference must resolve to the main pack.");
+        SmokeChecks.Require(
+            game.LoadedStatsRoot == AssetSmoke.GameStatsRoot,
+            "LoadAsset<StatsRoot>(AssetRef<StatsRoot>) must return the baked struct root.");
+        SmokeChecks.Require(
+            game.LoadedSpriteTexturePath == AssetSmoke.TexturePath,
+            "LoadAsset<SpriteAsset> must return the baked sprite with its texture reference.");
+        SmokeChecks.Require(
+            game.LoadedTexturePayloadPath == AssetSmoke.TexturePayloadPath,
+            "LoadAsset<TextureDescriptor> must return the baked descriptor with its raw payload reference.");
+
+        VerifyMessagePackRoundTrip();
+        VerifyRootIsCleared(game);
+
+        Console.WriteLine(
+            $"Bork2d NativeAOT smoke passed: Setup/Tick/Teardown = 1/1/1, root cleared, "
+            + $"default logging, Nerdbank.MessagePack generated shape, baked fixture packs at "
+            + $"'{packPath}' and '{dlcPackPath}', mainEntries={game.BrowsedEntryCount}, "
+            + $"mergedEntries={game.MergedBrowsedEntryCount} ({AssetSmoke.GamePath}, "
+            + $"{AssetSmoke.StatsRootPath}, {AssetSmoke.SpritePath}, {AssetSmoke.TexturePath}, "
+            + $"{AssetSmoke.TexturePayloadPath}, {AssetSmoke.DlcGamePath}), "
+            + $"game={game.LoadedGameName}, dlc={game.LoadedDlcGameName}, "
+            + $"dlcTexture={game.LoadedDlcTexturePath}, statsRoot={game.LoadedStatsRoot}, "
+            + $"spriteScale={AssetSmoke.SpriteScale}, spriteTexture={game.LoadedSpriteTexturePath}, "
+            + $"texturePayload={game.LoadedTexturePayloadPath}, rawBytes={game.RawByteCount}.");
+        return 0;
     }
 
     /// <summary>
@@ -164,9 +181,10 @@ internal static class Program
     {
         var original = new MessagePackSmokeData
         {
-            Name = "bork2d-aot-smoke",
-            Value = Value,
-            Scale = Scale,
+            Name = AssetSmoke.SmokeName,
+            Value = AssetSmoke.SmokeValue,
+            Scale = AssetSmoke.SmokeScale,
+            Tint = AssetSmoke.SmokeTint,
         };
 
         var roundTripped = MessagePackSmokeSerializer.RoundTrip(original);
@@ -175,14 +193,17 @@ internal static class Program
             roundTripped.Name == original.Name,
             "the MessagePack generated shape must round-trip the name.");
         SmokeChecks.Require(
-            roundTripped.Value == Value,
+            roundTripped.Value == AssetSmoke.SmokeValue,
             "the MessagePack generated shape must round-trip the value.");
         SmokeChecks.Require(
-            roundTripped.Scale == Scale,
+            roundTripped.Scale == AssetSmoke.SmokeScale,
             "the MessagePack generated shape must round-trip the scale.");
+        SmokeChecks.Require(
+            roundTripped.Tint == original.Tint,
+            "the MessagePack generated shape must round-trip the Color surrogate.");
 
         Console.WriteLine($"MessagePack generated-shape round trip: name={roundTripped.Name}, "
-            + $"value={roundTripped.Value}, scale={roundTripped.Scale}");
+            + $"value={roundTripped.Value}, scale={roundTripped.Scale}, tint={roundTripped.Tint}");
     }
 
     private static void VerifyRootIsCleared(SmokeGame game)

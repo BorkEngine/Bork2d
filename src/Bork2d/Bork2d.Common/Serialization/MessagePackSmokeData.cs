@@ -1,3 +1,4 @@
+using Bork2d.Api.Rendering;
 using PolyType;
 
 namespace Bork2d.Common.Serialization;
@@ -30,4 +31,10 @@ internal sealed partial class MessagePackSmokeData
 
     /// <summary>Gets or sets the smoke document scale.</summary>
     public float Scale { get; set; }
+
+    /// <summary>
+    /// Gets or sets a linear color. It is serialized by <c>ColorMarshaler</c> as
+    /// <c>[r, g, b, a]</c>, not as an object map.
+    /// </summary>
+    public Color Tint { get; set; }
 }

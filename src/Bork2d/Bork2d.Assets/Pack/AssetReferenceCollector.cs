@@ -10,9 +10,10 @@ namespace Bork2d.Assets.Pack;
 /// </summary>
 /// <remarks>
 /// Traversal is source-generated and reflection-free. It covers object properties, arrays and other
-/// enumerables, dictionary values, and nullable wrappers. A reference value is recorded at the
-/// property that contains it; the collector never descends into the reference itself. Polymorphic
-/// and <see cref="object"/>-typed members are not traversed in v1.
+/// enumerables, dictionary values, nullable wrappers, and marshaler surrogates (the marshaled value
+/// is visited, never treated as a scalar). A reference value is recorded at the property that
+/// contains it; the collector never descends into the reference itself. Polymorphic and
+/// <see cref="object"/>-typed members are not traversed in v1.
 /// </remarks>
 internal sealed class AssetReferenceCollector : TypeShapeVisitor
 {
@@ -152,6 +153,23 @@ internal sealed class AssetReferenceCollector : TypeShapeVisitor
             _path.RemoveAt(_path.Count - 1);
         }
 
+        return null;
+    }
+
+    /// <inheritdoc/>
+    public override object? VisitSurrogate<T, TSurrogate>(
+        ISurrogateTypeShape<T, TSurrogate> shape,
+        object? state)
+    {
+        if (state is not T value)
+        {
+            return null;
+        }
+
+        // Marshal first, then visit the surrogate shape: a marshaler may hide an AssetRef/DataRef
+        // inside the surrogate, so the surrogate must not be treated as a scalar leaf.
+        TSurrogate? surrogate = shape.Marshaler.Marshal(value);
+        VisitValue(shape.SurrogateType, surrogate);
         return null;
     }
 

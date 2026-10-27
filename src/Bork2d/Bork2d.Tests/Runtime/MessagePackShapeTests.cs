@@ -1,3 +1,4 @@
+using Bork2d.Api.Rendering;
 using Bork2d.Common.Serialization;
 using PolyType;
 using Xunit;
@@ -14,6 +15,7 @@ public sealed class MessagePackShapeTests
             Name = "generated-shape",
             Value = 42,
             Scale = 1.5f,
+            Tint = new Color(1f, 0.5f, 0.25f, 1f),
         };
 
         var roundTripped = MessagePackSmokeSerializer.RoundTrip(original);
@@ -22,6 +24,7 @@ public sealed class MessagePackShapeTests
         Assert.Equal(original.Name, roundTripped.Name);
         Assert.Equal(original.Value, roundTripped.Value);
         Assert.Equal(original.Scale, roundTripped.Scale);
+        Assert.Equal(original.Tint, roundTripped.Tint);
     }
 
     [Fact]
@@ -33,6 +36,22 @@ public sealed class MessagePackShapeTests
             .ToArray();
 
         Assert.Contains(typeof(IShapeable<>), shapeable);
+    }
+
+    [Fact]
+    public void ColorMemberUsesTheMarshalerSurrogate()
+    {
+        byte[] payload = MessagePackSmokeSerializer.Serialize(
+            new MessagePackSmokeData
+            {
+                Name = "surrogate",
+                Tint = new Color(1f, 0.5f, 0.25f, 1f),
+            });
+
+        ReadOnlySpan<byte> fourFloatArray = [0x94, 0xCA];
+        Assert.True(
+            payload.AsSpan().IndexOf(fourFloatArray) >= 0,
+            "A Color member must serialize as a float[4] surrogate array.");
     }
 
     [Fact]

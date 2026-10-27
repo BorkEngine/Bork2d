@@ -1,9 +1,13 @@
 # Contributing
 
-> **Status:** current through M3 plus the D-035 asset-reference refactor (merged, PR #6). The
+> **Status:** current through M3 plus the D-035 asset-reference refactor (merged, PR #6) and M4
+> serialization/bake (implementation complete on `m-4/common`; the owner D-M4-13 revision is
+> complete on `m-4/fix-2` and the D-M4-14/D-M4-15 multi-pack revision on `m-4/fix-3`; PR #7 is
+> open and not merged). The
 > warning/style/format/AOT gates and the docs link check are active. CI runs docs link check, build,
 > tests, and format verification on PRs to `develop` and pushes to `develop`; the NativeAOT
-> publish/run smoke (headless with a temporary pack, and windowed) is a required local gate.
+> publish/run smoke (headless loading the **baked fixture pack**, and windowed) is a required local
+> gate.
 
 ## 1. Prerequisites
 
@@ -30,16 +34,36 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **528 tests**: 519 deterministic tests run in CI; 9 `[WindowFact]` real-window tests
-are skipped unless the environment variable is set. The deterministic set includes the M3
-pack-format/writer tests, the path/VFS/browse/contract tests, the loader/threading and
-error-contract tests, generic pack-time reference validation, the public asset-reference/pack-build
-contracts, and the runtime asset lifecycle/error-matrix tests. They build packs in memory or in temp
-files and use **no committed binary fixtures**. Run only the asset/pack tests with:
+The suite is **923 tests**: 911 deterministic tests run in CI; 12 opt-in/conditional tests are
+skipped unless the environment variable or capability is present (9 `[WindowFact]` real-window tests
+and 3 reparse-point capability tests). The deterministic set includes the M3 pack-format/writer
+tests, the path/VFS/browse/contract tests, the loader/threading and error-contract tests, generic
+pack-time reference validation, the public asset-reference/pack-build contracts, the runtime asset
+lifecycle/error-matrix tests, the M4 bake pipeline (descriptor, host generation/load, TOML binder,
+textures, references, pack composition, determinism), and the M4 incremental/MSBuild tests. They
+build packs in memory or in temp files, generate their own test images, and use **no committed
+binary test/pack fixtures**. The only committed image is the bake fixture's
+`Bork2d.BakeFixture/Assets/art/player.png` source asset, which the MSBuild targets copy and bake and
+which is not a test pack or generated output. Run only the
+asset/pack tests with:
 
 ```powershell
 dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "FullyQualifiedName~Pack|FullyQualifiedName~Asset"
 ```
+
+Run the bake tests (bake pipeline, incremental, host, CLI, and the `dotnet build`/publish/clean
+MSBuild integration) with:
+
+```powershell
+dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "FullyQualifiedName~Bake"
+```
+
+The MSBuild integration test writes a temporary app project (two `[[assets]]` packs, sources, and a
+generated PNG in test code), references `Bork2d.BakeFixture`, imports
+[`build/Bork2d.Bake.targets`](../build/Bork2d.Bake.targets), and runs `dotnet build`, `dotnet publish`,
+and `dotnet clean` as child processes. It therefore needs a warmed repository build (the targets build
+the CLI project in the current configuration) and adds a few seconds to the Debug pass; it is not
+marked slower and runs in the normal suite.
 
 On a desktop session run the whole suite (including the opt-in window tests) with:
 
@@ -54,16 +78,28 @@ NativeAOT publish/run is required for runtime-affecting changes (both runs are l
 ```powershell
 dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
 $smoke = 'src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe'
-& $smoke                                  # headless smoke: scene + temporary pack load/browse
+& $smoke                                  # headless: scene + baked fixture pack load/assertions
 & $smoke --windowed --ticks 120           # windowed gate: exit 0 after exactly 120 ticks
 ```
 
-The publish must report zero AOT/trim warnings and contain `SDL2.dll`. The default run builds and
-deletes its own temporary pack (no fixtures), then exits `0` only when the scene, raw-asset,
-MessagePack-shape, public sprite/descriptor, browse/exists, and one-tick assertions pass. The
+The publish must report zero AOT/trim warnings and contain `assets.pck`, `dlc1.pck`, and `SDL2.dll`.
+The AOT smoke imports [`build/Bork2d.Bake.targets`](../build/Bork2d.Bake.targets), so its build copies
+the committed `Bork2d.BakeFixture` `Assets/**` and `DLC1/**` trees (including the fixture source PNG
+`Assets/art/player.png`), generates the single bake host from all roots, bakes the prepared fixture
+packs to `$(TargetDir)`, and copies both next to the published executable. The default headless run
+mounts the main pack from `AppContext.BaseDirectory` (not the process CWD), overlays `dlc1.pck` with
+`LoadPack`, and exits `0` only when the scene, the baked class root (nested struct/`Color`/texture
+reference), the `StatsRoot` through `AssetRef<StatsRoot>`, the sprite referencing `art/player`, the
+`art/player` descriptor, the exact `art/player-raw` payload, the DLC `data/dlc` (one entry) and its
+DLC → main texture reference, browse/exists (5 main, 6 merged), and exit 0 all pass. The
 windowed run uses `WithoutAssets()`, so it needs a desktop session but no pack; it asserts one
 `Setup`, exactly `N` ticks, and one `Teardown`. The interactive `--windowed` run is the manual
-visibility/input check.
+visibility/input check. Inspect the publish directory: it is a NativeAOT single-file output plus
+PDBs, so the managed assemblies are linked in. It must contain `assets.pck`, `dlc1.pck`, `SDL2.dll`,
+and the game-side `Bork2d.BakeFixture` PDB, and must not contain a `Bork2d.Bake.dll`,
+`Bork2d.Bake.Cli*`, `Bork2d.BakeHost*`, `Tomlyn*`, or `StbImageSharp*` file.
+`dotnet clean src/Bork2d/Bork2d.slnx` removes the generated host, the prepared fixture copy, the
+incremental/host state under `<descriptor>/obj/bork2d/bake`, and every declared pack.
 
 ## 3. Build, style, and warnings
 
@@ -95,8 +131,9 @@ public API; do not remove it.
 
 - Game code references `Bork2d.Api`/`Bork2d.Runtime` only; implementation projects are internal.
   The one public exception is the tooling-only pack writer in `Bork2d.Assets`.
-- `Bork2d.AotSmoke` may reference `Bork2d.Assets` for the public pack-tooling surface used by the
-  AOT pack proof; it uses the same project-reference rules as any other project and updates the
+- `Bork2d.AotSmoke` imports the bake targets and references the game-side `Bork2d.BakeFixture`; it
+  loads the baked pack through the public `IAssets` API and does not reference the pack tooling or
+  `Bork2d.Assets` directly (Assets remains in the publish through `Bork2d.Runtime`). It updates the
   dependency test/docs when the graph changes.
 - Editor/tooling stays JIT; no Avalonia, TOML, or reflection in runtime projects.
 - Runtime stays NativeAOT/trim-safe: no runtime reflection, assembly scanning, runtime TOML,
@@ -111,8 +148,11 @@ public API; do not remove it.
 
 - Add unit tests with behavior changes; pack/format tests for asset changes; threading tests for
   handoff changes; GPU/visual tests for renderer changes. Asset/pack tests build packs in memory or
-  in temp files (`PackBuilder`/`TempPackDirectory`) and never commit binary fixtures; the default
-  AOT smoke builds and deletes its own pack. Asset-loader tests are deterministic: they use a narrow
+  in temp files (`PackBuilder`/`TempPackDirectory`) and never commit binary **test/pack** fixtures;
+  the bake tests generate their own source trees and textures in temp directories, and the default
+  AOT smoke loads the pack baked by the targets. The one committed image is the bake fixture's
+  `Assets/art/player.png` source asset (an authoring input, not a test pack or generated output).
+  Asset-loader tests are deterministic: they use a narrow
   internal hook plus bounded signals/joins (no sleeps, retries, or timing assertions) to prove FIFO
   order, asynchronous completion, and shutdown cancellation.
 - Real-window tests use `[WindowFact]`, are skipped without `BORK2D_RUN_WINDOW_TESTS=1`, share the

@@ -1,0 +1,16 @@
+schema = 1
+
+[[assets]]
+root = "Assets"
+pack = "assets.pck"
+
+[[assets]]
+root = "DLC1"
+pack = "dlc1.pck"
+
+[bake]
+host = "obj/bork2d/bakehost"
+
+[textures]
+filter = "linear"
+wrap = "clamp"

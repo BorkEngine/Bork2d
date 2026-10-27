@@ -6,8 +6,9 @@ namespace Bork2d.Api.Assets;
 /// A typed reference to a MessagePack asset.
 /// </summary>
 /// <typeparam name="TAsset">
-/// The referenced asset type. It must have a compiled <c>[GenerateShape]</c> shape so it can be
-/// loaded through <see cref="IAssets.LoadAsset{T}(string)"/>.
+/// The referenced asset type, a class or a struct. It must have a compiled
+/// <c>[GenerateShape]</c> shape so it can be loaded through
+/// <see cref="IAssets.LoadAsset{T}(string)"/>.
 /// </typeparam>
 /// <param name="Path">
 /// The canonical asset path, or <see langword="null"/> when the reference is absent.
@@ -25,7 +26,7 @@ namespace Bork2d.Api.Assets;
 /// </remarks>
 [TypeShape(Marshaler = typeof(AssetRefMarshaler<>))]
 public readonly record struct AssetRef<TAsset>(string? Path) : IAssetReference
-    where TAsset : class, IShapeable<TAsset>
+    where TAsset : IShapeable<TAsset>
 {
     /// <summary>
     /// Gets the absent reference.

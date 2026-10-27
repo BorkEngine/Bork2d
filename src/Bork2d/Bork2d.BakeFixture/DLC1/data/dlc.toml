@@ -1,0 +1,7 @@
+name = "dlc"
+health = 10
+must = "overlay"
+texture = "art/player"
+
+[bork2d]
+type = "Bork2d.BakeFixture.GameConfig"

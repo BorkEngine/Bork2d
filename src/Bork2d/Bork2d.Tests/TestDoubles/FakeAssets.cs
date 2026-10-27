@@ -6,11 +6,11 @@ namespace Bork2d.Tests.TestDoubles;
 internal sealed class FakeAssets : IAssets
 {
     public Task<T> LoadAsset<T>(string assetPath)
-        where T : class, IShapeable<T>
+        where T : IShapeable<T>
         => throw new NotSupportedException("Scene-graph tests do not load assets.");
 
     public Task<T> LoadAsset<T>(AssetRef<T> reference)
-        where T : class, IShapeable<T>
+        where T : IShapeable<T>
         => throw new NotSupportedException("Scene-graph tests do not load assets.");
 
     public Task<byte[]> LoadData(string assetPath)

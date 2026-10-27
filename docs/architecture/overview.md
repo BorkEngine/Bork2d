@@ -1,11 +1,13 @@
 # Architecture Overview
 
 > **Status:** M1, M2, and M3 (pack, VFS, runtime integration) are merged into
-> `develop` (2026-10-26, PR #4); the post-M3 asset-reference refactor (D-035) is merged (PR #6). The
-> builder, validation, windowed SDL host (window/input/time/loop), one-tick
-> headless/offscreen host, scene graph, logging, asset pipeline, and AOT baseline are `Current`; the
-> editor (M5), Vulkan and frame handoff (M6/M7), and the sprite renderer (M8) are `Planned`. TOML
-> bake is M4. Status detail is in [the roadmap](../roadmap.md).
+> `develop` (2026-10-26, PR #4); the post-M3 asset-reference refactor (D-035) is merged (PR #6);
+> **M4 serialization and bake is implementation complete on `m-4/common`; the owner D-M4-13 revision
+> (including the committed fixture source PNG) is complete on `m-4/fix-2`, and the D-M4-14/D-M4-15
+> multi-pack revision is complete on `m-4/fix-3` (PR #7 open, not merged)**. The builder, validation, windowed SDL host (window/input/time/loop), one-tick
+> headless/offscreen host, scene graph, logging, asset pipeline, M4 bake tooling, and AOT baseline
+> are `Current`; the editor (M5), Vulkan and frame handoff (M6/M7), and the sprite renderer (M8) are
+> `Planned`. Status detail is in [the roadmap](../roadmap.md).
 
 ## 1. Purpose
 
@@ -22,6 +24,14 @@ three things:
 The design also includes a data-only editor (`Planned`, M5): no scene editing, only texture
 slicing and editing of custom serializable classes.
 
+The M4 tooling completes the source pipeline: each data TOML declares its CLR type in `[bork2d]`,
+and the JIT `Bork2d.Bake`/`Bork2d.Bake.Cli` bake custom-data TOML and imported textures (anywhere
+under each declared pack root) into one main pack plus optional DLC/overlay packs through a single
+generated bake host and the unchanged `PackBuilder`. The runtime still reads MessagePack only, with
+compiled `[GenerateShape]` shapes and no TOML or reflection. See
+[Assets and tooling](assets-and-tooling.md#11-build-pipeline) and the
+[M4 spec](../specs/m4-serialization-and-bake.md).
+
 ## 2. Goals
 
 - **2D-first, sprite-based rendering** with cameras, layers, z-ordering, tint, and transforms.
@@ -36,11 +46,12 @@ slicing and editing of custom serializable classes.
   stay JIT. Serialization uses Nerdbank.MessagePack generated shapes; the game is an instance.
 - **Packed, path-addressed assets.** Game code loads `SpriteAsset` like any other public asset and
   assigns it to a scene renderable; there are no opaque sprite handles. Asset-to-asset links are
-  typed canonical paths (`AssetRef<TAsset>`/`DataRef`). The runtime reads `assets.pck` plus
+  typed canonical paths (`AssetRef<TAsset>`/`DataRef`). The runtime reads a main pack plus
   later-wins overlays, loads/decompresses in the background, and skips a sprite whose texture link
   is absent or not ready. A pack holds raw payloads and MessagePack assets with **no per-asset
   version** (only the pack prefix version) and **no policy size caps** (intrinsic `uint32`/`uint64`
-  field widths and streaming bounds). TOML is source/editor format only; entities have no IDs. The
+  field widths and streaming bounds). TOML is baked by the JIT M4 tooling and never parsed at
+  runtime; entities have no IDs. The
   pack writer is the public tooling exception in `Bork2d.Assets`; it validates references at pack
   build.
 - **Headless and offscreen modes.** Servers run with no window, GPU, or render thread; headless is
@@ -129,7 +140,7 @@ bug, not a style preference.
 10. **At most one window and one app process in v1**: modes are windowed, offscreen, or headless; headless has no window or GPU and stores its tick rate (default 60, `0` = uncapped; pacing arrives in M7).
 11. **No steady-state per-frame allocations** in the tick snapshot builder or renderer hot path.
 12. **The runtime is NativeAOT- and trim-safe**: no runtime reflection, assembly scanning, runtime TOML, or dynamic code; MessagePack shapes are source-generated.
-13. **`assets.pck` is the runtime asset source**: TOML and source images live in `Project.Common`, only baked MessagePack/raw assets ship, overlays are packs (later wins), and a missing base pack throws at `Run()` unless the app calls `WithoutAssets()`. There is no per-asset version and no policy size cap.
+13. **Packs are the runtime asset source**: TOML and source images live in `Project.Common`, only baked MessagePack/raw assets ship, the descriptor's first `[[assets]]` entry is the main pack and later entries are DLC packs, overlays are packs (later wins), and a missing main pack throws at `Run()` unless the app calls `WithoutAssets()`. There is no per-asset version and no policy size cap.
 14. **Logging is available everywhere through `IEngine.LoggerFactory`**, configured with ZLogger; the default is a plain-text console provider.
 15. **Warnings and C# style violations are build errors**, with a format gate in CI.
 16. **Pre-1.0 breaking changes are allowed**, but every public change updates the API guide, reference, and decision log in the same change.
