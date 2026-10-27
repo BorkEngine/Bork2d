@@ -92,6 +92,34 @@ public sealed class AssetApiContractTests
     }
 
     [Fact]
+    public void TextureDescriptorUsesTheCanonicalEnumsAndDefaults()
+    {
+        var descriptor = new TextureDescriptor();
+
+        Assert.Equal(TextureFormat.Rgba8, descriptor.Format);
+        Assert.Equal(TextureFilter.Linear, descriptor.Filter);
+        Assert.Equal(TextureWrap.Clamp, descriptor.Wrap);
+
+        Type type = typeof(TextureDescriptor);
+        Assert.Equal(
+            typeof(TextureFormat),
+            type.GetProperty(nameof(TextureDescriptor.Format))!.PropertyType);
+        Assert.Equal(
+            typeof(TextureFilter),
+            type.GetProperty(nameof(TextureDescriptor.Filter))!.PropertyType);
+        Assert.Equal(
+            typeof(TextureWrap),
+            type.GetProperty(nameof(TextureDescriptor.Wrap))!.PropertyType);
+
+        // The zero value is the default for every enum, and Rgba8 is the only v1 format.
+        Assert.Equal(0, (int)TextureFormat.Rgba8);
+        Assert.Equal(0, (int)TextureFilter.Linear);
+        Assert.Equal(1, (int)TextureFilter.Nearest);
+        Assert.Equal(0, (int)TextureWrap.Clamp);
+        Assert.Equal(1, (int)TextureWrap.Repeat);
+    }
+
+    [Fact]
     public void AssetInfoIsAPublicReadOnlyRecordStructWithTheDocumentedFields()
     {
         Type type = typeof(AssetInfo);

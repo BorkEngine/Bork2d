@@ -131,13 +131,13 @@ internal static class AssetSmoke
     internal const uint TextureHeight = 2;
 
     /// <summary>The expected pixel format of the baked <see cref="TextureDescriptor"/>.</summary>
-    internal const string TextureFormat = "rgba8";
+    internal const TextureFormat ExpectedTextureFormat = TextureFormat.Rgba8;
 
     /// <summary>The expected sampler filter of the baked <see cref="TextureDescriptor"/>.</summary>
-    internal const string TextureFilter = "nearest";
+    internal const TextureFilter ExpectedTextureFilter = TextureFilter.Nearest;
 
     /// <summary>The expected sampler wrap mode of the baked <see cref="TextureDescriptor"/>.</summary>
-    internal const string TextureWrap = "repeat";
+    internal const TextureWrap ExpectedTextureWrap = TextureWrap.Repeat;
 
     /// <summary>
     /// The exact 2x2 RGBA8 payload the baked <c>art/player-raw</c> entry stores: red opaque,
@@ -158,13 +158,13 @@ internal static class AssetSmoke
     internal const uint PpmHeight = 2;
 
     /// <summary>The expected pixel format of the baked PPM <see cref="TextureDescriptor"/>.</summary>
-    internal const string PpmFormat = "rgba8";
+    internal const TextureFormat ExpectedPpmFormat = TextureFormat.Rgba8;
 
     /// <summary>The expected sampler filter of the baked PPM descriptor (sidecar override).</summary>
-    internal const string PpmFilter = "nearest";
+    internal const TextureFilter ExpectedPpmFilter = TextureFilter.Nearest;
 
     /// <summary>The expected sampler wrap mode of the baked PPM descriptor (sidecar override).</summary>
-    internal const string PpmWrap = "repeat";
+    internal const TextureWrap ExpectedPpmWrap = TextureWrap.Repeat;
 
     /// <summary>
     /// The exact 2x2 RGBA8 payload the baked <c>art/checker-raw</c> entry stores: opaque red, green,

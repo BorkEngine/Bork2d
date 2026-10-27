@@ -429,13 +429,13 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
             texture.Width == AssetSmoke.TextureWidth && texture.Height == AssetSmoke.TextureHeight,
             "LoadAsset<TextureDescriptor> must round-trip the 2x2 dimensions.");
         SmokeChecks.Require(
-            texture.Format == AssetSmoke.TextureFormat,
-            "LoadAsset<TextureDescriptor> must round-trip the rgba8 format.");
+            texture.Format == AssetSmoke.ExpectedTextureFormat,
+            "LoadAsset<TextureDescriptor> must round-trip the Rgba8 format.");
         SmokeChecks.Require(
-            texture.Filter == AssetSmoke.TextureFilter,
+            texture.Filter == AssetSmoke.ExpectedTextureFilter,
             "LoadAsset<TextureDescriptor> must round-trip the nearest filter.");
         SmokeChecks.Require(
-            texture.Wrap == AssetSmoke.TextureWrap,
+            texture.Wrap == AssetSmoke.ExpectedTextureWrap,
             "LoadAsset<TextureDescriptor> must round-trip the repeat wrap.");
 
         int expectedLength = checked((int)(AssetSmoke.TextureWidth * AssetSmoke.TextureHeight * 4));
@@ -456,13 +456,13 @@ internal sealed class SmokeGame : IGame<SmokeLayer>
             texture.Width == AssetSmoke.PpmWidth && texture.Height == AssetSmoke.PpmHeight,
             "LoadAsset<TextureDescriptor> must round-trip the baked PPM 2x2 dimensions.");
         SmokeChecks.Require(
-            texture.Format == AssetSmoke.PpmFormat,
-            "LoadAsset<TextureDescriptor> must round-trip the baked PPM rgba8 format.");
+            texture.Format == AssetSmoke.ExpectedPpmFormat,
+            "LoadAsset<TextureDescriptor> must round-trip the baked PPM Rgba8 format.");
         SmokeChecks.Require(
-            texture.Filter == AssetSmoke.PpmFilter,
+            texture.Filter == AssetSmoke.ExpectedPpmFilter,
             "LoadAsset<TextureDescriptor> must round-trip the baked PPM sidecar's nearest filter.");
         SmokeChecks.Require(
-            texture.Wrap == AssetSmoke.PpmWrap,
+            texture.Wrap == AssetSmoke.ExpectedPpmWrap,
             "LoadAsset<TextureDescriptor> must round-trip the baked PPM sidecar's repeat wrap.");
 
         int expectedLength = checked((int)(AssetSmoke.PpmWidth * AssetSmoke.PpmHeight * 4));

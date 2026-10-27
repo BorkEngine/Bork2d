@@ -64,9 +64,9 @@ public sealed class FixtureProcessorsApplicationTests
         Assert.Equal("art/checker-raw", ppm.Payload.Path);
         Assert.Equal(2u, ppm.Width);
         Assert.Equal(2u, ppm.Height);
-        Assert.Equal("rgba8", ppm.Format);
-        Assert.Equal("nearest", ppm.Filter);
-        Assert.Equal("repeat", ppm.Wrap);
+        Assert.Equal(TextureFormat.Rgba8, ppm.Format);
+        Assert.Equal(TextureFilter.Nearest, ppm.Filter);
+        Assert.Equal(TextureWrap.Repeat, ppm.Wrap);
         Assert.Equal(
             new byte[]
             {

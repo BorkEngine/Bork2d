@@ -56,9 +56,9 @@ public sealed class TextureProcessorTests
         Assert.Equal("art/player-raw", descriptor.Payload.Path);
         Assert.Equal(2u, descriptor.Width);
         Assert.Equal(2u, descriptor.Height);
-        Assert.Equal("rgba8", descriptor.Format);
-        Assert.Equal("nearest", descriptor.Filter);
-        Assert.Equal("repeat", descriptor.Wrap);
+        Assert.Equal(TextureFormat.Rgba8, descriptor.Format);
+        Assert.Equal(TextureFilter.Nearest, descriptor.Filter);
+        Assert.Equal(TextureWrap.Repeat, descriptor.Wrap);
         Assert.Equal(
             BakeProjectFixture.ExpectedTexturePayload,
             await host.Service.LoadData("art/player-raw"));
@@ -91,8 +91,8 @@ public sealed class TextureProcessorTests
         using var host = new AssetServiceHost(project.PackPath);
         host.Start();
         TextureDescriptor descriptor = await host.Service.LoadAsset<TextureDescriptor>("textures/player");
-        Assert.Equal("nearest", descriptor.Filter);
-        Assert.Equal("repeat", descriptor.Wrap);
+        Assert.Equal(TextureFilter.Nearest, descriptor.Filter);
+        Assert.Equal(TextureWrap.Repeat, descriptor.Wrap);
     }
 
     [Fact]
@@ -114,8 +114,8 @@ public sealed class TextureProcessorTests
         using var host = new AssetServiceHost(project.PackPath);
         host.Start();
         TextureDescriptor descriptor = await host.Service.LoadAsset<TextureDescriptor>("textures/player");
-        Assert.Equal("linear", descriptor.Filter);
-        Assert.Equal("clamp", descriptor.Wrap);
+        Assert.Equal(TextureFilter.Linear, descriptor.Filter);
+        Assert.Equal(TextureWrap.Clamp, descriptor.Wrap);
     }
 
     [Fact]
@@ -132,8 +132,8 @@ public sealed class TextureProcessorTests
         using var host = new AssetServiceHost(project.PackPath);
         host.Start();
         TextureDescriptor descriptor = await host.Service.LoadAsset<TextureDescriptor>("textures/player");
-        Assert.Equal("linear", descriptor.Filter);
-        Assert.Equal("repeat", descriptor.Wrap);
+        Assert.Equal(TextureFilter.Linear, descriptor.Filter);
+        Assert.Equal(TextureWrap.Repeat, descriptor.Wrap);
     }
 
     [Fact]
@@ -150,8 +150,8 @@ public sealed class TextureProcessorTests
         using var host = new AssetServiceHost(project.PackPath);
         host.Start();
         TextureDescriptor descriptor = await host.Service.LoadAsset<TextureDescriptor>("textures/player");
-        Assert.Equal("nearest", descriptor.Filter);
-        Assert.Equal("repeat", descriptor.Wrap);
+        Assert.Equal(TextureFilter.Nearest, descriptor.Filter);
+        Assert.Equal(TextureWrap.Repeat, descriptor.Wrap);
     }
 
     [Fact]
@@ -169,10 +169,10 @@ public sealed class TextureProcessorTests
         host.Start();
         TextureDescriptor player = await host.Service.LoadAsset<TextureDescriptor>("textures/player");
         TextureDescriptor enemy = await host.Service.LoadAsset<TextureDescriptor>("textures/enemy");
-        Assert.Equal("nearest", player.Filter);
-        Assert.Equal("repeat", player.Wrap);
-        Assert.Equal("linear", enemy.Filter);
-        Assert.Equal("clamp", enemy.Wrap);
+        Assert.Equal(TextureFilter.Nearest, player.Filter);
+        Assert.Equal(TextureWrap.Repeat, player.Wrap);
+        Assert.Equal(TextureFilter.Linear, enemy.Filter);
+        Assert.Equal(TextureWrap.Clamp, enemy.Wrap);
     }
 
     [Fact]
@@ -191,8 +191,8 @@ public sealed class TextureProcessorTests
         using var host = new AssetServiceHost(project.PackPath);
         host.Start();
         TextureDescriptor descriptor = await host.Service.LoadAsset<TextureDescriptor>("textures/player");
-        Assert.Equal("nearest", descriptor.Filter);
-        Assert.Equal("repeat", descriptor.Wrap);
+        Assert.Equal(TextureFilter.Nearest, descriptor.Filter);
+        Assert.Equal(TextureWrap.Repeat, descriptor.Wrap);
     }
 
     [Fact]

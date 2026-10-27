@@ -74,9 +74,9 @@ public sealed class PpmProcessorTests
         Assert.Equal("art/checker-raw", descriptor.Payload.Path);
         Assert.Equal(2u, descriptor.Width);
         Assert.Equal(2u, descriptor.Height);
-        Assert.Equal("rgba8", descriptor.Format);
-        Assert.Equal("nearest", descriptor.Filter);
-        Assert.Equal("repeat", descriptor.Wrap);
+        Assert.Equal(TextureFormat.Rgba8, descriptor.Format);
+        Assert.Equal(TextureFilter.Nearest, descriptor.Filter);
+        Assert.Equal(TextureWrap.Repeat, descriptor.Wrap);
         Assert.Equal(_expectedRgba8, await host.Service.LoadData("art/checker-raw"));
         Assert.True(host.Service.Exists("art/checker"));
         Assert.True(host.Service.Exists("art/checker-raw"));
@@ -122,8 +122,8 @@ public sealed class PpmProcessorTests
         using var host = new AssetServiceHost(output.FullPath("assets.pck"));
         host.Start();
         TextureDescriptor descriptor = await host.Service.LoadAsset<TextureDescriptor>("art/checker");
-        Assert.Equal("nearest", descriptor.Filter);
-        Assert.Equal("repeat", descriptor.Wrap);
+        Assert.Equal(TextureFilter.Nearest, descriptor.Filter);
+        Assert.Equal(TextureWrap.Repeat, descriptor.Wrap);
     }
 
     [Fact]
@@ -143,8 +143,8 @@ public sealed class PpmProcessorTests
         using var host = new AssetServiceHost(output.FullPath("assets.pck"));
         host.Start();
         TextureDescriptor descriptor = await host.Service.LoadAsset<TextureDescriptor>("art/checker");
-        Assert.Equal("nearest", descriptor.Filter);
-        Assert.Equal("clamp", descriptor.Wrap);
+        Assert.Equal(TextureFilter.Nearest, descriptor.Filter);
+        Assert.Equal(TextureWrap.Clamp, descriptor.Wrap);
     }
 
     [Theory]
