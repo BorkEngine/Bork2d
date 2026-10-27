@@ -10,16 +10,18 @@ namespace Bork2d.AotSmoke.Smoke;
 /// default NativeAOT smoke run loads.
 /// </summary>
 /// <remarks>
-/// The packs are produced by the imported <c>build/Bork2d.Bake.targets</c> from the fixture's
-/// committed <c>Bork2d.BakeFixture</c> asset trees (D-M4-14). The main pack
-/// <c>assets.pck</c> contains exactly five entries: <c>data/game</c>, the <c>roots/stats</c> struct
-/// root, <c>sprites/player</c>, <c>art/player</c>, and the raw <c>art/player-raw</c> payload. The DLC
-/// pack <c>dlc1.pck</c> contains exactly one entry, <c>data/dlc</c>, whose texture reference resolves
-/// to the main pack's <c>art/player</c> (an allowed DLC -> main reference). The smoke mounts the main
-/// pack as the base and <c>LoadPack("dlc1.pck")</c> as an overlay, both next to the published
-/// executable. The fixture's <c>Assets/art/player.png</c> is a committed fixture <em>source asset</em>;
-/// test packs and test images stay generated in temp directories (no committed test/pack binary
-/// fixture).
+/// The packs are produced by building <c>Bork2d.BakeFixture.Assets</c>, which owns the committed
+/// <c>Assets/</c>/<c>DLC1/</c> source trees and imports the bake targets; the AOT smoke imports the copy
+/// target and mounts the copied packs. The main pack <c>assets.pck</c> contains exactly eight entries:
+/// <c>data/game</c>, the <c>roots/stats</c> struct root, <c>sprites/player</c>, <c>art/player</c>, the
+/// raw <c>art/player-raw</c> payload, the PPM acceptance processor's <c>art/checker</c> descriptor and
+/// <c>art/checker-raw</c> payload, and the Unit acceptance processor's <c>data/archer</c>. The DLC pack
+/// <c>dlc1.pck</c> contains exactly one entry, <c>data/dlc</c>, whose texture reference resolves to the
+/// main pack's <c>art/player</c> (an allowed DLC -> main reference). The smoke mounts the main pack as
+/// the base and <c>LoadPack("dlc1.pck")</c> as an overlay, both next to the published executable. The
+/// fixture's <c>Assets/art/player.png</c>, <c>Assets/art/checker.ppm</c>, and
+/// <c>Assets/data/archer.unit</c> are committed fixture <em>source assets</em>; test packs and test
+/// images stay generated in temp directories (no committed test/pack binary fixture).
 /// </remarks>
 internal static class AssetSmoke
 {
@@ -44,11 +46,20 @@ internal static class AssetSmoke
     /// <summary>The canonical path of the baked raw texture payload.</summary>
     internal const string TexturePayloadPath = "art/player-raw";
 
+    /// <summary>The canonical path of the PPM acceptance processor's baked texture descriptor.</summary>
+    internal const string PpmTexturePath = "art/checker";
+
+    /// <summary>The canonical path of the PPM acceptance processor's baked raw payload.</summary>
+    internal const string PpmPayloadPath = "art/checker-raw";
+
+    /// <summary>The canonical path of the Unit acceptance processor's baked custom data.</summary>
+    internal const string UnitPath = "data/archer";
+
     /// <summary>The canonical path of the DLC pack's custom data.</summary>
     internal const string DlcGamePath = "data/dlc";
 
     /// <summary>The exact entry count of the baked main pack.</summary>
-    internal const int EntryCount = 5;
+    internal const int EntryCount = 8;
 
     /// <summary>The exact entry count of the baked DLC pack.</summary>
     internal const int DlcEntryCount = 1;
@@ -139,6 +150,45 @@ internal static class AssetSmoke
         0, 0, 255, 64,
         255, 255, 255, 0,
     ];
+
+    /// <summary>The expected pixel width of the baked PPM <see cref="TextureDescriptor"/>.</summary>
+    internal const uint PpmWidth = 2;
+
+    /// <summary>The expected pixel height of the baked PPM <see cref="TextureDescriptor"/>.</summary>
+    internal const uint PpmHeight = 2;
+
+    /// <summary>The expected pixel format of the baked PPM <see cref="TextureDescriptor"/>.</summary>
+    internal const string PpmFormat = "rgba8";
+
+    /// <summary>The expected sampler filter of the baked PPM descriptor (sidecar override).</summary>
+    internal const string PpmFilter = "nearest";
+
+    /// <summary>The expected sampler wrap mode of the baked PPM descriptor (sidecar override).</summary>
+    internal const string PpmWrap = "repeat";
+
+    /// <summary>
+    /// The exact 2x2 RGBA8 payload the baked <c>art/checker-raw</c> entry stores: opaque red, green,
+    /// blue, and white PPM pixels converted with alpha 255.
+    /// </summary>
+    internal static ReadOnlySpan<byte> PpmPayload =>
+    [
+        255, 0, 0, 255,
+        0, 255, 0, 255,
+        0, 0, 255, 255,
+        255, 255, 255, 255,
+    ];
+
+    /// <summary>The expected name of the baked <see cref="Unit"/>.</summary>
+    internal const string UnitName = "archer";
+
+    /// <summary>The expected health of the baked <see cref="Unit"/>.</summary>
+    internal const int UnitHealth = 50;
+
+    /// <summary>The expected attack of the baked <see cref="Unit"/>.</summary>
+    internal const int UnitAttack = 20;
+
+    /// <summary>The expected value of the baked <see cref="Unit"/>.</summary>
+    internal static Unit GameUnit => new(UnitName, UnitHealth, UnitAttack);
 
     /// <summary>The name used by the in-memory generated-shape round trip (not the baked pack).</summary>
     internal const string SmokeName = "bork2d-aot-smoke";
