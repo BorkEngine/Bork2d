@@ -1,3 +1,4 @@
+using Bork2d.Api.Assets;
 using PolyType;
 
 namespace Bork2d.Bake.Builder.Processors;

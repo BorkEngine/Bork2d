@@ -1,14 +1,16 @@
 # File Processors and `MyGame.Assets` — Implementation Spec
 
-> **Status:** **Implemented as-built on `task/file-processors` (D-036/D-037/D-038/D-039,
+> **Status:** **Implemented as-built on `task/file-processors` (D-036/D-037/D-038/D-039/D-040,
 > 2026-10-27).** WP1–WP5 are landed on the task branch: the public `Bork2d.Bake.Builder`
 > builder/processor API, explicit `RegisterAsset<T>()`, no project descriptor/generated host/CLI,
 > the processor registry and sidecars, the built-in texture processor, the PPM/Unit fixture
 > processors, the build-only fixture assets executable, schema-3 incremental bake, the final
 > `build/Bork2d.Assets*.targets`, and the local AOT fixture flow. The locked decisions, API text, and
 > semantics below remain the implementation authority; WP5 added the incremental manifest, build
-> targets, AOT proof, and this as-built record. Local verification: Debug/Release zero-warning
-> builds, 945 deterministic plus 12 opt-in/conditional tests (957 total), `dotnet format`,
+> targets, AOT proof, and this as-built record. The post-review D-040 fix (owner-approved) makes
+> `TextureDescriptor.Format`/`Filter`/`Wrap` non-null `Bork2d.Api.Assets` enums instead of nullable
+> strings; it leaves the rest of the locked task scope intact. Local verification: Debug/Release
+> zero-warning builds, 946 deterministic plus 12 opt-in/conditional tests (958 total), `dotnet format`,
 > `scripts/check-docs.ps1`, `git diff --check`, and the local AOT publish/run. CI runs only on pull
 > requests targeting `develop` and pushes to `develop`, so the task branch is verified by those local
 > gates.
@@ -33,6 +35,7 @@ Implement a game-owned, JIT, build-time asset pipeline with:
 | D-037 | `MyGame.Assets` owns assets/processors/configuration, is the CLI, and bakes on build. `Project.Common` remains the runtime data-type assembly. `Project.Desktop` takes a build-only reference and asks the assets executable to copy packs. No descriptor. |
 | D-038 | The generated host, host generation/loading/ALC/manifest/state/hash, `MetadataLoadContext`, `generate-host`, and `WithCommonAssembly` are removed. Data types are registered with `RegisterAsset<T>()`; `[bork2d].type` remains the per-source selector. No reflection. |
 | D-039 | This spec and the final design in [asset processors](../architecture/asset-processors.md) are the locked implementation variant; changes need a new owner decision. |
+| D-040 | Owner-approved exception to D-039 (2026-10-27): `TextureDescriptor.Format`/`Filter`/`Wrap` are the non-null `Bork2d.Api.Assets` enums `TextureFormat`/`TextureFilter`/`TextureWrap` (defaults `Rgba8`/`Linear`/`Clamp`), and the builder uses the same enums. |
 
 Default helpers:
 
@@ -61,8 +64,11 @@ Default helpers:
 
 ### 3.2 Out of scope
 
-- Runtime/API changes beyond removing host/tooling; `IAssets`, `TextureDescriptor`, `SpriteAsset`,
-  and the pack format are unchanged.
+- Runtime/API changes beyond removing host/tooling and the D-040 owner exception; `IAssets`,
+  `SpriteAsset`, and the pack format are unchanged. D-040 makes
+  `TextureDescriptor.Format`/`Filter`/`Wrap` non-null `Bork2d.Api.Assets` enums
+  (`TextureFormat`/`TextureFilter`/`TextureWrap`, defaults `Rgba8`/`Linear`/`Clamp`); nullable
+  descriptor strings are gone.
 - Reflection, assembly scanning, `MetadataLoadContext`, a generated host, or a source generator.
 - A TOML editor/writer beyond creating a missing `Required` sidecar.
 - Multi-input processors (atlas + metadata, font + glyph list).
@@ -122,7 +128,8 @@ public sealed class BakeApplication
 }
 ```
 
-`TextureFilter` is `Nearest`/`Linear`; `TextureWrap` is `Clamp`/`Repeat`.
+`TextureFilter` and `TextureWrap` are the `Bork2d.Api.Assets` enums: `TextureFilter` is
+`Linear` (default) or `Nearest`, and `TextureWrap` is `Clamp` (default) or `Repeat`.
 
 Builder rules:
 
@@ -283,7 +290,8 @@ for each file (sorted, reparse points skipped):
 
 - `TextureProcessor : AssetProcessor<TextureSidecar>`, extensions `png`, `jpg`, `jpeg`, `bmp`,
   `tga`.
-- `TextureSidecar` is a `[GenerateShape]` type with `filter`/`wrap`.
+- `TextureSidecar` is a `[GenerateShape]` type with `filter`/`wrap` members typed as the
+  `Bork2d.Api.Assets` `TextureFilter`/`TextureWrap` enums.
 - `CreateDefaultSidecar` returns the builder's `WithTextureDefaults` values. A texture without a
   sidecar gets one created on the first bake.
 - Decode with StbImageSharp to straight-alpha RGBA8; no premultiplication/gamma/ICC/flipping/
@@ -537,5 +545,5 @@ git diff --check
 - [Assets and tooling](../architecture/assets-and-tooling.md) — pack/VFS and target pipeline.
 - [Projects and dependencies](../architecture/projects.md) — project graph and `MyGame.Assets`.
 - [API guide](../api/guide.md), [API reference](../api/reference.md) — builder/processor examples.
-- [Decision log](../decisions.md) — D-036/D-037/D-038/D-039.
+- [Decision log](../decisions.md) — D-036/D-037/D-038/D-039/D-040.
 - [M4 spec](m4-serialization-and-bake.md) — historical M4 record.

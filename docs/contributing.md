@@ -38,7 +38,7 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **957 tests**: 945 deterministic tests run in CI; 12 opt-in/conditional tests are
+The suite is **958 tests**: 946 deterministic tests run in CI; 12 opt-in/conditional tests are
 skipped unless the environment variable or capability is present (9 `[WindowFact]` real-window tests
 and 3 reparse-point capability tests). The deterministic set includes the pack-format/writer tests,
 the path/VFS/browse/contract tests, the loader/threading and error-contract tests, generic pack-time
@@ -132,9 +132,9 @@ is an error, D-034); `_camelCase` private fields; `PascalCase` constants; `I`-pr
 code; no commented-out code; XML docs on public API.
 
 M3 closed the former XML-doc gap: `IAssets`, `AssetInfo`, `AssetException`, `AssetErrorKind`,
-`AssetRef<T>`, `DataRef`, `SpriteAsset`, `TextureDescriptor`, `SpriteTopology`, `Color`,
-`ClearKind`, and `Bork2dAppBuilder.WithoutAssets()` are documented. The rule applies to every new
-public API; do not remove it.
+`AssetRef<T>`, `DataRef`, `SpriteAsset`, `TextureDescriptor`, `SpriteTopology`, `TextureFormat`,
+`TextureFilter`, `TextureWrap`, `Color`, `ClearKind`, and `Bork2dAppBuilder.WithoutAssets()` are
+documented. The rule applies to every new public API; do not remove it.
 
 ## 5. Architecture boundaries
 

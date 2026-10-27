@@ -1,9 +1,9 @@
 # Bork2d Documentation
 
-> **Status:** **M0–M4 are merged into `develop`; D-036/D-037/D-038 are implemented as-built on
-> `task/file-processors` (2026-10-27).** The repository contains the M1 build/quality baseline,
-> public contracts, root-owned scene tree, builder, logging, the NativeAOT smoke app, the M2 SDL
-> windowed host (window, input, time, uncapped loop), the M3 asset pipeline (pack reader/writer,
+> **Status:** **M0–M4 are merged into `develop`; D-036/D-037/D-038/D-039/D-040 are implemented
+> as-built on `task/file-processors` (2026-10-27).** The repository contains the M1 build/quality
+> baseline, public contracts, root-owned scene tree, builder, logging, the NativeAOT smoke app, the
+> M2 SDL windowed host (window, input, time, uncapped loop), the M3 asset pipeline (pack reader/writer,
 > VFS, loader, public `SpriteAsset`/`TextureDescriptor`, typed `AssetRef<T>`/`DataRef` links,
 > runtime integration), and the builder-configured bake: a game-owned `MyGame.Assets` executable
 > registers explicit data types and asset processors, bakes on build, and records a schema-3
@@ -14,8 +14,8 @@
 > The [file-processors spec](specs/file-processors.md) owns implementation scope/acceptance; the
 > [asset processors](architecture/asset-processors.md) doc owns the architecture. The AOT smoke loads
 > the fixture packs (8 main / 9 merged entries) with no tooling assembly in its publish. Verification
-> is the local gate set: Debug/Release zero-warning builds, 945 deterministic plus 12
-> opt-in/conditional tests (957 total), `dotnet format`, the docs link check, `git diff --check`, and
+> is the local gate set: Debug/Release zero-warning builds, 946 deterministic plus 12
+> opt-in/conditional tests (958 total), `dotnet format`, the docs link check, `git diff --check`, and
 > the local AOT publish/run. CI runs on pull requests to `develop` and pushes to `develop`.
 
 Bork2d is a focused 2D game engine for .NET: **Vulkan 1.3** rendering, **SDL2** windowing through
@@ -178,7 +178,7 @@ One fact has one owner. Update the owner and link to it; do not copy.
 | **Bake fixture** | `Bork2d.BakeFixture`: game-side `Project.Common`-like data types (`GameConfig`, `Stats`, `StatsRoot`, `Unit`); source trees/processors live in the build-only `Bork2d.BakeFixture.Assets` executable. Its committed `player.png`, `checker.ppm`, and `archer.unit` are fixture **source assets**, not test/pack binary fixtures. |
 | **Structural determinism** | Same entry table/order and byte-identical decompressed payloads for identical inputs; whole-pack byte identity is not guaranteed. |
 | **Incremental bake** | Content-hash gate that skips a bake when the builder configuration, registered types, sources, game assembly, processor set/code, tool, and mode are unchanged; a multi-pack project skips only when every output is current. |
-| **Texture descriptor** | Public MessagePack metadata (payload `DataRef`, width, height, format, filter, wrap). |
+| **Texture descriptor** | Public MessagePack metadata (payload `DataRef`, width, height, `TextureFormat` format, `TextureFilter` filter, `TextureWrap` wrap); the three settings are non-null enums (D-040). |
 | **Sprite asset** | Public MessagePack quad definition: texture `AssetRef<TextureDescriptor>`, UVs, pivot, topology, optional indices, pixels-per-unit. |
 | **Asset reference** | `AssetRef<TAsset>`: a typed canonical path string to a MessagePack asset; `null` is absent. |
 | **Data reference** | `DataRef`: a canonical path string to a raw asset; `null` is absent. |

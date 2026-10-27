@@ -21,9 +21,9 @@ internal static class SpriteTestSupport
         Payload = PayloadPath,
         Width = 2,
         Height = 2,
-        Format = "rgba8",
-        Filter = "linear",
-        Wrap = "clamp",
+        Format = TextureFormat.Rgba8,
+        Filter = TextureFilter.Linear,
+        Wrap = TextureWrap.Clamp,
     };
 
     /// <summary>Creates a valid Quad sprite over the standard texture path.</summary>

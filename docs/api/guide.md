@@ -405,7 +405,9 @@ byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
   so a MessagePack `nil` payload is an `AssetException(Decode)` fault, never a silent `default`.
   `SpriteAsset.Texture` is an `AssetRef<TextureDescriptor>` and
   `TextureDescriptor.Payload` is a `DataRef`; resolve them with the reference overloads. A `null`
-  reference means absent and is not a load request (it throws `ArgumentException`). Both sprite and
+  reference means absent and is not a load request (it throws `ArgumentException`). The descriptor's
+  `Format`/`Filter`/`Wrap` fields are non-null `TextureFormat`/`TextureFilter`/`TextureWrap` enums
+  (defaults `Rgba8`/`Linear`/`Clamp`), never strings. Both sprite and
   descriptor are public MessagePack assets in `Bork2d.Api.Assets`; the built-in texture processor (a
   normal registered processor) validates descriptor fields, and the bake validates
   binding/references, while sprite field validation (UV extents, pivot, topology, indices) is M5
@@ -459,6 +461,7 @@ let the tooling bake the main pack and any DLC packs. The runtime never sees TOM
 roots and processors. Its `Program.cs` configures the bake; there is no `bork2d.project.toml`:
 
 ```csharp
+using Bork2d.Api.Assets;
 using Bork2d.Bake.Builder;
 
 return await new BakeApplicationBuilder()

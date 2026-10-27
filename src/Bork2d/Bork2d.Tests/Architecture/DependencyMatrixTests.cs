@@ -207,8 +207,6 @@ public sealed class DependencyMatrixTests
                 "Bork2d.Bake.Builder.IAssetProcessor",
                 "Bork2d.Bake.Builder.IAssetProcessorDiagnostics",
                 "Bork2d.Bake.Builder.SidecarPolicy",
-                "Bork2d.Bake.Builder.TextureFilter",
-                "Bork2d.Bake.Builder.TextureWrap",
             },
             exported);
     }

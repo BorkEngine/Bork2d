@@ -24,7 +24,6 @@ namespace Bork2d.Bake.Builder.Processors;
 internal sealed class TextureProcessor : AssetProcessor<TextureSidecar>
 {
     private const string RawSuffix = "-raw";
-    private const string FormatRgba8 = "rgba8";
 
     private static readonly string[] _extensions = ["png", "jpg", "jpeg", "bmp", "tga"];
 
@@ -87,9 +86,9 @@ internal sealed class TextureProcessor : AssetProcessor<TextureSidecar>
             Payload = payloadPath,
             Width = (uint)width,
             Height = (uint)height,
-            Format = FormatRgba8,
-            Filter = filter == TextureFilter.Nearest ? "nearest" : "linear",
-            Wrap = wrap == TextureWrap.Repeat ? "repeat" : "clamp",
+            Format = TextureFormat.Rgba8,
+            Filter = filter,
+            Wrap = wrap,
         };
 
         context.Outputs.AddAsset(context.BaseAssetPath, descriptor);

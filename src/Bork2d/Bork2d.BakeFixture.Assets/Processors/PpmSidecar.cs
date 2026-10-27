@@ -1,4 +1,4 @@
-using Bork2d.Bake.Builder;
+using Bork2d.Api.Assets;
 using PolyType;
 
 namespace Bork2d.BakeFixture.Assets.Processors;

@@ -73,7 +73,7 @@ public sealed class PackCompositionTests
         Assert.Equal(PayloadPath, descriptor.Payload.Path);
         Assert.Equal(2u, descriptor.Width);
         Assert.Equal(2u, descriptor.Height);
-        Assert.Equal("rgba8", descriptor.Format);
+        Assert.Equal(TextureFormat.Rgba8, descriptor.Format);
         Assert.Equal(payload, await host.Service.LoadData(PayloadPath));
     }
 
@@ -176,9 +176,9 @@ public sealed class PackCompositionTests
             Payload = PayloadPath,
             Width = 2,
             Height = 2,
-            Format = "rgba8",
-            Filter = "linear",
-            Wrap = "clamp",
+            Format = TextureFormat.Rgba8,
+            Filter = TextureFilter.Linear,
+            Wrap = TextureWrap.Clamp,
         };
 
         return BakeProcessorOutput.ForAsset(

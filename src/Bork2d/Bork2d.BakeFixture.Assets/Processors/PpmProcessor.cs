@@ -25,7 +25,6 @@ namespace Bork2d.BakeFixture.Assets.Processors;
 internal sealed class PpmProcessor : AssetProcessor<PpmSidecar>
 {
     private const string RawSuffix = "-raw";
-    private const string FormatRgba8 = "rgba8";
     private const int MaximumColorValue = 255;
     private const byte AlphaOpaque = 255;
 
@@ -99,9 +98,9 @@ internal sealed class PpmProcessor : AssetProcessor<PpmSidecar>
             Payload = payloadPath,
             Width = (uint)width,
             Height = (uint)height,
-            Format = FormatRgba8,
-            Filter = filter == TextureFilter.Nearest ? "nearest" : "linear",
-            Wrap = wrap == TextureWrap.Repeat ? "repeat" : "clamp",
+            Format = TextureFormat.Rgba8,
+            Filter = filter,
+            Wrap = wrap,
         };
 
         context.Outputs.AddAsset(context.BaseAssetPath, descriptor);

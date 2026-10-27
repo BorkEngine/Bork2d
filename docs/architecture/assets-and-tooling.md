@@ -1,12 +1,13 @@
 # Assets, Bake, and Editor Tooling
 
 > **Status:** **Implemented as-built through `task/file-processors` (2026-10-27; D-036/D-037/D-038/
-> D-039).** `Bork2d.Assets` provides the v1 pack reader/writer and the public
+> D-039/D-040).** `Bork2d.Assets` provides the v1 pack reader/writer and the public
 > `Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode` tooling surface, canonical paths, the
 > internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, one loader thread with
 > `LoadData`/`LoadAsset<T>`, generic `AssetRef<T>`/`DataRef` reference validation at pack build, and
-> the app-scoped service wired into `Run()`/`Dispose()`. `SpriteAsset`, `TextureDescriptor`, and
-> `SpriteTopology` are public `Bork2d.Api` assets; there is no `LoadSprite` handle path.
+> the app-scoped service wired into `Run()`/`Dispose()`. `SpriteAsset`, `TextureDescriptor`,
+> `SpriteTopology`, and the `TextureFormat`/`TextureFilter`/`TextureWrap` enums are public
+> `Bork2d.Api` assets; there is no `LoadSprite` handle path.
 >
 > The bake is the game-owned builder flow: a build-time `MyGame.Assets`/fixture assets executable
 > configures ordered packs, roots, texture defaults, processors, and explicit `RegisterAsset<T>()`
@@ -300,12 +301,14 @@ A texture is a MessagePack **descriptor** plus a **raw payload**: `art/player` a
 | `Payload` | `DataRef` | Raw asset reference containing RGBA8 pixels (`null` = absent). |
 | `Width` | `uint` | Pixel width. |
 | `Height` | `uint` | Pixel height. |
-| `Format` | `string?` | `rgba8` in v1; KTX2 is later. |
-| `Filter` | `string?` | `nearest` or `linear`. |
-| `Wrap` | `string?` | `clamp` or `repeat`. |
+| `Format` | `TextureFormat` | `Rgba8` in v1 (the default); KTX2 is later. |
+| `Filter` | `TextureFilter` | `Linear` (the default) or `Nearest`; sampler state. |
+| `Wrap` | `TextureWrap` | `Clamp` (the default) or `Repeat`; sampler state. |
 
-These are the CLR property names; Nerdbank writes them verbatim as the MessagePack map keys, so the
-pack stores `Payload`, `Width`, and so on (not lowercase field names).
+The three descriptor settings are non-null `Bork2d.Api.Assets` enums (D-040), not strings, and are
+stored as their underlying integer values. These are the CLR property names; Nerdbank writes them
+verbatim as the MessagePack map keys, so the pack stores `Payload`, `Width`, and so on (not lowercase
+field names).
 
 `rgba8` payload: width × height × 4 bytes, row-major, top-left origin, no padding, straight alpha,
 8 bits per channel, treated as sRGB. The source is a `<source>.toml` sidecar carrying **import
@@ -317,7 +320,8 @@ missing sidecars are valid and take the builder's texture defaults
 
 - **Public shape.** `TextureDescriptor` is a public `[GenerateShape]` class in
   `Bork2d.Api.Assets` with PascalCase property-name keys (no `[Key]`) and no per-asset version.
-  `System.Numerics.Vector2` uses Nerdbank's generated shape; there is no reflection resolver.
+  `Format`, `Filter`, and `Wrap` are the non-null `TextureFormat`/`TextureFilter`/`TextureWrap` enums
+  (D-040). `System.Numerics.Vector2` uses Nerdbank's generated shape; there is no reflection resolver.
 - **No runtime validation.** `LoadAsset<TextureDescriptor>` returns the packed descriptor as
   stored. `PackBuilder` validates that a non-null `Payload` exists and targets a raw entry. The
   built-in texture processor owns canonical-path, dimension, format, filter/wrap, and payload-size
@@ -494,6 +498,9 @@ as follows.
 code:
 
 ```csharp
+using Bork2d.Api.Assets;
+using Bork2d.Bake.Builder;
+
 return await new BakeApplicationBuilder()
     .WithProjectRoot(".")                      // MSBuild passes $(MSBuildProjectDirectory)
     .WithPack("assets.pck", "Assets")          // first pack = main

@@ -1,3 +1,4 @@
+using Bork2d.Api.Assets;
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Builder.Processors;
 using Bork2d.Bake.Diagnostics;

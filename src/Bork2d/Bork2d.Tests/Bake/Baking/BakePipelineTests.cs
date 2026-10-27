@@ -67,9 +67,9 @@ public sealed class BakePipelineTests
         Assert.Equal(BakeProjectFixture.TexturePayloadPath, texture.Payload.Path);
         Assert.Equal(2u, texture.Width);
         Assert.Equal(2u, texture.Height);
-        Assert.Equal("rgba8", texture.Format);
-        Assert.Equal("nearest", texture.Filter);
-        Assert.Equal("repeat", texture.Wrap);
+        Assert.Equal(TextureFormat.Rgba8, texture.Format);
+        Assert.Equal(TextureFilter.Nearest, texture.Filter);
+        Assert.Equal(TextureWrap.Repeat, texture.Wrap);
         Assert.Equal(
             BakeProjectFixture.ExpectedTexturePayload,
             await host.Service.LoadData(texture.Payload));
@@ -156,8 +156,8 @@ public sealed class BakePipelineTests
         host.Start();
         TextureDescriptor descriptor =
             await host.Service.LoadAsset<TextureDescriptor>(BakeProjectFixture.TexturePath);
-        Assert.Equal("linear", descriptor.Filter);
-        Assert.Equal("clamp", descriptor.Wrap);
+        Assert.Equal(TextureFilter.Linear, descriptor.Filter);
+        Assert.Equal(TextureWrap.Clamp, descriptor.Wrap);
         Assert.Equal(
             BakeProjectFixture.ExpectedTexturePayload,
             await host.Service.LoadData(BakeProjectFixture.TexturePayloadPath));

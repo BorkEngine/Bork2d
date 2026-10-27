@@ -310,6 +310,7 @@ public sealed class BakeTargetsIntegrationTests
         }
 
         private static string AssetsProgram() => """
+            using Bork2d.Api.Assets;
             using Bork2d.Bake.Builder;
 
             return await new BakeApplicationBuilder()

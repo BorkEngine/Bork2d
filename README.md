@@ -28,7 +28,7 @@ that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets sh
 | [`Bork2d.Bake.Builder`](src/Bork2d/Bork2d.Bake.Builder) | Public JIT builder/processor/CLI surface used by game and fixture assets executables. |
 | [`Bork2d.BakeFixture`](src/Bork2d/Bork2d.BakeFixture) | AOT-safe game-side fixture data types (`GameConfig`, `Stats`, `StatsRoot`, `Unit`). |
 | [`Bork2d.BakeFixture.Assets`](src/Bork2d/Bork2d.BakeFixture.Assets) | Build-only fixture assets executable; owns `Assets/`/`DLC1/`, PPM/Unit processors, and bakes on build. |
-| [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite and dependency-matrix test (957 tests: 945 deterministic, 12 opt-in/conditional). |
+| [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite and dependency-matrix test (958 tests: 946 deterministic, 12 opt-in/conditional). |
 | [`Bork2d.AotSmoke`](src/Bork2d/Bork2d.AotSmoke) | NativeAOT smoke executable: headless one-tick run loading the baked fixture packs (8 main / 9 merged entries) plus `--windowed [--ticks N]` SDL demo; local publish/run gate. |
 | `Bork2d.Editor` | Planned Avalonia editor library/app (M5); JIT, not in the solution. |
 
@@ -97,9 +97,10 @@ Start at the [documentation index](docs/README.md).
   packs, texture defaults, processors, explicit `RegisterAsset<T>()` types) bakes on build and is the
   CLI; source file types are registered processors with `None`/`Required` sidecars. The schema-3
   manifest makes an unchanged second build a no-op. Runtime data types stay in `Project.Common`.
-- Textures are MessagePack descriptors plus raw RGBA8 payloads; sprites are quads with UVs, pivot,
-  topology, optional indices, and pixels-per-unit scale. No vertices array; the shader generates
-  corners.
+- Textures are MessagePack descriptors plus raw RGBA8 payloads; the descriptor's
+  `Format`/`Filter`/`Wrap` are the non-null `TextureFormat`/`TextureFilter`/`TextureWrap` enums
+  (defaults `Rgba8`/`Linear`/`Clamp`). Sprites are quads with UVs, pivot, topology, optional
+  indices, and pixels-per-unit scale. No vertices array; the shader generates corners.
 - One instanced draw per non-empty camera, bindless texture pages, dynamic rendering.
 - Scene objects are owned by `IEngine.Root` (read-only). Detach with `Parent = null`; re-attach the
   same object later. No entity `Dispose`/`IsAlive`, IDs, or ordered discovery.
