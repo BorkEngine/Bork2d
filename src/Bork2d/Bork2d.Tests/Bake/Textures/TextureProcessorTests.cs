@@ -528,7 +528,13 @@ public sealed class TextureProcessorTests
         BakeResult result = project.Bake();
 
         Assert.Equal(BakeStatus.Success, result.Status);
-        Assert.Empty(result.Diagnostics);
+        Assert.DoesNotContain(
+            result.Diagnostics,
+            diagnostic => diagnostic.Severity == BakeSeverity.Error);
+        BakeDiagnostic created = Assert.Single(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code == BakeDiagnosticCodes.ProcessorSidecarCreated);
+        Assert.Equal("Assets/textures/real.png.toml", created.FilePath);
         Assert.Equal(["textures/real", "textures/real-raw"], result.Entries.Select(entry => entry.Path));
     }
 
