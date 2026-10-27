@@ -434,7 +434,7 @@ the JIT tooling; the runtime has no TOML parser, reflection serializer, or bake 
   [Assets and tooling §11](../architecture/assets-and-tooling.md#11-build-pipeline), the TOML model
   and leaves in [Assets and tooling §10](../architecture/assets-and-tooling.md#10-toml-source-model),
   and the as-built evidence in the
-  [M4 spec §22](../specs/m4-serialization-and-bake.md#22-as-built-evidence-m-4fix-1-revision).
+  [M4 spec §22](../specs/m4-serialization-and-bake.md#22-as-built-evidence-m-4fix-2-revision).
 
 ## 8. `ICamera<TLayer>`
 
@@ -665,7 +665,7 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 using Bork2d.Assets.Pack;
 
 var builder = new PackBuilder(PackCompressionMode.Release);
-builder.AddRaw("textures/player-raw", rgba8Bytes);
+builder.AddRaw("art/player-raw", rgba8Bytes);
 builder.AddMessagePack("data/config", new GameConfig { /* generated shape on GameConfig */ });
 builder.Write("assets.pck");   // overwrites; relative to the current directory
 ```

@@ -3,9 +3,10 @@
 > **Status:** **M0 complete; M1 merged into `develop` (2026-10-25, PR #1); M2 merged into `develop`
 > (2026-10-26, PR #2); M3 (assets: pack, VFS, descriptors) merged into `develop` (2026-10-26,
 > PR #4); the post-M3 asset-reference refactor (D-035) is merged (PR #6); M4 (serialization and
-> bake) is implementation complete on `m-4/common` — the final PR is pending and M4 is not
-> merged, and the owner-requested `m-4/fix-1` revision (D-M4-13: per-source `[bork2d].type`,
-> location-free data/textures, `-raw` payload paths) is in progress.** The repository contains the
+> bake) is implementation complete on `m-4/common` — PR #7 is open and M4 is not
+> merged, and the owner-requested revision (D-M4-13: per-source `[bork2d].type`,
+> location-free data/textures, `-raw` payload paths, plus the committed fixture source PNG) is
+> complete on `m-4/fix-2`.** The repository contains the
 > M1 build/quality baseline, public contracts, root-owned
 > scene tree, builder, logging, the NativeAOT smoke app, the M2 SDL windowed host (window, input,
 > time, uncapped loop), the M3 asset pipeline (pack reader/writer, VFS, loader, public
@@ -152,7 +153,7 @@ One fact has one owner. Update the owner and link to it; do not copy.
 | **Bake host** | The generated `Bork2d.BakeHost` assembly that statically knows the mapped types and calls generated bind/pack code; not a solution project. |
 | **Project descriptor** | `bork2d.project.toml`: asset root, pack/host locations, and texture defaults; it declares no types (each data TOML carries `[bork2d].type`). |
 | **Source type metadata** | The reserved top-level `[bork2d] type = "Full.Type.Name"` table in a custom-data TOML (D-M4-13); the root table is binder-ignored metadata. |
-| **Bake fixture** | `Bork2d.BakeFixture`: the game-side `Project.Common`-like data types plus `Assets/` tree used by the bake and AOT proofs. |
+| **Bake fixture** | `Bork2d.BakeFixture`: the game-side `Project.Common`-like data types plus `Assets/` tree used by the bake and AOT proofs; its committed `Assets/art/player.png` is a fixture **source asset** that the baker imports, not a test/pack binary fixture. |
 | **Structural determinism** | Same entry table/order and byte-identical decompressed payloads for identical inputs; whole-pack byte identity is not guaranteed. |
 | **Incremental bake** | Content-hash gate that skips host generation/bake when the descriptor, sources, game assembly, tool, and mode are unchanged. |
 | **Texture descriptor** | Public MessagePack metadata (payload `DataRef`, width, height, format, filter, wrap). |
