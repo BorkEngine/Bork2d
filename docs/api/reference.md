@@ -70,7 +70,8 @@ from the top-left, and an integer `ZIndex` sorts higher later. Sprite asset geom
 
 `Bork2d.Api` declares the interfaces in §2–§10 across the area namespaces in §1.5, plus the value
 types `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, `AssetRef<TAsset>`, `DataRef`,
-and `SpriteTopology`, the public assets `SpriteAsset` and `TextureDescriptor`, `Bork2dException`,
+`SpriteTopology`, and the texture enums `TextureFormat`, `TextureFilter`, and `TextureWrap`, the
+public assets `SpriteAsset` and `TextureDescriptor`, `Bork2dException`,
 the error pair `AssetException`/`AssetErrorKind`, and the `ColorMarshaler`/`AssetRefMarshaler<TAsset>`/
 `DataRefMarshaler` serialization infrastructure; `ILoggerFactory` is a Microsoft.Extensions.Logging
 type exposed by `IEngine` (not defined in `Bork2d.Api`). The runtime is NativeAOT- and trim-safe: no
@@ -103,7 +104,7 @@ namespace. Add the using for each area you touch (D-034).
 | Namespace | Types |
 | --- | --- |
 | `Bork2d.Api` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
-| `Bork2d.Api.Assets` | `IAssets`, `AssetInfo`, `AssetException`, `AssetErrorKind`, `AssetRef<TAsset>`, `DataRef`, `SpriteAsset`, `TextureDescriptor`, `SpriteTopology` |
+| `Bork2d.Api.Assets` | `IAssets`, `AssetInfo`, `AssetException`, `AssetErrorKind`, `AssetRef<TAsset>`, `DataRef`, `SpriteAsset`, `TextureDescriptor`, `SpriteTopology`, `TextureFormat`, `TextureFilter`, `TextureWrap` |
 | `Bork2d.Api.Scene` | `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
 | `Bork2d.Api.Rendering` | `Color`, `ColorMarshaler`, `ClearKind` |
 | `Bork2d.Api.Input` | `IInput`, `KeyCode`, `MouseButton` |
@@ -572,9 +573,12 @@ the pack has no per-asset version, D-M3-05).
 `SpriteAsset` is a public generated-shape asset: `AssetRef<TextureDescriptor> Texture`,
 `Vector2[]? Uvs`, `float Scale`, `Vector2 Pivot`, `SpriteTopology Topology`, `ushort[]? Indices`.
 `TextureDescriptor` is a public generated-shape asset: `DataRef Payload`, `uint Width`,
-`uint Height`, `string? Format`, `string? Filter`, `string? Wrap`. Neither type has runtime field
-validation; the built-in texture processor validates descriptor fields and the bake validates
-binding/references, while sprite UV/pivot/scale/topology/indices validation is M5 (D-M4-06).
+`uint Height`, `TextureFormat Format` (default `Rgba8`), `TextureFilter Filter` (default `Linear`),
+and `TextureWrap Wrap` (default `Clamp`). The three fields are non-null enums, not strings: `Rgba8`
+is the only v1 format, and `Filter`/`Wrap` are sampler state. Neither `SpriteAsset` nor
+`TextureDescriptor` has runtime field validation; the built-in texture processor validates descriptor
+fields and the bake validates binding/references, while sprite UV/pivot/scale/topology/indices
+validation is M5 (D-M4-06).
 `SpriteTopology` is `Quad`, `TriangleStrip`, or `Triangles`; v1 draws `Quad` only.
 
 `AssetInfo` is `readonly record struct AssetInfo(string Path, bool IsRaw, bool IsCompressed,

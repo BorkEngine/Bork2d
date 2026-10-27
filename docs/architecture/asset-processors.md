@@ -1,6 +1,6 @@
 # Asset Processors and `MyGame.Assets`
 
-> **Status:** **Implemented as-built on `task/file-processors` (D-036/D-037/D-038/D-039,
+> **Status:** **Implemented as-built on `task/file-processors` (D-036/D-037/D-038/D-039/D-040,
 > 2026-10-27).** This document is the architecture of the shipped processor model: every non-TOML
 > source type is an asset processor registered in a game-owned executable (`MyGame.Assets`), the
 > project descriptor is removed, all bake configuration is builder configuration in that executable,
@@ -88,6 +88,7 @@ MyGame/
 
 ```csharp
 // MyGame.Assets/Program.cs
+using Bork2d.Api.Assets;
 using Bork2d.Bake.Builder;
 
 return await new BakeApplicationBuilder()
@@ -402,8 +403,9 @@ The existing texture behavior moves behind the same contract; it does not keep a
 - It emits a `TextureDescriptor` instance at `BaseAssetPath` and the raw RGBA8 payload at
   `BaseAssetPath + "-raw"`; `Payload` points at the raw path. The engine serializes the descriptor;
   this preserves the M3/M4 runtime contract.
-- The descriptor's `filter`/`wrap` values come from the sidecar or the builder defaults. There is
-  no `[textures]` table and no descriptor parser.
+- The descriptor's `filter`/`wrap` values come from the sidecar or the builder defaults and are
+  written as the `Bork2d.Api.Assets` `TextureFilter`/`TextureWrap` enums; `Format` is always
+  `TextureFormat.Rgba8` (D-040). There is no `[textures]` table and no descriptor parser.
 - `TexturePipeline`, `TextureSidecarParser`, `BakedTexture`, `TextureSourceEntry`, and the
   texture-specific `BakedAssetEntry`/`PackComposer` branches are removed or become private
   implementation details of the processor.
