@@ -1,6 +1,7 @@
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Paths;
 using Bork2d.Bake.Project;
+using Bork2d.Bake.Toml;
 
 namespace Bork2d.Bake.Sources;
 
@@ -33,10 +34,17 @@ internal static class BakeSourceDiscovery
     /// <summary>Discovers the custom-data sources of a project.</summary>
     /// <param name="descriptor">The parsed project descriptor.</param>
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
+    /// <param name="validateSidecarSyntax">
+    /// When <see langword="true"/>, a sidecar-shaped TOML that is not data still has its syntax
+    /// validated. <c>generate-host</c> uses this so a broken sidecar fails before any host file is
+    /// written; the bake/full pipeline leaves sidecar syntax to the texture parser to avoid a
+    /// duplicate diagnostic.
+    /// </param>
     /// <returns>The discovered sources, sorted ordinal by canonical asset path.</returns>
     internal static IReadOnlyList<BakeSource> Discover(
         ProjectDescriptor descriptor,
-        BakeDiagnostics diagnostics)
+        BakeDiagnostics diagnostics,
+        bool validateSidecarSyntax = false)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -76,10 +84,16 @@ internal static class BakeSourceDiscovery
                 // The texture pipeline owns a sidecar-shaped document unless it declares a root
                 // [bork2d] table. A typed document with this name is data and is diagnosed here
                 // (its asset path contains a dot); a text or syntax failure is left to the sidecar
-                // parser so the same file is not reported twice.
+                // parser so the same file is not reported twice, except during generate-host where
+                // the syntax is validated because no texture pipeline runs.
                 string? candidate = TryReadSilently(file);
                 if (candidate is null || !BakeSourceMetadataReader.TryHasBork2dTable(candidate))
                 {
+                    if (validateSidecarSyntax && candidate is not null)
+                    {
+                        _ = TomlDocument.TryParse(candidate, diagnosticPath, diagnostics, out _, out _);
+                    }
+
                     continue;
                 }
             }

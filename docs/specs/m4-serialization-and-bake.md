@@ -1038,7 +1038,7 @@ Run on the fix-1 branch (Windows 11, SDK `11.0.100-rc.1.26425.128`, `win-x64`):
 | --- | --- |
 | `dotnet build src/Bork2d/Bork2d.slnx -c Debug` | 0 warnings, 0 errors; the targets bake `Bork2d.AotSmoke/bin/Debug/net11.0/assets.pck` |
 | `dotnet build src/Bork2d/Bork2d.slnx -c Release` | 0 warnings, 0 errors; the targets bake the release pack |
-| `dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build` | 0 failed, **877 passed**, **12 skipped**, 889 total |
+| `dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build` | 0 failed, **878 passed**, **12 skipped**, 890 total |
 | `dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore` | exit 0, no changes |
 | `pwsh scripts/check-docs.ps1` | passes (all local links/anchors) |
 | `git diff --check` | clean |
@@ -1070,4 +1070,4 @@ contains **no** `Bork2d.Bake.dll`, `Bork2d.Bake.Cli*`, `Bork2d.BakeHost*`, `Toml
 | 9. AOT | `m-4/common` evidence: published exe loads the baked pack and exits 0; `--windowed --ticks 120` exits 0; zero-warning publish contains no tooling assemblies. Fix-1 verifies the AOT project builds with `textures/player-raw`; fix-2 re-runs publish/run |
 | 10. Boundaries | `DependencyMatrixTests` (Bake/Bake.Cli internal, runtime assemblies tooling-free, generated host not in the solution) and the fixture's `Bork2d.Api`-only reference |
 | 11. Docs and decisions | Owning docs, roadmap delta, D-M4 entries, and AOT-gate docs updated in this change; they state that `partial` is PolyType's `[GenerateShape]` requirement |
-| 12. Gates | Debug/Release builds, 877+12 tests, format, docs check, `git diff --check`, and the AOT project build; AOT publish/run is re-run in fix-2 after the fixture PNG move |
+| 12. Gates | Debug/Release builds, 878+12 tests, format, docs check, `git diff --check`, and the AOT project build; AOT publish/run is re-run in fix-2 after the fixture PNG move |

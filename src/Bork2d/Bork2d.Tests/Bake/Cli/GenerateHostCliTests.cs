@@ -192,6 +192,39 @@ public sealed class GenerateHostCliTests
     }
 
     [Fact]
+    public void SidecarSyntaxErrorFailsGenerationBeforeTheHostIsWritten()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"bork2d-bake-cli-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(directory, "Assets", "art"));
+        File.WriteAllText(
+            Path.Combine(directory, TempBakeFixture.DescriptorFileName),
+            """
+            schema = 1
+
+            [assets]
+            root = "Assets"
+            """);
+        File.WriteAllText(
+            Path.Combine(directory, "Assets", "art", "player.png.toml"),
+            "filter = \n");
+        string output = CreateOutputDirectory();
+
+        Result result = Run(
+            "generate-host",
+            "--project",
+            Path.Combine(directory, TempBakeFixture.DescriptorFileName),
+            "--common",
+            _fixture.ProjectCommonAssemblyPath,
+            "--output",
+            output);
+
+        Assert.Equal(CliApplication.UsageExitCode, result.ExitCode);
+        Assert.Contains("error BK2001:", result.Error, StringComparison.Ordinal);
+        Assert.Contains("Assets/art/player.png.toml", result.Error, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(output, "BakeHost.csproj")));
+    }
+
+    [Fact]
     public void HelpListsBothCommands()
     {
         Result result = Run("--help");

@@ -33,7 +33,7 @@ dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The suite is **889 tests**: 877 deterministic tests run in CI; 12 opt-in/conditional tests are
+The suite is **890 tests**: 878 deterministic tests run in CI; 12 opt-in/conditional tests are
 skipped unless the environment variable or capability is present (9 `[WindowFact]` real-window tests
 and 3 reparse-point capability tests). The deterministic set includes the M3 pack-format/writer
 tests, the path/VFS/browse/contract tests, the loader/threading and error-contract tests, generic

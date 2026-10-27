@@ -60,7 +60,10 @@ internal static class HostGenerator
             return null;
         }
 
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
+            descriptor,
+            diagnostics,
+            validateSidecarSyntax: true);
         if (diagnostics.HasErrors)
         {
             return null;
