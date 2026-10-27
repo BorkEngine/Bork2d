@@ -9,8 +9,8 @@ namespace Bork2d.Bake.Hosting;
 /// The generated file contains only the type manifest, the <c>Bind</c> and <c>AddToPack</c>
 /// switches, and the host-load shape validation. Binding itself lives in the shared generic
 /// <c>TomlShapeBinder</c> (Q-07), so no member-level code or reflection is generated. Output uses
-/// <c>\n</c> line endings, no timestamps, and descriptor order, so identical inputs produce
-/// identical text.
+/// <c>\n</c> line endings, no timestamps, and distinct types in source discovery order, so identical
+/// inputs produce identical text (D-M4-13).
 /// </remarks>
 internal static class GeneratedBakeManifestWriter
 {
@@ -18,7 +18,7 @@ internal static class GeneratedBakeManifestWriter
     internal const string FileName = "BakeManifest.g.cs";
 
     /// <summary>Writes the manifest source for the mapped types.</summary>
-    /// <param name="mappings">The validated mappings in descriptor order.</param>
+    /// <param name="mappings">The validated distinct mappings in discovery order.</param>
     /// <returns>The generated C# source.</returns>
     internal static string Write(IReadOnlyList<BakeMappedType> mappings)
     {
@@ -57,7 +57,7 @@ internal static class GeneratedBakeManifestWriter
             {
                 lines.Add(
                     "        new global::Bork2d.Bake.Hosting.BakeTypeRegistration("
-                        + $"{Literal(mapping.TypeName)}, {Literal(mapping.SourcePrefix)}, "
+                        + $"{Literal(mapping.TypeName)}, "
                         + "global::Bork2d.Bake.Hosting.BakeAssetKind.MessagePack),");
             }
 
@@ -157,7 +157,7 @@ internal static class GeneratedBakeManifestWriter
                 lines.Add(
                     "        global::Bork2d.Bake.Hosting.BakeShapeValidator.ValidateRoot<"
                         + $"{mapping.CSharpName}>("
-                        + $"{Literal(mapping.TypeName)}, {Literal(mapping.SourcePrefix)}, "
+                        + $"{Literal(mapping.TypeName)}, "
                         + "diagnostics);");
             }
         }

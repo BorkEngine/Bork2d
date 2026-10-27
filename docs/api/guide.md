@@ -374,7 +374,7 @@ IReadOnlyList<AssetInfo> sprites = _engine.Assets.Browse("sprites");
 // Typed assets need a compiled shape; raw bytes use LoadData.
 GameConfig config = await _engine.Assets.LoadAsset<GameConfig>("data/config");
 LevelTuning tuning = await _engine.Assets.LoadAsset<LevelTuning>("data/level-tuning");
-byte[] pixels = await _engine.Assets.LoadData("textures/raw/player");
+byte[] pixels = await _engine.Assets.LoadData("textures/player-raw");
 
 // Sprites are normal public assets; reference links are typed path values.
 SpriteAsset player = await _engine.Assets.LoadAsset<SpriteAsset>("sprites/player/idle");
@@ -441,8 +441,7 @@ byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
 ### Data serialization and bake
 
 `Status: Current (M4) for custom data and sprite-as-data; sprite field validation and slicing are
-M5.` Author data as TOML in `Project.Common/Assets`, register it in `bork2d.project.toml`, and let
-the M4 tooling bake `assets.pck`. The runtime never sees TOML.
+M5.` Author data as TOML in `Project.Common/Assets`, declare each type in its own `[bork2d]` table, and let the M4 tooling bake `assets.pck`. The runtime never sees TOML.
 
 ```csharp
 using System.Text.Json.Serialization;
@@ -450,7 +449,7 @@ using Bork2d.Api.Assets;
 using Bork2d.Api.Rendering;
 using PolyType;
 
-// The descriptor ([[types]] prefix "data" -> MyGame.Data.GameConfig) registers the type.
+// The data TOML's [bork2d] table declares MyGame.Data.GameConfig; the descriptor has no type list.
 // [GenerateShape] + partial is PolyType's rule: it injects IShapeable<T> into the partial type.
 [GenerateShape]
 public sealed partial class GameConfig
@@ -480,11 +479,14 @@ max_players = 4          # [JsonPropertyName("max_players")]
 must = "present"         # [JsonRequired]
 tint = [1.0, 0.5, 0.25, 1.0]
 texture = "textures/player"
+
+[bork2d]
+type = "MyGame.Data.GameConfig"
 ```
 
 - **`partial` is PolyType's requirement.** On .NET 8+, `[GenerateShape]` emits
   `IShapeable<T>` through a partial declaration. There is no `[Bork2dSerializable]` attribute and no
-  Bork2d source generator; the project descriptor's `[[types]]` list is the registration.
+  Bork2d source generator; each data TOML's `[bork2d] type = "Full.Type.Name"` entry is the registration (D-M4-13).
 - **Keys and leaves.** Keys are camelCase; `[JsonPropertyName]`, `[JsonIgnore]`, and
   `[JsonRequired]` are honored. Supported leaves are booleans, integers, floats, strings, camelCase
   enums, `Guid`, offset date-times, `Vector2/3/4`, `Color`, `AssetRef<T>`/`DataRef` path strings,
@@ -512,7 +514,7 @@ the editor use it to produce the runtime packs the app loads. Game code must not
 using Bork2d.Assets.Pack;
 
 var builder = new PackBuilder(PackCompressionMode.Release);
-builder.AddRaw("textures/raw/player", rgba8Bytes);
+builder.AddRaw("textures/player-raw", rgba8Bytes);
 builder.AddMessagePack("data/config", new GameConfig { /* [GenerateShape] type */ });
 builder.Write("assets.pck"); // overwrites; relative paths resolve against the current directory
 ```

@@ -121,7 +121,8 @@ public sealed class BakePipelineTests
 
         BakeResult result = RunBake(
             Path.Combine(project, BakeProjectFixture.DescriptorFileName),
-            packPath);
+            packPath,
+            hostPath: _fixture.EmptyHostAssemblyPath);
 
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.True(result.PackWritten);
@@ -143,7 +144,8 @@ public sealed class BakePipelineTests
 
         BakeResult result = RunBake(
             Path.Combine(project, BakeProjectFixture.DescriptorFileName),
-            packPath);
+            packPath,
+            hostPath: _fixture.EmptyHostAssemblyPath);
 
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.True(result.PackWritten);
@@ -170,6 +172,7 @@ public sealed class BakePipelineTests
     public void InvalidSourceLeavesThePreviousPackUnchanged(string toml, string expectedCode)
     {
         string project = BakeProjectFixture.CreateProject("invalid-source");
+        BakeProjectFixture.WriteStandardAssets(project);
         BakeProjectFixture.WriteAsset(project, "data/game.toml", toml);
         BakeProjectFixture.WriteTexture(project);
         string packPath = Path.Combine(project, "assets.pck");
@@ -191,14 +194,8 @@ public sealed class BakePipelineTests
     public void DescriptorPackPathIsUsedWhenNoOutputOverrideIsGiven()
     {
         string project = BakeProjectFixture.CreateProject("default-pack");
-        BakeProjectFixture.WriteAsset(
-            project,
-            "data/game.toml",
-            """
-            name = "campaign"
-            health = 1
-            must = "m"
-            """);
+        BakeProjectFixture.WriteStandardAssets(project);
+        BakeProjectFixture.WriteTexture(project);
         string descriptorPath = Path.Combine(project, BakeProjectFixture.DescriptorFileName);
 
         var options = new BakeOptions(
@@ -215,6 +212,113 @@ public sealed class BakePipelineTests
         Assert.True(result.PackWritten);
         Assert.Equal(expectedPath, result.PackPath);
         Assert.True(File.Exists(expectedPath));
+    }
+
+    [Fact]
+    public void DataUnderTexturesBakesAsOrdinaryCustomData()
+    {
+        string project = BakeProjectFixture.CreateProject("data-under-textures");
+        BakeProjectFixture.WriteStandardAssets(project);
+        BakeProjectFixture.WriteTexture(project);
+        BakeProjectFixture.WriteAsset(
+            project,
+            "textures/notes.toml",
+            """
+            attack = 3
+            defense = 5
+
+            [bork2d]
+            type = "Bork2d.BakeFixture.StatsRoot"
+            """);
+        using var directory = TempBakeDirectory.Create();
+        string packPath = directory.FullPath("assets.pck");
+
+        BakeResult result = RunBake(
+            Path.Combine(project, BakeProjectFixture.DescriptorFileName),
+            packPath);
+
+        Assert.Equal(BakeStatus.Success, result.Status);
+        Assert.Empty(result.Diagnostics);
+        Assert.Contains(
+            result.Entries,
+            entry => entry.Path == "textures/notes"
+                && entry.TypeName == "Bork2d.BakeFixture.StatsRoot");
+        Assert.DoesNotContain(
+            result.Entries,
+            entry => entry.Path == "textures/notes-raw");
+    }
+
+    [Fact]
+    public void DataAndTextureDescriptorPathCollisionIsBK3005AndPreventsThePack()
+    {
+        string project = BakeProjectFixture.CreateProject("collision-descriptor");
+        BakeProjectFixture.WriteStandardAssets(project);
+        BakeProjectFixture.WriteTexture(project);
+        BakeProjectFixture.WriteAsset(
+            project,
+            "art/player.toml",
+            """
+            name = "art"
+            health = 1
+            must = "m"
+
+            [bork2d]
+            type = "Bork2d.BakeFixture.GameConfig"
+            """);
+        BakeProjectFixture.WriteAssetBytes(
+            project,
+            "art/player.png",
+            Bork2d.Tests.Bake.Textures.TextureImageFactory.RgbaPng());
+        using var directory = TempBakeDirectory.Create();
+        string packPath = directory.FullPath("assets.pck");
+
+        BakeResult result = RunBake(
+            Path.Combine(project, BakeProjectFixture.DescriptorFileName),
+            packPath);
+
+        Assert.Equal(BakeStatus.DiagnosticsError, result.Status);
+        Assert.False(result.PackWritten);
+        Assert.Contains(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code == BakeDiagnosticCodes.AssetPathCollision
+                && diagnostic.AssetPath == "art/player");
+        Assert.False(File.Exists(packPath));
+    }
+
+    [Fact]
+    public void DataAndRawPayloadPathCollisionIsBK3005AndPreventsThePack()
+    {
+        string project = BakeProjectFixture.CreateProject("collision-raw");
+        BakeProjectFixture.WriteStandardAssets(project);
+        BakeProjectFixture.WriteTexture(project);
+        BakeProjectFixture.WriteAsset(
+            project,
+            "art/player-raw.toml",
+            """
+            attack = 2
+            defense = 4
+
+            [bork2d]
+            type = "Bork2d.BakeFixture.StatsRoot"
+            """);
+        BakeProjectFixture.WriteAssetBytes(
+            project,
+            "art/player.png",
+            Bork2d.Tests.Bake.Textures.TextureImageFactory.RgbaPng());
+        using var directory = TempBakeDirectory.Create();
+        string packPath = directory.FullPath("assets.pck");
+
+        BakeResult result = RunBake(
+            Path.Combine(project, BakeProjectFixture.DescriptorFileName),
+            packPath);
+
+        Assert.Equal(BakeStatus.DiagnosticsError, result.Status);
+        Assert.False(result.PackWritten);
+        Assert.Contains(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code == BakeDiagnosticCodes.AssetPathCollision
+                && diagnostic.AssetPath == "art/player-raw");
+        Assert.False(File.Exists(packPath));
     }
 
     [Fact]
@@ -240,6 +344,8 @@ public sealed class BakePipelineTests
     public void RepeatedInvalidInputProducesTheSameDiagnosticsInTheSameOrder()
     {
         string project = BakeProjectFixture.CreateProject("stable-diagnostics");
+        BakeProjectFixture.WriteStandardAssets(project);
+        BakeProjectFixture.WriteTexture(project);
         BakeProjectFixture.WriteAsset(
             project,
             "data/game.toml",
@@ -250,6 +356,9 @@ public sealed class BakePipelineTests
 
             [stats]
             attack = "strong"
+
+            [bork2d]
+            type = "Bork2d.BakeFixture.GameConfig"
             """);
 
         BakeResult firstRun = RunBake(
@@ -270,37 +379,43 @@ public sealed class BakePipelineTests
     /// <summary>Gets the invalid TOML cases used by the pack-preservation theory.</summary>
     public static TheoryData<string, string> InvalidGameSources => new()
     {
-        { "name = \n", BakeDiagnosticCodes.TomlSyntax },
-        { "health = 1\nmust = \"m\"\n", BakeDiagnosticCodes.BinderMissingRequired },
-        { "name = \"x\"\nhealth = 1\nmust = \"m\"\nbogus = true\n", BakeDiagnosticCodes.BinderUnknownKey },
-        { "name = \"x\"\nhealth = \"many\"\nmust = \"m\"\n", BakeDiagnosticCodes.BinderTypeMismatch },
+        { "name = \n" + TypeTable, BakeDiagnosticCodes.TomlSyntax },
+        { "health = 1\nmust = \"m\"\n" + TypeTable, BakeDiagnosticCodes.BinderMissingRequired },
+        { "name = \"x\"\nhealth = 1\nmust = \"m\"\nbogus = true\n" + TypeTable, BakeDiagnosticCodes.BinderUnknownKey },
+        { "name = \"x\"\nhealth = \"many\"\nmust = \"m\"\n" + TypeTable, BakeDiagnosticCodes.BinderTypeMismatch },
         {
-            "name = \"x\"\nhealth = 9223372036854775807\nmust = \"m\"\n",
+            "name = \"x\"\nhealth = 9223372036854775807\nmust = \"m\"\n" + TypeTable,
             BakeDiagnosticCodes.BinderNumericRange
         },
         {
-            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"textures/missing\"\n",
+            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"textures/missing\"\n" + TypeTable,
             BakeDiagnosticCodes.ReferenceMissing
         },
         {
-            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"Textures/Player\"\n",
+            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"Textures/Player\"\n" + TypeTable,
             BakeDiagnosticCodes.ReferenceNotCanonical
         },
         {
-            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"textures/raw/player\"\n",
+            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"textures/player-raw\"\n" + TypeTable,
             BakeDiagnosticCodes.ReferenceWrongKind
         },
         {
-            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"data/game\"\n",
+            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"data/game\"\n" + TypeTable,
             BakeDiagnosticCodes.ReferenceWrongType
         },
     };
 
-    private BakeResult RunBake(string projectPath, string outputPath, bool check = false)
+    private const string TypeTable = "\n[bork2d]\ntype = \"Bork2d.BakeFixture.GameConfig\"\n";
+
+    private BakeResult RunBake(
+        string projectPath,
+        string outputPath,
+        bool check = false,
+        string? hostPath = null)
     {
         var options = new BakeOptions(
             projectPath,
-            _fixture.HostAssemblyPath,
+            hostPath ?? _fixture.HostAssemblyPath,
             outputPath,
             BakeMode.Debug,
             check,

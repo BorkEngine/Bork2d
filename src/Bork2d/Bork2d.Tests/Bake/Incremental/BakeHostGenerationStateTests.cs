@@ -22,6 +22,7 @@ public sealed class BakeHostGenerationStateTests
         Assert.Equal(state.GeneratorVersion, parsed.GeneratorVersion);
         Assert.Equal(state.DescriptorHash, parsed.DescriptorHash);
         Assert.Equal(state.CommonAssemblyHash, parsed.CommonAssemblyHash);
+        Assert.Equal(state.SourceTypesHash, parsed.SourceTypesHash);
         Assert.Equal(state.Configuration, parsed.Configuration);
         Assert.Equal(state.OutputDirectory, parsed.OutputDirectory);
         Assert.Equal(state.ProjectPath, parsed.ProjectPath);
@@ -73,6 +74,7 @@ public sealed class BakeHostGenerationStateTests
             BakeToolInfo.Version,
             "DESCRIPTOR",
             "COMMON",
+            "SOURCETYPES",
             "Debug",
             Path.Combine("game", "obj", "bork2d", "bakehost"),
             Path.Combine("game", "obj", "bork2d", "bakehost", "BakeHost.csproj"),

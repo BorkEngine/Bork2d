@@ -67,7 +67,7 @@ public sealed class HostGenerationTests
     }
 
     [Fact]
-    public void GeneratedManifestNamesTheManifestAndKeepsDescriptorOrder()
+    public void GeneratedManifestUsesConnectedTypeNamesInSourceOrder()
     {
         string manifest = File.ReadAllText(_fixture.HostManifestPath);
 
@@ -85,16 +85,24 @@ public sealed class HostGenerationTests
             manifest,
             StringComparison.Ordinal);
 
-        int data = manifest.IndexOf("\"data\"", StringComparison.Ordinal);
-        int roots = manifest.IndexOf("\"roots\"", StringComparison.Ordinal);
-        int hidden = manifest.IndexOf("\"hidden\"", StringComparison.Ordinal);
-        int weapons = manifest.IndexOf("\"weapons\"", StringComparison.Ordinal);
-        int sprites = manifest.IndexOf("\"sprites\"", StringComparison.Ordinal);
+        int config = manifest.IndexOf(
+            "\"BakeFixture.Common.GameConfig\"",
+            StringComparison.Ordinal);
+        int hidden = manifest.IndexOf(
+            "\"BakeFixture.Common.HiddenConfig\"",
+            StringComparison.Ordinal);
+        int stats = manifest.IndexOf(
+            "\"BakeFixture.Common.StatsRoot\"",
+            StringComparison.Ordinal);
+        int sprite = manifest.IndexOf(
+            "\"Bork2d.Api.Assets.SpriteAsset\"",
+            StringComparison.Ordinal);
+        int weapon = manifest.IndexOf("\"Game.Data.Weapon\"", StringComparison.Ordinal);
 
-        Assert.True(data >= 0 && data < roots, "data must precede roots");
-        Assert.True(roots < hidden, "roots must precede hidden");
-        Assert.True(hidden < weapons, "hidden must precede weapons");
-        Assert.True(weapons < sprites, "weapons must precede sprites");
+        Assert.True(config >= 0 && config < hidden, "data/config must precede hidden/secret");
+        Assert.True(hidden < stats, "hidden/secret must precede roots/stats");
+        Assert.True(stats < sprite, "roots/stats must precede sprites/player");
+        Assert.True(sprite < weapon, "sprites/player must precede weapons/sword");
     }
 
     [Fact]
@@ -105,11 +113,11 @@ public sealed class HostGenerationTests
         Assert.Equal(
             new[]
             {
-                new BakeTypeRegistration("BakeFixture.Common.GameConfig", "data", BakeAssetKind.MessagePack),
-                new BakeTypeRegistration("BakeFixture.Common.StatsRoot", "roots", BakeAssetKind.MessagePack),
-                new BakeTypeRegistration("BakeFixture.Common.HiddenConfig", "hidden", BakeAssetKind.MessagePack),
-                new BakeTypeRegistration("Game.Data.Weapon", "weapons", BakeAssetKind.MessagePack),
-                new BakeTypeRegistration("Bork2d.Api.Assets.SpriteAsset", "sprites", BakeAssetKind.MessagePack),
+                new BakeTypeRegistration("BakeFixture.Common.GameConfig", BakeAssetKind.MessagePack),
+                new BakeTypeRegistration("BakeFixture.Common.HiddenConfig", BakeAssetKind.MessagePack),
+                new BakeTypeRegistration("BakeFixture.Common.StatsRoot", BakeAssetKind.MessagePack),
+                new BakeTypeRegistration("Bork2d.Api.Assets.SpriteAsset", BakeAssetKind.MessagePack),
+                new BakeTypeRegistration("Game.Data.Weapon", BakeAssetKind.MessagePack),
             },
             registrations);
     }
@@ -196,9 +204,7 @@ public sealed class HostGenerationTests
     [Fact]
     public void MissingCommonAssemblyIsAHostReferenceDiagnostic()
     {
-        (HostGenerationResult? result, IReadOnlyList<BakeDiagnostic> diagnostics) = Generate(
-            "data",
-            "BakeFixture.Common.GameConfig",
+        (HostGenerationResult? result, IReadOnlyList<BakeDiagnostic> diagnostics) = Generate("BakeFixture.Common.GameConfig",
             commonAssemblyPath: Path.Combine(Path.GetTempPath(), "missing-common.dll"));
 
         Assert.Null(result);
@@ -220,9 +226,7 @@ public sealed class HostGenerationTests
     [InlineData("Game.Data.HiddenWeapon", BakeDiagnosticCodes.TypeNotVisible)]
     public void UnsupportedTypeNamesAreRejected(string typeName, string expectedCode)
     {
-        (HostGenerationResult? result, IReadOnlyList<BakeDiagnostic> diagnostics) = Generate(
-            "data",
-            typeName);
+        (HostGenerationResult? result, IReadOnlyList<BakeDiagnostic> diagnostics) = Generate(typeName);
 
         Assert.Null(result);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == expectedCode);
@@ -231,9 +235,7 @@ public sealed class HostGenerationTests
     [Fact]
     public void AmbiguousTypeNamesEveryCandidateAssembly()
     {
-        (HostGenerationResult? result, IReadOnlyList<BakeDiagnostic> diagnostics) = Generate(
-            "data",
-            "Game.Data.DupType");
+        (HostGenerationResult? result, IReadOnlyList<BakeDiagnostic> diagnostics) = Generate("Game.Data.DupType");
 
         Assert.Null(result);
         BakeDiagnostic diagnostic = Assert.Single(
@@ -246,15 +248,13 @@ public sealed class HostGenerationTests
     [Fact]
     public void MissingMappedTypeDiagnosticPointsAtTheTypeValue()
     {
-        (HostGenerationResult? result, IReadOnlyList<BakeDiagnostic> diagnostics) = Generate(
-            "data",
-            "BakeFixture.Common.Missing");
+        (HostGenerationResult? result, IReadOnlyList<BakeDiagnostic> diagnostics) = Generate("BakeFixture.Common.Missing");
 
         Assert.Null(result);
         BakeDiagnostic diagnostic = Assert.Single(
             diagnostics,
             candidate => candidate.Code == BakeDiagnosticCodes.TypeNotFound);
-        Assert.Equal(8, diagnostic.Line);
+        Assert.Equal(4, diagnostic.Line);
         Assert.Equal(8, diagnostic.Column);
     }
 
@@ -264,9 +264,7 @@ public sealed class HostGenerationTests
     [InlineData("Bork2d.Api.Assets.SpriteAsset")]
     public void SupportedTypesGenerate(string typeName)
     {
-        (HostGenerationResult? result, IReadOnlyList<BakeDiagnostic> diagnostics) = Generate(
-            "data",
-            typeName);
+        (HostGenerationResult? result, IReadOnlyList<BakeDiagnostic> diagnostics) = Generate(typeName);
 
         Assert.NotNull(result);
         Assert.Empty(diagnostics);
@@ -277,26 +275,28 @@ public sealed class HostGenerationTests
     }
 
     private (HostGenerationResult? Result, IReadOnlyList<BakeDiagnostic> Diagnostics) Generate(
-        string prefix,
         string typeName,
         string? commonAssemblyPath = null)
     {
         string directory = Path.Combine(Path.GetTempPath(), $"bork2d-bake-gen-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
+        Directory.CreateDirectory(Path.Combine(directory, "Assets", "data"));
         string descriptorPath = Path.Combine(directory, TempBakeFixture.DescriptorFileName);
         File.WriteAllText(
             descriptorPath,
-            $"""
+            """
             schema = 1
 
             [assets]
             root = "Assets"
+            """);
+        File.WriteAllText(
+            Path.Combine(directory, "Assets", "data", "source.toml"),
+            $"""
+            value = 1
 
-            [[types]]
-            prefix = "{prefix}"
+            [bork2d]
             type = "{typeName}"
             """);
-        Directory.CreateDirectory(Path.Combine(directory, "Assets"));
 
         var diagnostics = new BakeDiagnostics();
         HostGenerationResult? result = HostGenerator.Generate(

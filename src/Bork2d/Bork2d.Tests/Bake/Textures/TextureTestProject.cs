@@ -47,8 +47,7 @@ internal sealed class TextureTestProject : IDisposable
             directory.FullPath("assets.pck"),
             directory.FullPath("obj/bork2d/bakehost"),
             filter,
-            wrap,
-            []);
+            wrap);
 
         return new TextureTestProject(directory, descriptor);
     }

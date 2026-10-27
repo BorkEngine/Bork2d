@@ -294,17 +294,19 @@ public sealed class TextureSidecarTests
     }
 
     [Fact]
-    public void StrayTomlUnderTexturesIsAnError()
+    public void SidecarNextToAnArbitraryArtSourceApplies()
     {
         using var project = TextureTestProject.Create();
-        project.WriteText("textures/notes.toml", "filter = \"nearest\"\n");
+        project.WriteImage("art/player.png", TextureImageFactory.RgbaPng());
+        project.WriteText("art/player.png.toml", "filter = \"nearest\"\n");
 
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
+        BakedTexture texture = Assert.Single(TexturePipeline.Import(project.Descriptor).Textures);
 
-        Assert.Empty(result.Textures);
-        BakeDiagnostic error = Assert.Single(result.Diagnostics);
-        Assert.Equal(TextureDiagnosticCodes.TextureStrayToml, error.Code);
-        Assert.Equal("Assets/textures/notes.toml", error.FilePath);
+        Assert.Equal("art/player", texture.AssetPath);
+        Assert.Equal("nearest", texture.Descriptor.Filter);
+        Assert.Equal(
+            project.FullPath("art/player.png.toml"),
+            texture.Settings.SidecarPath);
     }
 
     [Fact]
@@ -320,19 +322,5 @@ public sealed class TextureSidecarTests
         BakeDiagnostic error = Assert.Single(result.Diagnostics);
         Assert.Equal(TextureDiagnosticCodes.TextureSourcePath, error.Code);
         Assert.Equal("Assets/textures/bad name.png", error.FilePath);
-    }
-
-    [Fact]
-    public void SidecarForAReservedSourceIsNotAlsoReportedAsOrphaned()
-    {
-        using var project = TextureTestProject.Create();
-        project.WriteImage("textures/raw/player.png", TextureImageFactory.RgbaPng());
-        project.WriteText("textures/raw/player.png.toml", "filter = \"nearest\"\n");
-
-        TextureBakeResult result = TexturePipeline.Import(project.Descriptor);
-
-        Assert.Empty(result.Textures);
-        BakeDiagnostic error = Assert.Single(result.Diagnostics);
-        Assert.Equal(TextureDiagnosticCodes.TextureReservedPath, error.Code);
     }
 }

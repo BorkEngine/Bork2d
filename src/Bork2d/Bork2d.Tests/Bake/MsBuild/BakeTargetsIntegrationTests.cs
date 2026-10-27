@@ -29,18 +29,6 @@ public sealed class BakeTargetsIntegrationTests
         [textures]
         filter = "linear"
         wrap = "clamp"
-
-        [[types]]
-        prefix = "data"
-        type = "Bork2d.BakeFixture.GameConfig"
-
-        [[types]]
-        prefix = "roots"
-        type = "Bork2d.BakeFixture.StatsRoot"
-
-        [[types]]
-        prefix = "sprites"
-        type = "Bork2d.Api.Assets.SpriteAsset"
         """;
 
     private const string GameToml = """
@@ -54,11 +42,17 @@ public sealed class BakeTargetsIntegrationTests
         [stats]
         attack = 3
         defense = 7
+
+        [bork2d]
+        type = "Bork2d.BakeFixture.GameConfig"
         """;
 
     private const string StatsToml = """
         attack = 11
         defense = 13
+
+        [bork2d]
+        type = "Bork2d.BakeFixture.StatsRoot"
         """;
 
     private const string SpriteToml = """
@@ -68,6 +62,9 @@ public sealed class BakeTargetsIntegrationTests
         pivot = [0.5, 0.5]
         topology = "triangles"
         indices = [0, 1, 2, 0, 2, 3]
+
+        [bork2d]
+        type = "Bork2d.Api.Assets.SpriteAsset"
         """;
 
     private const string SidecarToml = """

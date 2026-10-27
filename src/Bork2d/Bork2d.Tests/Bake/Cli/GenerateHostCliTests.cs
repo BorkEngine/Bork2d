@@ -63,7 +63,10 @@ public sealed class GenerateHostCliTests
 
         Assert.Equal(CliApplication.SuccessExitCode, forced.ExitCode);
         Assert.Contains("generated", forced.Output, StringComparison.Ordinal);
-        Assert.Contains("data -> BakeFixture.Common.GameConfig", forced.Output, StringComparison.Ordinal);
+        Assert.Contains(
+            "mapped type BakeFixture.Common.GameConfig",
+            forced.Output,
+            StringComparison.Ordinal);
         Assert.Contains("reference Bork2d.Api:", forced.Output, StringComparison.Ordinal);
     }
 
@@ -134,9 +137,7 @@ public sealed class GenerateHostCliTests
     [Fact]
     public void TypeResolutionFailureIsAUsageErrorWithACanonicalDiagnostic()
     {
-        string project = CreateProjectWithMapping(
-            "data",
-            "BakeFixture.Common.Missing");
+        string project = CreateProjectWithMapping("BakeFixture.Common.Missing");
 
         Result result = Run(
             "generate-host",
@@ -154,6 +155,43 @@ public sealed class GenerateHostCliTests
     }
 
     [Fact]
+    public void SourceMetadataErrorFailsGenerationAtTheSourceSpan()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"bork2d-bake-cli-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(directory, "Assets", "data"));
+        File.WriteAllText(
+            Path.Combine(directory, TempBakeFixture.DescriptorFileName),
+            """
+            schema = 1
+
+            [assets]
+            root = "Assets"
+            """);
+        File.WriteAllText(
+            Path.Combine(directory, "Assets", "data", "bad.toml"),
+            """
+            value = 1
+
+            [bork2d]
+            type = 4
+            """);
+
+        Result result = Run(
+            "generate-host",
+            "--project",
+            Path.Combine(directory, TempBakeFixture.DescriptorFileName),
+            "--common",
+            _fixture.ProjectCommonAssemblyPath,
+            "--output",
+            CreateOutputDirectory());
+
+        Assert.Equal(CliApplication.UsageExitCode, result.ExitCode);
+        Assert.Contains("error BK1031:", result.Error, StringComparison.Ordinal);
+        Assert.Contains("Assets/data/bad.toml(4,8)", result.Error, StringComparison.Ordinal);
+        Assert.Contains("failed", result.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void HelpListsBothCommands()
     {
         Result result = Run("--help");
@@ -166,20 +204,24 @@ public sealed class GenerateHostCliTests
     private static string CreateOutputDirectory()
         => Path.Combine(Path.GetTempPath(), $"bork2d-bake-host-out-{Guid.NewGuid():N}");
 
-    private static string CreateProjectWithMapping(string prefix, string typeName)
+    private static string CreateProjectWithMapping(string typeName)
     {
         string directory = Path.Combine(Path.GetTempPath(), $"bork2d-bake-cli-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(directory, "Assets"));
+        Directory.CreateDirectory(Path.Combine(directory, "Assets", "data"));
         File.WriteAllText(
             Path.Combine(directory, TempBakeFixture.DescriptorFileName),
-            $"""
+            """
             schema = 1
 
             [assets]
             root = "Assets"
+            """);
+        File.WriteAllText(
+            Path.Combine(directory, "Assets", "data", "source.toml"),
+            $"""
+            value = 1
 
-            [[types]]
-            prefix = "{prefix}"
+            [bork2d]
             type = "{typeName}"
             """);
         return Path.Combine(directory, TempBakeFixture.DescriptorFileName);

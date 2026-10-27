@@ -1,9 +1,12 @@
 # M4 — Serialization and Bake (spec)
 
-> **Status:** **implementation complete on `m-4/common`; final PR pending.** WP0–WP6 are implemented
-> and verified on the milestone branch; the PR to `develop` is **not open** and M4 is **not merged**.
-> The owner decisions D-M4-01…D-M4-12 in §2 were approved during the M4 spec review on 2026-10-26,
-> and the §18 questions are resolved as recorded in the
+> **Status:** **implementation complete on `m-4/common`; owner revision in progress on
+> `m-4/fix-1`; final PR pending.** WP0–WP6 are implemented and verified on the milestone branch, and
+> the breaking pre-release revision D-M4-13 (per-source `[bork2d].type`, no descriptor `[[types]]`,
+> location-free data/textures, `-raw` payload paths) is being applied on `m-4/fix-1` against the open
+> PR #7. The PR to `develop` is **not merged** and M4 is **not merged**. The owner decisions
+> D-M4-01…D-M4-13 in §2 were approved during the M4 spec review on 2026-10-26 and the owner revision
+> on 2026-10-27, and the §18 questions are resolved as recorded in the
 > [decision log](../decisions.md#m4-serialization-and-bake-decisions-approved-2026-10-26). This is
 > the first forward-looking milestone spec; the M1–M3 files under [`docs/specs/`](.) are historical
 > records. When this spec and another document disagree, this spec wins for M4 scope; the accepted
@@ -16,11 +19,12 @@
 Turn authoring sources into the runtime artifacts that M3 consumes:
 
 - a project descriptor (`bork2d.project.toml`) that defines the asset root, output pack, and
-  path-to-type mapping;
-- a generated, reflection-free bake host compiled from the registrations in `Project.Common`;
+  texture defaults (types are declared in the sources; D-M4-13);
+- a generated, reflection-free bake host compiled from the distinct source `[bork2d].type`
+  declarations in `Project.Common` and its closure;
 - custom data TOML → MessagePack, using the same generated shapes the NativeAOT runtime uses;
-- texture sources (PNG/JPG/BMP/TGA) plus import sidecars → a `TextureDescriptor` and a raw RGBA8
-  payload;
+- texture sources (PNG/JPG/BMP/TGA) anywhere under the asset root plus import sidecars → a
+  `TextureDescriptor` and a raw RGBA8 payload at `<descriptor>-raw`;
 - typed reference validation with `file:line:column` diagnostics;
 - structural determinism, a hash-based incremental bake, and an MSBuild target;
 - a NativeAOT proof that loads a pack produced by the baker, with no TOML or reflection in the
@@ -41,17 +45,18 @@ is not edited by this spec).
 | ID | Decision | Owner-approved choice |
 | --- | --- | --- |
 | D-M4-01 | Bake tooling shape | New JIT `Bork2d.Bake` library plus a `Bork2d.Bake.Cli` console. The M5 editor reuses the library; MSBuild invokes the CLI. |
-| D-M4-02 | Type mapping | The manifest is generated from `Project.Common` metadata and compiled into a **generated bake host** that references `Project.Common` and `Bork2d.Bake`. The host calls typed, generated bind/write code. No runtime reflection over game members, and `Project.Common` stays `Bork2d.Api`-only. |
+| D-M4-02 | Type mapping | The manifest is generated from the distinct source `[bork2d].type` declarations, resolved from `Project.Common` metadata, and compiled into a **generated bake host** that references `Project.Common` and `Bork2d.Bake`. The host calls typed, generated bind/write code. No runtime reflection over game members, and `Project.Common` stays `Bork2d.Api`-only. Registration source revised by D-M4-13. |
 | D-M4-03 | Type registration | **Superseded by D-M4-12.** Registration uses PolyType `[GenerateShape]` directly; no Bork2d attribute or generator. |
 | D-M4-04 | TOML library | Tomlyn 2.x (pin **2.10.1**), TOML 1.1.0. The tooling uses Tomlyn's POCO mapping; naming/required/ignore overrides use BCL `System.Text.Json.Serialization` attributes (`[JsonPropertyName]`, `[JsonRequired]`, `[JsonIgnore]`), and Bork2d converters cover references, vectors, colors, and enums. |
 | D-M4-05 | Texture sources | PNG, JPG/JPEG, BMP, and TGA via **StbImageSharp 2.30.16**, normalized to straight-alpha RGBA8. |
-| D-M4-06 | Sprite scope | `SpriteAsset` is ordinary custom data. M4 has **no** sprite source schema, no slicing, and no UV/pivot/scale/topology/indices validation; those are M5. `SpriteAsset` baking is still tested. |
+| D-M4-06 | Sprite scope | `SpriteAsset` is ordinary custom data: a source TOML declares `[bork2d] type = "Bork2d.Api.Assets.SpriteAsset"`. M4 has **no** sprite source schema, no slicing, and no UV/pivot/scale/topology/indices validation; those are M5. `SpriteAsset` baking is still tested. |
 | D-M4-07 | Determinism | Structural only: stable ordering, entry table, offsets, and identical baked payload bytes for identical inputs. Whole-pack byte identity is not guaranteed (D-M3-08 stays in force). |
 | D-M4-08 | Build integration | A `.targets` file runs the CLI on build; unchanged inputs skip as a whole; any change re-bakes; the pack is written atomically. |
 | D-M4-09 | AOT proof | The AOT build bakes a fixture pack and the smoke loads it. `Bake`, `Bake.Cli`, and the host generator are not in the AOT publish graph. |
 | D-M4-10 | `Color` | **Superseded by D-M4-12.** `Color` uses a marshaler; it does not get `[GenerateShape]` and does not become `partial`. |
 | D-M4-11 | Struct roots | A top-level asset root may be a `readonly record struct` (or any struct). M4 relaxes `IAssets.LoadAsset<T>` (both overloads) and `AssetRef<TAsset>`/`AssetRefMarshaler<TAsset>` from `where T : class, IShapeable<T>` to `where T : IShapeable<T>`, adjusts the deserializer (no null return for value types; a MessagePack `nil` is a `Decode` fault), and updates docs/tests. This supersedes the `class` part of D-M3-22 and is a public API change approved under D-014. |
-| D-M4-12 | Registration, `partial`, and `Color` | PolyType `[GenerateShape]` is the single shape attribute; the descriptor is the registration list; there is no `Bork2dSerializableAttribute` and no `Bork2d.Bake.Generators`. A `[GenerateShape]` root must be `partial` because PolyType injects `IShapeable<T>` through a partial declaration; this is a PolyType rule already applied to `SpriteAsset`, `TextureDescriptor`, and `MessagePackSmokeData`. `Color` gets a `[TypeShape(Marshaler = ...)]`/`ColorMarshaler` and stays non-`partial`. Supersedes D-M4-03 and D-M4-10. |
+| D-M4-12 | Registration, `partial`, and `Color` | PolyType `[GenerateShape]` is the single shape attribute; the descriptor was the registration list there (superseded by D-M4-13); there is no `Bork2dSerializableAttribute` and no `Bork2d.Bake.Generators`. A `[GenerateShape]` root must be `partial` because PolyType injects `IShapeable<T>` through a partial declaration; this is a PolyType rule already applied to `SpriteAsset`, `TextureDescriptor`, and `MessagePackSmokeData`. `Color` gets a `[TypeShape(Marshaler = ...)]`/`ColorMarshaler` and stays non-`partial`. Supersedes D-M4-03 and D-M4-10. |
+| D-M4-13 | Per-source type metadata and location-free assets (owner revision, pre-release) | Type is declared inside each custom-data TOML in a reserved top-level `[bork2d]` table: `[bork2d] type = "Full.Type.Name"`. `type` is required, non-empty, a full CLR name without assembly qualification; only `type` is allowed in `[bork2d]` in v1; unknown/mistyped/missing keys are diagnostics at the source line/column. `[[types]]` is removed from the descriptor and rejected as an unknown key; `ProjectDescriptor.Types`, `ProjectTypeMapping`, and prefix discovery are removed. Data and textures may live anywhere under the asset root. A texture descriptor path is the source path minus its extension; its raw payload is the descriptor path plus `-raw` (`art/player` → `art/player-raw`); there is no special `textures/` or `textures/raw/` folder. A sidecar is a type-less `<source>.toml` next to the source; a typed `.toml` is data even if it looks like a sidecar; a type-less `.toml` that is neither is a missing-type error. Cross-kind path collisions are `BK3005`. The binder ignores the root `bork2d` table. Host generation scans sources before binding and hashes the declarations into its incremental state. Supersedes the descriptor-registration parts of D-M4-02/D-M4-12 and the fixed-folder rules of Q-12/Q-13. |
 
 **Scope delta approved with D-M4-06.** The roadmap's M4 bullet currently includes sprite TOML,
 slicing-adjacent validation, and sprite field validation. M4 bakes `SpriteAsset` as data only. The
@@ -68,8 +73,9 @@ members.
 **Registration delta approved with D-M4-12.** The Bork2d-specific attribute and Roslyn generator
 are dropped. Data types use PolyType's `[GenerateShape]` directly and stay `partial`; the
 `partial` keyword is required by PolyType to inject `IShapeable<T>` and is already used by
-`SpriteAsset`, `TextureDescriptor`, and `MessagePackSmokeData`. The descriptor is the only
-registration list. `Color` uses a marshaler and stays non-`partial`.
+`SpriteAsset`, `TextureDescriptor`, and `MessagePackSmokeData`. At that point the descriptor was
+the only registration list; **D-M4-13 moves registration into each source's `[bork2d].type`**.
+`Color` uses a marshaler and stays non-`partial`.
 
 ## 3. Inherited constraints (facts, not new decisions)
 
@@ -108,9 +114,9 @@ registration list. `Color` uses a marshaler and stays non-`partial`.
 ### 4.1 In scope
 
 - New JIT tooling projects, the generated host contract, and the host generator.
-- `bork2d.project.toml` parsing and validation.
-- PolyType `[GenerateShape]` as the single shape attribute (the descriptor is the registration
-  list; no Bork2d attribute or source generator); a `Color` marshaler that keeps `Color`
+- `bork2d.project.toml` parsing and validation (no type list; D-M4-13).
+- PolyType `[GenerateShape]` as the single shape attribute (each source declares its type in
+  `[bork2d]`; no Bork2d attribute or source generator); a `Color` marshaler that keeps `Color`
   non-`partial`.
 - The typed-load constraint relaxation for struct roots (D-M4-11), including value-type decode
   semantics and the API docs/guide/tests that describe it.
@@ -146,15 +152,16 @@ registration list. `Color` uses a marshaler and stays non-`partial`.
 
 ```text
 Project.Common/Assets/
-  data/**.toml            custom data (registered types)
+  data/**.toml            custom data, each declaring [bork2d] type = "..."
   sprites/**.toml         SpriteAsset as ordinary custom data (no slicing)
-  textures/*.png|jpg|bmp|tga (+ <file>.toml sidecar)
+  art/**.png|jpg|bmp|tga  textures anywhere, with optional <source>.toml sidecars
         │
         │  1. PolyType generator: [GenerateShape] + partial → IShapeable<T>
-        │  2. generate-host: descriptor + Project.Common metadata → generated host source
-        │  3. MSBuild builds the host (references Project.Common + Bork2d.Bake)
-        │  4. bake: Tomlyn → typed objects → generated-shape MessagePack
-        │           textures → RGBA8 → TextureDescriptor + raw payload
+        │  2. scan sources: [bork2d].type declarations → distinct types
+        │  3. generate-host: descriptor + source declarations → generated host source
+        │  4. MSBuild builds the host (references Project.Common + Bork2d.Bake)
+        │  5. bake: Tomlyn → typed objects → generated-shape MessagePack
+        │           textures → RGBA8 → TextureDescriptor + <descriptor>-raw payload
         │           reference validation (file:line:col)
         ▼
   PackBuilder (unchanged v1 writer) → assets.pck
@@ -194,42 +201,45 @@ Rules:
    generator has emitted the `IShapeable<T>` implementation into `Project.Common`.
 2. The MSBuild target runs `bork2d-bake generate-host --project … --common <Project.Common.dll>
    --output obj/bork2d/bakehost --configuration <Debug|Release>`.
-3. The generator parses the descriptor, reads `Project.Common` (and referenced `Bork2d.Api`)
-   metadata at build time, validates every mapped type implements `IShapeable<T>` (the
-   `[GenerateShape]` attribute itself is `[Conditional("NEVER")]` and is not in metadata), and
-   writes:
+3. The generator parses the descriptor, **scans the sources for their `[bork2d].type`
+   declarations**, reads `Project.Common` (and referenced `Bork2d.Api`) metadata at build time,
+   validates every distinct declared type implements `IShapeable<T>` (the `[GenerateShape]`
+   attribute itself is `[Conditional("NEVER")]` and is not in metadata), and writes:
    - `BakeHost.csproj` — `net11.0`, library, `AssemblyName=Bork2d.BakeHost`, references
      `Project.Common`, `Bork2d.Api`, `Bork2d.Assets`, `Bork2d.Bake`, and Tomlyn (transitively);
    - `BakeManifest.g.cs` — the static manifest;
    - `BakeTomlContext.g.cs` — the Tomlyn registrations, if that mechanism is selected (Q-07).
+   A source TOML syntax or metadata error fails generation before any host file is written.
 4. MSBuild builds `BakeHost.csproj` into the host output directory.
 5. The MSBuild target runs `bork2d-bake bake --project … --host <Bork2d.BakeHost.dll>`.
-6. The CLI loads the host, uses the manifest, bakes, validates, and writes the pack.
+6. The CLI discovers the sources, checks the host manifest against the discovered declarations,
+   binds, validates, and writes the pack.
 
-The manifest contract (visibility is Q-02) must expose at least:
+The manifest contract (visibility is Q-02) exposes at least:
 
 ```csharp
 // Tooling-only; exact names are decided with Q-02.
 internal interface IBakeManifest
 {
     IReadOnlyList<BakeTypeRegistration> Types { get; }
-    object Bind(string typeName, string toml, out IReadOnlyList<BakeReferenceSite> references);
+    object Bind(string typeName, BakeBindContext context);
     void AddToPack(PackBuilder builder, string typeName, string assetPath, object value);
 }
 
 internal readonly record struct BakeTypeRegistration(
     string TypeName,
-    string SourcePrefix,
     BakeAssetKind Kind); // MessagePack | Raw
 
-internal readonly record struct BakeReferenceSite(
-    string MemberPath,   // e.g. "texture", "items[2].icon"
-    string ReferencePath, // canonical path from TOML
-    bool IsData);
+internal readonly record struct BakeMappedType(
+    string TypeName,
+    string CSharpName,
+    string AssemblyPath,
+    BakeAssetKind Kind);
 ```
 
-`Bind` returns the typed instance; `references` lists every present `AssetRef`/`DataRef` in the
-bound object graph with the key path needed for source spans. `AddToPack` is generated per type
+There is no `SourcePrefix`: registration is by type, and each source supplies its own type name.
+`Bind` returns the typed instance; the binding context records every present `AssetRef`/`DataRef`
+with the key path needed for source spans. `AddToPack` is generated per type
 (`builder.AddMessagePack<T>(path, (T)value)`) and therefore never reflects over members.
 
 **Host isolation (proposed).** The CLI loads the host in a non-collectible
@@ -254,7 +264,7 @@ default output location and the `dotnet run` working-directory story are Q-10.
 
 ## 6. Project descriptor — `bork2d.project.toml`
 
-Proposed schema; Q-03/Q-04 decide the exact fields and requiredness. The descriptor is TOML and is
+Schema (D-M4-13); Q-03/Q-04 decide the exact fields and requiredness. The descriptor is TOML and is
 parsed with Tomlyn by `Bork2d.Bake`; it is never packed.
 
 ```toml
@@ -272,43 +282,43 @@ host = "obj/bork2d/bakehost"
 [textures]
 filter = "linear"                            # nearest | linear
 wrap = "clamp"                               # clamp | repeat
-
-# One entry per path prefix. Longest matching prefix wins.
-[[types]]
-prefix = "data"
-type = "MyGame.Data.GameConfig"
-
-[[types]]
-prefix = "sprites"
-type = "Bork2d.Api.Assets.SpriteAsset"
 ```
 
-Rules (proposed):
+Rules:
 
 - `schema` is required and must be `1`. An unknown schema is a fatal descriptor diagnostic.
 - Every relative path resolves against the descriptor's directory. CLI overrides (`--output`) win
   over `[bake].pack`.
 - `[assets].root` is required. It must exist, be a directory, and contain the source tree.
-- `[[types]]` entries map a **canonical source prefix** (relative to the asset root) to a CLR type.
-  The longest prefix that matches a TOML file's asset path decides the type; the prefix must match
-  on a `/` segment boundary. Duplicate exact prefixes are errors. Overlapping prefixes with no
-  deterministic winner are errors.
-- Type names are full names resolved in `Project.Common` first, then `Bork2d.Api`; an ambiguous
-  name is an error. Assembly-qualified names and types from other assemblies are Q-04.
-- A mapped `Project.Common` type must implement `IShapeable<T>` (that is, carry `[GenerateShape]`
-  on a `partial` type). Built-in shapeable types such as `Bork2d.Api.Assets.SpriteAsset` are
-  allowed without any Bork2d-specific marker; registration is the descriptor entry itself.
+- There is **no** `[[types]]` list and no prefix mapping. `types` is an unknown descriptor key and is
+  rejected. Each custom-data TOML declares its type in a reserved root `[bork2d]` table (§7.1).
+- Type names are full names without assembly qualification, resolved in `Project.Common` first, then
+  its referenced assemblies, then `Bork2d.Api`; an ambiguous name is an error (Q-04).
+- A declared type must implement `IShapeable<T>` (that is, carry `[GenerateShape]` on a `partial`
+  type). Built-in shapeable types such as `Bork2d.Api.Assets.SpriteAsset` are allowed without any
+  Bork2d-specific marker; registration is the source declaration itself.
 - `[textures]` defaults apply when a sidecar omits `filter`/`wrap`; both fields are optional.
 - Unknown descriptor keys are errors (Q-05). Include/exclude patterns and a raw-RGBA source policy
   are Q-12.
-- The descriptor is validated before any source file is read; errors carry descriptor line/column.
+- The descriptor is validated before any source file is read; errors carry descriptor line/column,
+  and source errors carry the source line/column.
 
 ## 7. Custom data
 
 ### 7.1 Registration and the generated shape
 
 There is **no Bork2d registration attribute and no Bork2d source generator** (D-M4-12). A game
-data type is registered by the descriptor (`[[types]]`) and shaped by PolyType's `[GenerateShape]`:
+data type is declared by each data TOML in its reserved `[bork2d]` table (D-M4-13) and shaped by
+PolyType's `[GenerateShape]`:
+
+```toml
+# Assets/data/enemies/grunt.toml -> data/enemies/grunt
+name = "grunt"
+health = 10
+
+[bork2d]
+type = "MyGame.Data.EnemyDefinition"
+```
 
 ```csharp
 [GenerateShape]
@@ -322,6 +332,11 @@ public sealed partial class EnemyDefinition
 public readonly partial record struct EnemyStats(int Attack, int Defense);
 ```
 
+The `[bork2d]` table is reserved top-level metadata. `type` is required, non-empty, and a full CLR
+name without assembly qualification; only `type` is allowed in v1, and unknown/mistyped/missing keys
+are diagnostics at the source line/column. The binder ignores the table: it is not an unknown key
+and it cannot bind a root `Bork2d` member. Nested `bork2d` tables are ordinary member tables.
+
 `partial` is **required**, but it is a PolyType requirement, not a Bork2d one: on .NET 8+,
 `[GenerateShape]` emits a partial declaration implementing `IShapeable<T>`, which is what
 `LoadAsset<T>` requires and what the bake host uses to serialize. The repository's own
@@ -329,10 +344,11 @@ public readonly partial record struct EnemyStats(int Attack, int Defense);
 `partial` with `[GenerateShape]`). The keyword is one word; `[GenerateShape]` is the single
 attribute.
 
-The descriptor is the registration list. There is no attribute scan and no `[Bork2dSerializable]`
-marker. The host generator validates that each mapped type implements `IShapeable<T>` and reports a
-clear diagnostic when it does not; a missing `[GenerateShape]` is a compile-time problem in the game
-assembly (no shape is generated), not a bake-time discovery.
+The source declarations are the registration list. There is no attribute scan and no
+`[Bork2dSerializable]` marker. The host generator scans the sources before binding, resolves every
+distinct type, validates that it implements `IShapeable<T>`, and reports a clear diagnostic at the
+source `type` value when it does not; a missing `[GenerateShape]` is a compile-time problem in the
+game assembly (no shape is generated), not a bake-time discovery.
 
 **Structs (D-M4-11).** A `readonly record struct` (or any struct) is supported both as a **member**
 and as a **top-level asset root**. As a member it is covered by the root's generated shape,
@@ -425,25 +441,20 @@ M4 validates **binding and references**, not type-specific field semantics:
 
 ### 7.5 `SpriteAsset` as custom data
 
-There is no `SpritePipeline` and no `sprites/`-specific code. A project maps a prefix to
-`Bork2d.Api.Assets.SpriteAsset`:
+There is no `SpritePipeline` and no `sprites/`-specific code. A source declares
+`Bork2d.Api.Assets.SpriteAsset` in its own `[bork2d]` table:
 
 ```toml
-[[types]]
-prefix = "sprites"
-type = "Bork2d.Api.Assets.SpriteAsset"
-```
-
-A source file `sprites/player/idle.toml` becomes the asset `sprites/player/idle` and uses the
-public property names, camelCased:
-
-```toml
+# Assets/sprites/player/idle.toml -> sprites/player/idle
 texture = "textures/player"
 uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
 scale = 16.0
 pivot = [0.5, 0.5]
 topology = "quad"
 # indices = [0, 1, 2, 0, 2, 3]   # non-Quad only; not validated in M4
+
+[bork2d]
+type = "Bork2d.Api.Assets.SpriteAsset"
 ```
 
 The baker validates that `texture` exists and is a `TextureDescriptor` MessagePack entry. It does
@@ -458,16 +469,19 @@ reference.
 ```text
 Assets/textures/player.png
 Assets/textures/player.png.toml     # import sidecar (optional)
-Assets/textures/ui/button.jpg
-Assets/textures/ui/button.jpg.toml
+Assets/art/ui/button.jpg            # location is free; art/ is only an example
+Assets/art/ui/button.jpg.toml
+Assets/art/ui/button.png.toml       # typed [bork2d] => data; its dotted asset path is an error
 ```
 
-- Accepted source extensions: `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tga` (D-M4-05). Case-insensitive
-  discovery; canonical-path collisions after lowercasing and extension stripping are errors.
-- The asset path is `textures/<relative path without the source extension>`; the raw payload path
-  is `textures/raw/<same suffix>`. `Assets/textures/ui/button.jpg` → `textures/ui/button` and
-  `textures/raw/ui/button`.
-- The sidecar is `<source file>.toml`. It carries **import settings only** (proposed; Q-12):
+- Accepted source extensions: `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tga` (D-M4-05), anywhere under the
+  asset root. Case-insensitive discovery; canonical-path collisions after lowercasing and extension
+  stripping are errors.
+- The descriptor path is the source path relative to the asset root minus its extension; the raw
+  payload path is the descriptor path plus `-raw`. `Assets/art/ui/button.jpg` → `art/ui/button` and
+  `art/ui/button-raw`. There is **no** special `textures/` or `textures/raw/` folder.
+- The sidecar is `<source file>.toml` next to the source. It carries **import settings only**
+  (proposed; Q-12):
 
 ```toml
 filter = "nearest"   # optional: nearest | linear
@@ -475,9 +489,9 @@ wrap = "repeat"      # optional: clamp | repeat
 ```
 
 - A missing sidecar is valid: the `[textures]` descriptor defaults apply.
-- A `.toml` file under `textures/` that is not `<source>.toml` for an existing source is an error.
-  A sidecar without a source is an error. Source files under `textures/raw/` are reserved/forbidden
-  (Q-12).
+- A `.toml` with a root `[bork2d]` table is data, even when its name looks exactly like a sidecar.
+  A type-less `<image>.toml` is a sidecar; a type-less `.toml` that is neither is a missing-type
+  data error. A sidecar without a source is an error.
 - Raw RGBA sources and their sidecar schema are Q-12.
 
 ### 8.2 Decode and normalize
@@ -496,12 +510,12 @@ wrap = "repeat"      # optional: clamp | repeat
 
 ### 8.3 Emitted assets
 
-For `textures/ui/button`:
+For `art/ui/button` (from `Assets/art/ui/button.png`):
 
 | Asset | Kind | Value |
 | --- | --- | --- |
-| `textures/ui/button` | MessagePack | `TextureDescriptor { Payload = "textures/raw/ui/button", Width, Height, Format = "rgba8", Filter, Wrap }` |
-| `textures/raw/ui/button` | Raw | `width × height × 4` bytes, row-major, top-left origin, straight alpha, sRGB values unchanged |
+| `art/ui/button` | MessagePack | `TextureDescriptor { Payload = "art/ui/button-raw", Width, Height, Format = "rgba8", Filter, Wrap }` |
+| `art/ui/button-raw` | Raw | `width × height × 4` bytes, row-major, top-left origin, straight alpha, sRGB values unchanged |
 
 The descriptor is created in code by the texture pipeline and added with
 `PackBuilder.AddMessagePack<TextureDescriptor>`; the payload is added with `AddRaw`. Authors do not
@@ -515,8 +529,8 @@ hand-write texture descriptors in M4 (Q-29).
   pack's `uint32` length and the in-memory array limit.
 - The descriptor's `Payload` is present, canonical, and targets the raw entry.
 - No policy cap is added beyond the format field widths (D-M3-06); a decoder/OOM guard is Q-12.
-- Duplicate canonical paths, collisions with custom data, and reserved `textures/raw/` names are
-  errors.
+- Duplicate canonical texture paths and collisions with custom data or other raw payload paths are
+  `BK3005` errors and prevent the pack.
 
 ## 9. References
 
@@ -529,7 +543,7 @@ complete baked asset set **before** the pack is written:
 4. When the target's type is known, it matches `T`: a `SpriteAsset.Texture` reference must target a
    `TextureDescriptor`; a `data/` reference must target the type mapped for that path; a
    `AssetRef<Struct>` target must be the same struct type (D-M4-11).
-5. A `DataRef` targets a raw payload (in M4, only `textures/raw/**` exists).
+5. A `DataRef` targets a raw payload (in M4, a texture's `<descriptor>-raw` entry).
 6. An absent reference (omitted key) is valid and skipped.
 
 A violation is a bake error naming the source file, line, column, member path, and reference path.
@@ -573,12 +587,17 @@ runtime versions. Tests assert the contract above, not a pack hash. Q-19 pins th
 
 ### 10.3 Incremental bake (D-M4-08)
 
-- A manifest under `obj/bork2d/bake/` records: descriptor hash, canonical input list with SHA-256
-  per source file, `Project.Common` hash, tool version, mode, output pack hash, and host hash.
+- A manifest under `obj/bork2d/bake/` records: descriptor hash, canonical input list with a content
+  hash per source file (every `.toml` and texture source anywhere under the asset root),
+  `Project.Common` hash, tool version, mode, output pack hash, and host hash.
 - On each invocation the CLI recomputes the input digest. If it matches the manifest and the
   output pack exists with the recorded hash, the bake is skipped (reported as up to date).
 - Any change re-bakes the entire project (no per-asset cache in M4). Host generation is skipped the
-  same way when its inputs (descriptor, `Project.Common`, generator version) are unchanged.
+  same way when its inputs (descriptor, `Project.Common`, generator version, configuration, output
+  directory, generated content, and the discovered source-type declaration hash) are unchanged;
+  `--force` regenerates.
+- A type or path declaration add/remove/change regenerates the host even when the descriptor and
+  `Project.Common` are unchanged (D-M4-13).
 - `--force` bypasses both skips. A missing/corrupt/unreadable manifest forces a full bake. An
   externally modified pack is detected by the output hash and re-baked.
 - Deleted sources disappear on the next full bake; stale outputs are never merged.
@@ -603,8 +622,9 @@ bork2d-bake --help | --version
 - `generate-host` is used by MSBuild; it writes the generated host sources/project and returns 0
   when up to date.
 - `bake` runs the full pipeline. `--check` validates without writing the pack or manifest.
-- `validate` validates the descriptor and reachable sources without requiring a host; when a host is
-  supplied it also binds and checks references.
+- `validate` validates the descriptor and reachable sources without requiring a host: source
+  `[bork2d]` type metadata, TOML syntax, and textures. When a host is supplied it also discovers,
+  checks the host manifest against the declarations, and binds/references.
 - `--project` is required; relative CLI paths resolve against the process current directory.
   Descriptor-internal paths resolve against the descriptor.
 - Exit codes: `0` success/up to date; `1` one or more bake diagnostics; `2` usage/descriptor
@@ -730,6 +750,12 @@ files/areas disjoint; otherwise run them sequentially and record why in the mile
 | WP5 | Incremental + MSBuild: hash manifest, skip/force/clean, `.targets`, host build invocation, fixture project, `dotnet build` integration test, output/publish layout. | WP4 | 4 |
 | WP6 | AOT proof + docs + gates: AOT bake step, smoke loads baked pack, docs (assets/tooling, projects, nativeaot, API guide/reference, README, roadmap, decisions, contributing), full gates, acceptance evidence. | WP5 | 5 |
 
+**Owner revision fix-1 (post-WP6).** The `m-4/fix-1` branch applies D-M4-13 against the open PR:
+descriptor/type-model removal, per-source `[bork2d]` metadata, host scanning and source-type hash,
+location-free data/textures, `-raw` payload paths, fixture/test/doc updates, and the same gates.
+The texture-path change touches the AOT smoke; fix-1 keeps the fixture PNG generated and verifies
+the AOT project builds, while fix-2 commits the PNG and re-runs AOT publish/run.
+
 WP0 is a gate, not a deliverable: it may produce throwaway code. Its report records which TOML
 mapping/span mechanism is viable and any deviation; the orchestrator asks the owner before a
 contract-level change.
@@ -790,7 +816,7 @@ committed.
 | Custom data | bake + `LoadAsset<T>` round-trip for class and struct roots; `AssetRef<Struct>`; `SpriteAsset`-as-data + texture reference; nested references; absent references; source spans for nested/collection references. |
 | API contract | `LoadAsset<T>`/`AssetRef<T>` compile for a `readonly record struct`; a `nil` root payload faults `Decode`; class-based call sites and `FakeAssets` still compile and behave unchanged; API docs match the relaxed constraint. |
 | References | canonical/missing/wrong-kind/wrong-type/duplicate target; `DataRef` to raw; errors carry file/line/member path; `PackBuilder` backstop not triggered. |
-| Textures | PNG (RGBA/RGB/palette/grayscale), BMP, TGA, JPG (decoder seam plus a tiny in-code sample); sidecar defaults/overrides; 16-bit behavior; corrupt/truncated/unsupported; zero/huge dimensions; duplicate paths; `textures/raw/` reservation. |
+| Textures | PNG (RGBA/RGB/palette/grayscale), BMP, TGA, JPG (decoder seam plus a tiny in-code sample); sources anywhere under the asset root (`art/...`); sidecar defaults/overrides next to the source; typed sidecar-shaped TOML treated as data; 16-bit behavior; corrupt/truncated/unsupported; zero/huge dimensions; duplicate paths; data/texture/raw collisions. |
 | Determinism | same-process and separate-process double bake; entry table/payload comparison; discovery order independence. |
 | Incremental | skip; change one TOML; change one image; delete a source; corrupt manifest; missing pack; externally modified pack; `--force`; failed bake keeps the old pack. |
 | Host | generated project contents; manifest type map; binder delegates; ALC/type-identity; missing/stale host diagnostic; host rebuild after descriptor change. |
@@ -818,7 +844,7 @@ behavior. They are no longer open; the remaining rows are.
 | ID | Question | Suggested default | Blocks |
 | --- | --- | --- | --- |
 | Q-02 | Is the bake tooling surface public (like `PackBuilder`) or internal with `InternalsVisibleTo` to a fixed `Bork2d.BakeHost`, `Bake.Cli`, `Tests`, and `Editor`? | Internal + IVT; no new public tooling API until a consumer needs one. | WP1/WP2 |
-| Q-03 | Exact descriptor schema: required/optional fields, `[bake].host`, include/exclude, empty `[[types]]`, default pack name/location. | Schema in §6; allow empty type list; pack defaults to `assets.pck` at the target output. | WP1 |
+| Q-03 | Exact descriptor schema: required/optional fields, `[bake].host`, include/exclude, type list, default pack name/location. | Schema in §6; **no** type list (D-M4-13); pack defaults to `assets.pck` at the target output. | WP1 |
 | Q-04 | Type naming: simple name in `Project.Common` then Api vs assembly-qualified; may a mapped type live outside `Project.Common`? | Simple name, Project.Common then Api; other assemblies deferred. | WP1/WP2 |
 | Q-30 | Does a mapped `[GenerateShape]` type need to be public, or is `internal` enough (both are visible to the generated host via `InternalsVisibleTo`)? | `internal` allowed; the host is a friend. | WP1 |
 
@@ -839,7 +865,7 @@ behavior. They are no longer open; the remaining rows are.
 
 | ID | Question | Suggested default | Blocks |
 | --- | --- | --- | --- |
-| Q-12 | Texture edge policy: 16-bit sources (accept/downsample vs reject); raw RGBA sources in M4; sidecar required/optional; source dir reservation; symlinks; max dimension/OOM guard. | Accept 8-bit and decoder-normalized sources, reject explicit 16-bit PNGs; raw RGBA deferred; sidecars optional; forbid `textures/raw/` sources; skip reparse points; fail cleanly on OOM without a new policy cap. | WP3 |
+| Q-12 | Texture edge policy: 16-bit sources (accept/downsample vs reject); raw RGBA sources in M4; sidecar required/optional; source dir reservation; symlinks; max dimension/OOM guard. | Accept 8-bit and decoder-normalized sources, reject explicit 16-bit PNGs; raw RGBA deferred; sidecars optional and next to any source anywhere under the asset root; no reserved `textures/raw/` folder (raw path is descriptor + `-raw`); skip reparse points; fail cleanly on OOM without a new policy cap. | WP3 |
 | Q-24 | Are texture sidecars allowed to override `format` or declare source-specific fields? | Only `filter`/`wrap` in v1; `format` fixed `rgba8`. | WP3 |
 | Q-29 | May authors hand-write `TextureDescriptor` TOML, or is it generated only? | Generated only; no descriptor TOML path in M4. | WP3 |
 
@@ -847,7 +873,7 @@ behavior. They are no longer open; the remaining rows are.
 
 | ID | Question | Suggested default | Blocks |
 | --- | --- | --- | --- |
-| Q-13 | Discovery: should unknown files under the asset root be ignored or errors? Must all TOML be mapped? How are `sprites/` files mapped? Longest-prefix tie-breaks? | Ignore non-asset files; error on unmapped `.toml`; map `sprites` explicitly; longest prefix, exact duplicates error. | WP2/WP3 |
+| Q-13 | Discovery: should unknown files under the asset root be ignored or errors? Must all TOML declare a type? How are sidecars distinguished? | Ignore non-asset files; a non-sidecar `.toml` must declare `[bork2d].type`; a type-less `<image>.toml` is a sidecar; duplicate canonical paths are errors (D-M4-13). | WP2/WP3 |
 | Q-14 | `SpriteAsset` test scope: which fields/values are baked and asserted, given no field validation? | One TOML with all public fields and a texture reference; assert round-trip only. | WP2 |
 | Q-15 | CLI shape: final command names/options, `--json`, `validate` command, warnings policy, log verbosity. | Commands/options in §11; human output + structured library API; `--json` deferred. | WP1/WP5 |
 | Q-19 | Determinism assertions: exactly which bytes/tables are compared, and is a pack-hash check informational only? | Entry table + per-asset payload bytes + diagnostics; pack hash informational. | WP4 |
@@ -862,7 +888,7 @@ behavior. They are no longer open; the remaining rows are.
 | Q-10 | Default pack output location; publish copy; `dotnet run` CWD; whether the app must pass an absolute path. | `$(TargetDir)assets.pck`, copied to publish; document CWD and `WithAssetsPack`. | WP5 |
 | Q-11 | Which project imports the targets; hook (`Build`/`Publish`); property names; clean behavior. | Runnable app project (`Project.Desktop`), `AfterTargets=Build`, publish copy, clean removes generated artifacts. | WP5 |
 | Q-16 | AOT/fixture project: built-in `SpriteAsset` only vs a `Bork2d.BakeFixture` custom type; where the fixture lives; whether it joins the solution and the AOT reference graph. | Add `Bork2d.BakeFixture` (library + `Assets/`) to the solution, referenced by the AOT smoke and tests. | WP5/WP6 |
-| Q-18 | Public API docs for `[GenerateShape]`/`partial`, descriptor registration, and `Color`: XML docs, API reference section, guide example, status markers. | Add an API-reference "data serialization" subsection and a guide "data and bake" section; document that `partial` is PolyType's requirement. | WP6 |
+| Q-18 | Public API docs for `[GenerateShape]`/`partial`, per-source `[bork2d]` registration, and `Color`: XML docs, API reference section, guide example, status markers. | Add an API-reference "data serialization" subsection and a guide "data and bake" section; document that `partial` is PolyType's requirement. | WP6 |
 | Q-22 | AOT smoke default-run changes: replace the `PackBuilder` temp pack with the baked fixture pack; keep the windowed demo `WithoutAssets()`. | Yes; the default run loads the baked pack; windowed unchanged. | WP6 |
 | Q-23 | Empty/no-custom-type and texture-only projects; empty pack behavior. | Supported; empty pack valid. | WP4/WP5 |
 | Q-26 | Cross-platform CLI behavior (path separators, case-sensitive FS) in M4. | Windows-first; use platform APIs; no guarantees beyond v1 Windows. | WP1 |
@@ -899,7 +925,7 @@ behavior. They are no longer open; the remaining rows are.
 - [`nativeaot.md`](../architecture/nativeaot.md): JIT/tooling table, build-time reflection boundary,
   AOT smoke baked-pack step, dependency proof.
 - [`api/reference.md`](../api/reference.md) and [`api/guide.md`](../api/guide.md):
-  `[GenerateShape]` + `partial` data authoring, descriptor registration, TOML authoring, bake
+  `[GenerateShape]` + `partial` data authoring, per-source `[bork2d]` registration, TOML authoring, bake
   commands (tooling-only), the `ColorMarshaler` infrastructure type and `Color`'s serialized form,
   and the relaxed `where T : IShapeable<T>` load contract with a struct-root example and its `nil`
   decode rule.
@@ -956,26 +982,32 @@ marshaler.
 - [M3 record](m3-assets.md) and [asset-reference refactor](refactor-asset-references.md) — inherited
   asset model; D-035's field-validation sentence is adjusted by D-M4-06.
 
-## 22. As-built evidence (m-4/common, PR pending)
+## 22. As-built evidence (m-4/fix-1 revision)
 
-**Status:** implementation complete on `m-4/common`; the final PR to `develop` is **not open** and
-M4 is **not merged**. All work packages (WP0–WP6) are landed on the milestone branch. The WP0
-feasibility report is [M4 WP0 — Serialization and Bake Feasibility Spike](m4-wp0-spike.md); it
-records the Tomlyn DOM binder (Q-06/Q-07), the generated-host/ALC mechanism (Q-08), the XXH3
-override (Q-09), and the `Color`/AOT findings that shaped WP1–WP2.
+**Status:** implementation complete on `m-4/common`; the owner revision D-M4-13 is implemented on
+`m-4/fix-1` against open PR #7; the final PR to `develop` is **not merged** and M4 is **not
+merged**. All work packages (WP0–WP6) are landed on the milestone branch, and the fix-1 revision
+replaces the descriptor `[[types]]`/prefix model and fixed texture folders. The WP0 feasibility
+report is [M4 WP0 — Serialization and Bake Feasibility Spike](m4-wp0-spike.md); it records the
+Tomlyn DOM binder (Q-06/Q-07), the generated-host/ALC mechanism (Q-08), the XXH3 override (Q-09),
+and the `Color`/AOT findings that shaped WP1–WP2. Its old `textures/raw/` examples are historical
+spike output; the current `-raw` convention is D-M4-13.
 
 ### 22.1 Delivered scope
 
 - `Bork2d.Bake` (JIT, internal) and `Bork2d.Bake.Cli` (`generate-host`, `bake`, `validate`)
-  implement the descriptor model/parser, metadata type resolution, generated host, shape-driven
-  Tomlyn DOM binder, texture import, reference validation, structural determinism, atomic pack
-  write, incremental manifest/host state, and the non-collectible host loader.
+  implement the descriptor model/parser, per-source `[bork2d]` metadata scanning and type
+  resolution, generated host, shape-driven Tomlyn DOM binder, location-free texture import,
+  reference validation, structural determinism, atomic pack write, incremental manifest/host state,
+  and the non-collectible host loader (D-M4-13).
 - `build/Bork2d.Bake.targets` runs `generate-host` → host build → `bake` after `Build`, copies the
   pack on `Publish`, and removes the generated host, manifest, and pack on `Clean`. The tooling is
   built and executed out of process; it is never referenced by the app.
 - `Bork2d.BakeFixture` is the game-side `Project.Common`-like fixture (data types plus `Assets/`
-  tree); `build/write-fixture-texture.ps1` generates the deterministic 2x2 PNG into the prepared
-  copy, so no binary fixture is committed.
+  tree; its data TOMLs carry `[bork2d].type` and its descriptor has no `[[types]]`).
+  `build/write-fixture-texture.ps1` still generates the deterministic 2x2 PNG into the prepared
+  copy in this branch, so no binary fixture is committed; fix-2 commits
+  `Bork2d.BakeFixture/Assets/art/player.png` and removes the generator.
 - `Bork2d.AotSmoke` imports the targets; its default headless run mounts the baked pack from
   `AppContext.BaseDirectory/assets.pck` (D-M4-09, Q-22). The windowed demo keeps
   `WithoutAssets()` and is unchanged.
@@ -989,8 +1021,8 @@ The targets bake exactly **5 entries** from `Bork2d.BakeFixture/Assets`:
 | `data/game` | `Bork2d.BakeFixture.GameConfig` | `Name "campaign"`, `Health 120`, `MaxPlayers 4`, `Must "present"`, `Stats(3,7)`, `Tint Color(1,0.5,0.25,1)`, `Texture textures/player` |
 | `roots/stats` | `Bork2d.BakeFixture.StatsRoot` | `(11,13)` |
 | `sprites/player` | `Bork2d.Api.Assets.SpriteAsset` | texture `textures/player`, UVs `[[0,0],[1,0],[1,1],[0,1]]`, scale `16`, pivot `(0.5,0.5)`, topology `Triangles`, indices `[0,1,2,0,2,3]` |
-| `textures/player` | `Bork2d.Api.Assets.TextureDescriptor` | payload `textures/raw/player`, `2x2`, format `rgba8`, filter `nearest`, wrap `repeat` |
-| `textures/raw/player` | raw payload | 16 bytes `255,0,0,255, 0,255,0,128, 0,0,255,64, 255,255,255,0` |
+| `textures/player` | `Bork2d.Api.Assets.TextureDescriptor` | payload `textures/player-raw`, `2x2`, format `rgba8`, filter `nearest`, wrap `repeat` |
+| `textures/player-raw` | raw payload | 16 bytes `255,0,0,255, 0,255,0,128, 0,0,255,64, 255,255,255,0` |
 
 The default AOT run asserts the class root (including the nested `readonly record struct`, the
 `Color` marshaler form, and `AssetRef<TextureDescriptor>`), the sprite and its texture reference,
@@ -1000,42 +1032,42 @@ scene graph and one `Setup`/`Tick`/`Teardown`.
 
 ### 22.3 Commands and results
 
-Run on the milestone branch (Windows 11, SDK `11.0.100-rc.1.26425.128`, `win-x64`):
+Run on the fix-1 branch (Windows 11, SDK `11.0.100-rc.1.26425.128`, `win-x64`):
 
 | Command | Result |
 | --- | --- |
 | `dotnet build src/Bork2d/Bork2d.slnx -c Debug` | 0 warnings, 0 errors; the targets bake `Bork2d.AotSmoke/bin/Debug/net11.0/assets.pck` |
 | `dotnet build src/Bork2d/Bork2d.slnx -c Release` | 0 warnings, 0 errors; the targets bake the release pack |
-| `dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build` | 0 failed, **859 passed**, **12 skipped**, 871 total |
+| `dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build` | 0 failed, **877 passed**, **12 skipped**, 889 total |
 | `dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore` | exit 0, no changes |
 | `pwsh scripts/check-docs.ps1` | passes (all local links/anchors) |
 | `git diff --check` | clean |
-| `dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64 --nologo` | **0 warnings** (AOT/trim included) |
-| published `Bork2d.AotSmoke.exe` (no arguments) | exit 0; loads the baked 5-entry pack and asserts every value above |
-| published `Bork2d.AotSmoke.exe --windowed --ticks 120` | exit 0 after exactly 120 ticks (`Setup/Tick/Teardown = 1/120/1`) |
+| `dotnet build src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release` | 0 warnings; the baked pack uses `textures/player-raw` |
+| AOT publish/run | deferred to fix-2, which commits `Bork2d.BakeFixture/Assets/art/player.png`; fix-1 verifies the AOT project builds in Debug/Release |
 
 The 12 skipped tests are the existing conditional ones: 9 real-window tests gated by
 `BORK2D_RUN_WINDOW_TESTS=1` and 3 reparse-point capability tests. They are unrelated to M4's
 deterministic contract and run when the environment/capability is present.
 
-Publish inspection: the NativeAOT single-file output contains `Bork2d.AotSmoke.exe`, `assets.pck`,
-`SDL2.dll`, and the managed PDBs (`Bork2d.BakeFixture.pdb` confirms the fixture assembly was in the
-publish graph). It contains **no** `Bork2d.Bake.dll`, `Bork2d.Bake.Cli*`, `Bork2d.BakeHost*`,
-`Tomlyn*`, or `StbImageSharp*` assembly. The generated host is not a solution project.
+Publish inspection (from the `m-4/common` evidence; fix-2 re-runs it after the fixture PNG move):
+the NativeAOT single-file output contains `Bork2d.AotSmoke.exe`, `assets.pck`, `SDL2.dll`, and the
+managed PDBs (`Bork2d.BakeFixture.pdb` confirms the fixture assembly was in the publish graph). It
+contains **no** `Bork2d.Bake.dll`, `Bork2d.Bake.Cli*`, `Bork2d.BakeHost*`, `Tomlyn*`, or
+`StbImageSharp*` assembly. The generated host is not a solution project.
 
 ### 22.4 Acceptance mapping (§16)
 
 | §16 criterion | As-built evidence |
 | --- | --- |
-| 1. Bake and load (classes, struct members, `Color`, struct root with `AssetRef`, `nil` decode fault) | `BakePipelineTests`, `PackCompositionTests`, `ReferenceValidationTests`, and the default AOT baked-pack run |
-| 2. Invalid TOML diagnostics | `BakeSourceBinderTests` and the CLI tests cover syntax, required, unknown key, type mismatch, and numeric range with `file:line:column`; a failed bake leaves the pack unchanged |
+| 1. Bake and load (classes, struct members, `Color`, struct root with `AssetRef`, `nil` decode fault) | `BakePipelineTests`, `PackCompositionTests`, `ReferenceValidationTests`, and the `m-4/common` AOT baked-pack run (fix-2 re-runs AOT) |
+| 2. Invalid TOML and metadata diagnostics | `BakeSourceBinderTests`, `BakeSourceDiscoveryTests`, and the CLI tests cover syntax, required, unknown key, type mismatch, numeric range, missing/malformed `[bork2d]`, missing source type, and descriptor `types` rejection with `file:line:column`; a failed bake leaves the pack unchanged. |
 | 3. Reference diagnostics | `ReferenceValidationTests` covers missing, wrong-kind, wrong-type, non-canonical, and absent references with spans and member paths |
-| 4. Textures | `TexturePipelineTests` and `SpriteAssetBakeTests` cover PNG/BMP/TGA/JPG, sidecars/defaults, exact pixels, corrupt/unsupported sources, collisions, and reserved paths |
+| 4. Textures | `TexturePipelineTests` and `SpriteAssetBakeTests` cover PNG/BMP/TGA/JPG, sidecars/defaults next to arbitrary sources, exact pixels, corrupt/unsupported sources, texture collisions, and data/texture/raw `BK3005` collisions |
 | 5. Sprite-as-data | `SpriteAssetBakeTests` bakes and loads a `SpriteAsset`; M4 has no sprite field validation, documented as M5 (D-M4-06) |
 | 6. Determinism | `BakeCliTests.SeparateProcessBakesAreStructurallyIdentical` plus the in-process composition tests compare the entry table and decompressed payloads under D-M4-07 |
-| 7. Incremental | `BakeIncrementalCliTests`, `BakeIncrementalManifestTests`, and `BakeHostGenerationStateTests` cover skip, change, delete, corrupt/missing manifest, missing/modified pack, `--force`, host-state reuse, and failure preservation |
+| 7. Incremental | `BakeIncrementalCliTests`, `BakeIncrementalManifestTests`, and `BakeHostGenerationStateTests` cover skip, change, delete, corrupt/missing manifest, missing/modified pack, `--force`, host-state reuse, source-type hash reuse/regeneration, and failure preservation |
 | 8. MSBuild | `BakeTargetsIntegrationTests` runs a temporary app through the targets: build, pack location, canonical error propagation, publish copy, and clean |
-| 9. AOT | Published exe loads the baked pack and exits 0; `--windowed --ticks 120` exits 0; zero-warning publish contains no tooling assemblies |
+| 9. AOT | `m-4/common` evidence: published exe loads the baked pack and exits 0; `--windowed --ticks 120` exits 0; zero-warning publish contains no tooling assemblies. Fix-1 verifies the AOT project builds with `textures/player-raw`; fix-2 re-runs publish/run |
 | 10. Boundaries | `DependencyMatrixTests` (Bake/Bake.Cli internal, runtime assemblies tooling-free, generated host not in the solution) and the fixture's `Bork2d.Api`-only reference |
 | 11. Docs and decisions | Owning docs, roadmap delta, D-M4 entries, and AOT-gate docs updated in this change; they state that `partial` is PolyType's `[GenerateShape]` requirement |
-| 12. Gates | Debug/Release builds, 859+12 tests, format, docs check, `git diff --check`, and the local AOT publish/run above |
+| 12. Gates | Debug/Release builds, 877+12 tests, format, docs check, `git diff --check`, and the AOT project build; AOT publish/run is re-run in fix-2 after the fixture PNG move |

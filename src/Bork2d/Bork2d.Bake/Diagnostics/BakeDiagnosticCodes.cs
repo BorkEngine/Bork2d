@@ -62,12 +62,6 @@ internal static class BakeDiagnosticCodes
     /// <summary>The assets root is missing or is not a directory.</summary>
     internal const string DescriptorAssetsRoot = "BK1007";
 
-    /// <summary>Two <c>[[types]]</c> entries use the same exact prefix.</summary>
-    internal const string DescriptorDuplicatePrefix = "BK1008";
-
-    /// <summary>A <c>[[types]]</c> prefix is not a canonical asset path.</summary>
-    internal const string DescriptorInvalidPrefix = "BK1009";
-
     /// <summary>A <c>[textures]</c> filter or wrap value is not supported.</summary>
     internal const string DescriptorTextureSetting = "BK1010";
 
@@ -113,8 +107,8 @@ internal static class BakeDiagnosticCodes
     /// <summary>A mapped type is not visible to the generated host.</summary>
     internal const string TypeNotVisible = "BK1024";
 
-    /// <summary>A TOML source is not covered by any <c>[[types]]</c> prefix.</summary>
-    internal const string SourceUnmapped = "BK1025";
+    /// <summary>A TOML source path cannot be mapped to a canonical asset path (for example a dot).</summary>
+    internal const string SourceInvalidAssetPath = "BK1025";
 
     /// <summary>Two source files map to the same canonical asset path.</summary>
     internal const string SourceDuplicate = "BK1026";
@@ -127,6 +121,12 @@ internal static class BakeDiagnosticCodes
 
     /// <summary>The host-generation incremental state could not be written.</summary>
     internal const string HostIncrementalStateWriteFailed = "BK1029";
+
+    /// <summary>A non-sidecar data TOML has no <c>[bork2d].type</c> declaration.</summary>
+    internal const string SourceTypeMissing = "BK1030";
+
+    /// <summary>A source <c>[bork2d]</c> table is malformed or declares an unsupported key.</summary>
+    internal const string SourceTypeInvalid = "BK1031";
 
     /// <summary>A reference path is not canonical.</summary>
     internal const string ReferenceNotCanonical = "BK3001";

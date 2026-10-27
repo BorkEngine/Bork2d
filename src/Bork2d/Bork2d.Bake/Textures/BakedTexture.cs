@@ -22,9 +22,9 @@ internal sealed class BakedTexture
     /// <summary>
     /// Initializes a new instance of the <see cref="BakedTexture"/> class.
     /// </summary>
-    /// <param name="assetPath">The canonical descriptor asset path, for example <c>textures/ui/button</c>.</param>
+    /// <param name="assetPath">The canonical descriptor asset path, for example <c>art/ui/button</c>.</param>
     /// <param name="descriptor">The descriptor to write as MessagePack.</param>
-    /// <param name="payloadPath">The canonical raw payload path, for example <c>textures/raw/ui/button</c>.</param>
+    /// <param name="payloadPath">The canonical raw payload path (descriptor path plus <c>-raw</c>), for example <c>art/ui/button-raw</c>.</param>
     /// <param name="payload">The RGBA8 payload bytes.</param>
     /// <param name="sourcePath">The absolute source image path.</param>
     /// <param name="settings">The resolved import settings and their sidecar spans.</param>

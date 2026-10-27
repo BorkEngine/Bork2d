@@ -1,4 +1,3 @@
-using System.Text;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Hosting;
 using Bork2d.Bake.Paths;
@@ -13,53 +12,56 @@ namespace Bork2d.Bake.Sources;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Binding is sequential and ordinal by canonical asset path, so diagnostics are deterministic.
-/// A source that fails to read, parse, or bind is dropped from the result while its diagnostics stay
-/// in the bag; a successful source yields its typed value and reference sites for WP4.
+/// Binding is sequential and ordinal by canonical asset path, so diagnostics are deterministic. The
+/// caller discovers the sources first (D-M4-13): discovery also reads each source's
+/// <c>[bork2d].type</c>, so the binder never has to guess a mapping and a source failure cannot reach
+/// the host with an unknown type. A source that fails to read, parse, or bind is dropped from the
+/// result while its diagnostics stay in the bag.
 /// </para>
 /// <para>
-/// Source text is strict UTF-8 with an optional BOM: invalid bytes are a
-/// <see cref="BakeDiagnosticCodes.SourceNotUtf8"/> diagnostic instead of replacement characters.
-/// This pass does not validate references against the baked set and never writes a pack.
+/// Source text is strict UTF-8 with an optional BOM (shared with discovery). This pass does not
+/// validate references against the baked set and never writes a pack.
 /// </para>
 /// </remarks>
 internal static class BakeSourceBinder
 {
-    private static readonly UTF8Encoding _strictUtf8 = new(
-        encoderShouldEmitUTF8Identifier: false,
-        throwOnInvalidBytes: true);
-
-    /// <summary>
-    /// Discovers every custom-data source and parses it for TOML syntax without binding it.
-    /// </summary>
+    /// <summary>Parses every discovered source for TOML syntax without binding it.</summary>
     /// <remarks>
-    /// This is the <c>validate</c> command's host-free path: it proves the source tree reads and
-    /// parses, but it cannot check types, required members, or references without the generated host.
-    /// Discovery diagnostics (unmapped sources, duplicate paths) are reported exactly as in a bake.
+    /// This is the <c>validate</c> command's host-free path. Discovery already parses the metadata of
+    /// every data source; this method only re-reads the discovered files and proves their full TOML
+    /// syntax parses. It cannot check types, required members, or references without the generated
+    /// host.
     /// </remarks>
     /// <param name="descriptor">The parsed project descriptor.</param>
+    /// <param name="sources">The discovered sources.</param>
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
     /// <returns>The number of sources whose TOML syntax parsed successfully.</returns>
     internal static int ValidateSyntax(
         ProjectDescriptor descriptor,
+        IReadOnlyList<BakeSource> sources,
         BakeDiagnostics diagnostics)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(sources);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
         int parsed = 0;
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
         foreach (BakeSource source in sources)
         {
-            string? text = ReadSource(source, descriptor, diagnostics);
-            if (text is null)
-            {
-                continue;
-            }
-
             string diagnosticPath = BakeDiagnosticPath.ForSource(
                 descriptor.DescriptorDirectory,
                 source.FullPath);
+
+            if (!BakeSourceText.TryRead(
+                    source.FullPath,
+                    source.RelativePath,
+                    diagnosticPath,
+                    source.AssetPath,
+                    diagnostics,
+                    out string text))
+            {
+                continue;
+            }
 
             if (TomlDocument.TryParse(text, diagnosticPath, diagnostics, out _, out _))
             {
@@ -70,34 +72,41 @@ internal static class BakeSourceBinder
         return parsed;
     }
 
-    /// <summary>Discovers and binds every custom-data source of a project.</summary>
+    /// <summary>Binds every discovered custom-data source of a project.</summary>
     /// <param name="descriptor">The parsed project descriptor.</param>
+    /// <param name="sources">The discovered sources with their declared types.</param>
     /// <param name="manifest">The loaded generated host manifest.</param>
     /// <param name="diagnostics">The diagnostics bag to append to.</param>
     /// <returns>The successfully bound assets, sorted ordinal by canonical asset path.</returns>
     internal static IReadOnlyList<BoundAsset> BindAll(
         ProjectDescriptor descriptor,
+        IReadOnlyList<BakeSource> sources,
         IBakeManifest manifest,
         BakeDiagnostics diagnostics)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(sources);
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
-        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
         var assets = new List<BoundAsset>(sources.Count);
 
         foreach (BakeSource source in sources)
         {
-            string? text = ReadSource(source, descriptor, diagnostics);
-            if (text is null)
-            {
-                continue;
-            }
-
             string diagnosticPath = BakeDiagnosticPath.ForSource(
                 descriptor.DescriptorDirectory,
                 source.FullPath);
+
+            if (!BakeSourceText.TryRead(
+                    source.FullPath,
+                    source.RelativePath,
+                    diagnosticPath,
+                    source.AssetPath,
+                    diagnostics,
+                    out string text))
+            {
+                continue;
+            }
 
             int before = diagnostics.Count;
             if (!TomlDocument.TryParse(
@@ -169,53 +178,5 @@ internal static class BakeSourceBinder
         }
 
         return assets;
-    }
-
-    private static string? ReadSource(
-        BakeSource source,
-        ProjectDescriptor descriptor,
-        BakeDiagnostics diagnostics)
-    {
-        string diagnosticPath = BakeDiagnosticPath.ForSource(
-            descriptor.DescriptorDirectory,
-            source.FullPath);
-
-        byte[] bytes;
-        try
-        {
-            bytes = File.ReadAllBytes(source.FullPath);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
-            or NotSupportedException or ArgumentException)
-        {
-            diagnostics.Add(
-                BakeSeverity.Error,
-                BakeDiagnosticCodes.SourceReadFailed,
-                $"Failed to read '{source.RelativePath}': {exception.Message}",
-                diagnosticPath,
-                assetPath: source.AssetPath);
-            return null;
-        }
-
-        ReadOnlySpan<byte> content = bytes;
-        if (content.Length >= 3 && content[0] == 0xEF && content[1] == 0xBB && content[2] == 0xBF)
-        {
-            content = content[3..];
-        }
-
-        try
-        {
-            return _strictUtf8.GetString(content);
-        }
-        catch (DecoderFallbackException)
-        {
-            diagnostics.Add(
-                BakeSeverity.Error,
-                BakeDiagnosticCodes.SourceNotUtf8,
-                $"'{source.RelativePath}' is not valid UTF-8.",
-                diagnosticPath,
-                assetPath: source.AssetPath);
-            return null;
-        }
     }
 }

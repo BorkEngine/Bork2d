@@ -4,7 +4,9 @@
 > (2026-10-26, PR #2); M3 (assets: pack, VFS, descriptors) merged into `develop` (2026-10-26,
 > PR #4); the post-M3 asset-reference refactor (D-035) is merged (PR #6); M4 (serialization and
 > bake) is implementation complete on `m-4/common` — the final PR is pending and M4 is not
-> merged.** The repository contains the M1 build/quality baseline, public contracts, root-owned
+> merged, and the owner-requested `m-4/fix-1` revision (D-M4-13: per-source `[bork2d].type`,
+> location-free data/textures, `-raw` payload paths) is in progress.** The repository contains the
+> M1 build/quality baseline, public contracts, root-owned
 > scene tree, builder, logging, the NativeAOT smoke app, the M2 SDL windowed host (window, input,
 > time, uncapped loop), the M3 asset pipeline (pack reader/writer, VFS, loader, public
 > `SpriteAsset`/`TextureDescriptor`, typed `AssetRef<T>`/`DataRef` links, runtime integration), and
@@ -148,7 +150,8 @@ One fact has one owner. Update the owner and link to it; do not copy.
 | **Pack / overlay** | `assets.pck` file; a later mounted pack that shadows earlier paths. |
 | **Bake** | The JIT tooling pipeline that turns TOML sources and textures into MessagePack/raw pack entries; never in the runtime. |
 | **Bake host** | The generated `Bork2d.BakeHost` assembly that statically knows the mapped types and calls generated bind/pack code; not a solution project. |
-| **Project descriptor** | `bork2d.project.toml`: asset root, pack/host locations, texture defaults, and `[[types]]` prefix→CLR-type registrations. |
+| **Project descriptor** | `bork2d.project.toml`: asset root, pack/host locations, and texture defaults; it declares no types (each data TOML carries `[bork2d].type`). |
+| **Source type metadata** | The reserved top-level `[bork2d] type = "Full.Type.Name"` table in a custom-data TOML (D-M4-13); the root table is binder-ignored metadata. |
 | **Bake fixture** | `Bork2d.BakeFixture`: the game-side `Project.Common`-like data types plus `Assets/` tree used by the bake and AOT proofs. |
 | **Structural determinism** | Same entry table/order and byte-identical decompressed payloads for identical inputs; whole-pack byte identity is not guaranteed. |
 | **Incremental bake** | Content-hash gate that skips host generation/bake when the descriptor, sources, game assembly, tool, and mode are unchanged. |

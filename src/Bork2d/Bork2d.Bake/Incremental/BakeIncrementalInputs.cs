@@ -10,11 +10,12 @@ namespace Bork2d.Bake.Incremental;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The tracked inputs are every <c>.toml</c> source under the asset root (custom data, sprites, and
-/// texture sidecars) plus every accepted texture source under <c>textures/</c>. Paths are
-/// project-relative with <c>/</c> separators when the file is under the descriptor directory,
-/// otherwise absolute, and the list is sorted ordinal, so the digest is independent of filesystem
-/// enumeration order. Non-asset files are ignored, matching discovery (Q-13).
+/// The tracked inputs are every <c>.toml</c> source anywhere under the asset root (custom data and
+/// texture sidecars) plus every accepted texture source anywhere under the asset root (D-M4-13:
+/// there is no special <c>textures/</c> folder). Paths are project-relative with <c>/</c> separators
+/// when the file is under the descriptor directory, otherwise absolute, and the list is sorted
+/// ordinal, so the digest is independent of filesystem enumeration order. Non-asset files are
+/// ignored, matching discovery (Q-13).
 /// </para>
 /// <para>
 /// The "common" hash covers the game-side assembly closure copied next to the generated host
@@ -30,7 +31,6 @@ internal sealed class BakeIncrementalInputs
         StringComparer.OrdinalIgnoreCase);
 
     private const string TomlSuffix = ".toml";
-    private const string TexturesDirectory = "textures";
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BakeIncrementalInputs"/> class from already
@@ -139,7 +139,7 @@ internal sealed class BakeIncrementalInputs
 
         foreach (string file in BakeSourcePath.EnumerateFilesSorted(descriptor.AssetsRoot))
         {
-            if (!IsTrackedInput(descriptor, file))
+            if (!IsTrackedInput(file))
             {
                 continue;
             }
@@ -153,27 +153,9 @@ internal sealed class BakeIncrementalInputs
         return inputs;
     }
 
-    private static bool IsTrackedInput(ProjectDescriptor descriptor, string fullPath)
-    {
-        if (fullPath.EndsWith(TomlSuffix, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (!_textureExtensions.Contains(Path.GetExtension(fullPath)))
-        {
-            return false;
-        }
-
-        return BakeSourcePath.TryMakeRelative(
-                descriptor.AssetsRoot,
-                fullPath,
-                out string relativePath,
-                out _)
-            && relativePath
-                .Split('/')[0]
-                .Equals(TexturesDirectory, StringComparison.OrdinalIgnoreCase);
-    }
+    private static bool IsTrackedInput(string fullPath)
+        => fullPath.EndsWith(TomlSuffix, StringComparison.OrdinalIgnoreCase)
+            || _textureExtensions.Contains(Path.GetExtension(fullPath));
 
     private static string HashGameAssemblyClosure(string hostDirectory)
     {

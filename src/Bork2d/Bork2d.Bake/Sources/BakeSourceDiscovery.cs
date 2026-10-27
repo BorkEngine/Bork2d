@@ -5,25 +5,30 @@ using Bork2d.Bake.Project;
 namespace Bork2d.Bake.Sources;
 
 /// <summary>
-/// Discovers custom-data <c>.toml</c> sources under the asset root and maps each to its type.
+/// Discovers custom-data <c>.toml</c> sources under the asset root and reads each source's own
+/// <c>[bork2d].type</c> declaration (D-M4-13).
 /// </summary>
 /// <remarks>
 /// <para>
-/// Discovery walks the asset root in ordinal path order, skips reparse points (so a link cannot leave
-/// the root), and uses <see cref="BakeSourcePath"/> as the only path grammar. A data source loses its
-/// <c>.toml</c> suffix; a file under <c>textures/</c> is a WP3 texture sidecar and is ignored by WP2.
-/// A <c>.toml</c> file outside a mapped prefix is a <see cref="BakeDiagnosticCodes.SourceUnmapped"/>
-/// error (Q-13), and two sources that canonicalize to the same asset path are a
-/// <see cref="BakeDiagnosticCodes.SourceDuplicate"/> error.
+/// Discovery walks the whole asset root in ordinal path order (skipping reparse points so a link
+/// cannot leave the root), excludes the descriptor itself, and uses <see cref="BakeSourcePath"/> as
+/// the only path grammar. There is no prefix mapping: a data source loses its <c>.toml</c> suffix and
+/// its canonical asset path is the source path relative to the asset root, wherever it lives.
 /// </para>
 /// <para>
-/// The longest prefix on a <c>/</c> segment boundary wins; the descriptor parser already guarantees
-/// unique exact prefixes. Non-TOML files are ignored.
+/// A <c>.toml</c> whose name is <c>&lt;image&gt;.toml</c> and that has no root <c>bork2d</c> table is a
+/// texture sidecar and is left to the texture pipeline; a typed <c>.toml</c> with that shape is data.
+/// A type-less <c>.toml</c> that is not sidecar-shaped is a missing-type error. Two data sources that
+/// canonicalize to the same asset path are a duplicate error.
 /// </para>
 /// </remarks>
 internal static class BakeSourceDiscovery
 {
-    private const string TextureArea = "textures";
+    private static readonly HashSet<string> _imageExtensions = new(
+        [".png", ".jpg", ".jpeg", ".bmp", ".tga"],
+        StringComparer.OrdinalIgnoreCase);
+
+    private const string TomlSuffix = ".toml";
 
     /// <summary>Discovers the custom-data sources of a project.</summary>
     /// <param name="descriptor">The parsed project descriptor.</param>
@@ -37,10 +42,12 @@ internal static class BakeSourceDiscovery
         ArgumentNullException.ThrowIfNull(diagnostics);
 
         var byAssetPath = new Dictionary<string, BakeSource>(StringComparer.Ordinal);
+        string descriptorPath = Path.GetFullPath(descriptor.DescriptorPath);
 
         foreach (string file in BakeSourcePath.EnumerateFilesSorted(descriptor.AssetsRoot))
         {
-            if (!file.EndsWith(".toml", StringComparison.OrdinalIgnoreCase))
+            if (!file.EndsWith(TomlSuffix, StringComparison.OrdinalIgnoreCase)
+                || PathEquals(file, descriptorPath))
             {
                 continue;
             }
@@ -63,10 +70,54 @@ internal static class BakeSourceDiscovery
                 continue;
             }
 
-            if (IsTextureSidecar(relativePath))
+            bool sidecarShaped = IsSidecarShaped(relativePath);
+            if (sidecarShaped)
             {
-                // Texture sidecars belong to WP3; WP2 never reads them, and a sidecar name keeps
-                // the source image's extension, so it must be ignored before asset-path validation.
+                // The texture pipeline owns a sidecar-shaped document unless it declares a root
+                // [bork2d] table. A typed document with this name is data and is diagnosed here
+                // (its asset path contains a dot); a text or syntax failure is left to the sidecar
+                // parser so the same file is not reported twice.
+                string? candidate = TryReadSilently(file);
+                if (candidate is null || !BakeSourceMetadataReader.TryHasBork2dTable(candidate))
+                {
+                    continue;
+                }
+            }
+
+            if (!BakeSourceText.TryRead(
+                    file,
+                    relativePath,
+                    diagnosticPath,
+                    assetPath: null,
+                    diagnostics,
+                    out string text))
+            {
+                continue;
+            }
+
+            BakeSourceMetadata metadata = BakeSourceMetadataReader.Read(
+                text,
+                diagnosticPath,
+                diagnostics);
+
+            if (metadata.Kind == BakeSourceMetadataKind.Untyped)
+            {
+                if (!sidecarShaped)
+                {
+                    diagnostics.Add(
+                        BakeSeverity.Error,
+                        BakeDiagnosticCodes.SourceTypeMissing,
+                        $"The source '{relativePath}' has no root '[bork2d]' table; every "
+                            + "custom-data TOML must declare its full CLR type name as "
+                            + "[bork2d] type = \"Full.Type.Name\".",
+                        diagnosticPath);
+                }
+
+                continue;
+            }
+
+            if (metadata.Kind != BakeSourceMetadataKind.Typed)
+            {
                 continue;
             }
 
@@ -78,24 +129,12 @@ internal static class BakeSourceDiscovery
             {
                 diagnostics.Add(
                     BakeSeverity.Error,
-                    BakeDiagnosticCodes.SourceUnmapped,
+                    BakeDiagnosticCodes.SourceInvalidAssetPath,
                     $"The source '{relativePath}' does not map to a canonical asset path: "
-                        + $"{pathReason}.",
-                    diagnosticPath);
-                continue;
-            }
-
-
-            ProjectTypeMapping? mapping = FindMapping(descriptor.Types, assetPath);
-            if (mapping is null)
-            {
-                diagnostics.Add(
-                    BakeSeverity.Error,
-                    BakeDiagnosticCodes.SourceUnmapped,
-                    $"The source '{relativePath}' (asset '{assetPath}') is not covered by any "
-                        + "[[types]] prefix in the project descriptor.",
+                        + $"{pathReason}. A data TOML name must not contain an extension or dot.",
                     diagnosticPath,
-                    assetPath: assetPath);
+                    metadata.TypeLine,
+                    metadata.TypeColumn);
                 continue;
             }
 
@@ -103,8 +142,9 @@ internal static class BakeSourceDiscovery
                 relativePath,
                 file,
                 assetPath,
-                mapping.TypeName,
-                mapping.Prefix);
+                metadata.TypeName!,
+                metadata.TypeLine,
+                metadata.TypeColumn);
 
             if (byAssetPath.TryGetValue(assetPath, out BakeSource? existing))
             {
@@ -126,49 +166,40 @@ internal static class BakeSourceDiscovery
             StringComparer.Ordinal)];
     }
 
-    /// <summary>Finds the longest mapping prefix that covers an asset path.</summary>
-    /// <param name="mappings">The descriptor mappings.</param>
-    /// <param name="assetPath">The canonical asset path.</param>
-    /// <returns>The winning mapping, or <see langword="null"/> when none matches.</returns>
-    internal static ProjectTypeMapping? FindMapping(
-        IReadOnlyList<ProjectTypeMapping> mappings,
-        string assetPath)
+    /// <summary>Tests whether a <c>.toml</c> name has the texture-sidecar shape.</summary>
+    /// <param name="relativePath">The asset-root-relative TOML path.</param>
+    /// <returns><see langword="true"/> when it is <c>&lt;image extension&gt;.toml</c>.</returns>
+    internal static bool IsSidecarShaped(string relativePath)
     {
-        ArgumentNullException.ThrowIfNull(mappings);
-        ArgumentNullException.ThrowIfNull(assetPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
 
-        ProjectTypeMapping? best = null;
-        foreach (ProjectTypeMapping mapping in mappings)
+        if (!relativePath.EndsWith(TomlSuffix, StringComparison.OrdinalIgnoreCase))
         {
-            if (!MatchesPrefix(mapping.Prefix, assetPath))
-            {
-                continue;
-            }
-
-            if (best is null || mapping.Prefix.Length > best.Prefix.Length)
-            {
-                best = mapping;
-            }
+            return false;
         }
 
-        return best;
+        string sourceName = relativePath[..^TomlSuffix.Length];
+        return _imageExtensions.Contains(Path.GetExtension(sourceName));
     }
 
-    private static bool MatchesPrefix(string prefix, string assetPath)
+    private static string? TryReadSilently(string fullPath)
     {
-        if (string.Equals(assetPath, prefix, StringComparison.Ordinal))
+        try
         {
-            return true;
+            return File.ReadAllText(fullPath);
         }
-
-        return assetPath.Length > prefix.Length
-            && assetPath[prefix.Length] == '/'
-            && assetPath.StartsWith(prefix, StringComparison.Ordinal);
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or NotSupportedException or ArgumentException)
+        {
+            return null;
+        }
     }
 
-    private static bool IsTextureSidecar(string relativePath)
+    private static bool PathEquals(string left, string right)
     {
-        string normalized = relativePath.Replace('\\', '/');
-        return normalized.StartsWith(TextureArea + "/", StringComparison.OrdinalIgnoreCase);
+        StringComparison comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        return string.Equals(left, right, comparison);
     }
 }

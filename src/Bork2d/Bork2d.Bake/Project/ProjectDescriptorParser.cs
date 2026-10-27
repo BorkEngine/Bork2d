@@ -1,4 +1,3 @@
-using Bork2d.Assets.Vfs;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Toml;
 using Tomlyn;
@@ -16,9 +15,10 @@ namespace Bork2d.Bake.Project;
 /// The descriptor is TOML and is never packed. Parsing uses Tomlyn's syntax tree for source spans
 /// (0-based positions converted to the 1-based <see cref="BakeDiagnostic"/> model) and the Tomlyn
 /// model for values. Unknown keys are errors, every relative path resolves against the descriptor's
-/// directory, and mapped type existence/<c>IShapeable&lt;T&gt;</c> validation is deliberately left to
-/// the generated host (WP2). Texture defaults are <c>linear</c>/<c>clamp</c> (the schema example in
-/// the M4 spec §6); a sidecar may override them.
+/// directory, and mapped type declarations are deliberately not part of this model (D-M4-13): each
+/// custom-data TOML declares its type in its own <c>[bork2d]</c> table. A <c>types</c> key is an
+/// unknown key, so the removed prefix model cannot silently linger. Texture defaults are
+/// <c>linear</c>/<c>clamp</c> (the schema example in the M4 spec §6); a sidecar may override them.
 /// </para>
 /// <para>
 /// The parser aggregates descriptor errors; it returns <see langword="null"/> when any error was
@@ -31,7 +31,7 @@ internal static class ProjectDescriptorParser
     private const string DefaultHostPath = "obj/bork2d/bakehost";
 
     private static readonly HashSet<string> _rootKeys = new(
-        ["schema", "name", "assets", "bake", "textures", "types"],
+        ["schema", "name", "assets", "bake", "textures"],
         StringComparer.Ordinal);
     private static readonly HashSet<string> _assetsKeys = new(["root"], StringComparer.Ordinal);
     private static readonly HashSet<string> _bakeKeys = new(
@@ -39,9 +39,6 @@ internal static class ProjectDescriptorParser
         StringComparer.Ordinal);
     private static readonly HashSet<string> _textureKeys = new(
         ["filter", "wrap"],
-        StringComparer.Ordinal);
-    private static readonly HashSet<string> _typeKeys = new(
-        ["prefix", "type"],
         StringComparer.Ordinal);
 
     /// <summary>
@@ -242,13 +239,6 @@ internal static class ProjectDescriptorParser
             out BakeTextureFilter textureFilter,
             out BakeTextureWrap textureWrap);
 
-        valid &= TryValidateTypes(
-            diagnostics,
-            syntax,
-            fullPath,
-            root,
-            out List<ProjectTypeMapping> types);
-
         if (!valid)
         {
             return null;
@@ -261,8 +251,7 @@ internal static class ProjectDescriptorParser
             packPath,
             hostPath,
             textureFilter,
-            textureWrap,
-            types);
+            textureWrap);
     }
 
     private static bool ValidateSchema(
@@ -569,204 +558,6 @@ internal static class ProjectDescriptorParser
 
         return valid;
     }
-
-    private static bool TryValidateTypes(
-        BakeDiagnostics diagnostics,
-        TomlSyntaxIndex syntax,
-        string fullPath,
-        TomlTable root,
-        out List<ProjectTypeMapping> types)
-    {
-        types = [];
-        if (!root.TryGetValue("types", out object? typesValue))
-        {
-            return true;
-        }
-
-        var mappings = new List<ProjectTypeMapping>();
-        var prefixes = new HashSet<string>(StringComparer.Ordinal);
-        bool valid = true;
-
-        switch (typesValue)
-        {
-            case TomlTableArray tableArray:
-                for (int i = 0; i < tableArray.Count; i++)
-                {
-                    valid &= TryValidateTypeEntry(
-                        diagnostics,
-                        syntax,
-                        fullPath,
-                        tableArray[i],
-                        TomlPath.Root.Child("types").Element(i),
-                        $"types[{i}]",
-                        mappings,
-                        prefixes);
-                }
-
-                break;
-
-            case TomlArray array:
-                for (int i = 0; i < array.Count; i++)
-                {
-                    if (array[i] is not TomlTable table)
-                    {
-                        AddValueError(
-                            diagnostics,
-                            syntax,
-                            fullPath,
-                            BakeDiagnosticCodes.DescriptorInvalidValue,
-                            $"'types[{i}]' must be a table.",
-                            TomlPath.Root.Child("types").Element(i));
-                        valid = false;
-                        continue;
-                    }
-
-                    valid &= TryValidateTypeEntry(
-                        diagnostics,
-                        syntax,
-                        fullPath,
-                        table,
-                        TomlPath.Root.Child("types").Element(i),
-                        $"types[{i}]",
-                        mappings,
-                        prefixes);
-                }
-
-                break;
-
-            default:
-                AddValueError(
-                    diagnostics,
-                    syntax,
-                    fullPath,
-                    BakeDiagnosticCodes.DescriptorInvalidValue,
-                    "'types' must be an array of tables.",
-                    TomlPath.Root.Child("types"));
-                return false;
-        }
-
-        if (!valid)
-        {
-            return false;
-        }
-
-        types = mappings;
-        return true;
-    }
-
-    private static bool TryValidateTypeEntry(
-        BakeDiagnostics diagnostics,
-        TomlSyntaxIndex syntax,
-        string fullPath,
-        TomlTable entry,
-        TomlPath entryPath,
-        string entryDisplay,
-        List<ProjectTypeMapping> mappings,
-        HashSet<string> prefixes)
-    {
-        bool valid = AddUnknownKeys(
-            diagnostics,
-            syntax,
-            fullPath,
-            entry,
-            entryPath,
-            entryDisplay,
-            _typeKeys);
-
-        string? prefix = null;
-        string? typeName = null;
-
-        if (!entry.TryGetValue("prefix", out object? prefixValue))
-        {
-            AddMissingKey(diagnostics, syntax, fullPath, $"{entryDisplay}.prefix", entryPath);
-            valid = false;
-        }
-        else if (prefixValue is not string prefixString || string.IsNullOrWhiteSpace(prefixString))
-        {
-            AddValueError(
-                diagnostics,
-                syntax,
-                fullPath,
-                BakeDiagnosticCodes.DescriptorInvalidValue,
-                $"'{entryDisplay}.prefix' must be a non-empty string.",
-                entryPath.Child("prefix"));
-            valid = false;
-        }
-        else if (!AssetPath.TryValidateCanonical(prefixString, out string? reason))
-        {
-            AddValueError(
-                diagnostics,
-                syntax,
-                fullPath,
-                BakeDiagnosticCodes.DescriptorInvalidPrefix,
-                $"'{entryDisplay}.prefix' is not a canonical asset path: {reason}.",
-                entryPath.Child("prefix"));
-            valid = false;
-        }
-        else
-        {
-            prefix = prefixString;
-        }
-
-        if (!entry.TryGetValue("type", out object? typeValue))
-        {
-            AddMissingKey(diagnostics, syntax, fullPath, $"{entryDisplay}.type", entryPath);
-            valid = false;
-        }
-        else if (typeValue is not string typeString || string.IsNullOrWhiteSpace(typeString))
-        {
-            AddValueError(
-                diagnostics,
-                syntax,
-                fullPath,
-                BakeDiagnosticCodes.DescriptorInvalidValue,
-                $"'{entryDisplay}.type' must be a non-empty string.",
-                entryPath.Child("type"));
-            valid = false;
-        }
-        else
-        {
-            typeName = typeString;
-        }
-
-        if (prefix is not null && typeName is not null)
-        {
-            if (!prefixes.Add(prefix))
-            {
-                AddKeyError(
-                    diagnostics,
-                    syntax,
-                    fullPath,
-                    BakeDiagnosticCodes.DescriptorDuplicatePrefix,
-                    $"Duplicate type prefix '{prefix}'.",
-                    entryPath.Child("prefix"));
-                valid = false;
-            }
-            else
-            {
-                (int? prefixLine, int? prefixColumn) = GetValueLocation(
-                    syntax,
-                    entryPath.Child("prefix"));
-                (int? typeLine, int? typeColumn) = GetValueLocation(
-                    syntax,
-                    entryPath.Child("type"));
-                mappings.Add(new ProjectTypeMapping(prefix, typeName)
-                {
-                    PrefixLine = prefixLine,
-                    PrefixColumn = prefixColumn,
-                    TypeLine = typeLine,
-                    TypeColumn = typeColumn,
-                });
-            }
-        }
-
-        return valid;
-    }
-
-    private static (int? Line, int? Column) GetValueLocation(TomlSyntaxIndex syntax, TomlPath path)
-        => syntax.TryGetValueSpan(path, out SourceSpan span)
-            ? (span.Start.Line + 1, span.Start.Column + 1)
-            : (null, null);
 
     private static bool TryReadPath(
         BakeDiagnostics diagnostics,

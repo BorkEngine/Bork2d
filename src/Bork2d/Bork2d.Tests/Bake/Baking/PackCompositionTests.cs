@@ -21,7 +21,7 @@ namespace Bork2d.Tests.Bake.Baking;
 public sealed class PackCompositionTests
 {
     private const string TexturePath = "textures/player";
-    private const string PayloadPath = "textures/raw/player";
+    private const string PayloadPath = "textures/player-raw";
 
     [Fact]
     public async Task ComposesCustomDataAndTextureEntriesIntoOnePack()

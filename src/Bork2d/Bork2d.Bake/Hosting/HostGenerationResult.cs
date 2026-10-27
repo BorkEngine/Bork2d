@@ -16,7 +16,7 @@ internal sealed class HostGenerationResult
     /// <param name="changed">Whether a file was written.</param>
     /// <param name="projectPath">The generated project path.</param>
     /// <param name="manifestPath">The generated manifest path.</param>
-    /// <param name="types">The mapped types in descriptor order.</param>
+    /// <param name="types">The distinct mapped types in source discovery order.</param>
     /// <param name="references">The generated assembly references.</param>
     internal HostGenerationResult(
         bool changed,
@@ -46,7 +46,7 @@ internal sealed class HostGenerationResult
     /// <summary>Gets the generated manifest path.</summary>
     internal string ManifestPath { get; }
 
-    /// <summary>Gets the mapped types in descriptor order.</summary>
+    /// <summary>Gets the distinct mapped types in source discovery order.</summary>
     internal IReadOnlyList<BakeMappedType> Types { get; }
 
     /// <summary>Gets the generated assembly references in ordinal order.</summary>

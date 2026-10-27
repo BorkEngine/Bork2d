@@ -466,6 +466,40 @@ public sealed class TomlShapeBinderTests
     }
 
     [Fact]
+    public void RootBork2dTableIsReservedMetadataAndNeverBound()
+    {
+        const string toml = """
+            value = 7
+
+            [bork2d]
+            type = "MyGame.Data.Root"
+            """;
+
+        ReservedMetadataRoot value = BinderTestHarness.BindOk<ReservedMetadataRoot>(toml);
+
+        Assert.Equal(7, value.Value);
+        Assert.Null(value.Bork2d);
+    }
+
+    [Fact]
+    public void NestedBork2dKeyRemainsAnOrdinaryMemberTable()
+    {
+        const string toml = """
+            name = "x"
+
+            [meta]
+            bork2d = "ordinary"
+
+            [bork2d]
+            type = "MyGame.Data.Root"
+            """;
+
+        NestedRoot value = BinderTestHarness.BindOk<NestedRoot>(toml);
+
+        Assert.Equal("ordinary", value.Meta?.Bork2d);
+    }
+
+    [Fact]
     public void TypeMismatchIsAnErrorLocatedAtTheValue()
     {
         const string toml = "i32 = \"seven\"\n";

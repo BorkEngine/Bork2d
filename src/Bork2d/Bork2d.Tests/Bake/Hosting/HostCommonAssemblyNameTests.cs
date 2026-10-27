@@ -17,6 +17,14 @@ public sealed class HostCommonAssemblyNameTests
     {
         using var directory = TempBakeDirectory.Create();
         directory.CreateDirectory("Assets");
+        directory.WriteFile(
+            "Assets/data/source.toml",
+            """
+            value = 1
+
+            [bork2d]
+            type = "Bork2d.BakeFixture.GameConfig"
+            """);
         string descriptorPath = directory.WriteFile(
             "bork2d.project.toml",
             """
@@ -24,10 +32,6 @@ public sealed class HostCommonAssemblyNameTests
 
             [assets]
             root = "Assets"
-
-            [[types]]
-            prefix = "data"
-            type = "Bork2d.BakeFixture.GameConfig"
             """);
 
         string commonPath = typeof(Bork2d.BakeFixture.GameConfig).Assembly.Location;

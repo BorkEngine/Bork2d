@@ -1,30 +1,35 @@
 using Bork2d.Api.Assets;
+using Bork2d.Assets.Vfs;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Paths;
 using Bork2d.Bake.Project;
+using Bork2d.Bake.Sources;
 
 namespace Bork2d.Bake.Textures;
 
 /// <summary>
-/// Imports the texture tree under <c>&lt;assets.root&gt;/textures</c> into descriptors and RGBA8
-/// payloads.
+/// Imports every texture source under the asset root into descriptors and RGBA8 payloads.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Discovery walks the textures directory in ordinal order, skips reparse points, accepts
-/// case-insensitive <c>.png</c>/<c>.jpg</c>/<c>.jpeg</c>/<c>.bmp</c>/<c>.tga</c> sources, ignores
-/// non-asset files, and associates optional <c>&lt;source file&gt;.toml</c> sidecars by canonical
-/// asset path (so casing and the accepted source extension do not break the association). Canonical
-/// paths come from <see cref="BakeSourcePath"/> (the single path grammar): the descriptor path is
-/// <c>textures/&lt;suffix&gt;</c> and the raw payload path is <c>textures/raw/&lt;suffix&gt;</c>.
+/// D-M4-13 removes the fixed <c>textures/</c> and <c>textures/raw/</c> folders. Discovery walks the
+/// whole asset root in ordinal order, skips reparse points, accepts case-insensitive
+/// <c>.png</c>/<c>.jpg</c>/<c>.jpeg</c>/<c>.bmp</c>/<c>.tga</c> sources wherever they live, ignores
+/// non-asset files, and associates optional <c>&lt;source file&gt;.toml</c> sidecars next to the
+/// source. Canonical paths come from <see cref="BakeSourcePath"/> (the single path grammar): the
+/// descriptor path is the source path relative to the asset root minus its extension, and the raw
+/// payload path is the descriptor path plus <c>-raw</c> (for example <c>art/player</c> and
+/// <c>art/player-raw</c>).
 /// </para>
 /// <para>
-/// Canonical collisions, a source under the reserved <c>textures/raw/</c> path, a sidecar without a
-/// source, and a stray <c>.toml</c> under <c>textures/</c> are errors. A missing sidecar is valid and
-/// applies the descriptor's <c>[textures]</c> defaults. Decoding normalizes to straight-alpha RGBA8
-/// without premultiplication, gamma, ICC, flipping, or resampling; explicit 16-bit PNGs are rejected
-/// before decode (Q-12). Sources shorter than a derivable uncompressed BMP/TGA layout and JPEGs
-/// without an end-of-image marker are rejected as truncated (BK4015) before decode.
+/// A <c>.toml</c> with a root <c>[bork2d]</c> table is data, even when its name looks like a sidecar,
+/// and is ignored here. A type-less <c>&lt;image&gt;.toml</c> is a sidecar; a type-less <c>.toml</c>
+/// that is neither is a missing-type data error reported by discovery. Canonical texture collisions
+/// and a sidecar without a source are errors. A missing sidecar is valid and applies the descriptor's
+/// <c>[textures]</c> defaults. Decoding normalizes to straight-alpha RGBA8 without premultiplication,
+/// gamma, ICC, flipping, or resampling; explicit 16-bit PNGs are rejected before decode (Q-12).
+/// Sources shorter than a derivable uncompressed BMP/TGA layout and JPEGs without an end-of-image
+/// marker are rejected as truncated (BK4015) before decode.
 /// </para>
 /// <para>
 /// This component does not write packs, validate custom-data references, or check cross-kind
@@ -33,10 +38,8 @@ namespace Bork2d.Bake.Textures;
 /// </remarks>
 internal static class TexturePipeline
 {
-    private const string TexturesDirectoryName = "textures";
-    private const string TexturePathPrefix = "textures/";
-    private const string RawPathPrefix = "textures/raw/";
     private const string TomlSuffix = ".toml";
+    private const string RawSuffix = "-raw";
     private const string FormatRgba8 = "rgba8";
     private const int HeaderByteCount = 64;
 
@@ -73,23 +76,17 @@ internal static class TexturePipeline
         ITextureDecoder decoder,
         BakeDiagnostics diagnostics)
     {
-        string texturesRoot = Path.Combine(project.AssetsRoot, TexturesDirectoryName);
-        if (!Directory.Exists(texturesRoot) || IsReparsePoint(texturesRoot))
-        {
-            return [];
-        }
-
         var sources = new List<TextureSourceEntry>();
         var sourcesByAssetPath = new Dictionary<string, TextureSourceEntry>(StringComparer.Ordinal);
         var sourcePaths = new HashSet<string>(StringComparer.Ordinal);
         var sidecars = new List<string>();
 
-        foreach (string file in BakeSourcePath.EnumerateFilesSorted(texturesRoot))
+        foreach (string file in BakeSourcePath.EnumerateFilesSorted(project.AssetsRoot))
         {
             string extension = Path.GetExtension(file);
             if (extension.Equals(TomlSuffix, StringComparison.OrdinalIgnoreCase))
             {
-                sidecars.Add(file);
+                AddSidecarIfUntyped(file, sidecars);
             }
             else if (_textureExtensions.Contains(extension))
             {
@@ -117,6 +114,21 @@ internal static class TexturePipeline
 
         textures.Sort(static (left, right) => string.CompareOrdinal(left.AssetPath, right.AssetPath));
         return textures;
+    }
+
+    private static void AddSidecarIfUntyped(string file, List<string> sidecars)
+    {
+        string? text = TryReadSilently(file);
+        if (text is not null && BakeSourceMetadataReader.TryHasBork2dTable(text))
+        {
+            // A typed TOML is data, even when its name looks exactly like a sidecar (D-M4-13).
+            return;
+        }
+
+        if (BakeSourceDiscovery.IsSidecarShaped(Path.GetFileName(file)))
+        {
+            sidecars.Add(file);
+        }
     }
 
     private static void AddSource(
@@ -159,17 +171,6 @@ internal static class TexturePipeline
             sourcesByAssetPath[assetPath] = entry;
         }
 
-        if (relativePath.StartsWith(RawPathPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            diagnostics.Add(
-                BakeSeverity.Error,
-                TextureDiagnosticCodes.TextureReservedPath,
-                $"Texture source '{displayPath}' is under the reserved 'textures/raw/' path; raw "
-                    + "payloads are written by the baker and may not be authored.",
-                displayPath);
-            return;
-        }
-
         if (!hasCanonicalPath)
         {
             diagnostics.Add(
@@ -180,18 +181,20 @@ internal static class TexturePipeline
             return;
         }
 
-        if (!assetPath.StartsWith(TexturePathPrefix, StringComparison.Ordinal))
+        string payloadPath = assetPath + RawSuffix;
+        if (!AssetPath.TryValidateCanonical(payloadPath, out string? payloadReason))
         {
             diagnostics.Add(
                 BakeSeverity.Error,
                 TextureDiagnosticCodes.TextureSourcePath,
-                $"Texture source '{displayPath}' does not map to a 'textures/' asset path: '{assetPath}'.",
+                $"Texture source '{displayPath}' maps to the raw payload path '{payloadPath}', which is "
+                    + $"not canonical: {payloadReason}.",
                 displayPath);
             return;
         }
 
         entry.AssetPath = assetPath;
-        entry.PayloadPath = RawPathPrefix + assetPath[TexturePathPrefix.Length..];
+        entry.PayloadPath = payloadPath;
     }
 
     private static void AttachSidecars(
@@ -234,24 +237,11 @@ internal static class TexturePipeline
                 continue;
             }
 
-            string candidateExtension = Path.GetExtension(candidate);
-            if (_textureExtensions.Contains(candidateExtension))
-            {
-                diagnostics.Add(
-                    BakeSeverity.Error,
-                    TextureDiagnosticCodes.TextureSidecarWithoutSource,
-                    $"Texture sidecar '{displayPath}' has no matching source file.",
-                    displayPath);
-            }
-            else
-            {
-                diagnostics.Add(
-                    BakeSeverity.Error,
-                    TextureDiagnosticCodes.TextureStrayToml,
-                    $"'{displayPath}' is not a texture sidecar; a sidecar must be named "
-                        + "'<source file>.toml'.",
-                    displayPath);
-            }
+            diagnostics.Add(
+                BakeSeverity.Error,
+                TextureDiagnosticCodes.TextureSidecarWithoutSource,
+                $"Texture sidecar '{displayPath}' has no matching source file.",
+                displayPath);
         }
     }
 
@@ -517,6 +507,18 @@ internal static class TexturePipeline
             ? relativePath
             : fullPath;
 
+    private static string? TryReadSilently(string fullPath)
+    {
+        try
+        {
+            return File.ReadAllText(fullPath);
+        }
+        catch (Exception exception) when (IsReadFailure(exception))
+        {
+            return null;
+        }
+    }
+
     private static int ReadTrailer(Stream stream, long fileLength, Span<byte> trailer)
     {
         if (fileLength < trailer.Length)
@@ -533,18 +535,6 @@ internal static class TexturePipeline
 
     private static string ToWrapName(BakeTextureWrap wrap)
         => wrap == BakeTextureWrap.Repeat ? "repeat" : "clamp";
-
-    private static bool IsReparsePoint(string path)
-    {
-        try
-        {
-            return BakeSourcePath.IsReparsePoint(path);
-        }
-        catch (Exception exception) when (IsReadFailure(exception))
-        {
-            return false;
-        }
-    }
 
     private static bool IsReadFailure(Exception exception)
         => exception is IOException or UnauthorizedAccessException or NotSupportedException

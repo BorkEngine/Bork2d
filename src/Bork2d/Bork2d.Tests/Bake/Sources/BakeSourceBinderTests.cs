@@ -26,10 +26,7 @@ public sealed class BakeSourceBinderTests
     {
         var diagnostics = new BakeDiagnostics();
 
-        IReadOnlyList<BoundAsset> assets = BakeSourceBinder.BindAll(
-            _fixture.DescriptorDescriptor,
-            _fixture.Manifest,
-            diagnostics);
+        IReadOnlyList<BoundAsset> assets = Bind(_fixture.DescriptorDescriptor, diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
         Assert.Equal(
@@ -53,10 +50,7 @@ public sealed class BakeSourceBinderTests
     public void ClassAndStructRootsAndTheirReferenceSitesBind()
     {
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BoundAsset> assets = BakeSourceBinder.BindAll(
-            _fixture.DescriptorDescriptor,
-            _fixture.Manifest,
-            diagnostics);
+        IReadOnlyList<BoundAsset> assets = Bind(_fixture.DescriptorDescriptor, diagnostics);
         Assert.Empty(diagnostics.GetSorted());
 
         BoundAsset config = assets.Single(asset => asset.AssetPath == "data/config");
@@ -87,10 +81,18 @@ public sealed class BakeSourceBinderTests
     {
         string project = _fixture.CreateProjectCopy(
             "unknown-key",
-            ("data/bad.toml", "name = \"x\"\nhealth = 1\nmust = \"m\"\nbogus = true\n"));
+            ("data/bad.toml", """
+                name = "x"
+                health = 1
+                must = "m"
+                bogus = true
+
+                [bork2d]
+                type = "BakeFixture.Common.GameConfig"
+                """));
         var diagnostics = new BakeDiagnostics();
 
-        _ = BakeSourceBinder.BindAll(Parse(project), _fixture.Manifest, diagnostics);
+        _ = Bind(Parse(project), diagnostics);
 
         BakeDiagnostic diagnostic = Assert.Single(
             diagnostics.GetSorted(),
@@ -110,7 +112,7 @@ public sealed class BakeSourceBinderTests
             ("data/bad.toml", "name = \n"));
         var diagnostics = new BakeDiagnostics();
 
-        _ = BakeSourceBinder.BindAll(Parse(project), _fixture.Manifest, diagnostics);
+        _ = Bind(Parse(project), diagnostics);
 
         Assert.Contains(
             diagnostics.GetSorted(),
@@ -126,14 +128,11 @@ public sealed class BakeSourceBinderTests
         string path = Path.Combine(project, "Assets", "data", "bom.toml");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         byte[] content = Encoding.UTF8.GetBytes(
-            "name = \"caf\u00e9\"\nhealth = 1\nmust = \"m\"\n");
+            "name = \"caf\u00e9\"\nhealth = 1\nmust = \"m\"\n\n[bork2d]\ntype = \"BakeFixture.Common.GameConfig\"\n");
         File.WriteAllBytes(path, [0xEF, 0xBB, 0xBF, .. content]);
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BoundAsset> assets = BakeSourceBinder.BindAll(
-            Parse(project),
-            _fixture.Manifest,
-            diagnostics);
+        IReadOnlyList<BoundAsset> assets = Bind(Parse(project), diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
         BoundAsset asset = Assert.Single(assets);
@@ -150,10 +149,7 @@ public sealed class BakeSourceBinderTests
         File.WriteAllBytes(path, [0x6E, 0x61, 0x6D, 0x65, 0x20, 0x3D, 0x20, 0xFF, 0xFE]);
 
         var diagnostics = new BakeDiagnostics();
-        IReadOnlyList<BoundAsset> assets = BakeSourceBinder.BindAll(
-            Parse(project),
-            _fixture.Manifest,
-            diagnostics);
+        IReadOnlyList<BoundAsset> assets = Bind(Parse(project), diagnostics);
 
         Assert.Empty(assets);
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
@@ -172,17 +168,29 @@ public sealed class BakeSourceBinderTests
                 health = 1
                 must = "m"
                 texture = "textures/player"
+
+                [bork2d]
+                type = "BakeFixture.Common.GameConfig"
                 """));
         var diagnostics = new BakeDiagnostics();
 
-        IReadOnlyList<BoundAsset> assets = BakeSourceBinder.BindAll(
-            Parse(project),
-            _fixture.Manifest,
-            diagnostics);
+        IReadOnlyList<BoundAsset> assets = Bind(Parse(project), diagnostics);
 
         Assert.Empty(diagnostics.GetSorted());
         BoundAsset asset = Assert.Single(assets);
         Assert.Equal("data/config", asset.AssetPath);
+    }
+
+    private IReadOnlyList<BoundAsset> Bind(
+        Bork2d.Bake.Project.ProjectDescriptor descriptor,
+        BakeDiagnostics diagnostics)
+    {
+        IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(descriptor, diagnostics);
+        return BakeSourceBinder.BindAll(
+            descriptor,
+            sources,
+            _fixture.Manifest,
+            diagnostics);
     }
 
     private static Bork2d.Bake.Project.ProjectDescriptor Parse(string project)

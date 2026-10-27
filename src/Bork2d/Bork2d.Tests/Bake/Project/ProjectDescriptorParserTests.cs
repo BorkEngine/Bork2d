@@ -30,7 +30,6 @@ public sealed class ProjectDescriptorParserTests
             descriptor.HostPath);
         Assert.Equal(BakeTextureFilter.Linear, descriptor.TextureFilter);
         Assert.Equal(BakeTextureWrap.Clamp, descriptor.TextureWrap);
-        Assert.Empty(descriptor.Types);
         Assert.Equal(Path.Combine(projectDirectory, "bork2d.project.toml"), descriptor.DescriptorPath);
     }
 
@@ -56,14 +55,6 @@ public sealed class ProjectDescriptorParserTests
             [textures]
             filter = "nearest"
             wrap = "repeat"
-
-            [[types]]
-            prefix = "data"
-            type = "MyGame.Data.GameConfig"
-
-            [[types]]
-            prefix = "sprites"
-            type = "Bork2d.Api.Assets.SpriteAsset"
             """);
 
         Assert.Equal("MyGame", descriptor.Name);
@@ -71,17 +62,6 @@ public sealed class ProjectDescriptorParserTests
         Assert.Equal(Path.Combine(directory.RootPath, "obj", "host"), descriptor.HostPath);
         Assert.Equal(BakeTextureFilter.Nearest, descriptor.TextureFilter);
         Assert.Equal(BakeTextureWrap.Repeat, descriptor.TextureWrap);
-        Assert.Equal(
-            new[]
-            {
-                ("data", "MyGame.Data.GameConfig"),
-                ("sprites", "Bork2d.Api.Assets.SpriteAsset"),
-            },
-            descriptor.Types.Select(mapping => (mapping.Prefix, mapping.TypeName)));
-        Assert.Equal(17, descriptor.Types[0].TypeLine);
-        Assert.Equal(8, descriptor.Types[0].TypeColumn);
-        Assert.Equal(16, descriptor.Types[0].PrefixLine);
-        Assert.Equal(10, descriptor.Types[0].PrefixColumn);
     }
 
     [Fact]
@@ -169,22 +149,26 @@ public sealed class ProjectDescriptorParserTests
     }
 
     [Fact]
-    public void EmptyTypeListIsAllowed()
+    public void TypesDescriptorKeyIsRejected()
     {
         using var directory = TempBakeDirectory.Create();
         directory.CreateDirectory("Assets");
 
-        ProjectDescriptor descriptor = Parse(
+        BakeDiagnostic error = ParseError(
             directory,
             """
             schema = 1
-            types = []
 
             [assets]
             root = "Assets"
+
+            [[types]]
+            prefix = "data"
+            type = "MyGame.Data.GameConfig"
             """);
 
-        Assert.Empty(descriptor.Types);
+        Assert.Equal(BakeDiagnosticCodes.DescriptorUnknownKey, error.Code);
+        Assert.Contains("types", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -335,31 +319,6 @@ public sealed class ProjectDescriptorParserTests
     }
 
     [Fact]
-    public void UnknownKeyInTypeEntryFails()
-    {
-        using var directory = TempBakeDirectory.Create();
-        directory.CreateDirectory("Assets");
-
-        BakeDiagnostic error = ParseError(
-            directory,
-            """
-            schema = 1
-
-            [assets]
-            root = "Assets"
-
-            [[types]]
-            prefix = "data"
-            type = "MyGame.Data"
-            kind = "MessagePack"
-            """);
-
-        Assert.Equal(BakeDiagnosticCodes.DescriptorUnknownKey, error.Code);
-        Assert.Contains("types[0].kind", error.Message, StringComparison.Ordinal);
-        Assert.Equal(9, error.Line);
-    }
-
-    [Fact]
     public void InvalidTextureFilterFailsWithTheValueLocation()
     {
         using var directory = TempBakeDirectory.Create();
@@ -402,79 +361,6 @@ public sealed class ProjectDescriptorParserTests
 
         Assert.Equal(BakeDiagnosticCodes.DescriptorTextureSetting, error.Code);
         Assert.Contains("mirror", error.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void DuplicateTypePrefixFailsAtTheSecondPrefixKey()
-    {
-        using var directory = TempBakeDirectory.Create();
-        directory.CreateDirectory("Assets");
-
-        BakeDiagnostic error = ParseError(
-            directory,
-            """
-            schema = 1
-
-            [assets]
-            root = "Assets"
-
-            [[types]]
-            prefix = "data"
-            type = "MyGame.Data.A"
-
-            [[types]]
-            prefix = "data"
-            type = "MyGame.Data.B"
-            """);
-
-        Assert.Equal(BakeDiagnosticCodes.DescriptorDuplicatePrefix, error.Code);
-        Assert.Contains("data", error.Message, StringComparison.Ordinal);
-        Assert.Equal(11, error.Line);
-        Assert.Equal(1, error.Column);
-    }
-
-    [Fact]
-    public void NonCanonicalPrefixFails()
-    {
-        using var directory = TempBakeDirectory.Create();
-        directory.CreateDirectory("Assets");
-
-        BakeDiagnostic error = ParseError(
-            directory,
-            """
-            schema = 1
-
-            [assets]
-            root = "Assets"
-
-            [[types]]
-            prefix = "Data"
-            type = "MyGame.Data"
-            """);
-
-        Assert.Equal(BakeDiagnosticCodes.DescriptorInvalidPrefix, error.Code);
-    }
-
-    [Fact]
-    public void MissingTypeNameFails()
-    {
-        using var directory = TempBakeDirectory.Create();
-        directory.CreateDirectory("Assets");
-
-        BakeDiagnostic error = ParseError(
-            directory,
-            """
-            schema = 1
-
-            [assets]
-            root = "Assets"
-
-            [[types]]
-            prefix = "data"
-            """);
-
-        Assert.Equal(BakeDiagnosticCodes.DescriptorMissingKey, error.Code);
-        Assert.Contains("types[0].type", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
