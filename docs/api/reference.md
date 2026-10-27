@@ -425,10 +425,11 @@ reference.
   There is no `[Bork2dSerializable]` attribute, no Bork2d source generator, and no assembly scan.
   Registration is explicit (D-038): the builder calls `RegisterAsset<T>()` for every authorable type
   (`UseDefaultAssets()` supplies `SpriteAsset`), and the data TOML selects one with
-  `[bork2d] type = "Full.Type.Name"` (D-M4-13). There is no generated host, no reflection, and no
-  type lookup: the type name is the key into the registered entry dictionary. A type name that is
-  not registered is a `BK1xxx` error. A registered internal type needs `InternalsVisibleTo` to the
-  assets executable.
+  `[bork2d] type = "Full.Type.Name"` (D-M4-13). Each registration carries `typeof(T).Assembly`, so
+  there is no common-assembly option; the builder derives the tracked shape assemblies. There is no
+  generated host, no reflection, and no type lookup: the type name is the key into the registered
+  entry dictionary. A type name that is not registered is a `BK1xxx` error. A registered internal
+  type needs `InternalsVisibleTo` to the assets executable.
 - **TOML authoring.** Keys are camelCase; `[JsonPropertyName]`, `[JsonIgnore]`, and `[JsonRequired]`
   are honored. Supported leaves are booleans, integers, floats, strings, camelCase enum names,
   `Guid`, offset date-times, `Vector2/3/4` (`[x, y]`), `Color` (`[r, g, b, a]`),

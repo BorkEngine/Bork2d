@@ -462,7 +462,6 @@ roots and processors. Its `Program.cs` configures the bake; there is no `bork2d.
 return await new BakeApplicationBuilder()
     .WithPack("assets.pck", "Assets")          // first = main
     .WithPack("dlc1.pck", "DLC1")              // later = overlay
-    .WithCommonAssembly(typeof(GameConfig).Assembly)
     .UseDefaultAssets()                        // SpriteAsset
     .RegisterAsset<GameConfig>()               // explicit data-TOML types
     .RegisterAsset<LevelTuning>()
@@ -529,9 +528,10 @@ type = "MyGame.Data.GameConfig"
   Bork2d source generator.
 - **Registration is explicit (D-038).** Call `.RegisterAsset<GameConfig>()` for every type a data
   TOML may select; `.UseDefaultAssets()` supplies engine authoring types such as `SpriteAsset`.
-  There is no generated host and no reflection. `[bork2d] type = "Full.Type.Name"` is the
-  per-source selector; an unregistered type is a `BK1xxx` error. A registered internal type needs
-  `InternalsVisibleTo` to the assets executable.
+  There is no common-assembly option: each registration carries `typeof(T).Assembly`, and the
+  builder derives the tracked shape assemblies. There is no generated host and no reflection.
+  `[bork2d] type = "Full.Type.Name"` is the per-source selector; an unregistered type is a
+  `BK1xxx` error. A registered internal type needs `InternalsVisibleTo` to the assets executable.
 - **Keys and leaves.** Keys are camelCase; `[JsonPropertyName]`, `[JsonIgnore]`, and
   `[JsonRequired]` are honored. Supported leaves are booleans, integers, floats, strings, camelCase
   enums, `Guid`, offset date-times, `Vector2/3/4`, `Color`, `AssetRef<T>`/`DataRef` path strings,

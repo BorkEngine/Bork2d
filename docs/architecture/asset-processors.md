@@ -25,8 +25,8 @@ Make file-type support an extension point, not a set of engine-owned special cas
   editing engine code;
 - no file type is hardcoded in discovery, path mapping, the baked index, the pack composer, or the
   incremental input list;
-- the project descriptor is gone: packs, roots, output root, common assembly, texture defaults,
-  processors, and data types are configured through a builder in `MyGame.Assets`;
+- the project descriptor is gone: packs, roots, output root, texture defaults, processors, and data
+  types are configured through a builder in `MyGame.Assets`;
 - data types are registered explicitly through the builder (`RegisterAsset<T>()`) and bound with
   compile-time generic calls; there is no generated host and no reflection;
 - `MyGame.Assets` is the game's bake CLI and its build bakes the packs automatically.
@@ -92,7 +92,6 @@ return await new BakeApplicationBuilder()
     .WithProjectRoot(".")                      // MSBuild passes $(MSBuildProjectDirectory)
     .WithPack("assets.pck", "Assets")          // first pack = main
     .WithPack("dlc1.pck", "DLC1")              // later pack = overlay
-    .WithCommonAssembly(typeof(GameConfig).Assembly)
     .UseDefaultAssets()                        // e.g. SpriteAsset
     .RegisterAsset<GameConfig>()               // explicit data-TOML type
     .UseDefaultProcessors()                    // built-in texture processor
@@ -109,8 +108,9 @@ Configuration rules:
   overlay/DLC pack. Each pack has a required root and output path.
 - Roots and output paths are relative, canonical-safe, and cannot escape the project root (same
   containment rules as M4, now validated by the builder instead of the descriptor parser).
-- `WithCommonAssembly` supplies the runtime data/shape assembly. Registered asset types must live in
-  it or its referenced closure; its content hash is tracked for incremental baking.
+- There is no common-assembly option. Each `RegisterAsset<T>()` carries `typeof(T).Assembly`; the
+  builder derives the shape-assembly set and their dependency closure for incremental hashing. A
+  registered type may therefore live in any assembly referenced by `MyGame.Assets`.
 - `UseDefaultAssets()` registers the engine-provided authoring asset types. It currently registers
   `SpriteAsset`; texture descriptors are processor output and are not authoring data.
 - `RegisterAsset<T>()` explicitly registers a data type that may appear in a data TOML's
@@ -294,8 +294,9 @@ public BakeApplicationBuilder UseDefaultProcessors();
   texture processor.
 - A registered data type must be accessible to `MyGame.Assets`: public, or internal with an
   `InternalsVisibleTo` grant to the assets assembly. There is no host assembly to grant access to.
-- `WithCommonAssembly` still identifies the runtime shape assembly whose closure is hashed for
-  incremental baking; it no longer drives code generation or type lookup.
+- The builder derives the shape-assembly set from the registered types (`typeof(T).Assembly`) and
+  the assets executable's non-tooling dependency closure. There is no common-assembly option and no
+  type lookup; the registration dictionary is the resolution.
 
 ## 7. Discovery and file classification
 
@@ -468,8 +469,8 @@ public readonly partial record struct Unit(string Name, int Health, int Attack);
 
 The manifest (`<project root>/obj/bork2d/bake/manifest.json`, schema bumped) records:
 
-- builder configuration hash: packs/roots/output paths, common assembly, texture defaults,
-  registered type names, processor identities, and processor assembly hash;
+- builder configuration hash: packs/roots/output paths, texture defaults, registered type names,
+  processor identities, and processor assembly hash;
 - every tracked input: every `.toml` under every pack root plus every file whose suffix is in the
   registered extension set (so `.ppm`/`.unit` are tracked automatically);
 - the game-side assembly closure hash (the registered data/output types and their dependencies);
@@ -558,9 +559,8 @@ Planned sequence on `task/file-processors`:
 
 ## 16. Acceptance criteria
 
-- A game-owned `MyGame.Assets` executable configures packs, roots, common assembly, texture
-  defaults, processors, and explicit data types through the builder; no `bork2d.project.toml` is
-  read or required.
+- A game-owned `MyGame.Assets` executable configures packs, roots, texture defaults, processors,
+  and explicit data types through the builder; no `bork2d.project.toml` is read or required.
 - Data TOML keeps `[bork2d].type`; each such type is registered with `RegisterAsset<T>()` and
   bound with compile-time generic calls. No generated host and no reflection are used.
 - `UseDefaultAssets()` and `UseDefaultProcessors()` register the engine defaults; a game can add

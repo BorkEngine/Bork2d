@@ -43,8 +43,7 @@ MyGame.Assets/Assets/ (main) + DLC1/ (overlay)
   art/**.png|jpg|...           built-in texture processor + <source>.toml sidecar
   data/**.ppm|**.unit|...      custom processor sources + <source>.toml sidecar
     │ MyGame.Assets executable:
-    │   BakeApplicationBuilder (packs, roots, common assembly, texture defaults, processors,
-    │                            RegisterAsset<T> entries)
+    │   BakeApplicationBuilder (packs, roots, texture defaults, processors, RegisterAsset<T> entries)
     │   → processor discovery + sidecar binding → registered data binder
     │   → PolyType generated-shape MessagePack (data + processor AddAsset instances) / AddData
     │   → binding/reference validation with file:line:column
@@ -510,7 +509,6 @@ return await new BakeApplicationBuilder()
     .WithProjectRoot(".")                      // MSBuild passes $(MSBuildProjectDirectory)
     .WithPack("assets.pck", "Assets")          // first pack = main
     .WithPack("dlc1.pck", "DLC1")              // later pack = overlay
-    .WithCommonAssembly(typeof(GameConfig).Assembly)
     .UseDefaultAssets()                        // SpriteAsset
     .RegisterAsset<GameConfig>()               // explicit data-TOML type
     .UseDefaultProcessors()                    // built-in texture processor
@@ -522,8 +520,9 @@ return await new BakeApplicationBuilder()
 ```
 
 At least one pack is required; the first is main and later packs are DLC/overlay. Roots and pack
-paths are relative, canonical-safe, and contained by the project root. `WithCommonAssembly` names the
-runtime data/shape assembly whose closure is hashed. `UseDefaultAssets()` registers `SpriteAsset`;
+paths are relative, canonical-safe, and contained by the project root. There is no common-assembly
+option: each `RegisterAsset<T>()` carries its own assembly, and the builder derives the tracked
+shape-assembly closure. `UseDefaultAssets()` registers `SpriteAsset`;
 `RegisterAsset<T>()` explicitly registers a type that a data TOML may select with
 `[bork2d].type`. `UseDefaultProcessors()` registers the built-in texture processor;
 `WithTextureDefaults` replaces `[textures]`; `AddProcessor` adds custom processors, and a later
@@ -595,8 +594,8 @@ XXH3-64-checksummed; the format bytes are unchanged.
 
 ### 11.5 Structural determinism
 
-For identical builder configuration, sources, common assembly, processor set/code, tool version, and
-mode, a second bake produces the same canonical path/kind set per pack, the same sorted entry table
+For identical builder configuration, sources, registered type/shape assemblies, processor set/code,
+tool version, and mode, a second bake produces the same canonical path/kind set per pack, the same sorted entry table
 (path, `IsRaw`, `IsCompressed`, `Length`, `Size`, with `Offset` derived from the layout),
 byte-identical MessagePack payloads, byte-identical processor payloads and descriptor values, and
 identical diagnostics. Whole-pack byte equality is **not** guaranteed (D-M3-08/D-M4-07): Zstd output
@@ -608,10 +607,10 @@ deterministic.
 
 - The internal, non-committed manifest is `<project root>/obj/bork2d/bake/manifest.json`: JSON
   schema 3, XXH3-128 uppercase hex, explicit field framing, deterministic field order. It records
-  the builder configuration hash (packs/roots/output paths, common assembly, texture defaults,
-  registered type names, processor identities and assembly hash), the sorted tracked inputs across
-  every pack root (every `.toml` plus every file whose suffix is in the registered extension set),
-  the game-side assembly closure hash, tool version, mode, every pack output path/hash in builder
+  the builder configuration hash (packs/roots/output paths, texture defaults, registered type
+  names, processor identities and assembly hash), the sorted tracked inputs across every pack root
+  (every `.toml` plus every file whose suffix is in the registered extension set), the derived
+  shape-assembly closure hash, tool version, mode, every pack output path/hash in builder
   order, and aggregate counts.
 - `bake` skips only when every recorded field matches and every output pack exists with its recorded
   hash. The decision is all-or-nothing; there is no per-pack cache. A missing/corrupt manifest, any
@@ -686,8 +685,8 @@ using var editor = new Bork2dEditorBuilder()
 editor.Run();
 ```
 
-- `WithProject` points at the game's `MyGame.Assets` project (or its common assembly); D-037 removes
-  the M4 descriptor, and the editor will consume the same builder configuration (M5 refinement).
+- `WithProject` points at the game's `MyGame.Assets` project; D-037 removes the M4 descriptor, and
+  the editor will consume the same builder configuration (M5 refinement).
 - `WithAssetType<T>()` registers a serializable class for the property editor as a **compile-time
   registration** (no assembly scanning); the JIT editor may reflect for property metadata, and a
   source generator can replace that later without changing the API.
