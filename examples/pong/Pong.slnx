@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="Pong.Assets/Pong.Assets.csproj" />
   <Project Path="Pong.Common/Pong.Common.csproj" />
+  <Project Path="Pong.Tests/Pong.Tests.csproj" />
   <!--
     The desktop copy target bakes/copies the assets executable out of process. It is not a project
     reference (the AOT app must not reference the JIT assets executable), so the solution records

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>true</IsTestProject>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+        <PackageReference Include="xunit" Version="2.9.3" />
+        <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+            <PrivateAssets>all</PrivateAssets>
+        </PackageReference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Pong.Common\Pong.Common.csproj" />
+        <ProjectReference Include="..\Pong.Assets\Pong.Assets.csproj" />
+        <ProjectReference Include="..\..\..\src\Bork2d\Bork2d.Engine\Bork2d.Engine.csproj" />
+        <ProjectReference Include="..\..\..\src\Bork2d\Bork2d.Bake\Bork2d.Bake.csproj" />
+        <ProjectReference Include="..\..\..\src\Bork2d\Bork2d.Runtime\Bork2d.Runtime.csproj" />
+    </ItemGroup>
+
+</Project>
