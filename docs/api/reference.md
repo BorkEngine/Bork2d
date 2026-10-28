@@ -88,7 +88,7 @@ The only other public surface is the tooling-only pack writer in `Bork2d.Engine.
 public JIT tooling surface `Bork2d.Bake` (`BakeApplicationBuilder`, `BakeApplication`,
 `RegisterAsset<T>()`, `UseDefaultAssets()`, `UseDefaultProcessors()`, `IAssetProcessor`,
 `AssetProcessor<TSidecar>`, `SidecarPolicy`, `AssetProcessorContext`, output sink/diagnostics),
-referenced only by the build-time `MyGame.Assets`/fixture assets executables. Game **runtime** code
+referenced only by the build-time `MyGame.Assets`/`Pong.Assets` executables. Game **runtime** code
 still references only `Bork2d.Engine` and `Bork2d.Runtime`. Data types are registered explicitly; there
 is no generated host and no reflection. The builder is never in the runtime or AOT publish graph; the
 design is in [asset processors](../architecture/asset-processors.md).

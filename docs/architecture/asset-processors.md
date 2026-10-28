@@ -6,9 +6,9 @@
 > source type is an asset processor registered in a game-owned executable (`MyGame.Assets`), the
 > project descriptor is removed, all bake configuration is builder configuration in that executable,
 > and data types are registered explicitly with no generated host and no reflection. The built-in
-> texture importer is one processor; the PPM and Unit processors prove the extension point end to
-> end. Schema-3 incremental bake, `build/Bork2d.Assets.targets`/`Bork2d.Assets.Copy.targets`, the
-> build-only `Bork2d.BakeFixture.Assets` executable, and the local AOT fixture flow are in place. The
+> texture importer is one processor; the Pong example's `CircleProcessor` proves the extension point
+> end to end. Schema-3 incremental bake, `build/Bork2d.Assets.targets`/`Bork2d.Assets.Copy.targets`,
+> the build-only `Pong.Assets` executable, and the local Pong AOT flow are in place. The
 > implementation scope and acceptance record live in the
 > [file-processors spec](../specs/file-processors.md); the M4 material in the
 > [M4 spec](../specs/m4-serialization-and-bake.md) and [assets and tooling](assets-and-tooling.md)
@@ -34,9 +34,10 @@ Make file-type support an extension point, not a set of engine-owned special cas
   compile-time generic calls; there is no generated host and no reflection;
 - `MyGame.Assets` is the game's bake CLI and its build bakes the packs automatically.
 
-The design is proved by two test processors: **PPM** (a simple image format reusing
-`TextureDescriptor`) and **Unit** (a JSON source that emits a custom `[GenerateShape]` data type with
-a required sidecar).
+The design is proved by the Pong example's **`CircleProcessor`** (a processor-owned JSON source that
+emits a `TextureDescriptor` + RGBA8 payload, with `SidecarPolicy.None`) and by the self-contained
+processor contract tests in `Bork2d.Tests`. The former fixture PPM/Unit acceptance processors were
+removed with the exploratory examples (D-043); the processor contract itself is unchanged.
 
 ## 2. Non-goals
 
@@ -61,16 +62,20 @@ MyGame/
       Assets/                  main pack root
         data/*.toml            custom data ([bork2d].type)
         art/*.png              texture sources + <source>.toml sidecars
-        data/*.unit            Unit processor sources + <source>.toml sidecars
+        textures/*.circle      CircleProcessor sources (processor-owned JSON, no sidecar)
       DLC1/                    optional overlay pack root
       Program.cs               BakeApplicationBuilder configuration
     Project.Desktop/           runtime app; references Bork2d.Runtime + Project.Common
     Project.Editor/            M5 editor host; references Bork2d.Editor + Project.Common
 ```
 
+The current worked instance is the Pong example: `Pong.Common` is the data-type/game assembly,
+`Pong.Assets` owns `Assets/` plus `Processors/CircleProcessor.cs`, and `Pong.Desktop` is the AOT
+host; its `assets.pck` has 7 entries.
+
 - **`Project.Common` remains the runtime data-type assembly.** `MyGame.Assets` references it so a
-  processor can emit a runtime type such as `Unit` with its compiled shape. `Project.Common` never
-  references the builder or processor assemblies.
+  processor can emit a runtime type such as `GameSettings` with its compiled shape. `Project.Common`
+  never references the builder or processor assemblies.
 - **`MyGame.Assets` owns assets, processors, and bake configuration.** It is an executable and
   build-time only; it is never referenced by `Project.Desktop`'s runtime output and never enters
   the AOT publish graph. `Project.Desktop` references it only as a build dependency so the packs
@@ -79,31 +84,34 @@ MyGame/
   data-type registration, processor contracts, sidecar policy, output sink, and CLI command
   handling, and the internal Tomlyn/StbImageSharp implementation they hide.
 - `Bork2d.Bake.Cli` is retired as the game-facing CLI. The builder's command handling is the CLI;
-  `MyGame.Assets` is the executable that hosts it. The engine fixture gets a build-only
-  `Bork2d.BakeFixture.Assets` executable with the same shape.
+  `MyGame.Assets` is the executable that hosts it. The Pong example uses a build-only `Pong.Assets`
+  executable with the same shape.
 
 ## 4. Builder configuration (no project descriptor)
 
-`bork2d.project.toml` is deleted. The builder is the single source of truth. Illustrative shape:
+`bork2d.project.toml` is deleted. The builder is the single source of truth. The Pong configuration
+(the current worked example) is:
 
 ```csharp
-// MyGame.Assets/Program.cs
-using Bork2d.Engine.Assets;
+// Pong.Assets/Program.cs
 using Bork2d.Bake;
+using Bork2d.Engine.Assets;
+using Pong.Assets.Processors;
+using Pong.Common;
 
 return await new BakeApplicationBuilder()
     .WithProjectRoot(".")                      // MSBuild passes $(MSBuildProjectDirectory)
     .WithPack("assets.pck", "Assets")          // first pack = main
-    .WithPack("dlc1.pck", "DLC1")              // later pack = overlay
-    .UseDefaultAssets()                        // e.g. SpriteAsset
-    .RegisterAsset<GameConfig>()               // explicit data-TOML type
+    .UseDefaultAssets()                        // SpriteAsset
+    .RegisterAsset<GameSettings>()             // explicit data-TOML type
     .UseDefaultProcessors()                    // built-in texture processor
     .WithTextureDefaults(TextureFilter.Linear, TextureWrap.Clamp)
-    .AddProcessor(new PpmProcessor())
-    .AddProcessor(new UnitProcessor())
+    .AddProcessor(new CircleProcessor())       // game processor for textures/*.circle
     .Build()
     .RunAsync(args);
 ```
+
+A game with an overlay pack adds `.WithPack("dlc1.pck", "DLC1")` after the main pack.
 
 Configuration rules:
 
@@ -188,8 +196,8 @@ public sealed class AssetProcessorContext
     public string SourcePath { get; }          // absolute source path
     public string RelativePath { get; }        // pack-root relative, '/'
     public string BaseAssetPath { get; }       // canonical path, matched extension removed
-    public string SourceFileName { get; }      // "archer.unit"
-    public string SourceFileNameWithoutExtension { get; } // "archer"
+    public string SourceFileName { get; }      // "ball.circle"
+    public string SourceFileNameWithoutExtension { get; } // "ball"
     public IAssetOutputSink Outputs { get; }
     public IAssetProcessorDiagnostics Diagnostics { get; }
 }
@@ -226,9 +234,9 @@ Key properties:
 - **MessagePack is the engine's responsibility.** `AddAsset<T>` takes a typed instance; the engine
   serializes it with `T.GetTypeShape()` through the existing `PackBuilder.AddMessagePack<T>` path.
   A processor never serializes MessagePack, never sees MessagePack bytes, and never calls
-  `PackBuilder`. The output type can be a public runtime type (`TextureDescriptor`, `Unit`) or any
-  other shapeable type; it does **not** need a `RegisterAsset<T>()` entry, because `AddAsset<T>`
-  carries the compiled shape at compile time.
+  `PackBuilder`. The output type can be a public runtime type (`TextureDescriptor`, `GameSettings`)
+  or any other shapeable type; it does **not** need a `RegisterAsset<T>()` entry, because
+  `AddAsset<T>` carries the compiled shape at compile time.
 - `AddData` is only for opaque raw payloads. A `[GenerateShape]` asset must come through
   `AddAsset<T>` as an instance; a processor cannot emit pre-serialized bytes for a shaped asset.
 - A processor may emit any number of assets and data entries for one source; there is no fixed
@@ -319,8 +327,8 @@ for each file under each pack root (sorted, reparse points skipped):
 
 - `.toml` remains the one metadata/source format (D-036): custom data is typed TOML, sidecars are
   type-less TOML. Source extensions are processor-owned.
-- A sidecar is `<source file>.toml` next to the source (`art/player.png.toml`,
-  `data/archer.unit.toml`). It is associated by canonical base path, so casing differences between
+- A sidecar is `<source file>.toml` next to the source (for example `art/paddle.png.toml`). It is
+  associated by canonical base path, so casing differences between
   the source and sidecar resolve as they do in M4.
 - **Filename decides sidecar classification.** If `<source>.toml` exists for a registered source
   whose processor has a sidecar, it is that source's sidecar. A `[bork2d]` table inside it is an
@@ -386,8 +394,9 @@ for each file under each pack root (sorted, reparse points skipped):
 - Processor output references are validated against the complete baked set before the pack is
   written, using the collected `AssetRef`/`DataRef` sites.
 - A processor output type must be shapeable (`IShapeable<T>`) and its shape must be compiled into
-  an assembly available to the runtime when the asset is loaded. `Unit` therefore lives in
-  `Project.Common`, not in `MyGame.Assets`.
+  an assembly available to the runtime when the asset is loaded. A custom output type therefore lives
+  in `Project.Common`, not in `MyGame.Assets` (Pong's `CircleProcessor` emits only the engine's
+  `TextureDescriptor`).
 
 ## 10. Built-in texture processor
 
@@ -410,48 +419,34 @@ The existing texture behavior moves behind the same contract; it does not keep a
   texture-specific `BakedAssetEntry`/`PackComposer` branches are removed or become private
   implementation details of the processor.
 
-## 11. Test processors
+## 11. Example processor: Pong's `CircleProcessor`
 
-### 11.1 PPM (image extension point)
+The current worked processor is `CircleProcessor`, registered by the build-only `Pong.Assets`
+executable. It proves the extension point end to end without an engine change.
 
-- `PpmProcessor : AssetProcessor<PpmSidecar>` with extension `ppm`; required sidecar with
-  `filter`/`wrap` (default values created when missing); simple P6 (binary) support with header
-  comments/whitespace, max value 255, dimension validation, RGB→RGBA8 conversion (alpha 255).
-- Emits a `TextureDescriptor` instance (engine-serialized) + raw payload, reusing the public runtime
-  descriptor so the test proves a user processor produces a loadable asset.
-- Tests: extension discovery, sidecar binding/unknown key, exact RGBA bytes, descriptor/payload
-  paths, collisions, unregistered extension ignored, full bake → `LoadAsset<TextureDescriptor>`.
-
-### 11.2 Unit (custom data extension point)
-
-- `UnitProcessor : AssetProcessor<UnitSidecar>` with extension `unit`; required sidecar with an
-  optional `name` member. When missing, `CreateDefaultSidecar` returns
-  `new UnitSidecar { Name = context.SourceFileNameWithoutExtension }`; JSON payload shape:
+- `CircleProcessor : IAssetProcessor` with extension `circle` and `SidecarPolicy.None`. It owns its
+  JSON source, so no TOML sidecar is created.
+- The source `Assets/textures/ball.circle` contains exactly:
 
 ```json
-{
-    "Health": 50,
-    "Attack": 20
-}
+{"resolution": 64, "size": 48}
 ```
 
-- The source is `Assets/data/archer.unit`; the sidecar is `Assets/data/archer.unit.toml`. The name
-  is the sidecar `name` when present, otherwise `SourceFileNameWithoutExtension` (`archer`). A
-  missing sidecar is created with `name = "archer"` before binding.
-- The output type is a runtime data type in the fixture common assembly:
-
-```csharp
-[GenerateShape]
-public readonly partial record struct Unit(string Name, int Health, int Attack);
-```
-
-- The processor emits `context.Outputs.AddAsset(context.BaseAssetPath, new Unit(name, health, attack))`
-  at `data/archer`. It never serializes MessagePack. It uses `System.Text.Json` in the JIT assets
-  executable; JSON parsing is processor-owned, not an engine format.
-- Tests: default-sidecar creation with the filename name, sidecar override, JSON parse/validation,
-  and struct round-trip through `LoadAsset<Unit>`.
-- This test proves a custom processor can emit a custom `[GenerateShape]` type, not only a texture
-  descriptor, and that processor outputs need no `RegisterAsset<T>()` entry.
+- `resolution` is the texture edge length in pixels; `size` is the circle diameter. Valid ranges:
+  `1 <= resolution <= 4096` and `1 <= size <= resolution`.
+- It renders a white, straight-alpha antialiased circle (4×4 supersampled per pixel) on a
+  transparent background, then emits a `TextureDescriptor` at `textures/ball` and its RGBA8 payload
+  at `textures/ball-raw`: `Format = Rgba8`, `Filter = Linear`, `Wrap = Clamp`, and `Payload` points
+  at the `-raw` path.
+- An unreadable source or invalid JSON is `BK7001`; a valid JSON document with missing, non-integer,
+  or out-of-range values is `BK7002`. A failed source emits no outputs.
+- `Pong.Tests` bakes the real `Pong.Assets/Assets` tree through the public `BakeApplicationBuilder`,
+  loads the pack through a public headless probe, and asserts the descriptor dimensions
+  (64×64 with a 48-pixel diameter), the exact payload length, the alpha values (center opaque,
+  corner transparent), and a `BK7xxx` diagnostic for invalid `.circle` input.
+- The processor emits only the public runtime `TextureDescriptor`, so it needs no custom runtime
+  type. A processor that emits a custom `[GenerateShape]` type must put it in `Project.Common`; its
+  outputs need no `RegisterAsset<T>()` entry.
 
 ## 12. Data binding, incremental bake, and MSBuild
 
@@ -476,7 +471,7 @@ The manifest (`<project root>/obj/bork2d/bake/manifest.json`, schema bumped) rec
 - builder configuration hash: packs/roots/output paths, texture defaults, registered type names,
   processor identities, and processor assembly hash;
 - every tracked input: every `.toml` under every pack root plus every file whose suffix is in the
-  registered extension set (so `.ppm`/`.unit` are tracked automatically);
+  registered extension set (so `.circle` is tracked automatically);
 - the game-side assembly closure hash (the registered data/output types and their dependencies);
 - the tool version, mode, every output pack path/hash, and aggregate counts.
 
@@ -505,11 +500,10 @@ the skip; `--check` validates without writing.
 - There is no `bork2d.project.toml`, no `Bork2dBakePackPaths`, no `[bake].host`, no `[textures]`
   table, and no `obj/bork2d/bakehost` directory. The old `build/Bork2d.Bake.targets` descriptor
   properties are removed.
-- The engine fixture uses `Bork2d.BakeFixture.Assets` (same pattern) so bake tests, the MSBuild
-  integration test, and the AOT smoke exercise the real game flow. `Bork2d.AotSmoke` takes a
-  build-only dependency on it (the copy target builds it out of process; it is not a
-  `ProjectReference`); the AOT publish still contains only the fixture data types and the baked
-  packs, never the assets executable or builder.
+- The Pong example uses `Pong.Assets` (same pattern) so `Pong.Tests` and the AOT gate exercise the
+  real game flow. `Pong.Desktop` takes a build-only dependency on it (the copy target builds it out
+  of process; it is not a `ProjectReference`); the AOT publish still contains only `Pong.Common` and
+  the baked pack, never the assets executable or builder.
 
 ## 13. Diagnostics
 
@@ -518,7 +512,7 @@ the skip; `--check` validates without writing.
 | `BK1xxx` | Builder configuration and explicit asset-type registration |
 | `BK2xxx` | TOML syntax/binding for data and sidecars |
 | `BK3xxx` | References and baked-set validation |
-| `BK4xxx` | Built-in texture decode/probe/dimensions (and PPM if it chooses to reuse them) |
+| `BK4xxx` | Built-in texture decode/probe/dimensions |
 | `BK5xxx` | Pack composition/write, incremental state |
 | `BK6xxx` | MSBuild/build integration |
 | `BK7xxx` | Processor registration and processing |
@@ -542,8 +536,9 @@ the skip; `--check` validates without writing.
 - Builder, processors, and `MyGame.Assets` are JIT tooling. They are not in the runtime or AOT
   publish graph. Game data types stay in `Project.Common` and remain AOT-safe.
 - Processor output types need `[GenerateShape]` and must be loadable by the runtime; a processor
-  that emits a type living only in `MyGame.Assets` would bake but fail to load at runtime, so the
-  test processors put `Unit` in the fixture common assembly.
+  that emits a type living only in `MyGame.Assets` would bake but fail to load at runtime. The Pong
+  `CircleProcessor` emits the engine's `TextureDescriptor`, so it needs no extra runtime type; a game
+  processor that emits a custom type must put it in `Project.Common`.
 - The processor API is trusted build-time code. It may read the source file and use normal .NET
   libraries; it cannot escape the pack-root path rules because output paths are validated against
   `BaseAssetPath`.
@@ -558,16 +553,19 @@ Delivered on `task/file-processors`:
    `BakeApplicationBuilder`/`BakeApplication`, explicit `RegisterAsset<T>()`,
    `UseDefaultAssets()`/`UseDefaultProcessors()`, configuration validation, commands, and
    output/copy targets. Removed `ProjectDescriptor`, the generated host, host generation/loading, and
-   `MetadataLoadContext`; migrated tests/fixtures. Added `Bork2d.BakeFixture.Assets`.
+   `MetadataLoadContext`; migrated tests/fixtures. Added the assets executable (later `Pong.Assets`;
+   the fixture executable was removed by D-043).
 2. **Processor framework.** Added the processor contract, explicit data-type registry, registry
    override rules, base-path output validation, sidecar policy, sidecar binder entry point,
    `BK7xxx`, and generic baked-index entries. Removed hardcoded extension lists from
    discovery/path/incremental.
 3. **Texture processor.** Moved the existing texture pipeline behind `TextureProcessor`, kept all
    behavior/tests, retired `TextureSidecarParser` and texture-specific index/composer branches.
-4. **PPM and Unit.** Added the two test processors, fixture sources, and end-to-end tests.
-5. **Build/AOT/docs.** Wired the assets build targets, fixture assets executable, schema-3
-   incremental manifest, AOT fixture flow, and finalized these docs.
+4. **PPM and Unit.** Added the two test processors, fixture sources, and end-to-end tests. (Removed
+   with the exploratory examples by D-043; the current example processor is Pong's
+   `CircleProcessor`.)
+5. **Build/AOT/docs.** Wired the assets build targets, assets executable, schema-3 incremental
+   manifest, AOT flow, and finalized these docs.
 
 ## 16. Acceptance criteria
 
@@ -581,9 +579,12 @@ Delivered on `task/file-processors`:
   a pack-path list.
 - The engine's PNG/JPG/JPEG/BMP/TGA support is a registered processor; discovery has no image
   extension list, and no texture-specific branches remain in the generic index/composer.
-- A test registers a `.ppm` processor and bakes/loads a `TextureDescriptor` + exact RGBA payload.
-- A test registers a `.unit` processor, reads JSON, defaults the name to the file name, honors a
-  sidecar override, and loads a `Unit` struct.
+- The Pong example's `CircleProcessor` proves the contract: it registers `.circle` with
+  `SidecarPolicy.None`, owns its JSON, emits a `TextureDescriptor` + exact RGBA payload at the base
+  path and `<base>-raw`, and reports unreadable/invalid JSON as `BK7001` and missing/out-of-range
+  values as `BK7002`.
+- A test registers a processor with a `[GenerateShape]` sidecar, exercises `Required` sidecar
+  creation/defaulting, and loads the emitted type.
 - `Required` sidecars are created once when missing through `CreateDefaultSidecar`; `None` has no
   sidecar file.
 - A later processor registration overrides an earlier one for the same extension.
@@ -597,8 +598,8 @@ These naming/mechanical choices were settled in WP1–WP5; they do not change th
 
 - Project/API names are final: `Bork2d.Bake`, `BakeApplicationBuilder`, `BakeApplication`,
   `RegisterAsset<T>`, `UseDefaultAssets`, `UseDefaultProcessors`, `IAssetProcessor`/
-  `AssetProcessor<TSidecar>`, `SidecarPolicy`, and `IAssetOutputSink`. `MyGame.Assets` and
-  `Bork2d.BakeFixture.Assets` follow D-037.
+  `AssetProcessor<TSidecar>`, `SidecarPolicy`, and `IAssetOutputSink`. `MyGame.Assets` follows
+  D-037; the Pong example is `Pong.Assets`.
 - MSBuild files are final: `build/Bork2d.Assets.targets` for the assets executable and
   `build/Bork2d.Assets.Copy.targets` for a consuming desktop/AOT app. The assets executable owns the
   pack paths, so no pack-path property and no host build step exist.

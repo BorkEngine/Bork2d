@@ -1,8 +1,9 @@
 # Pong Example — Task Spec
 
-> **Status:** approved 2026-10-28. Implementation runs on `task/pong-example/wp-1` …
-> `wp-5` and integrates through `task/pong-example/common`. This document is the scope authority
-> for the task; the owner-approved decisions are D-043 and D-044.
+> **Status:** implemented 2026-10-28 (WP-1…WP-5 on `task/pong-example`; PR pending). Implementation
+> runs on `task/pong-example/wp-1` … `wp-5` and integrates through `task/pong-example/common`. This
+> document is the scope authority for the task; the owner-approved decisions are D-043 and D-044.
+> As-built evidence is in §12.
 
 ## 1. Goal
 
@@ -303,8 +304,9 @@ Sequential; each branch starts from the latest `origin/task/pong-example/common`
   expected RGBA8 payload.
 - Windowed mode reads W/S, Space, R, and Escape; the right paddle is AI; the title shows the score
   and prompt/state; no per-frame logging.
-- AOT publish contains `Pong.Common.dll`, `Pong.Desktop.exe`, `assets.pck`, and `SDL2.dll`, and no
-  `Pong.Assets`, `Bork2d.Bake`, Tomlyn, or StbImageSharp assembly; headless and
+- AOT publish contains `Pong.Desktop.exe`, `assets.pck`, and `SDL2.dll`, includes the `Pong.Common`
+  game assembly (NativeAOT single-file links it; `Pong.Common.pdb` is the on-disk proof), and
+  contains no `Pong.Assets`, `Bork2d.Bake`, Tomlyn, or StbImageSharp assembly; headless and
   `--windowed --ticks 120` exit 0.
 - `scripts/check-docs.ps1`, `git diff --check`, and the dependency/public-surface tests pass.
 - `AGENTS.md` (already updated on `develop`) points the AOT gate and examples policy at
@@ -319,3 +321,56 @@ Sequential; each branch starts from the latest `origin/task/pong-example/common`
 | No renderer makes the game look empty | Document it; verify through title/logs/headless assertions; sprites/camera are already wired for M8. |
 | Title updates on every tick | Compare the formatted title and only assign on change. |
 | Resize changes the court aspect | Recompute half-width from the framebuffer and call `ResizeCourt` each windowed tick. |
+
+## 12. As-built evidence
+
+Implemented on `task/pong-example` from `origin/task/pong-example/common` (base `45a69b4` for WP-1;
+the integration head before WP-5 is `4b434c5`). Each work package was merged with `--no-ff` into
+`task/pong-example/common`.
+
+| WP | Commits | Merge into `task/pong-example/common` | Delivered |
+| --- | --- | --- | --- |
+| WP-1 | `0f0b667` | `31c17cf` | This spec and D-043/D-044; no code. |
+| WP-2 | `13d0ca2` | `a17bea9` | Deleted `Bork2d.AotSmoke`/`Bork2d.BakeFixture`/`Bork2d.BakeFixture.Assets`/`examples/Bork2d.Examples.slnx`; self-contained bake test data types; `Bork2d.Tests`/`RepositoryPaths`/dependency-guard updates. |
+| WP-3 | `8d89ab8`, `801033b` | `c574e03` | `examples/pong` solution, `Pong.Common`, `Pong.Assets` (paddle PNG, `CircleProcessor`, TOMLs), `Pong.Desktop` headless host, pack copy. |
+| WP-4 | `061720a` | `4b434c5` | Full `PongGame` gameplay/input/AI/title/logging/resize and the 20 `Pong.Tests`. |
+| WP-5 | `pong(wp-5): add the NativeAOT gate and refresh docs` | pending | `PublishAot`/`InvariantGlobalization`/narrow `IL3000;IL3002` suppression, current-doc migration from the removed examples to Pong, full gates, PR evidence. |
+
+### 12.1 Tests
+
+- `Pong.Tests`: **20 tests**, all passing (simulation, AI, title, bake/load integration, and the full
+  headless `PongGame` run).
+- `Bork2d.Tests` after WP-2: **907 passed + 12 skipped = 919 total**. The suite no longer references
+  the removed examples; the former fixture/MSBuild/AOT integration tests are self-contained bake
+  tests (`Bork2d.Tests.Bake.Baking.GameConfig`/`.Stats`/`.StatsRoot`).
+
+### 12.2 AOT evidence
+
+```powershell
+dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-x64 --nologo
+& examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe --headless
+& examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe --windowed --ticks 120
+```
+
+- Publish: **0 warnings, 0 errors**, zero AOT/trim diagnostics.
+- Headless: exit `0`; `mode=Headless`, `validation=passed`, 7 pack entries, paddle 16×96 (6144 raw
+  bytes), ball 64×64 (16384 raw bytes), setup/tick/teardown 1/1/1, world detached.
+- `--windowed --ticks 120`: exit `0` after exactly 120 ticks (setup/teardown 1/1), SDL 2.30.8,
+  1280×720 framebuffer.
+- Publish contents: `Pong.Desktop.exe`, `assets.pck`, `SDL2.dll`, and the PDBs
+  (`Pong.Desktop.pdb`, `Pong.Common.pdb`, `Bork2d.Engine.pdb`, `Bork2d.Render.pdb`,
+  `Bork2d.Runtime.pdb`). NativeAOT single-file links the managed assemblies into the executable, so
+  `Pong.Common.pdb` is the on-disk proof that the game assembly is in the publish graph (the old AOT
+  smoke documented the same behavior for `Bork2d.BakeFixture.pdb`). The publish contains no
+  `Pong.Assets`, `Bork2d.Bake`, Tomlyn, or StbImageSharp assembly.
+
+### 12.3 Docs and gates
+
+- `pwsh scripts/check-docs.ps1` passes; `git diff --check` is clean.
+- Debug/Release builds, `dotnet test`, and `dotnet format --verify-no-changes` pass with zero
+  warnings for both `src/Bork2d/Bork2d.slnx` and `examples/pong/Pong.slnx`.
+- **Known Release-solution note:** a `dotnet build examples/pong/Pong.slnx -c Release` builds the
+  external engine project references in **Debug** (the `.slnx` has no configuration mapping for
+  projects outside `examples/pong`). The direct `dotnet publish … -c Release -r win-x64` above is the
+  Release proof for the engine/desktop graph; the examples solution build is a shape/test gate.
+- `docs/decisions.md` D-043/D-044 status is unchanged; the final merge status is left to the PR.

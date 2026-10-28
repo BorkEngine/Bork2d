@@ -8,7 +8,7 @@
           Bork2dAssetsProjectDirectory  the assets executable project directory (also the project
                                         root used to validate the configuration)
           Bork2dAssetsExecutable        the built assets executable assembly (for example
-                                        ...\bin\Debug\net11.0\Bork2d.BakeFixture.Assets.dll)
+                                        ...\bin\Debug\net11.0\Pong.Assets.dll)
           Bork2dAssetsProjectFile       optional assets executable project; when set, the targets build
                                         it out of process before copying
           Bork2dAssetsTargetFramework   target framework used in the executable path; default net11.0
@@ -17,9 +17,9 @@
         A normal desktop app may reference the assets project with ReferenceOutputAssembly="false"
         for build order only. That does not work for a self-contained AOT app: the SDK copies an
         executable reference's apphost/deps/runtimeconfig transitively and rejects a self-contained
-        reference to a JIT executable, so the AOT smoke instead sets Bork2dAssetsProjectFile and the
-        target builds the assets executable out of process. Either way the app references the assets
-        executable only for build order: neither the builder, the assets executable, nor the
+        reference to a JIT executable, so the Pong AOT app instead sets Bork2dAssetsProjectFile and
+        the target builds the assets executable out of process. Either way the app references the
+        assets executable only for build order: neither the builder, the assets executable, nor the
         processors enter its compile or publish graph. After Build the target asks the executable to
         copy every configured pack to $(TargetDir); after Publish it copies them to $(PublishDir).
         Clean is owned by the assets project, which is the only component that knows the pack paths

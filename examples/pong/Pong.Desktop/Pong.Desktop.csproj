@@ -3,6 +3,18 @@
     <PropertyGroup>
         <OutputType>Exe</OutputType>
         <IsPackable>false</IsPackable>
+        <PublishAot>true</PublishAot>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <!--
+            Narrow AOT-publisher suppression. Silk.NET.Core.Loader.DefaultPathResolver (reached via
+            Sdl.GetApi()) probes Assembly.Location/CodeBase/DependencyContext for native-library
+            candidates; ILC reports those single-file probes as IL3000/IL3002. Bork2d's SDL2 native
+            ships from Silk.NET.SDL and is resolved by the runtime's normal native-asset lookup, so
+            the flagged fallback paths are not used. Only these two trim codes are suppressed, and
+            only in this AOT publisher (the Pong desktop app is the AOT gate too).
+            Remove the suppression when Silk.NET stops probing those APIs.
+        -->
+        <NoWarn>$(NoWarn);IL3000;IL3002</NoWarn>
     </PropertyGroup>
 
     <!--
