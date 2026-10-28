@@ -353,6 +353,9 @@ dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-
 ```
 
 - Publish: **0 warnings, 0 errors**, zero AOT/trim diagnostics.
+- Verified from a cold workspace (both Pong projects' `obj`/`bin` removed, no prior solution build):
+  `Bork2d.Assets.Copy.targets` restores the assets project out of process before building it, so the
+  direct publish command above succeeds on its own.
 - Headless: exit `0`; `mode=Headless`, `validation=passed`, 7 pack entries, paddle 16×96 (6144 raw
   bytes), ball 64×64 (16384 raw bytes), setup/tick/teardown 1/1/1, world detached.
 - `--windowed --ticks 120`: exit `0` after exactly 120 ticks (setup/teardown 1/1), SDL 2.30.8,

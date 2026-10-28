@@ -95,9 +95,11 @@ $pong = 'examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Des
 
 The publish must report zero AOT/trim warnings and contain `assets.pck` and `SDL2.dll`.
 `Pong.Desktop` imports `build/Bork2d.Assets.Copy.targets` and sets `Bork2dAssetsProjectFile`, so its
-build builds the build-only `Pong.Assets` executable out of process; that executable owns the
-`Assets/` root, the `GameSettings` registration, `CircleProcessor`, and the builder configuration,
-bakes the pack, and the copy target places it next to the built and published executable. There is no
+build restores and builds the build-only `Pong.Assets` executable out of process; that executable
+owns the `Assets/` root, the `GameSettings` registration, `CircleProcessor`, and the builder
+configuration, bakes the pack, and the copy target places it next to the built and published
+executable. The restore step makes the direct publish work from a clean clone; the app's own publish
+never references the assets project. There is no
 generated host, and the AOT publish never contains the builder/processor assemblies or the assets
 executable. The headless run mounts the pack from `AppContext.BaseDirectory` (not the process CWD)
 and exits `0` only when the scene, the `GameSettings` struct root, the `sprites/paddle` and
