@@ -169,7 +169,7 @@ public sealed class MultiPackBakeTests
             defense = 2
 
             [bork2d]
-            type = "Bork2d.BakeFixture.StatsRoot"
+            type = "Bork2d.Tests.Bake.Baking.StatsRoot"
             """);
 
         using var output = TempBakeDirectory.Create();
@@ -202,7 +202,7 @@ public sealed class MultiPackBakeTests
             defense = 4
 
             [bork2d]
-            type = "Bork2d.BakeFixture.StatsRoot"
+            type = "Bork2d.Tests.Bake.Baking.StatsRoot"
             """);
 
         using var output = TempBakeDirectory.Create();
@@ -337,6 +337,6 @@ public sealed class MultiPackBakeTests
             texture = "{texture}"
 
             [bork2d]
-            type = "Bork2d.BakeFixture.GameConfig"
+            type = "Bork2d.Tests.Bake.Baking.GameConfig"
             """);
 }

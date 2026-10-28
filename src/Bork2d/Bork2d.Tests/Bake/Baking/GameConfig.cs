@@ -3,16 +3,17 @@ using Bork2d.Engine.Assets;
 using Bork2d.Engine.Rendering;
 using PolyType;
 
-namespace Bork2d.BakeFixture;
+namespace Bork2d.Tests.Bake.Baking;
 
 /// <summary>
-/// The fixture's class-root custom-data type: required members, a nested struct, a <see cref="Color"/>,
-/// a typed texture reference, and the BCL source-mapping attributes in one asset.
+/// The class-root custom-data type used by the bake tests: required members, a nested struct, a
+/// <see cref="Color"/>, a typed texture reference, and the BCL source-mapping attributes in one
+/// asset.
 /// </summary>
 /// <remarks>
-/// The type is public and carries <c>[GenerateShape]</c> on a <c>partial</c> declaration (D-M4-12),
-/// so the generated bake host can bind and pack it without <c>InternalsVisibleTo</c>. The fixture is
-/// a stand-in for a game's <c>Project.Common</c> library and never references the bake tooling.
+/// The type carries <c>[GenerateShape]</c> on a <c>partial</c> declaration (D-M4-12), so the bake
+/// host can bind and pack it without relying on the removed example fixture assembly. It is a
+/// stand-in for a game's <c>Project.Common</c> library and never references the bake tooling.
 /// </remarks>
 [GenerateShape]
 public sealed partial class GameConfig

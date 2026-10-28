@@ -14,8 +14,8 @@ namespace Bork2d.Tests.Bake.Processors;
 /// </summary>
 public sealed class BakeProcessorIndexTests
 {
-    private static readonly string _gameConfigType = typeof(Bork2d.BakeFixture.GameConfig).FullName!;
-    private static readonly string _statsRootType = typeof(Bork2d.BakeFixture.StatsRoot).FullName!;
+    private static readonly string _gameConfigType = typeof(Bork2d.Tests.Bake.Baking.GameConfig).FullName!;
+    private static readonly string _statsRootType = typeof(Bork2d.Tests.Bake.Baking.StatsRoot).FullName!;
     private static readonly string _textureType = typeof(TextureDescriptor).FullName!;
 
     [Fact]

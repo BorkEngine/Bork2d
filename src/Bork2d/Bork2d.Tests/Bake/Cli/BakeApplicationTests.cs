@@ -3,15 +3,14 @@ using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Incremental;
 using Bork2d.Tests.Bake.Baking;
-using Bork2d.Tests.TestSupport;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Cli;
 
 /// <summary>
 /// The assets command surface against <see cref="BakeApplication"/>: exit codes, stderr/stdout
-/// routing, <c>--check</c>/<c>--force</c> behavior, <c>clean</c>, <c>copy-packs</c>, configuration
-/// diagnostics, and the separate-process structural determinism proof.
+/// routing, <c>--check</c>/<c>--force</c> behavior, <c>clean</c>, <c>copy-packs</c>, and
+/// configuration diagnostics.
 /// </summary>
 public sealed class BakeApplicationTests
 {
@@ -449,48 +448,6 @@ public sealed class BakeApplicationTests
         Assert.Contains("error BK5004:", result.Error, StringComparison.Ordinal);
         Assert.Contains(packName, result.Error, StringComparison.Ordinal);
     }
-
-    [Fact]
-    public void SeparateProcessBakesAreStructurallyIdentical()
-    {
-        string executable = RepositoryPaths.FixtureAssetsExecutable;
-        Assert.True(
-            File.Exists(executable),
-            $"The fixture assets executable was not built: '{executable}'.");
-
-        using var first = TempBakeDirectory.Create();
-        using var second = TempBakeDirectory.Create();
-
-        TempProcessRunner.Result firstRun = RunSeparate(first.RootPath);
-        TempProcessRunner.Result secondRun = RunSeparate(second.RootPath);
-
-        Assert.True(firstRun.ExitCode == 0, firstRun.Output);
-        Assert.True(secondRun.ExitCode == 0, secondRun.Output);
-        Assert.Contains("baked '", firstRun.Output, StringComparison.Ordinal);
-        Assert.Contains("baked '", secondRun.Output, StringComparison.Ordinal);
-
-        BakedPackAssertions.AssertStructurallyEqual(
-            first.FullPath("assets.pck"),
-            second.FullPath("assets.pck"));
-        BakedPackAssertions.AssertStructurallyEqual(
-            first.FullPath("dlc1.pck"),
-            second.FullPath("dlc1.pck"));
-    }
-
-    private static TempProcessRunner.Result RunSeparate(string outputRoot)
-        => TempProcessRunner.Run(
-            "dotnet",
-            [
-                RepositoryPaths.FixtureAssetsExecutable,
-                "bake",
-                "--project-root",
-                RepositoryPaths.FixtureAssetsProjectDirectory,
-                "--output-root",
-                outputRoot,
-                "--mode",
-                "debug",
-            ],
-            RepositoryPaths.FixtureAssetsProjectDirectory);
 
     private static Result Run(BakeApplication app, params string[] arguments)
     {

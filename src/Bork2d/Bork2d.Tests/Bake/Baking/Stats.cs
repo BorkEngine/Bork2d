@@ -1,6 +1,6 @@
 using PolyType;
 
-namespace Bork2d.BakeFixture;
+namespace Bork2d.Tests.Bake.Baking;
 
 /// <summary>
 /// A nested <c>readonly record struct</c> member of <see cref="GameConfig"/>, exercised on both the
