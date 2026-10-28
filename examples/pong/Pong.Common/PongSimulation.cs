@@ -243,8 +243,9 @@ public sealed class PongSimulation
 
     private void MovePaddles(float deltaTime, float leftInput, float rightInput)
     {
-        float left = Math.Clamp(leftInput, -1f, 1f);
-        float right = Math.Clamp(rightInput, -1f, 1f);
+        // Math.Clamp(NaN, ...) returns NaN, so a non-finite input is treated as neutral.
+        float left = float.IsFinite(leftInput) ? Math.Clamp(leftInput, -1f, 1f) : 0f;
+        float right = float.IsFinite(rightInput) ? Math.Clamp(rightInput, -1f, 1f) : 0f;
         _leftPaddleY = ClampPaddle(_leftPaddleY + (left * _settings.PaddleSpeed * deltaTime));
         _rightPaddleY = ClampPaddle(_rightPaddleY + (right * _settings.PaddleSpeed * deltaTime));
     }
@@ -292,9 +293,12 @@ public sealed class PongSimulation
 
         float ballEdge = left ? _ballPosition.X - BallRadius : _ballPosition.X + BallRadius;
         bool atFace = left ? ballEdge <= paddleFace : ballEdge >= paddleFace;
+        // The ball must still be on the court side of the face; otherwise it already missed the
+        // paddle and a later Y overlap must not reflect it from behind.
+        bool courtSide = left ? _ballPosition.X >= paddleFace : _ballPosition.X <= paddleFace;
         bool withinReach = MathF.Abs(_ballPosition.Y - paddleY) <= PaddleHalfHeight + BallRadius;
         bool insideCourt = left ? _ballPosition.X >= -_halfWidth : _ballPosition.X <= _halfWidth;
-        if (!atFace || !withinReach || !insideCourt)
+        if (!atFace || !courtSide || !withinReach || !insideCourt)
         {
             return;
         }

@@ -36,6 +36,7 @@ public sealed class PongGame : IGame<GameLayer>
     private const int PaddleZIndex = 10;
     private const int BallZIndex = 20;
     private const string SettingsPath = "game_settings";
+    private const float MinimumCourtHalfWidth = PongSimulation.PaddleInset + PongSimulation.PaddleHalfWidth;
 
     private static readonly Color _clearColor = new(0.04f, 0.04f, 0.06f, 1f);
 
@@ -232,6 +233,16 @@ public sealed class PongGame : IGame<GameLayer>
         }
 
         Vector2 framebuffer = engine.Window.Size;
-        return CourtHalfHeight * (framebuffer.X / framebuffer.Y);
+        if (framebuffer.Y <= 0f)
+        {
+            return MinimumCourtHalfWidth;
+        }
+
+        // A tiny or degenerate window must not produce a court narrower than the simulation can
+        // represent (a paddle inset plus its half-width); keep the value finite as well.
+        float halfWidth = CourtHalfHeight * (framebuffer.X / framebuffer.Y);
+        return float.IsFinite(halfWidth)
+            ? MathF.Max(halfWidth, MinimumCourtHalfWidth)
+            : MinimumCourtHalfWidth;
     }
 }
