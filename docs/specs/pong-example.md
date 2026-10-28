@@ -334,7 +334,7 @@ the integration head before WP-5 is `4b434c5`). Each work package was merged wit
 | WP-2 | `13d0ca2` | `a17bea9` | Deleted `Bork2d.AotSmoke`/`Bork2d.BakeFixture`/`Bork2d.BakeFixture.Assets`/`examples/Bork2d.Examples.slnx`; self-contained bake test data types; `Bork2d.Tests`/`RepositoryPaths`/dependency-guard updates. |
 | WP-3 | `8d89ab8`, `801033b` | `c574e03` | `examples/pong` solution, `Pong.Common`, `Pong.Assets` (paddle PNG, `CircleProcessor`, TOMLs), `Pong.Desktop` headless host, pack copy. |
 | WP-4 | `061720a` | `4b434c5` | Full `PongGame` gameplay/input/AI/title/logging/resize and the 20 `Pong.Tests`. |
-| WP-5 | `6ab4c3c`, `8f0f376` | pending | `PublishAot`/`InvariantGlobalization`/narrow `IL3000;IL3002` suppression, cold-clone assets restore in the shared copy target, current-doc migration from the removed examples to Pong, full gates, PR evidence. |
+| WP-5 | `6ab4c3c`, `8f0f376`, `c3852e5` | `fda4df8` | `PublishAot`/`InvariantGlobalization`/narrow `IL3000;IL3002` suppression, cold-clone assets restore in the shared copy target, current-doc migration from the removed examples to Pong, full gates, PR evidence. |
 
 ### 12.1 Tests
 
