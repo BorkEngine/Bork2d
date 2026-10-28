@@ -61,7 +61,8 @@ composition root and the only project that knows both the engine and the rendere
 | **Pong.Common** | ✓ | ✗ | ✗ | ✗ | — | ✗ | ✗ |
 | **Pong.Assets** | ✗ | ✗ | ✗ | ✓ | ✓ | — | ✗ |
 | **Pong.Desktop** | ✓ | ✗ | ✓ | ✗ | ✓ | ✗ | — |
-| **Tests** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Bork2d.Tests** | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
+| **Pong.Tests** | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ |
 
 Rules behind the matrix:
 
@@ -87,8 +88,11 @@ Rules behind the matrix:
   transitively through both). It imports `build/Bork2d.Assets.Copy.targets`, which builds
   `Pong.Assets` out of process and copies the baked pack next to the app and the publish. It must not
   pull `Render` types or any bake-tooling/assets-executable assembly in.
-- `Tests` may reference everything and use internals. The dependency test asserts the runtime
-  assemblies never reference the bake tooling and that the examples graph matches this matrix.
+- `Bork2d.Tests` may reference the engine/runtime/bake assemblies and use their internals, but no
+  Pong project; it asserts the runtime assemblies never reference the bake tooling and that the
+  engine dependency graph matches this matrix. `Pong.Tests` references `Pong.Common`, `Pong.Assets`,
+  `Bork2d.Engine`, `Bork2d.Bake`, and `Bork2d.Runtime`; it does not reference `Pong.Desktop` or
+  `Bork2d.Render` directly.
 - `Editor` is independent of the renderer: it edits source data, slices textures, and previews with
   Avalonia imaging; it consumes the public `Bork2d.Bake` surface.
 

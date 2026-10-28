@@ -9,7 +9,7 @@
 > A milestone is done when its exit criterion is demonstrated, not merely when code is merged.
 >
 > **Post-M4 task (not a milestone): D-036/D-037/D-038/D-039/D-040 asset processors and `MyGame.Assets`.**
-> **Implemented as-built on `task/file-processors` (2026-10-27) and awaiting human review/merge.** It
+> **Implemented as-built on `task/file-processors` (2026-10-27) and merged into `develop` (2026-10-27, PR #8).** It
 > replaces the project descriptor with builder configuration, makes source file types registered
 > processors (built-in texture importer included), removes the generated host in favor of explicit
 > `RegisterAsset<T>()` registrations, and moves assets/processors to a game-owned executable that
@@ -46,7 +46,7 @@
 | Build | Green | SDK `11.0.100-rc.1`, `net11.0`, zero warnings/errors in Debug and Release; `dotnet format` clean. |
 | `Bork2d.Engine` | Current | Public contract for engine, game, time, window, input, assets, camera, sprite, transform, root, `ZIndex`, `Bork2dException`, `AssetInfo`, `AssetException`/`AssetErrorKind`, the public asset model (`SpriteAsset`, `TextureDescriptor`, `TextureFormat`, `TextureFilter`, `TextureWrap`, `SpriteTopology`, `AssetRef<T>`, `DataRef`), the full `KeyCode` scancode set, and five `MouseButton` members; plus the root-owned unordered scene tree, transforms (degrees normalized), structural/per-object locks, time wrapper, layer validation, MessagePack shape policy, v1 pack reader/writer, canonical paths, base/overlay VFS, one loader thread, and generic pack-time reference validation. Snapshot structs are M7. |
 | `Bork2d.Runtime` | Current (M3) | Builder, validation, app-owned logging, SDL windowed host (window/input/time, uncapped loop), one-tick headless/offscreen host, `Exit`/`Dispose`/post-shutdown contract, and the app-scoped asset-service lifecycle. Renderer wiring is M6/M8. |
-| `Bork2d.Bake` | Implemented on `task/file-processors` (2026-10-27; D-036/D-037/D-038); merged with the builder by D-041/D-042 | JIT tooling: builder-configured ordered packs, shape-driven Tomlyn binder, processor registry/sidecars, built-in texture processor, the Pong `CircleProcessor` example, reference validation, structural determinism, schema-3 incremental bake, per-pack atomic writes, MSBuild targets. The public builder/processor surface and the internal implementation share the one `Bork2d.Bake` assembly. No descriptor, generated host, host state, or `Bork2d.Bake.Cli`. |
+| `Bork2d.Bake` | Implemented on `task/file-processors` (2026-10-27; D-036/D-037/D-038); merged with the builder by D-041/D-042 | JIT tooling: builder-configured ordered packs, shape-driven Tomlyn binder, processor registry/sidecars, built-in texture processor, reference validation, structural determinism, schema-3 incremental bake, per-pack atomic writes, MSBuild targets. The public builder/processor surface and the internal implementation share the one `Bork2d.Bake` assembly. No descriptor, generated host, host state, or `Bork2d.Bake.Cli`. The Pong example's `CircleProcessor` lives in `Pong.Assets` and uses this surface. |
 | `Bork2d.Render` | Empty | Reference-wired; no Vulkan implementation (M6/M8). |
 | `Bork2d.Editor` | Absent | Not in the solution; the editor is removed from Stage 1 and deferred (M5 removed). |
 | `Bork2d.Tests` | Current | 907 deterministic xUnit tests plus 12 opt-in/conditional tests (919 total): ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix/public surfaces, the Q-20 metadata guard, fake-SDL window/input/loop/time, pack/VFS/loader, asset references, runtime lifecycle, the builder/processor/sidecar/bake suites, and schema-3 incremental rules. The exploratory smoke/fixture tests were removed by D-043; bake coverage is self-contained. |
@@ -367,7 +367,7 @@ approvals; only unresolved choices are listed here.
 | M6 Vulkan bring-up | Not started | — |
 | M7 Frame handoff/pacing | Not started | — |
 | M8 Sprite renderer | Not started | — |
-| M9 Template/samples | Not started | — |
+| M9 Template/samples | Partially started (Pong sample) | `examples/pong` is the first sample; the solution template, packaging, and the remaining samples are pending. |
 | M10 Hardening/0.1 | Not started | — |
 
 **Planning change (2026-10-27):** M5 (Editor) was removed from Stage 1; M6–M10 IDs are unchanged.

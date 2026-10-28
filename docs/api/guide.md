@@ -24,7 +24,7 @@ parentheses.
 
 | Project | References | Contains |
 | --- | --- | --- |
-| `Pong.Common` (`Project.Common`) | `Bork2d.Engine` only | Gameplay classes and runtime `[GenerateShape]` data types: `PongGame`, `PongSimulation`, `PongAi`, `GameSettings`. |
+| `Pong.Common` (`Project.Common`) | `Bork2d.Engine` only | Gameplay classes and runtime `[GenerateShape]` data types: `PongGame`, `PongSimulation`, `PongAi`, `PongTitle`, `PongSide`, `GameSettings`. |
 | `Pong.Assets` (`MyGame.Assets`) | `Bork2d.Bake` + `Pong.Common` | Build-time executable: asset roots, processors (`CircleProcessor`), `BakeApplicationBuilder` config, CLI; bakes on build. |
 | `Pong.Desktop` (`Project.Desktop`) | `Bork2d.Runtime` + `Pong.Common`; build-only `Pong.Assets` | Entry point that builds and runs the app; the NativeAOT gate. |
 | `Project.Editor` (M5) | `Bork2d.Editor` + `Project.Common` | Thin Avalonia editor host. |

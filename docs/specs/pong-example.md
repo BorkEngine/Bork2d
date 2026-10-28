@@ -294,8 +294,8 @@ Sequential; each branch starts from the latest `origin/task/pong-example/common`
 
 ## 10. Acceptance criteria
 
-- `examples/` contains only `pong`; no `Bork2d.AotSmoke`/`BakeFixture` references remain in code,
-  tests, or docs.
+- `examples/` contains only `pong`; no references remain in current code, tests, or current docs
+  (historical milestone specs, decision rows, and progress-log rows are retained).
 - Engine solution: Debug/Release build, tests, and format pass with zero warnings.
 - Pong solution: Debug/Release build, Pong tests, and format pass with zero warnings.
 - `assets.pck` has exactly the 7 expected entries; `game_settings` is a `GameSettings` struct;
@@ -334,7 +334,7 @@ the integration head before WP-5 is `4b434c5`). Each work package was merged wit
 | WP-2 | `13d0ca2` | `a17bea9` | Deleted `Bork2d.AotSmoke`/`Bork2d.BakeFixture`/`Bork2d.BakeFixture.Assets`/`examples/Bork2d.Examples.slnx`; self-contained bake test data types; `Bork2d.Tests`/`RepositoryPaths`/dependency-guard updates. |
 | WP-3 | `8d89ab8`, `801033b` | `c574e03` | `examples/pong` solution, `Pong.Common`, `Pong.Assets` (paddle PNG, `CircleProcessor`, TOMLs), `Pong.Desktop` headless host, pack copy. |
 | WP-4 | `061720a` | `4b434c5` | Full `PongGame` gameplay/input/AI/title/logging/resize and the 20 `Pong.Tests`. |
-| WP-5 | `pong(wp-5): add the NativeAOT gate and refresh docs` | pending | `PublishAot`/`InvariantGlobalization`/narrow `IL3000;IL3002` suppression, current-doc migration from the removed examples to Pong, full gates, PR evidence. |
+| WP-5 | `6ab4c3c`, `8f0f376` | pending | `PublishAot`/`InvariantGlobalization`/narrow `IL3000;IL3002` suppression, cold-clone assets restore in the shared copy target, current-doc migration from the removed examples to Pong, full gates, PR evidence. |
 
 ### 12.1 Tests
 

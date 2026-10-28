@@ -501,9 +501,10 @@ the skip; `--check` validates without writing.
   table, and no `obj/bork2d/bakehost` directory. The old `build/Bork2d.Bake.targets` descriptor
   properties are removed.
 - The Pong example uses `Pong.Assets` (same pattern) so `Pong.Tests` and the AOT gate exercise the
-  real game flow. `Pong.Desktop` takes a build-only dependency on it (the copy target builds it out
-  of process; it is not a `ProjectReference`); the AOT publish still contains only `Pong.Common` and
-  the baked pack, never the assets executable or builder.
+  real game flow. `Pong.Desktop` takes a build-only dependency on it (the copy target restores and
+  builds it out of process; it is not a `ProjectReference`); the AOT publish links only the
+  game-side `Pong.Common` assembly into the single-file executable (its `Pong.Common.pdb` is the
+  on-disk proof) alongside the baked pack, never the assets executable or builder.
 
 ## 13. Diagnostics
 
