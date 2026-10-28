@@ -1,8 +1,10 @@
 using System.Numerics;
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
+using Bork2d.Engine.Input;
 using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
+using Microsoft.Extensions.Logging;
 
 namespace Pong.Common;
 
@@ -14,12 +16,14 @@ namespace Pong.Common;
 /// <para>
 /// The game works in the headless one-tick host and in the windowed host. Headless mode never reads
 /// <c>IInput</c> or <c>IWindow</c> and advances the simulation with a fixed 1/60 s step; windowed
-/// mode uses the frame delta and recomputes the court aspect from the framebuffer so a resize keeps
-/// the court proportional.
+/// mode reads the player input and the frame delta, updates the window title when the state changes,
+/// and recomputes the court aspect from the framebuffer so a resize keeps the court proportional.
+/// The right paddle is always driven by <see cref="PongAi"/>.
 /// </para>
 /// <para>
-/// WP-3 deliberately has no keyboard input, window-title updates, or score logging; WP-4 adds the
-/// interactive behavior. The exposed read-only properties exist for the headless acceptance smoke.
+/// Scores, pause/resume/reset transitions, and the final teardown are logged at Information. The
+/// title is formatted and compared each tick but assigned only when it changes, and the game never
+/// logs per frame. The exposed read-only properties exist for the headless acceptance smoke.
 /// </para>
 /// </remarks>
 public sealed class PongGame : IGame<GameLayer>
@@ -43,13 +47,19 @@ public sealed class PongGame : IGame<GameLayer>
     private readonly bool _interactive;
     private readonly int? _tickLimit;
     private IEngine<GameLayer>? _engine;
+    private ILogger<PongGame>? _logger;
+    private string? _title;
+    private int _lastLeftScore;
+    private int _lastRightScore;
+    private PongSide _lastWinner;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PongGame"/> class.
     /// </summary>
     /// <param name="interactive">
-    /// <see langword="true"/> for the windowed host, which reads the frame delta and the framebuffer
-    /// size; <see langword="false"/> for the headless host, which uses a fixed step and a 16:9 court.
+    /// <see langword="true"/> for the windowed host, which reads the frame delta, the input, and the
+    /// framebuffer size; <see langword="false"/> for the headless host, which uses a fixed step and a
+    /// 16:9 court.
     /// </param>
     /// <param name="tickLimit">
     /// The number of completed windowed ticks after which the game calls
@@ -124,6 +134,7 @@ public sealed class PongGame : IGame<GameLayer>
         ArgumentNullException.ThrowIfNull(engine);
         SetupCount++;
         _engine = engine;
+        _logger = engine.LoggerFactory.CreateLogger<PongGame>();
 
         // Setup blocks on the baked asset chain on purpose: the scene must be complete before the
         // first tick, and the engine API guide explicitly allows blocking startup loads.
@@ -135,6 +146,17 @@ public sealed class PongGame : IGame<GameLayer>
         PaddlePixelCount = engine.Assets.LoadData(PaddleTexture.Payload).GetAwaiter().GetResult().Length;
         BallPixelCount = engine.Assets.LoadData(BallTexture.Payload).GetAwaiter().GetResult().Length;
         PackEntryCount = engine.Assets.Browse().Count;
+
+        _logger.LogInformation(
+            "Pong setup: interactive={Interactive}, packEntries={PackEntries}, "
+                + "paddleSprite={PaddleSprite}, paddleTexture={PaddleTexture}, "
+                + "ballSprite={BallSprite}, ballTexture={BallTexture}.",
+            _interactive,
+            PackEntryCount,
+            Settings.Paddle.Path,
+            PaddleSprite.Texture.Path,
+            Settings.Ball.Path,
+            BallSprite.Texture.Path);
 
         ICamera<GameLayer> camera = engine.CreateCamera(engine.Root);
         camera.Size = CourtHalfHeight;
@@ -155,7 +177,16 @@ public sealed class PongGame : IGame<GameLayer>
         Ball.Tint = Color.White;
 
         Simulation = new PongSimulation(Settings, ComputeHalfWidth(engine), CourtHalfHeight);
+        _lastLeftScore = Simulation.LeftScore;
+        _lastRightScore = Simulation.RightScore;
+        _lastWinner = Simulation.Winner;
+        _title = null;
         ApplySimulation();
+
+        if (_interactive)
+        {
+            UpdateTitle(engine, Simulation);
+        }
     }
 
     /// <inheritdoc/>
@@ -170,16 +201,26 @@ public sealed class PongGame : IGame<GameLayer>
 
         if (_interactive)
         {
+            float leftInput = ReadLeftInput(engine.Input);
+            ApplyActionKeys(engine, engine.Input, simulation);
+
             float halfWidth = ComputeHalfWidth(engine);
             if (halfWidth != simulation.HalfWidth)
             {
                 simulation.ResizeCourt(halfWidth, CourtHalfHeight);
             }
-        }
 
-        float deltaTime = _interactive ? (float)engine.Time.DeltaTime : FixedDeltaTime;
-        simulation.Step(deltaTime, leftInput: 0f, PongAi.Steer(simulation));
-        ApplySimulation();
+            float deltaTime = (float)engine.Time.DeltaTime;
+            simulation.Step(deltaTime, leftInput, PongAi.Steer(simulation));
+            LogSimulationChanges(simulation);
+            ApplySimulation();
+            UpdateTitle(engine, simulation);
+        }
+        else
+        {
+            simulation.Step(FixedDeltaTime, leftInput: 0f, PongAi.Steer(simulation));
+            ApplySimulation();
+        }
 
         if (_tickLimit is { } tickLimit && TickCount >= tickLimit)
         {
@@ -191,7 +232,131 @@ public sealed class PongGame : IGame<GameLayer>
     public void Teardown()
     {
         TeardownCount++;
+
+        if (Simulation is { } simulation)
+        {
+            _logger?.LogInformation(
+                "Pong teardown: left={LeftScore}, right={RightScore}, winner={Winner}, "
+                    + "ticks={TickCount}.",
+                simulation.LeftScore,
+                simulation.RightScore,
+                simulation.Winner,
+                TickCount);
+        }
+
         _engine?.Root.DetachAll();
+    }
+
+    private static float ReadLeftInput(IInput input)
+    {
+        float leftInput = 0f;
+        if (input.IsKeyDown(KeyCode.W))
+        {
+            leftInput += 1f;
+        }
+
+        if (input.IsKeyDown(KeyCode.S))
+        {
+            leftInput -= 1f;
+        }
+
+        return leftInput;
+    }
+
+    private void ApplyActionKeys(
+        IEngine<GameLayer> engine,
+        IInput input,
+        PongSimulation simulation)
+    {
+        if (input.IsKeyPressed(KeyCode.Space))
+        {
+            TogglePause(simulation);
+        }
+
+        if (input.IsKeyPressed(KeyCode.R))
+        {
+            ResetMatch(simulation);
+        }
+
+        if (input.IsKeyPressed(KeyCode.Escape))
+        {
+            engine.Exit();
+        }
+    }
+
+    private void TogglePause(PongSimulation simulation)
+    {
+        bool wasPaused = simulation.IsPaused;
+        simulation.TogglePause();
+        if (simulation.IsPaused == wasPaused)
+        {
+            return;
+        }
+
+        if (simulation.IsPaused)
+        {
+            _logger?.LogInformation(
+                "Pong paused: left={LeftScore}, right={RightScore}.",
+                simulation.LeftScore,
+                simulation.RightScore);
+        }
+        else
+        {
+            _logger?.LogInformation(
+                "Pong resumed: left={LeftScore}, right={RightScore}.",
+                simulation.LeftScore,
+                simulation.RightScore);
+        }
+    }
+
+    private void ResetMatch(PongSimulation simulation)
+    {
+        simulation.ResetMatch();
+        _lastLeftScore = simulation.LeftScore;
+        _lastRightScore = simulation.RightScore;
+        _lastWinner = simulation.Winner;
+        _logger?.LogInformation(
+            "Pong match reset: left={LeftScore}, right={RightScore}.",
+            simulation.LeftScore,
+            simulation.RightScore);
+    }
+
+    private void LogSimulationChanges(PongSimulation simulation)
+    {
+        if (simulation.LeftScore != _lastLeftScore || simulation.RightScore != _lastRightScore)
+        {
+            _lastLeftScore = simulation.LeftScore;
+            _lastRightScore = simulation.RightScore;
+            _logger?.LogInformation(
+                "Pong score: left={LeftScore}, right={RightScore}.",
+                simulation.LeftScore,
+                simulation.RightScore);
+        }
+
+        if (simulation.Winner != _lastWinner)
+        {
+            _lastWinner = simulation.Winner;
+            if (simulation.Winner != PongSide.None)
+            {
+                _logger?.LogInformation(
+                    "Pong match over: winner={Winner}, left={LeftScore}, right={RightScore}.",
+                    simulation.Winner,
+                    simulation.LeftScore,
+                    simulation.RightScore);
+            }
+        }
+    }
+
+    private void UpdateTitle(IEngine<GameLayer> engine, PongSimulation simulation)
+    {
+        string title = PongTitle.Format(simulation);
+        if (string.Equals(title, _title, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        engine.Window.Title = title;
+        _title = title;
     }
 
     private ISpriteRender<GameLayer> CreatePaddle(GameLayer layer, Color tint)
