@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <!-- Gameplay, settings, and simulation are runtime game code: they reference the engine
+             contract only and stay AOT/trim-clean so the Pong desktop app can publish. -->
+        <IsAotCompatible>true</IsAotCompatible>
+        <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+        <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\..\src\Bork2d\Bork2d.Engine\Bork2d.Engine.csproj" />
+    </ItemGroup>
+
+</Project>

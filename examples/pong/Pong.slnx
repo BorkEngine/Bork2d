@@ -1,0 +1,13 @@
+<Solution>
+  <Project Path="Pong.Assets/Pong.Assets.csproj" />
+  <Project Path="Pong.Common/Pong.Common.csproj" />
+  <!--
+    The desktop copy target bakes/copies the assets executable out of process. It is not a project
+    reference (the AOT app must not reference the JIT assets executable), so the solution records
+    the build order explicitly; otherwise a parallel solution build can start the copy before the
+    assets bake has written assets.pck.
+  -->
+  <Project Path="Pong.Desktop/Pong.Desktop.csproj">
+    <BuildDependency Project="Pong.Assets/Pong.Assets.csproj" />
+  </Project>
+</Solution>

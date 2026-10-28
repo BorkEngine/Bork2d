@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <!-- Build-time only: the asset roots, data-type registrations, and processors. This
+             executable is JIT and never enters the desktop app's compile or publish graph. -->
+        <OutputType>Exe</OutputType>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\..\src\Bork2d\Bork2d.Bake\Bork2d.Bake.csproj" />
+        <ProjectReference Include="..\Pong.Common\Pong.Common.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Pong.Tests instantiates the internal CircleProcessor through the public bake builder. -->
+        <InternalsVisibleTo Include="Pong.Tests" />
+    </ItemGroup>
+
+    <!-- Building this project bakes Assets/ -> assets.pck next to the executable; clean removes it. -->
+    <Import Project="..\..\..\build\Bork2d.Assets.targets" />
+
+</Project>
