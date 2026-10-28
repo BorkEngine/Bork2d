@@ -1,0 +1,131 @@
+using System.Globalization;
+
+namespace Pong.Desktop;
+
+/// <summary>
+/// The parsed command-line arguments of the Pong desktop host.
+/// </summary>
+/// <remarks>
+/// The default invocation (no arguments) and <c>--windowed</c> run the interactive windowed
+/// example. <c>--ticks N</c> is valid only together with <c>--windowed</c> and turns the run into
+/// the automated acceptance run that exits after exactly <c>N</c> completed ticks. <c>--headless</c>
+/// runs the one-tick acceptance smoke and cannot be combined with <c>--ticks</c>. Parsing is strict:
+/// an unknown, duplicated, or malformed argument prints the usage and exits with code 2.
+/// </remarks>
+internal sealed class PongArguments
+{
+    private PongArguments(bool headless, bool windowed, int? tickLimit)
+    {
+        Headless = headless;
+        Windowed = windowed;
+        TickLimit = tickLimit;
+    }
+
+    /// <summary>Gets a value indicating whether the one-tick headless smoke was selected.</summary>
+    internal bool Headless { get; }
+
+    /// <summary>Gets a value indicating whether windowed mode was selected explicitly.</summary>
+    internal bool Windowed { get; }
+
+    /// <summary>Gets the automated tick limit, or <see langword="null"/> for an interactive run.</summary>
+    internal int? TickLimit { get; }
+
+    /// <summary>Parses the command-line arguments.</summary>
+    /// <param name="args">The arguments passed to <c>Main</c>; never <see langword="null"/>.</param>
+    /// <param name="arguments">The parsed arguments when parsing succeeds.</param>
+    /// <param name="error">The diagnostic when parsing fails; otherwise empty.</param>
+    /// <returns><see langword="true"/> when the arguments are valid.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    internal static bool TryParse(
+        string[] args,
+        out PongArguments arguments,
+        out string error)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        arguments = new PongArguments(headless: false, windowed: false, tickLimit: null);
+        error = string.Empty;
+        var headless = false;
+        var windowed = false;
+        int? tickLimit = null;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--headless":
+                    if (headless)
+                    {
+                        error = "--headless may be specified only once.";
+                        return false;
+                    }
+
+                    headless = true;
+                    break;
+
+                case "--windowed":
+                    if (windowed)
+                    {
+                        error = "--windowed may be specified only once.";
+                        return false;
+                    }
+
+                    windowed = true;
+                    break;
+
+                case "--ticks":
+                    if (tickLimit is not null)
+                    {
+                        error = "--ticks may be specified only once.";
+                        return false;
+                    }
+
+                    if (i + 1 >= args.Length)
+                    {
+                        error = "--ticks requires a tick count.";
+                        return false;
+                    }
+
+                    i++;
+                    if (!int.TryParse(
+                            args[i],
+                            NumberStyles.None,
+                            CultureInfo.InvariantCulture,
+                            out var parsed)
+                        || parsed < 1)
+                    {
+                        error = $"--ticks requires an integer >= 1; got '{args[i]}'.";
+                        return false;
+                    }
+
+                    tickLimit = parsed;
+                    break;
+
+                default:
+                    error = $"unknown argument '{args[i]}'.";
+                    return false;
+            }
+        }
+
+        if (headless && windowed)
+        {
+            error = "--headless and --windowed are mutually exclusive.";
+            return false;
+        }
+
+        if (headless && tickLimit is not null)
+        {
+            error = "--ticks cannot be combined with --headless.";
+            return false;
+        }
+
+        if (tickLimit is not null && !windowed)
+        {
+            error = "--ticks requires --windowed.";
+            return false;
+        }
+
+        arguments = new PongArguments(headless, windowed, tickLimit);
+        return true;
+    }
+}
