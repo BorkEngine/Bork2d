@@ -14,9 +14,10 @@ that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets sh
 > records a schema-3 incremental manifest; PPM and Unit are the acceptance processors. There is still
 > no renderer (M8), and headless/offscreen keep the one-tick `Setup` → `Tick` → `Teardown` sequence.
 > The project-consolidation refactor (D-041/D-042,
-> [spec](docs/specs/refactor-projects.md)) reduces the engine solution to five projects: the public
-> contract and engine implementation live in `Bork2d.Engine`, and the bake tooling lives in
-> `Bork2d.Bake`; the smoke and fixture projects live in the separate examples solution.
+> [spec](docs/specs/refactor-projects.md)) is merged (2026-10-28, PR #9) and reduces the engine
+> solution to five projects: the public contract and engine implementation live in `Bork2d.Engine`,
+> and the bake tooling lives in `Bork2d.Bake`; the smoke and fixture projects live in the separate
+> examples solution.
 > See the [roadmap](docs/roadmap.md), the
 > [file-processors spec](docs/specs/file-processors.md), and the
 > [asset-processors architecture](docs/architecture/asset-processors.md).

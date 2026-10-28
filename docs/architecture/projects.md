@@ -1,7 +1,6 @@
 # Projects and Dependencies
 
-> **Status:** `Current` after the project-consolidation refactor
-> ([refactor-projects](../specs/refactor-projects.md), D-041/D-042, 2026-10-27) and enforced by the
+> **Status:** `Current`, merged into `develop` (2026-10-28, PR #9; D-041/D-042) and enforced by the
 > dependency test. The engine solution has five projects; the smoke and fixture projects live in a
 > separate examples solution. `Bork2d.Engine` carries the `Bork2d.Engine.*` public contract plus the
 > internal engine implementation, and `Bork2d.Bake` carries the public bake-tooling surface plus the

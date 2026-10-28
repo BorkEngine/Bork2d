@@ -12,9 +12,10 @@
 > descriptor, generated host, or `Bork2d.Bake.Cli`. The local AOT gate loads packs baked by the
 > fixture assets executable; no builder/processor assembly enters the publish. Implementation scope:
 > [file-processors spec](specs/file-processors.md). The project-consolidation refactor
-> (D-041/D-042, [spec](specs/refactor-projects.md)) moved the engine contract/implementation into
-> `Bork2d.Engine`, merged the bake tooling into `Bork2d.Bake`, and moved the smoke/fixture projects
-> to `examples/Bork2d.Examples.slnx`; CI does not build that examples solution.
+> (D-041/D-042, [spec](specs/refactor-projects.md)) is merged (2026-10-28, PR #9); it moved the
+> engine contract/implementation into `Bork2d.Engine`, merged the bake tooling into `Bork2d.Bake`,
+> and moved the smoke/fixture projects to `examples/Bork2d.Examples.slnx`; CI does not build that
+> examples solution.
 
 ## 1. Prerequisites
 

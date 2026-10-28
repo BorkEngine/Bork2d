@@ -15,8 +15,9 @@
 > The [file-processors spec](specs/file-processors.md) owns implementation scope/acceptance; the
 > [asset processors](architecture/asset-processors.md) doc owns the architecture. The
 > project-consolidation refactor (D-041/D-042,
-> [spec](specs/refactor-projects.md)) reduced the engine solution to five projects and moved the
-> smoke/fixture projects to a separate examples solution. The AOT smoke loads the fixture packs
+> [spec](specs/refactor-projects.md)) is merged into `develop` (2026-10-28, PR #9); it reduced the
+> engine solution to five projects and moved the smoke/fixture projects to a separate examples
+> solution. The AOT smoke loads the fixture packs
 > (8 main / 9 merged entries) with no tooling assembly in its publish. Verification is the local
 > gate set: Debug/Release zero-warning builds, 942 deterministic plus 12 opt-in/conditional tests
 > (954 total), `dotnet format` for both solutions, the docs link check, `git diff --check`, and the

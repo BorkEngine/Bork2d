@@ -1,10 +1,10 @@
 # Project Consolidation — Refactor Spec
 
-> **Status:** In progress on `task/project-consolidation` (2026-10-27). Owner-approved refactor:
-> the engine solution shrinks from eleven projects to five, the engine contract moves to the
-> `Bork2d.Engine` namespace, the bake tooling merges into `Bork2d.Bake`, and the smoke/fixture
-> projects move to a separate examples solution. This spec is the implementation authority for the
-> task; the as-built record is filled in at §12.
+> **Status:** **Merged into `develop` (2026-10-28, PR #9, merge `70216e7`).** Owner-approved
+> refactor: the engine solution shrank from eleven projects to five, the engine contract moved to the
+> `Bork2d.Engine` namespace, the bake tooling merged into `Bork2d.Bake`, and the smoke/fixture
+> projects moved to a separate examples solution. This spec is the implementation authority for the
+> task; the as-built record is in §12.
 
 ## 1. Goal
 
@@ -239,9 +239,11 @@ git diff --check
 
 ## 12. As-built evidence
 
-- Branch: `task/project-consolidation`. Process-doc commit: `f5c4e68` (AGENTS.md, docs-only on
-  `develop`); spec commit: `00ae614`; implementation commit: `03a0358`; the documentation update
-  that includes this section follows on the same branch.
+- Merged into `develop` as `70216e7` (PR #9) on 2026-10-28. Process-doc commit: `f5c4e68`
+  (AGENTS.md, docs-only on `develop`); spec commit: `00ae614`; implementation commit: `03a0358`;
+  documentation commit: `1bceca5`. PR CI run
+  [40563643324](https://github.com/BorkEngine/Bork2d/actions/runs/40563643324) passed
+  (build, format, and test).
 - Engine solution: exactly five projects (`Bork2d.Engine`, `Bork2d.Bake`, `Bork2d.Render`,
   `Bork2d.Runtime`, `Bork2d.Tests`); examples solution has the three example projects. No
   `src/Bork2d/Bork2d.{Api,Common,Assets,Bake.Builder,AotSmoke,BakeFixture,BakeFixture.Assets}`

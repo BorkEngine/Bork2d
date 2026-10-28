@@ -19,8 +19,8 @@
 > state/ALC/manifest, `MetadataLoadContext`, `Bork2d.Bake.Cli`, and `generate-host` are removed. The
 > AOT smoke loads the fixture packs (8 main entries, 9 merged) and its publish contains no
 > Bake/assets-executable/Tomlyn/StbImageSharp assembly. The project-consolidation refactor
-> (D-041/D-042) merged the pack implementation into `Bork2d.Engine` and the builder into
-> `Bork2d.Bake`. The M3 record and M4 spec are
+> (D-041/D-042, merged 2026-10-28, PR #9) merged the pack implementation into `Bork2d.Engine` and the
+> builder into `Bork2d.Bake`. The M3 record and M4 spec are
 > historical; the [file-processors spec](../specs/file-processors.md) and
 > [asset processors](asset-processors.md) own the current bake design.
 >

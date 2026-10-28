@@ -1,7 +1,7 @@
 # NativeAOT
 
 > **Status:** `Current` through M3 and M4 and the merged asset-processor task
-> (D-036/D-037/D-038, 2026-10-27, PR #8). The project-consolidation refactor (D-041/D-042) merged
+> (D-036/D-037/D-038, 2026-10-27, PR #8). The project-consolidation refactor (D-041/D-042, merged 2026-10-28, PR #9) merged
 > Api/Common/Assets into `Bork2d.Engine` and Bake.Builder into `Bork2d.Bake`; `Bork2d.Engine`,
 > `Bork2d.Render`, `Bork2d.Runtime`, and `Bork2d.BakeFixture` compile with `IsAotCompatible` plus the trim
 > and AOT analyzers, and `Bork2d.AotSmoke` publishes and runs with zero AOT/trim warnings. The
