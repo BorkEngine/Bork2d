@@ -3,7 +3,7 @@
 > **Status:** **M0–M4 are merged into `develop`; the post-M4 asset-processor task
 > (D-036/D-037/D-038/D-039/D-040) is merged (2026-10-27, PR #8).** The repository contains the M1
 > build/quality
-> baseline, public contracts, root-owned scene tree, builder, logging, the NativeAOT smoke app, the
+> baseline, public contracts, root-owned scene tree, builder, logging, the NativeAOT gate, the
 > M2 SDL windowed host (window, input, time, uncapped loop), the M3 asset pipeline (pack reader/writer,
 > VFS, loader, public `SpriteAsset`/`TextureDescriptor`, typed `AssetRef<T>`/`DataRef` links,
 > runtime integration), and the builder-configured bake: a game-owned `MyGame.Assets` executable
@@ -16,13 +16,14 @@
 > [asset processors](architecture/asset-processors.md) doc owns the architecture. The
 > project-consolidation refactor (D-041/D-042,
 > [spec](specs/refactor-projects.md)) is merged into `develop` (2026-10-28, PR #9); it reduced the
-> engine solution to five projects and moved the smoke/fixture projects to a separate examples
-> solution. The AOT smoke loads the fixture packs
-> (8 main / 9 merged entries) with no tooling assembly in its publish. Verification is the local
-> gate set: Debug/Release zero-warning builds, 942 deterministic plus 12 opt-in/conditional tests
-> (954 total), `dotnet format` for both solutions, the docs link check, `git diff --check`, and the
-> local AOT publish/run. CI runs on pull requests to `develop` and pushes to `develop`; it does not
-> build the examples solution.
+> engine solution to five projects. The Pong example (D-043/D-044,
+> [spec](specs/pong-example.md)) replaces the exploratory smoke/fixture projects with
+> `examples/pong` and is the AOT gate: `Pong.Desktop` publishes with no tooling assembly in the
+> output, loads the 7-entry Pong pack headless, and runs `--windowed --ticks 120`. Verification is
+> the local gate set: Debug/Release zero-warning builds, 907 deterministic plus 12
+> opt-in/conditional tests (919 total) for the engine and 20 Pong tests, `dotnet format` for both
+> solutions, the docs link check, `git diff --check`, and the local AOT publish/run. CI runs on pull
+> requests to `develop` and pushes to `develop`; it does not build the Pong solution.
 
 Bork2d is a focused 2D game engine for .NET: **Vulkan 1.3** rendering, **SDL2** windowing through
 **Silk.NET**, a NativeAOT runtime, and **`assets.pck`** assets addressed by canonical paths.
@@ -71,8 +72,9 @@ automatically wins. The [decision log](decisions.md) records the accepted choice
 | [Scene ownership](architecture/scene-ownership.md) | contributors | Root-owned graph, membership, remove/re-add, read-only root. |
 | [Threading](architecture/threading.md) | contributors | Thread ownership, locks, snapshot ring, input, memory ordering. |
 | [Assets and tooling](architecture/assets-and-tooling.md) | contributors, editor | Pack format, VFS, descriptors, sprites, TOML bake, editor. |
-| [Asset processors and `MyGame.Assets`](architecture/asset-processors.md) | contributors, game developers | Processor contract, sidecar policies, builder/no-descriptor/no-host flow, PPM/Unit tests. |
+| [Asset processors and `MyGame.Assets`](architecture/asset-processors.md) | contributors, game developers | Processor contract, sidecar policies, builder/no-descriptor/no-host flow, Pong's `CircleProcessor` example. |
 | [File-processors implementation spec](specs/file-processors.md) | implementers | Locked scope, public API, semantics, work packages, tests, acceptance criteria. |
+| [Pong example spec](specs/pong-example.md) | implementers | Pong game/asset contract, work packages, acceptance criteria, and as-built evidence (§12). |
 | [Rendering](architecture/rendering.md) | contributors | Vulkan 1.3, one draw per camera, generated quads, bindless, present. |
 | [NativeAOT](architecture/nativeaot.md) | contributors | Runtime AOT constraints, generated shapes, local publish gate. |
 | [Logging](architecture/logging.md) | contributors | MEL/ZLogger, `IEngine.LoggerFactory`, default format. |
@@ -182,7 +184,7 @@ One fact has one owner. Update the owner and link to it; do not copy.
 | **`MyGame.Assets`** | Game-owned build-time executable that contains the asset roots/processors, configures the bake with `BakeApplicationBuilder`, acts as the CLI, and bakes when built. Never shipped with the runtime. |
 | **Main / DLC pack** | In the builder's ordered pack list, the first pack / every later entry; there is no `main` flag. |
 | **Source type metadata** | The reserved top-level `[bork2d] type = "Full.Type.Name"` table in a custom-data TOML (D-M4-13); the root table is binder-ignored metadata. |
-| **Bake fixture** | `Bork2d.BakeFixture`: game-side `Project.Common`-like data types (`GameConfig`, `Stats`, `StatsRoot`, `Unit`); source trees/processors live in the build-only `Bork2d.BakeFixture.Assets` executable. Its committed `player.png`, `checker.ppm`, and `archer.unit` are fixture **source assets**, not test/pack binary fixtures. |
+| **Pong example** | `examples/pong`: `Pong.Common` (game/simulation/AI/settings), `Pong.Assets` (build-time bake, `CircleProcessor`), `Pong.Desktop` (AOT headless/windowed host), and `Pong.Tests`. It is the living game example and the NativeAOT gate; its committed `paddle.png`, `ball.circle`, and TOMLs are game **source assets**, not test/pack binary fixtures. |
 | **Structural determinism** | Same entry table/order and byte-identical decompressed payloads for identical inputs; whole-pack byte identity is not guaranteed. |
 | **Incremental bake** | Content-hash gate that skips a bake when the builder configuration, registered types, sources, game assembly, processor set/code, tool, and mode are unchanged; a multi-pack project skips only when every output is current. |
 | **Texture descriptor** | Public MessagePack metadata (payload `DataRef`, width, height, `TextureFormat` format, `TextureFilter` filter, `TextureWrap` wrap); the three settings are non-null enums (D-040). |

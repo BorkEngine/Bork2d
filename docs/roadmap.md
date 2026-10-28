@@ -9,13 +9,21 @@
 > A milestone is done when its exit criterion is demonstrated, not merely when code is merged.
 >
 > **Post-M4 task (not a milestone): D-036/D-037/D-038/D-039/D-040 asset processors and `MyGame.Assets`.**
-> **Implemented as-built on `task/file-processors` (2026-10-27) and awaiting human review/merge.** It
+> **Implemented as-built on `task/file-processors` (2026-10-27) and merged into `develop` (2026-10-27, PR #8).** It
 > replaces the project descriptor with builder configuration, makes source file types registered
 > processors (built-in texture importer included), removes the generated host in favor of explicit
 > `RegisterAsset<T>()` registrations, and moves assets/processors to a game-owned executable that
 > bakes on build with a schema-3 incremental manifest. The runtime model and milestone sequence are
 > unchanged. Design: [asset processors](architecture/asset-processors.md); implementation spec:
 > [file processors](specs/file-processors.md).
+>
+> **Post-M4 task (not a milestone): the Pong example (D-043/D-044).**
+> **Implemented on `task/pong-example` (WP-1…WP-5, 2026-10-28) and awaiting human review/merge.** It
+> replaces `Bork2d.AotSmoke`/`Bork2d.BakeFixture`/`Bork2d.BakeFixture.Assets` with one real game
+> solution, `examples/pong` (`Pong.Common`, `Pong.Assets`, `Pong.Desktop`, `Pong.Tests`), makes
+> `Pong.Desktop` the NativeAOT headless/windowed gate, and moves the exploratory smoke/fixture tests
+> to self-contained engine bake tests. The runtime model and milestone sequence are unchanged.
+> Spec: [Pong example](specs/pong-example.md); decisions: D-043/D-044.
 >
 > **Stage 1 — engine version 0.1.** Every milestone below belongs to Stage 1 and ships as engine
 > 0.1. There is **no API freeze**: the public API stays flexible until 1.0, and 1.0 is not
@@ -38,12 +46,12 @@
 | Build | Green | SDK `11.0.100-rc.1`, `net11.0`, zero warnings/errors in Debug and Release; `dotnet format` clean. |
 | `Bork2d.Engine` | Current | Public contract for engine, game, time, window, input, assets, camera, sprite, transform, root, `ZIndex`, `Bork2dException`, `AssetInfo`, `AssetException`/`AssetErrorKind`, the public asset model (`SpriteAsset`, `TextureDescriptor`, `TextureFormat`, `TextureFilter`, `TextureWrap`, `SpriteTopology`, `AssetRef<T>`, `DataRef`), the full `KeyCode` scancode set, and five `MouseButton` members; plus the root-owned unordered scene tree, transforms (degrees normalized), structural/per-object locks, time wrapper, layer validation, MessagePack shape policy, v1 pack reader/writer, canonical paths, base/overlay VFS, one loader thread, and generic pack-time reference validation. Snapshot structs are M7. |
 | `Bork2d.Runtime` | Current (M3) | Builder, validation, app-owned logging, SDL windowed host (window/input/time, uncapped loop), one-tick headless/offscreen host, `Exit`/`Dispose`/post-shutdown contract, and the app-scoped asset-service lifecycle. Renderer wiring is M6/M8. |
-| `Bork2d.Bake` | Implemented on `task/file-processors` (2026-10-27; D-036/D-037/D-038); merged with the builder by D-041/D-042 | JIT tooling: builder-configured ordered packs, shape-driven Tomlyn binder, processor registry/sidecars, built-in texture processor, PPM/Unit acceptance processors, reference validation, structural determinism, schema-3 incremental bake, per-pack atomic writes, MSBuild targets. The public builder/processor surface and the internal implementation share the one `Bork2d.Bake` assembly. No descriptor, generated host, host state, or `Bork2d.Bake.Cli`. |
+| `Bork2d.Bake` | Implemented on `task/file-processors` (2026-10-27; D-036/D-037/D-038); merged with the builder by D-041/D-042 | JIT tooling: builder-configured ordered packs, shape-driven Tomlyn binder, processor registry/sidecars, built-in texture processor, reference validation, structural determinism, schema-3 incremental bake, per-pack atomic writes, MSBuild targets. The public builder/processor surface and the internal implementation share the one `Bork2d.Bake` assembly. No descriptor, generated host, host state, or `Bork2d.Bake.Cli`. The Pong example's `CircleProcessor` lives in `Pong.Assets` and uses this surface. |
 | `Bork2d.Render` | Empty | Reference-wired; no Vulkan implementation (M6/M8). |
 | `Bork2d.Editor` | Absent | Not in the solution; the editor is removed from Stage 1 and deferred (M5 removed). |
-| `Bork2d.Tests` | Current | 942 deterministic xUnit tests plus 12 opt-in/conditional tests (954 total): ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix/public surfaces, the Q-20 metadata guard, fake-SDL window/input/loop/time, pack/VFS/loader, asset references, runtime lifecycle, the builder/processor/sidecar/bake suites, schema-3 incremental rules, and the MSBuild/AOT fixture flow. |
-| `Bork2d.AotSmoke` (examples) | Current | Builds the fixture packs out of process through `build/Bork2d.Assets.Copy.targets`; imports `Bork2d.Engine`/`Bork2d.Runtime` and the game-side `Bork2d.BakeFixture`. |
-| NativeAOT | Implemented on `task/file-processors` | Libraries use `IsAotCompatible` + trim/AOT analyzers; `Bork2d.AotSmoke` publishes/runs locally with zero warnings. The default headless run mounts the **baked main pack** (8 entries: `data/game`, `roots/stats`, `sprites/player`, `art/player`, `art/player-raw`, PPM `art/checker`/`art/checker-raw`, and Unit `data/archer`) and overlays `dlc1.pck` (1 entry: `data/dlc`, whose texture resolves to main), for 9 merged entries; `--windowed --ticks 120` uses `WithoutAssets()`. No tooling assembly is in the publish. Local gate only. |
+| `Bork2d.Tests` | Current | 907 deterministic xUnit tests plus 12 opt-in/conditional tests (919 total): ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix/public surfaces, the Q-20 metadata guard, fake-SDL window/input/loop/time, pack/VFS/loader, asset references, runtime lifecycle, the builder/processor/sidecar/bake suites, and schema-3 incremental rules. The exploratory smoke/fixture tests were removed by D-043; bake coverage is self-contained. |
+| `examples/pong` (Pong example) | Current on `task/pong-example` (D-043/D-044; merged pending) | `Pong.Common` (game/simulation/AI/settings), build-only `Pong.Assets` (circle processor, TOML, pack bake), AOT `Pong.Desktop` (`--headless` acceptance smoke and `--windowed [--ticks N]`), and `Pong.Tests` (20 tests). Builds the pack out of process through `build/Bork2d.Assets.Copy.targets`. |
+| NativeAOT | Implemented on `task/pong-example` (D-043; merged pending) | Libraries use `IsAotCompatible` + trim/AOT analyzers; `Pong.Desktop` is the only `PublishAot` project and publishes/runs locally with zero warnings. The headless run mounts the **baked 7-entry pack** (`art/paddle`, `art/paddle-raw`, `game_settings`, `sprites/ball`, `sprites/paddle`, `textures/ball`, `textures/ball-raw`) and asserts the class-root settings, sprite/descriptor/raw chain, and detached root; `--windowed --ticks 120` runs the same pack. No tooling assembly is in the publish. Local gate only. |
 | CI | Current | GitHub Actions on PRs to `develop` and pushes to `develop`: restore, format verify, build, test. No AOT or real-window job. |
 | Runnable engine | Partial (windowed shell + assets) | A real window, input, time, and an uncapped tick loop plus the pack/VFS/loader/CPU descriptor pipeline; no renderer yet. |
 
@@ -73,7 +81,8 @@
 | M9 | Template, samples, packaging | Game solution, samples, AOT desktop/server | M8 | S/M | Low/Medium |
 | M10 | Hardening + 0.1 | Stability, performance, API review, release | all | L | Medium |
 
-`examples/` stays empty until M9.
+`examples/` contains only the Pong example (`examples/pong`), which is the engine's living example
+and its NativeAOT gate; M9 adds the solution template and the remaining samples.
 
 **M5 (Editor) is removed** from Stage 1: no `Bork2d.Editor`, no `Project.Editor` host, no texture
 slicing, and no editor preview. Sprite UV/pivot/topology/indices validation is likewise not planned
@@ -257,8 +266,9 @@ Goal: a new game can be created, packed, and AOT-published.
 - Solution template: `Project.Common`, `MyGame.Assets`, `Project.Desktop`, assets;
   builder configuration in `MyGame.Assets` (no project descriptor, D-037); `dotnet new bork2d` or
   documented copy; CI template build.
-- Sample game: sprites, layers, camera, input, data, overlays; headless server and offscreen
-  samples; NativeAOT publish profile and native SDL2/Vulkan deployment.
+- Sample game: sprites, layers, camera, input, data, and AOT desktop; the Pong example is the first
+  sample, and M9 adds overlay/DLC, headless server, and offscreen samples, the NativeAOT publish
+  profile, and native SDL2/Vulkan deployment.
 - Docs samples compile; guide/reference match the surface; packaging decision and versioning.
 
 Exit: clean machine + SDK + Vulkan 1.3 builds/runs the template; game code references only
@@ -283,9 +293,9 @@ unfrozen and may break until 1.0, which is not planned.
 | Area | Policy |
 | --- | --- |
 | Documentation | Same-change docs for contracts; one fact, one owner (see [docs index](README.md)); decisions for public changes. |
-| Tests | Unit tests each milestone; pack/format from M3; AOT smoke from M1; handoff stress from M7; GPU/visual from M8. |
+| Tests | Unit tests each milestone; pack/format from M3; AOT gate from M1 (now `Pong.Desktop`); handoff stress from M7; GPU/visual from M8. |
 | CI | PRs to `develop` and pushes to `develop`: docs link check, format, build, test. AOT is local; GPU runner from M8; template build from M9. |
-| NativeAOT | Analyzers + publish smoke from M1; no reflection/dynamic code/TOML in runtime; generated MessagePack shapes. |
+| NativeAOT | Analyzers + the `Pong.Desktop` publish/run gate; no reflection/dynamic code/TOML in runtime; generated MessagePack shapes. |
 | Diagnostics | ZLogger/MEL, `IEngine.LoggerFactory`, counters, validation layers, labels; no silent failures. |
 | Quality | Warnings-as-errors, style errors, format gate, AOT/trim analyzers on every project. |
 | Scope | Audio/UI/physics/animation need a decision entry and roadmap change. |
@@ -316,7 +326,7 @@ drawing, asset/pack unloading, public offscreen readback.
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| NativeAOT vs Silk.NET/native dependencies | High | AOT smoke from M1; pin versions; isolate adapters. |
+| NativeAOT vs Silk.NET/native dependencies | High | AOT gate from M1 (now `Pong.Desktop`); pin versions; isolate adapters. |
 | Pack format/overlay bugs | High | Versioned reader, bounds/duplicate tests, fuzzing, AOT tests. |
 | Frame pacing races/deadlocks | High | Three-slot state machine, fake-fence stress, invariants, no sleeps. |
 | Vulkan WSI/offscreen lifetime | High | Split windowed/offscreen paths; validation; GPU runner. |
@@ -353,10 +363,11 @@ approvals; only unresolved choices are listed here.
 | M4 Serialization/bake | Merged (2026-10-27, PR #7) | WP0–WP6 landed: bake library + CLI, generated host, per-source `[bork2d]` metadata, descriptor/TOML binder, location-free texture pipeline, reference validation, structural determinism, incremental bake, MSBuild targets, `Bork2d.BakeFixture`, and the AOT baked-pack smoke. The fix-1 revision removed the descriptor `[[types]]`/prefix model, moved type metadata into each data TOML, allowed data/textures anywhere under the asset root, and changed raw payload paths to `<descriptor>-raw`. Fix-2 commits the fixture **source** PNG at `Bork2d.BakeFixture/Assets/art/player.png` (sidecar `art/player.png.toml`; data/sprite TOMLs reference `art/player`), removes the texture generator, and leaves test images/packs generated in temp directories. Fix-3 applies D-M4-14/D-M4-15: ordered `[[assets]]` multi-pack descriptors (first is main; no `name`/`[bake].pack`), one host over all roots, per-pack bake with main-only external references, internal `PackBuilder` external-main seam, `bake --output-root` (no `--output`), all-output incremental manifest schema 2, MSBuild bake/publish/clean for every declared pack, fixture `DLC1/data/dlc.toml`, and the AOT main + `dlc1.pck` overlay proof; texture sidecars are retained. The main fixture pack has 5 entries (ending in `art/player` and `art/player-raw`) and the DLC pack 1 (`data/dlc`). 911 deterministic + 12 conditional tests (923 total); Debug/Release zero warnings; format/docs/diff checks clean. Fix-3 AOT publish is zero-warning with `assets.pck`/`dlc1.pck`/`SDL2.dll` and no Bake/Tomlyn/StbImageSharp assemblies; the published headless run exits 0 with `mainEntries=5`, `mergedEntries=6`, the DLC → main texture reference, and 16 raw bytes; `--windowed --ticks 120` exits 0. Final CI run [40455684420](https://github.com/BorkEngine/Bork2d/actions/runs/40455684420) succeeded: 914 passed, 9 skipped (the 3 reparse tests ran with symlink capability; the local gate is 911 passed, 12 skipped). [M4 spec §22](specs/m4-serialization-and-bake.md#22-as-built-evidence-m4-merged-to-develop). |
 | Post-M4 asset processors | Merged into `develop` (2026-10-27, PR #8, merge `a98e0ab`; CI green on `39563f9`) | D-036/D-037/D-038/D-039/D-040 as-built: public `Bork2d.Bake`, build-time `MyGame.Assets`/`Bork2d.BakeFixture.Assets`, explicit `RegisterAsset<T>()` + defaults, processor extension point with PPM/Unit acceptance processors, no descriptor/generated host/`Bake.Cli`, schema-3 incremental manifest and build targets, and the AOT fixture flow (8 main / 9 merged entries, no tooling assemblies in publish). D-040 makes the `TextureDescriptor` sampler fields the non-null `TextureFormat`/`TextureFilter`/`TextureWrap` enums. 946 deterministic + 12 conditional tests (958 total); Debug/Release, format, docs, and AOT gates pass locally. Design: [asset processors](architecture/asset-processors.md); spec: [file processors](specs/file-processors.md). |
 | Project consolidation | Merged (2026-10-28, PR #9; D-041/D-042) | Five-project engine solution: `Bork2d.Engine` = Api+Common+Assets with `Bork2d.Engine.*` namespaces; `Bork2d.Bake` = Bake+Builder with the public `Bork2d.Bake` namespace; smoke/fixture in `examples/Bork2d.Examples.slnx`; Tests decoupled from the smoke; dependency tests and the Q-20 metadata guard. 942 deterministic + 12 conditional tests (954); Debug/Release zero warnings; both format gates; docs check; AOT headless and `--windowed --ticks 120` exit 0; PR CI run 40563643324 succeeded. [Spec](specs/refactor-projects.md). |
+| Pong example | Implemented on `task/pong-example` (2026-10-28; WP-1…WP-5; D-043/D-044); merged pending | Replaces the exploratory examples with `examples/pong` (`Pong.Common`, `Pong.Assets`, `Pong.Desktop`, `Pong.Tests`) and makes `Pong.Desktop` the NativeAOT gate. 20 Pong tests; engine suite 907 passed + 12 skipped (919) after WP-2; Debug/Release, tests, and both format gates zero-warning; AOT publish zero warnings with a 7-entry `assets.pck`, `Pong.Desktop.exe`, `SDL2.dll`, and no `Pong.Assets`/`Bork2d.Bake`/Tomlyn/StbImageSharp assembly; headless and `--windowed --ticks 120` exit 0; docs link check and `git diff --check` clean. [Spec](specs/pong-example.md#12-as-built-evidence). |
 | M6 Vulkan bring-up | Not started | — |
 | M7 Frame handoff/pacing | Not started | — |
 | M8 Sprite renderer | Not started | — |
-| M9 Template/samples | Not started | — |
+| M9 Template/samples | Partially started (Pong sample) | `examples/pong` is the first sample; the solution template, packaging, and the remaining samples are pending. |
 | M10 Hardening/0.1 | Not started | — |
 
 **Planning change (2026-10-27):** M5 (Editor) was removed from Stage 1; M6–M10 IDs are unchanged.

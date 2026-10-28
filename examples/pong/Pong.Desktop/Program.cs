@@ -18,8 +18,8 @@ namespace Pong.Desktop;
 /// Headless mode loads the pack, runs <see cref="PongGame"/> through the one-tick host, asserts the
 /// full baked asset chain, and exits 0; a failed assertion prints the diagnostic and returns 1.
 /// Windowed mode runs the interactive game, or exits after exactly <c>N</c> ticks when
-/// <c>--ticks N</c> is supplied. WP-3 has no keyboard/title behavior yet; WP-4 adds it. This app
-/// deliberately does not set <c>PublishAot</c> yet; WP-5 adds the AOT gate.
+/// <c>--ticks N</c> is supplied. The project is published with <c>PublishAot</c> and a narrow
+/// Silk.NET <c>IL3000;IL3002</c> suppression, and is the engine's NativeAOT gate.
 /// </para>
 /// </remarks>
 internal static class Program

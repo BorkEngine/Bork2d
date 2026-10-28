@@ -8,18 +8,19 @@
           Bork2dAssetsProjectDirectory  the assets executable project directory (also the project
                                         root used to validate the configuration)
           Bork2dAssetsExecutable        the built assets executable assembly (for example
-                                        ...\bin\Debug\net11.0\Bork2d.BakeFixture.Assets.dll)
-          Bork2dAssetsProjectFile       optional assets executable project; when set, the targets build
-                                        it out of process before copying
+                                        ...\bin\Debug\net11.0\Pong.Assets.dll)
+          Bork2dAssetsProjectFile       optional assets executable project; when set, the targets
+                                        restore and build it out of process before copying
           Bork2dAssetsTargetFramework   target framework used in the executable path; default net11.0
           Bork2dDotNetHost              dotnet host executable; default dotnet
 
         A normal desktop app may reference the assets project with ReferenceOutputAssembly="false"
         for build order only. That does not work for a self-contained AOT app: the SDK copies an
         executable reference's apphost/deps/runtimeconfig transitively and rejects a self-contained
-        reference to a JIT executable, so the AOT smoke instead sets Bork2dAssetsProjectFile and the
-        target builds the assets executable out of process. Either way the app references the assets
-        executable only for build order: neither the builder, the assets executable, nor the
+        reference to a JIT executable, so the Pong AOT app instead sets Bork2dAssetsProjectFile and
+        the targets restore and build the assets executable out of process. Either way the app
+        references the assets executable only for build order: neither the builder, the assets
+        executable, nor the
         processors enter its compile or publish graph. After Build the target asks the executable to
         copy every configured pack to $(TargetDir); after Publish it copies them to $(PublishDir).
         Clean is owned by the assets project, which is the only component that knows the pack paths
@@ -50,6 +51,25 @@
     </Target>
 
     <!--
+        Restores the assets executable project out of process. The app's own publish restores only
+        its project graph; the assets executable is deliberately outside that graph (it is tooling,
+        not a reference), so in a clean clone its project.assets.json does not exist and the
+        out-of-process Build below would fail with NETSDK1004. The same conditions as the build apply,
+        and the same RemoveProperties keeps the app's RID/publish settings off the assets restore. The
+        once-per-build guard keeps a later copy-packs/publish step from restoring again.
+    -->
+    <Target Name="Bork2dRestoreAssetsExecutable"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dAssetsEnabled)' != 'false' and '$(Bork2dAssetsProjectFile)' != '' and Exists('$(Bork2dAssetsProjectFile)') and '$(_Bork2dRestoreAssetsExecutableCompleted)' != 'true'">
+        <PropertyGroup>
+            <_Bork2dRestoreAssetsExecutableCompleted>true</_Bork2dRestoreAssetsExecutableCompleted>
+        </PropertyGroup>
+        <MSBuild Projects="$(Bork2dAssetsProjectFile)"
+                 Targets="Restore"
+                 Properties="Configuration=$(Configuration)"
+                 RemoveProperties="RuntimeIdentifier;SelfContained;OutDir;OutputPath;PublishDir;BaseOutputPath;BaseIntermediateOutputPath" />
+    </Target>
+
+    <!--
         Builds the assets executable out of process when its project file is configured. This keeps
         the tools out of the app's output and publish graph: SDK executable references copy their
         apphost/deps/runtimeconfig transitively and reject a self-contained reference to a JIT
@@ -57,7 +77,7 @@
         executable stays at its documented $(Configuration)/net11.0 path.
     -->
     <Target Name="Bork2dBuildAssetsExecutable"
-            DependsOnTargets="Bork2dValidateAssetsCopyConfiguration"
+            DependsOnTargets="Bork2dValidateAssetsCopyConfiguration;Bork2dRestoreAssetsExecutable"
             Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dAssetsEnabled)' != 'false' and '$(Bork2dAssetsProjectFile)' != '' and Exists('$(Bork2dAssetsProjectFile)')">
         <MSBuild Projects="$(Bork2dAssetsProjectFile)"
                  Targets="Build"
