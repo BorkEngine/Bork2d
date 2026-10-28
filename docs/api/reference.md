@@ -13,9 +13,9 @@
 > document and the code disagree, treat it as a defect and reconcile it in the owning docs
 > ([AGENTS.md §10](../../AGENTS.md)) instead of assuming the code is automatically right.
 >
-> The build-time `MyGame.Assets` executable uses the public `Bork2d.Bake.Builder` surface for builder
+> The build-time `MyGame.Assets` executable uses the public `Bork2d.Bake` surface for builder
 > config, explicit `RegisterAsset<T>()` data types, asset processors, and sidecars; the project
-> descriptor and generated host are removed. Runtime `Bork2d.Api`/`Bork2d.Runtime` contracts are
+> descriptor and generated host are removed. Runtime `Bork2d.Engine`/`Bork2d.Runtime` contracts are
 > unchanged. Implementation scope: [file-processors spec](../specs/file-processors.md).
 
 ## 1. Contract-wide rules
@@ -68,27 +68,28 @@ from the top-left, and an integer `ZIndex` sorts higher later. Sprite asset geom
 
 ### 1.4 Public surface and NativeAOT
 
-`Bork2d.Api` declares the interfaces in §2–§10 across the area namespaces in §1.5, plus the value
+`Bork2d.Engine` declares the interfaces in §2–§10 across the area namespaces in §1.5, plus the value
 types `Color`, `ClearKind`, `KeyCode`, `MouseButton`, `AssetInfo`, `AssetRef<TAsset>`, `DataRef`,
 `SpriteTopology`, and the texture enums `TextureFormat`, `TextureFilter`, and `TextureWrap`, the
 public assets `SpriteAsset` and `TextureDescriptor`, `Bork2dException`,
 the error pair `AssetException`/`AssetErrorKind`, and the `ColorMarshaler`/`AssetRefMarshaler<TAsset>`/
 `DataRefMarshaler` serialization infrastructure; `ILoggerFactory` is a Microsoft.Extensions.Logging
-type exposed by `IEngine` (not defined in `Bork2d.Api`). The runtime is NativeAOT- and trim-safe: no
+type exposed by `IEngine` (not defined in `Bork2d.Engine`). The runtime is NativeAOT- and trim-safe: no
 reflection, assembly scanning, runtime TOML, or dynamic code; `LoadAsset<T>` requires a
 [PolyType](https://github.com/AArnott/PolyType) `IShapeable<T>` shape (a Nerdbank.MessagePack
 `[GenerateShape]` type) and the game is passed as an instance. A class or a struct root uses the
-same path; a MessagePack `nil` root is a `Decode` fault. `Bork2d.Api` references PolyType
-`1.4.1` for the shape contract and the value marshalers (D-035, D-M4-12); it does not
-reference Nerdbank.MessagePack, `System.IO.Hashing`, Zstd, or file I/O. See
+same path; a MessagePack `nil` root is a `Decode` fault. `Bork2d.Engine` references PolyType
+`1.4.1` for the shape contract and the value marshalers (D-035, D-M4-12), plus
+Nerdbank.MessagePack and `System.IO.Hashing` for the merged pack implementation; the public
+signatures do not expose them. See
 [NativeAOT](../architecture/nativeaot.md).
 
-The only other public surface is the tooling-only pack writer in `Bork2d.Assets.Pack` (§13) and the
-public JIT tooling surface `Bork2d.Bake.Builder` (`BakeApplicationBuilder`, `BakeApplication`,
+The only other public surface is the tooling-only pack writer in `Bork2d.Engine.Assets.Pack` (§13) and the
+public JIT tooling surface `Bork2d.Bake` (`BakeApplicationBuilder`, `BakeApplication`,
 `RegisterAsset<T>()`, `UseDefaultAssets()`, `UseDefaultProcessors()`, `IAssetProcessor`,
 `AssetProcessor<TSidecar>`, `SidecarPolicy`, `AssetProcessorContext`, output sink/diagnostics),
 referenced only by the build-time `MyGame.Assets`/fixture assets executables. Game **runtime** code
-still references only `Bork2d.Api` and `Bork2d.Runtime`. Data types are registered explicitly; there
+still references only `Bork2d.Engine` and `Bork2d.Runtime`. Data types are registered explicitly; there
 is no generated host and no reflection. The builder is never in the runtime or AOT publish graph; the
 design is in [asset processors](../architecture/asset-processors.md).
 
@@ -103,14 +104,14 @@ namespace. Add the using for each area you touch (D-034).
 
 | Namespace | Types |
 | --- | --- |
-| `Bork2d.Api` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
-| `Bork2d.Api.Assets` | `IAssets`, `AssetInfo`, `AssetException`, `AssetErrorKind`, `AssetRef<TAsset>`, `DataRef`, `SpriteAsset`, `TextureDescriptor`, `SpriteTopology`, `TextureFormat`, `TextureFilter`, `TextureWrap` |
-| `Bork2d.Api.Scene` | `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
-| `Bork2d.Api.Rendering` | `Color`, `ColorMarshaler`, `ClearKind` |
-| `Bork2d.Api.Input` | `IInput`, `KeyCode`, `MouseButton` |
-| `Bork2d.Api.Platform` | `IWindow`, `ITime` |
+| `Bork2d.Engine` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
+| `Bork2d.Engine.Assets` | `IAssets`, `AssetInfo`, `AssetException`, `AssetErrorKind`, `AssetRef<TAsset>`, `DataRef`, `SpriteAsset`, `TextureDescriptor`, `SpriteTopology`, `TextureFormat`, `TextureFilter`, `TextureWrap` |
+| `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
+| `Bork2d.Engine.Rendering` | `Color`, `ColorMarshaler`, `ClearKind` |
+| `Bork2d.Engine.Input` | `IInput`, `KeyCode`, `MouseButton` |
+| `Bork2d.Engine.Platform` | `IWindow`, `ITime` |
 
-The tooling-only pack writer is in `Bork2d.Assets.Pack` (§13); it is not part of the game
+The tooling-only pack writer is in `Bork2d.Engine.Assets.Pack` (§13); it is not part of the game
 contract.
 
 ## 2. `IEngine<TLayer>`
@@ -297,7 +298,7 @@ public interface IAssets
 }
 ```
 
-`IShapeable<T>` is `PolyType.IShapeable<T>`; `Bork2d.Api` references PolyType `1.4.1` for this
+`IShapeable<T>` is `PolyType.IShapeable<T>`; `Bork2d.Engine` references PolyType `1.4.1` for this
 contract (D-M3-22). `T` may be a class or a struct (D-M4-11): a `readonly record struct` root loads
 through the same path, and a MessagePack `nil` root is a `Decode` fault for both kinds rather than a
 silent `default`. A missing shape is a compile-time error; there is no unconstrained or
@@ -689,14 +690,14 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
   last values readable, and `IEngine.Exit()` is a no-op. `Run` returns `void`; failure is reported
   by exceptions.
 
-## 13. Pack tooling (`Bork2d.Assets.Pack`, tooling only)
+## 13. Pack tooling (`Bork2d.Engine.Assets.Pack`, tooling only)
 
-`Status: Current (M3).` `Bork2d.Assets.Pack` exposes exactly two public types for writing v1
-`assets.pck` files. This is a **tooling surface**: game code still references only `Bork2d.Api` and
+`Status: Current (M3).` `Bork2d.Engine.Assets.Pack` exposes exactly two public types for writing v1
+`assets.pck` files. This is a **tooling surface**: game code still references only `Bork2d.Engine` and
 `Bork2d.Runtime`, and the runtime never exposes these types.
 
 ```csharp
-using Bork2d.Assets.Pack;
+using Bork2d.Engine.Assets.Pack;
 
 var builder = new PackBuilder(PackCompressionMode.Release);
 builder.AddRaw("art/player-raw", rgba8Bytes);
@@ -734,8 +735,8 @@ builder.Write("assets.pck");   // overwrites; relative to the current directory
 - The builder is not thread-safe. `Build()`/`Write()` may be repeated, and entries may be added
   after a build. Adding the missing target after a failed build makes the next build valid.
 - This section documents the writer only; game code consumes packs through `IEngine.Assets`
-  without referencing `Bork2d.Assets`. The public `SpriteAsset`/`TextureDescriptor` types live in
-  `Bork2d.Api.Assets`.
+  without touching the pack tooling. The public `SpriteAsset`/`TextureDescriptor` types live in
+  `Bork2d.Engine.Assets`.
 
 ## 14. Errors and exceptions
 
@@ -765,9 +766,9 @@ builder.Write("assets.pck");   // overwrites; relative to the current directory
 | Empty `AssetRef<T>`/`DataRef` passed to a load overload | `ArgumentException`; an absent (`null`) reference is not a load request. |
 | After the asset service stops | Every `IAssets` member throws `ObjectDisposedException`; pending load tasks complete as canceled. The `IEngine.Assets` getter never throws and keeps returning the disposed service. |
 
-`Bork2dException` lives in `Bork2d.Api` with the standard constructors; BCL exceptions remain for
+`Bork2dException` lives in `Bork2d.Engine` with the standard constructors; BCL exceptions remain for
 caller argument errors. Pack open/parse/mount failures are `Bork2dException` per D-M3-15;
-`AssetException`/`AssetErrorKind` are declared in `Bork2d.Api` and used by the loader.
+`AssetException`/`AssetErrorKind` are declared in `Bork2d.Engine.Assets` and used by the loader.
 
 ## 15. Related documents
 

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <IsAotCompatible>true</IsAotCompatible>
+        <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+        <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- A minimal Project.Common-like fixture: the game data types only. It references Bork2d.Engine
+             (the game contract) and nothing from the bake tooling, so the bake and AOT proofs
+             exercise the same boundary a real game has (Q-16). The fixture source trees and the
+             assets executable configuration moved to Bork2d.BakeFixture.Assets in WP1: this library
+             is never an authoring input, so it never pushes content into a consuming app's output or
+             the AOT publish. It stays AOT-compatible and tooling-free. -->
+        <ProjectReference Include="..\..\src\Bork2d\Bork2d.Engine\Bork2d.Engine.csproj" />
+    </ItemGroup>
+
+</Project>

@@ -1,8 +1,8 @@
-using Bork2d.Api.Assets;
+using Bork2d.Bake;
 using Bork2d.Bake.Baking;
-using Bork2d.Bake.Builder;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.BakeFixture.Assets.Processors;
+using Bork2d.Engine.Assets;
 using Bork2d.Tests.Assets.Service;
 using Bork2d.Tests.Bake.Baking;
 using Bork2d.Tests.Bake.Textures;
@@ -17,7 +17,7 @@ namespace Bork2d.Tests.Bake.Processors;
 /// </summary>
 public sealed class PpmProcessorTests
 {
-    private const string TextureType = "Bork2d.Api.Assets.TextureDescriptor";
+    private const string TextureType = "Bork2d.Engine.Assets.TextureDescriptor";
 
     private static readonly byte[] _defaultHeader = "P6\n2 2\n255\n"u8.ToArray();
 

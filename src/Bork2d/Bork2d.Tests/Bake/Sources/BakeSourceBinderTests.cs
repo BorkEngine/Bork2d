@@ -1,7 +1,7 @@
 using System.Text;
-using Bork2d.Api.Assets;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Sources;
+using Bork2d.Engine.Assets;
 using Bork2d.Tests.Bake.Baking;
 using Xunit;
 
@@ -31,7 +31,7 @@ public sealed class BakeSourceBinderTests
             {
                 "Bork2d.BakeFixture.GameConfig",
                 "Bork2d.BakeFixture.StatsRoot",
-                "Bork2d.Api.Assets.SpriteAsset",
+                "Bork2d.Engine.Assets.SpriteAsset",
             },
             assets.Select(asset => asset.TypeName));
         Assert.All(assets, asset => Assert.Equal("Assets", asset.SourcePath.Split('/')[0]));
@@ -215,7 +215,7 @@ public sealed class BakeSourceBinderTests
             indices = [0, 1, 2, 0, 2, 3]
 
             [bork2d]
-            type = "Bork2d.Api.Assets.SpriteAsset"
+            type = "Bork2d.Engine.Assets.SpriteAsset"
             """);
     }
 

@@ -9,9 +9,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\Bork2d.Api\Bork2d.Api.csproj" />
-        <ProjectReference Include="..\Bork2d.Common\Bork2d.Common.csproj" />
-        <ProjectReference Include="..\Bork2d.Assets\Bork2d.Assets.csproj" />
+        <ProjectReference Include="..\Bork2d.Engine\Bork2d.Engine.csproj" />
         <ProjectReference Include="..\Bork2d.Render\Bork2d.Render.csproj" />
     </ItemGroup>
 

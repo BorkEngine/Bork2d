@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
-using Bork2d.Api.Assets;
-using Bork2d.Assets.Vfs;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Assets.Vfs;
 using Xunit;
 
 namespace Bork2d.Tests.Assets.Vfs;

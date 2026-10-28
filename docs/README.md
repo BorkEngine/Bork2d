@@ -13,11 +13,15 @@
 > status markers before treating an API as implemented.
 >
 > The [file-processors spec](specs/file-processors.md) owns implementation scope/acceptance; the
-> [asset processors](architecture/asset-processors.md) doc owns the architecture. The AOT smoke loads
-> the fixture packs (8 main / 9 merged entries) with no tooling assembly in its publish. Verification
-> is the local gate set: Debug/Release zero-warning builds, 946 deterministic plus 12
-> opt-in/conditional tests (958 total), `dotnet format`, the docs link check, `git diff --check`, and
-> the local AOT publish/run. CI runs on pull requests to `develop` and pushes to `develop`.
+> [asset processors](architecture/asset-processors.md) doc owns the architecture. The
+> project-consolidation refactor (D-041/D-042,
+> [spec](specs/refactor-projects.md)) reduced the engine solution to five projects and moved the
+> smoke/fixture projects to a separate examples solution. The AOT smoke loads the fixture packs
+> (8 main / 9 merged entries) with no tooling assembly in its publish. Verification is the local
+> gate set: Debug/Release zero-warning builds, 942 deterministic plus 12 opt-in/conditional tests
+> (954 total), `dotnet format` for both solutions, the docs link check, `git diff --check`, and the
+> local AOT publish/run. CI runs on pull requests to `develop` and pushes to `develop`; it does not
+> build the examples solution.
 
 Bork2d is a focused 2D game engine for .NET: **Vulkan 1.3** rendering, **SDL2** windowing through
 **Silk.NET**, a NativeAOT runtime, and **`assets.pck`** assets addressed by canonical paths.
@@ -28,15 +32,15 @@ Game code consumes exactly two assemblies:
 
 | Assembly | Role |
 | --- | --- |
-| `Bork2d.Api` | Public contracts and value types: engine, game, camera, sprite, input, assets, logging factory. No GPU/OS/Silk types. |
-| `Bork2d.Runtime` | Public startup surface: builder, app host, modes. Composes the internal engine and later platform/render/asset implementations. |
+| `Bork2d.Engine` | Public contract and value types: engine, game, camera, sprite, input, assets, logging factory. No GPU/OS/Silk types. |
+| `Bork2d.Runtime` | Public startup surface: builder, app host, modes. Composes the engine, renderer, and platform implementations. |
 
-`Bork2d.Editor` is the planned JIT/Avalonia tool surface (M5). `Bork2d.Common`, `Bork2d.Assets`, and
-`Bork2d.Render` are implementation details, except the tooling-only pack writer
-(`Bork2d.Assets.Pack.PackBuilder`/`PackCompressionMode`). `Bork2d.Bake` is internal JIT tooling and
-`Bork2d.Bake.Builder` is its public JIT surface: the game-owned build-time `MyGame.Assets` executable
-references it, registers data types explicitly, has no generated host, and is not part of the
-runtime app. **Runtime game code** never references the builder or bake tooling.
+`Bork2d.Editor` is the planned JIT/Avalonia tool surface (M5). The `Bork2d.Engine` scene/time/asset
+implementation and `Bork2d.Render` are implementation details, except the tooling-only pack writer
+(`Bork2d.Engine.Assets.Pack.PackBuilder`/`PackCompressionMode`). `Bork2d.Bake` contains both the
+internal JIT bake implementation and its public builder/processor surface: the game-owned build-time
+`MyGame.Assets` executable references it, registers data types explicitly, has no generated host,
+and is not part of the runtime app. **Runtime game code** never references the bake tooling.
 
 ## Status markers
 
@@ -80,6 +84,7 @@ automatically wins. The [decision log](decisions.md) records the accepted choice
 | [M4 spec](specs/m4-serialization-and-bake.md) | implementers | M4 serialization/bake scope, decisions, acceptance criteria, and as-built evidence (§22). |
 | [M4 WP0 report](specs/m4-wp0-spike.md) | implementers | Feasibility findings: shapes, struct roots, `Color`, Tomlyn binder/spans, host/ALC, AOT, XXH3. |
 | [Asset-reference refactor record](specs/refactor-asset-references.md) | implementers | Public sprite/texture assets, typed `AssetRef`/`DataRef` links, pack-time reference validation, and the removal of sprite handles/resources. |
+| [Project-consolidation spec](specs/refactor-projects.md) | implementers | Five-project engine solution, `Bork2d.Engine`/`Bork2d.Bake` consolidation, examples split, acceptance, and as-built evidence. |
 | [Contributing](contributing.md) | contributors | Build, warnings, style, format, docs check, PR checklist. |
 | [Decision log](decisions.md) | everyone | Accepted decisions and their status (superseded entries kept as history). |
 
@@ -151,7 +156,7 @@ One fact has one owner. Update the owner and link to it; do not copy.
 1. Update the owning document in the same change as the code.
 2. Keep status markers and the roadmap progress log accurate.
 3. Record public-contract decisions in the [decision log](decisions.md).
-4. Keep the API guide/reference in sync with `Bork2d.Api`.
+4. Keep the API guide/reference in sync with `Bork2d.Engine`.
 5. Run `pwsh scripts/check-docs.ps1` after moving files or headings.
 
 ## Glossary

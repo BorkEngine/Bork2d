@@ -1,9 +1,9 @@
-using Bork2d.Api.Assets;
-using Bork2d.Assets.Pack;
+using Bork2d.Bake;
 using Bork2d.Bake.Baking;
-using Bork2d.Bake.Builder;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Processors;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Assets.Pack;
 using Bork2d.Tests.Assets.Service;
 using Bork2d.Tests.Bake.Baking;
 using Bork2d.Tests.TestSupport;
@@ -18,7 +18,7 @@ namespace Bork2d.Tests.Bake.Textures;
 /// </summary>
 public sealed class TextureProcessorTests
 {
-    private const string TextureType = "Bork2d.Api.Assets.TextureDescriptor";
+    private const string TextureType = "Bork2d.Engine.Assets.TextureDescriptor";
 
     [Fact]
     public async Task DescriptorAndRawPayloadAreEmittedAtTheCanonicalPaths()

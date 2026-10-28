@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Build-time only: the fixture data types (game-side Project.Common stand-in) and the
+             public builder/CLI. This executable and the builder never enter the runtime/AOT publish
+             graph; desktop apps reference it for build order only. -->
+        <ProjectReference Include="..\..\src\Bork2d\Bork2d.Bake\Bork2d.Bake.csproj" />
+        <ProjectReference Include="..\Bork2d.BakeFixture\Bork2d.BakeFixture.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Tests instantiate the fixture's internal PPM and Unit processors through the public
+             builder so the acceptance processors are exercised end to end (WP4). -->
+        <InternalsVisibleTo Include="Bork2d.Tests" />
+    </ItemGroup>
+
+    <!-- Building this project bakes Assets/ -> assets.pck and DLC1/ -> dlc1.pck next to the
+         executable; clean removes them. The assets executable owns the pack paths. -->
+    <Import Project="..\..\build\Bork2d.Assets.targets" />
+
+</Project>

@@ -33,6 +33,6 @@ internal interface ISdlWindow : IDisposable
 
     /// <summary>Enters or leaves borderless desktop fullscreen.</summary>
     /// <param name="fullscreen">Whether the window should be fullscreen.</param>
-    /// <exception cref="Bork2d.Api.Bork2dException">SDL failed to change the fullscreen state.</exception>
+    /// <exception cref="Bork2d.Engine.Bork2dException">SDL failed to change the fullscreen state.</exception>
     void SetFullscreen(bool fullscreen);
 }

@@ -2,7 +2,7 @@
 
 > **Status:** implemented through M4 and the D-036/D-037/D-038 asset-processor task merged into
 > `develop` (2026-10-27, PR #8). M1 (foundation), M2 (SDL windowed host), and M3 (pack, VFS,
-> runtime integration) exist in `Bork2d.Runtime`/`Bork2d.Assets` and are merged into `develop`.
+> runtime integration) exist in `Bork2d.Runtime`/`Bork2d.Engine` and are merged into `develop`.
 > `Build()` validates and `Run()` runs the uncapped windowed loop (window, input, time) or the
 > one-tick headless/offscreen sequence, opening the base pack (or the `WithoutAssets()` empty
 > filesystem) before the window and `Setup`. The renderer is M8. See the
@@ -11,29 +11,29 @@
 > Assets/processors are configured in a build-time `MyGame.Assets` executable with
 > `BakeApplicationBuilder`; the project descriptor and generated host are removed, data types are
 > registered explicitly, and source file types are registered processors. Runtime game code still
-> references only `Bork2d.Api`/`Bork2d.Runtime`. Implementation scope:
+> references only `Bork2d.Engine`/`Bork2d.Runtime`. Implementation scope:
 > [file-processors spec](../specs/file-processors.md).
 
 ## 1. What you reference
 
 | Project | References | Contains |
 | --- | --- | --- |
-| `Project.Common` | `Bork2d.Api` only | Gameplay classes and runtime `[GenerateShape]` data types. |
-| `MyGame.Assets` | `Bork2d.Bake.Builder` + `Project.Common` | Build-time executable: asset roots, processors, `BakeApplicationBuilder` config, CLI; bakes on build. |
+| `Project.Common` | `Bork2d.Engine` only | Gameplay classes and runtime `[GenerateShape]` data types. |
+| `MyGame.Assets` | `Bork2d.Bake` + `Project.Common` | Build-time executable: asset roots, processors, `BakeApplicationBuilder` config, CLI; bakes on build. |
 | `Project.Desktop` | `Bork2d.Runtime` + `Project.Common`; build-only `MyGame.Assets` | Entry point that builds and runs the app. |
 | `Project.Editor` (M5) | `Bork2d.Editor` + `Project.Common` | Thin Avalonia editor host. |
 
-Do not reference `Bork2d.Render`, `Bork2d.Common`, or `Bork2d.Assets` from runtime game code; they
-are implementation details ([Projects and dependencies](../architecture/projects.md)). **Tooling and
-tests** may reference `Bork2d.Assets` for the public `Bork2d.Assets.Pack.PackBuilder`/
+Do not reference `Bork2d.Render` from runtime game code; it is an implementation detail
+([Projects and dependencies](../architecture/projects.md)). **Tooling and
+tests** may reference `Bork2d.Engine` for the public `Bork2d.Engine.Assets.Pack.PackBuilder`/
 `PackCompressionMode` writer (§10); that surface is not part of the game contract. The bake tooling
-(`Bork2d.Bake`/`Bork2d.Bake.Builder`) is JIT and build-only; runtime game code never references it.
-The build-time `MyGame.Assets` executable references `Bork2d.Bake.Builder` and bakes the packs; it is
+(`Bork2d.Bake`) is JIT and build-only; runtime game code never references it.
+The build-time `MyGame.Assets` executable references `Bork2d.Bake` and bakes the packs; it is
 never part of the runtime app or AOT publish.
 
-`Bork2d.Api` is split by area: engine/game in `Bork2d.Api`, scene types in `Bork2d.Api.Scene`,
-render value types in `Bork2d.Api.Rendering`, input in `Bork2d.Api.Input`, window/time in
-`Bork2d.Api.Platform`, and assets in `Bork2d.Api.Assets` ([reference §1.5](reference.md#15-namespaces)).
+`Bork2d.Engine` is split by area: engine/game in `Bork2d.Engine`, scene types in `Bork2d.Engine.Scene`,
+render value types in `Bork2d.Engine.Rendering`, input in `Bork2d.Engine.Input`, window/time in
+`Bork2d.Engine.Platform`, and assets in `Bork2d.Engine.Assets` ([reference §1.5](reference.md#15-namespaces)).
 
 ## 2. Start the engine
 
@@ -100,9 +100,9 @@ smoke against the baked fixture packs (8 main / 9 merged entries); the demo is o
 NativeAOT-published:
 
 ```powershell
-dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64 --nologo
-& src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed
-& src/Bork2d/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed --ticks 120
+dotnet publish examples/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64 --nologo
+& examples/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed
+& examples/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed --ticks 120
 ```
 
 The interactive demo creates a camera/transform/sprite tree, moves the transform with WASD or the
@@ -117,10 +117,10 @@ and `N >= 1`. Invalid or unknown arguments print usage and exit with code 2.
 
 ```csharp
 using System.Numerics;
-using Bork2d.Api;
-using Bork2d.Api.Assets;
-using Bork2d.Api.Rendering;
-using Bork2d.Api.Scene;
+using Bork2d.Engine;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Rendering;
+using Bork2d.Engine.Scene;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -217,7 +217,7 @@ camera.ZIndex = 0;                         // ascending order; higher applies la
 - `Viewport` is normalized `(x, y, width, height)`, top-left origin. `ZIndex` orders cameras
   ascending, higher later, default `0`; ties are unspecified (M8). Split screen uses two cameras
   with viewports `(0, 0, 0.5, 1)` and `(0.5, 0, 0.5, 1)`;
-  `ScreenToWorld`/`WorldToScreen` are `Planned` (not declared in `Bork2d.Api` yet).
+  `ScreenToWorld`/`WorldToScreen` are `Planned` (not declared in `Bork2d.Engine` yet).
 - Multiple cameras are supported; each non-empty camera issues one draw (M8). A later camera with
   `Clear.Color` wipes its viewport, while `Clear.None` overlays.
 
@@ -246,7 +246,7 @@ sprite.LocalScale = new Vector2(2, 2);
   non-drawable until the texture and GPU page are ready (M8). Do not block.
 - `ZIndex` orders within a layer, higher later; ties are unspecified. `Tint` multiplies the
   texture, `White` is neutral.
-- `FlipX`/`FlipY` are `Planned` (not declared in `Bork2d.Api` yet).
+- `FlipX`/`FlipY` are `Planned` (not declared in `Bork2d.Engine` yet).
 - Parenting preserves the world transform: assigning `Parent` later keeps the child in place,
   cycles and setting the root's own parent throw `InvalidOperationException`, and a non-engine or
   foreign-engine parent throws `Bork2dException`. `ITransform.DetachAll()` detaches direct children
@@ -408,7 +408,7 @@ byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
   reference means absent and is not a load request (it throws `ArgumentException`). The descriptor's
   `Format`/`Filter`/`Wrap` fields are non-null `TextureFormat`/`TextureFilter`/`TextureWrap` enums
   (defaults `Rgba8`/`Linear`/`Clamp`), never strings. Both sprite and
-  descriptor are public MessagePack assets in `Bork2d.Api.Assets`; the built-in texture processor (a
+  descriptor are public MessagePack assets in `Bork2d.Engine.Assets`; the built-in texture processor (a
   normal registered processor) validates descriptor fields, and the bake validates
   binding/references, while sprite field validation (UV extents, pivot, topology, indices) is M5
   (D-M4-06), not the loader. `PackBuilder` validates every non-null reference when it builds a pack;
@@ -461,8 +461,8 @@ let the tooling bake the main pack and any DLC packs. The runtime never sees TOM
 roots and processors. Its `Program.cs` configures the bake; there is no `bork2d.project.toml`:
 
 ```csharp
-using Bork2d.Api.Assets;
-using Bork2d.Bake.Builder;
+using Bork2d.Engine.Assets;
+using Bork2d.Bake;
 
 return await new BakeApplicationBuilder()
     .WithProjectRoot(".")                      // MSBuild passes $(MSBuildProjectDirectory)
@@ -491,8 +491,8 @@ is unchanged: mount the main pack with `WithAssetsPack`, then mount DLC packs wi
 
 ```csharp
 using System.Text.Json.Serialization;
-using Bork2d.Api.Assets;
-using Bork2d.Api.Rendering;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Rendering;
 using PolyType;
 
 // The data TOML's [bork2d] table selects MyGame.Data.GameConfig among the builder's
@@ -631,12 +631,12 @@ public readonly partial record struct Unit(string Name, int Health, int Attack);
 
 ### Building a pack (tooling only)
 
-The pack **writer** is the public tooling surface in `Bork2d.Assets.Pack`; tools, tests, and later
+The pack **writer** is the public tooling surface in `Bork2d.Engine.Assets.Pack`; tools, tests, and later
 the editor use it to produce the runtime packs the app loads. Game code must not reference
-`Bork2d.Assets`.
+`Bork2d.Engine`.
 
 ```csharp
-using Bork2d.Assets.Pack;
+using Bork2d.Engine.Assets.Pack;
 
 var builder = new PackBuilder(PackCompressionMode.Release);
 builder.AddRaw("art/player-raw", rgba8Bytes);
@@ -656,7 +656,7 @@ builder.Write("assets.pck"); // overwrites; relative paths resolve against the c
 - Paths are normalized/validated with the same canonical rules as runtime lookups. Duplicate
   paths, serialization failures, and write failures throw `Bork2dException`; null/invalid path
   arguments throw `ArgumentNullException`/`ArgumentException`.
-- See the [pack tooling reference](reference.md#13-pack-tooling-bork2dassetspack-tooling-only) for
+- See the [pack tooling reference](reference.md#13-pack-tooling-bork2dengineassetspack-tooling-only) for
   the full contract.
 
 ## 11. Lifetimes and threading

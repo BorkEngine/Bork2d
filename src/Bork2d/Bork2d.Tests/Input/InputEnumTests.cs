@@ -1,4 +1,4 @@
-using Bork2d.Api.Input;
+using Bork2d.Engine.Input;
 using Bork2d.Runtime.Sdl;
 using Xunit;
 using Scancode = Silk.NET.SDL.Scancode;

@@ -1,4 +1,4 @@
-using Bork2d.Api.Assets;
+using Bork2d.Engine.Assets;
 using Bork2d.Tests.Assets.Pack;
 using Bork2d.Tests.Assets.Vfs;
 using Microsoft.Extensions.Logging;
@@ -27,7 +27,7 @@ public sealed class AssetServiceLoggingTests
             host.Logs,
             log => log.Level == LogLevel.Information
                 && log.Message.Contains("Asset service started", StringComparison.Ordinal));
-        Assert.Equal("Bork2d.Assets", start.Category);
+        Assert.Equal("Bork2d.Engine.Assets", start.Category);
         Assert.Contains("mode Pack", start.Message, StringComparison.Ordinal);
         Assert.Contains(packPath, start.Message, StringComparison.Ordinal);
         Assert.Contains("version 1", start.Message, StringComparison.Ordinal);
@@ -71,7 +71,7 @@ public sealed class AssetServiceLoggingTests
             host.Logs,
             log => log.Level == LogLevel.Information
                 && log.Message.Contains("Mounted asset pack", StringComparison.Ordinal));
-        Assert.Equal("Bork2d.Assets", mount.Category);
+        Assert.Equal("Bork2d.Engine.Assets", mount.Category);
         Assert.Contains(overlayPath, mount.Message, StringComparison.Ordinal);
         Assert.Contains("2 entries", mount.Message, StringComparison.Ordinal);
     }
@@ -96,7 +96,7 @@ public sealed class AssetServiceLoggingTests
             host.Logs,
             log => log.Level == LogLevel.Information
                 && log.Message.Contains("Asset service stopped", StringComparison.Ordinal));
-        Assert.Equal("Bork2d.Assets", stop.Category);
+        Assert.Equal("Bork2d.Engine.Assets", stop.Category);
         Assert.Contains("pending 0", stop.Message, StringComparison.Ordinal);
         Assert.Contains("canceled 0", stop.Message, StringComparison.Ordinal);
         Assert.Contains("mounted packs 2", stop.Message, StringComparison.Ordinal);
@@ -111,7 +111,7 @@ public sealed class AssetServiceLoggingTests
         await Assert.ThrowsAsync<AssetException>(() => host.Service.LoadData("data/missing"));
 
         var error = Assert.Single(host.LogsAt(LogLevel.Error));
-        Assert.Equal("Bork2d.Assets", error.Category);
+        Assert.Equal("Bork2d.Engine.Assets", error.Category);
         Assert.Contains("data/missing", error.Message, StringComparison.Ordinal);
         Assert.Contains("kind NotFound", error.Message, StringComparison.Ordinal);
         Assert.NotNull(error.Exception);

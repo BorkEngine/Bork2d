@@ -1,10 +1,9 @@
 using System.Numerics;
-using Bork2d.Api;
-using Bork2d.Api.Assets;
-using Bork2d.Api.Input;
-using Bork2d.Api.Scene;
-using Bork2d.Common.Scene;
-using Bork2d.Common.Time;
+using Bork2d.Engine;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Input;
+using Bork2d.Engine.Scene;
+using Bork2d.Engine.Time;
 using Bork2d.Runtime;
 using Bork2d.Runtime.Hosting;
 using Bork2d.Runtime.Input;
@@ -356,8 +355,8 @@ public sealed class Bork2dAppTests
         var input = new InputProxy();
         var time = new StopwatchTime(0.25);
         var loggerFactory = new FakeLoggerFactory();
-        var assetService = new Bork2d.Assets.Loading.AssetService(basePackPath: null, loggerFactory);
-        var engine = new Engine<GameLayer>(time, window, assetService, input);
+        var assetService = new Bork2d.Engine.Assets.Loading.AssetService(basePackPath: null, loggerFactory);
+        var engine = new GameEngine<GameLayer>(time, window, assetService, input);
         var options = new Bork2dAppOptions<GameLayer>
         {
             Game = game,

@@ -1,6 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using Bork2d.Api.Assets;
+using Bork2d.Engine.Assets;
 using Bork2d.Tests.Assets.Pack;
 using PolyType;
 using Xunit;
@@ -174,7 +174,7 @@ public sealed class AssetApiContractTests
     {
         Assert.DoesNotContain(
             typeof(IAssets).Assembly.GetExportedTypes(),
-            type => type.FullName == "Bork2d.Api.Rendering.Sprite");
+            type => type.FullName == "Bork2d.Engine.Rendering.Sprite");
         Assert.DoesNotContain(
             typeof(IAssets).GetMethods(),
             method => method.Name == "LoadSprite");

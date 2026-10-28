@@ -129,7 +129,7 @@ public sealed class BakeTargetsIntegrationTests
         {
             string name = Path.GetFileNameWithoutExtension(file);
             Assert.False(
-                name is "Bork2d.Bake" or "Bork2d.Bake.Builder" or "Bork2d.BakeHost" or "Bork2d.Bake.Cli",
+                name is "Bork2d.Bake" or "Bork2d.BakeHost" or "Bork2d.Bake.Cli",
                 $"'{file}' must not be copied into an app output.");
             if (includeAssetsExecutable)
             {
@@ -206,12 +206,11 @@ public sealed class BakeTargetsIntegrationTests
                 repositoryRoot,
                 "src",
                 "Bork2d",
-                "Bork2d.Bake.Builder",
-                "Bork2d.Bake.Builder.csproj");
+                "Bork2d.Bake",
+                "Bork2d.Bake.csproj");
             string fixtureProject = Path.Combine(
                 repositoryRoot,
-                "src",
-                "Bork2d",
+                "examples",
                 "Bork2d.BakeFixture",
                 "Bork2d.BakeFixture.csproj");
 
@@ -310,8 +309,8 @@ public sealed class BakeTargetsIntegrationTests
         }
 
         private static string AssetsProgram() => """
-            using Bork2d.Api.Assets;
-            using Bork2d.Bake.Builder;
+            using Bork2d.Engine.Assets;
+            using Bork2d.Bake;
 
             return await new BakeApplicationBuilder()
                 .WithProjectRoot(".")

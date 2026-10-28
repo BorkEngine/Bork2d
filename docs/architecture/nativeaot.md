@@ -1,8 +1,9 @@
 # NativeAOT
 
 > **Status:** `Current` through M3 and M4 and the merged asset-processor task
-> (D-036/D-037/D-038, 2026-10-27, PR #8). `Bork2d.Api`, `Bork2d.Common`,
-> `Bork2d.Assets`, `Bork2d.Render`, and `Bork2d.Runtime` compile with `IsAotCompatible` plus the trim
+> (D-036/D-037/D-038, 2026-10-27, PR #8). The project-consolidation refactor (D-041/D-042) merged
+> Api/Common/Assets into `Bork2d.Engine` and Bake.Builder into `Bork2d.Bake`; `Bork2d.Engine`,
+> `Bork2d.Render`, `Bork2d.Runtime`, and `Bork2d.BakeFixture` compile with `IsAotCompatible` plus the trim
 > and AOT analyzers, and `Bork2d.AotSmoke` publishes and runs with zero AOT/trim warnings. The
 > default smoke loads the **baked fixture packs** produced by the build-only
 > `Bork2d.BakeFixture.Assets` executable, asserting the class-root custom data, the struct root
@@ -12,7 +13,7 @@
 > `WithoutAssets()`. The smoke also keeps the default logging path, the M1 scene checks, and a
 > MessagePack round trip. The editor and build tools stay JIT; Vulkan AOT validation is M6.
 >
-> The build-time `MyGame.Assets`/`Bork2d.BakeFixture.Assets` executables, `Bork2d.Bake.Builder`, and
+> The build-time `MyGame.Assets`/`Bork2d.BakeFixture.Assets` executables, `Bork2d.Bake`, and
 > processors are JIT and never enter the runtime/AOT graph. Runtime data types stay in
 > `Project.Common`/`Bork2d.BakeFixture`. The AOT smoke builds the fixture assets executable out of
 > process through `build/Bork2d.Assets.Copy.targets`; see [asset processors](asset-processors.md).
@@ -21,22 +22,20 @@
 
 | Component | NativeAOT required? | Why |
 | --- | --- | --- |
-| `Bork2d.Api` | Yes | Referenced by the AOT game; must avoid dynamic/reflection traps. |
-| `Bork2d.Common` | Yes | Runtime scene, transforms, time, snapshot policy, generated shapes. |
-| `Bork2d.Assets` | Yes | Pack parsing, decompression, MessagePack decoding, and pack-time reference validation. |
+| `Bork2d.Engine` | Yes | Public contract plus the runtime scene, transforms, time, snapshot policy, generated shapes, pack parsing, decompression, MessagePack decoding, and pack-time reference validation. |
 | `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. |
 | `Bork2d.Runtime` | Yes | Builder, host, and app-owned logging. |
-| `Bork2d.AotSmoke` | Yes | One-tick smoke executable published with `PublishAot`; the local gate. It references `Api`/`Common`/`Runtime` plus the game-side `BakeFixture` and loads the baked fixture pack (D-M4-09/Q-22). The game template's `Project.Desktop` takes over this role in M9. |
-| `Bork2d.BakeFixture` | Yes | Game-side `Project.Common`-like fixture data types (`GameConfig`, `Stats`, `StatsRoot`, `Unit`) baked and loaded under AOT; it references `Bork2d.Api` only. |
+| `Bork2d.AotSmoke` | Yes | One-tick smoke executable published with `PublishAot`; the local gate. It references `Bork2d.Engine`/`Bork2d.Runtime` plus the game-side `Bork2d.BakeFixture` and loads the baked fixture pack (D-M4-09/Q-22). The game template's `Project.Desktop` takes over this role in M9. |
+| `Bork2d.BakeFixture` | Yes | Game-side `Project.Common`-like fixture data types (`GameConfig`, `Stats`, `StatsRoot`, `Unit`) baked and loaded under AOT; it references `Bork2d.Engine` only. |
 | `Bork2d.Editor` | No (JIT) | Avalonia desktop tool; may reflect over the game model. M5. |
-| Asset baker / pack tool (`Bork2d.Bake`, `Bork2d.Bake.Builder`) | No (JIT) | Build-time tools; use explicit `RegisterAsset<T>()` registrations and TOML. No generated host, no reflection, and no `Bork2d.Bake.Cli` or `generate-host`. |
+| Asset baker / pack tool (`Bork2d.Bake`) | No (JIT) | Build-time tools; use explicit `RegisterAsset<T>()` registrations and TOML. No generated host, no reflection, and no `Bork2d.Bake.Cli` or `generate-host`. |
 | `MyGame.Assets` / `Bork2d.BakeFixture.Assets` | No (JIT) | Game/fixture build-time executables that own source roots, processors, and builder configuration; they bake packs when built and are never referenced by the runtime/AOT publish. Fixture data types remain in the AOT-safe `Bork2d.BakeFixture`. |
 | Tests | Mixed | Unit tests run JIT; `Bork2d.AotSmoke` is the one AOT publish/run smoke. |
 
 ## 2. Build settings
 
 ```xml
-<!-- Api, Common, Assets, Render, Runtime (libraries) -->
+<!-- Engine, Render, Runtime, BakeFixture (libraries) -->
 <PropertyGroup>
   <IsAotCompatible>true</IsAotCompatible>
   <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
@@ -91,11 +90,11 @@ reflection-based construction, which also allows constructor injection. See the
 - Runtime data assets are MessagePack (M3/M4), decoded by
   [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) **source-generated
   shapes**; no reflection resolver is configured.
-- M1 pins [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack) `1.4.95` in
-  `Bork2d.Common`; `Bork2d.Assets` adds `PolyType` `1.4.1` and `System.IO.Hashing`
+- `Bork2d.Engine` pins [Nerdbank.MessagePack](https://github.com/AArnott/Nerdbank.MessagePack)
+  `1.4.95` for generated shapes, plus `PolyType` `1.4.1` and `System.IO.Hashing`
   `11.0.0-rc.1.26425.128`. The full pin list is in [Projects §1](projects.md#1-current-projects).
-  An internal `[GenerateShape]` smoke type and round-trip helper prove the generated-shape path;
-  `Bork2d.AotSmoke` sees them through the intentional `InternalsVisibleTo`. The v1 pack
+  The AOT smoke owns a `[GenerateShape]` type and round-trip helper; the tests use a tests-local
+  equivalent. The v1 pack
   header/entry shapes and the public `TextureDescriptor`/`SpriteAsset` shapes are `Current`.
   Descriptors and sprites use PascalCase property-name keys (not `[Key]`), an integer
   `SpriteTopology`, no per-asset version, and Nerdbank's generated `System.Numerics.Vector2` shape
@@ -118,12 +117,11 @@ reflection-based construction, which also allows constructor injection. See the
   (eight entries: a class root with a nested struct/`Color`/texture reference, a `StatsRoot` struct
   root, a sprite, the public `art/player` descriptor and raw payload, the PPM `art/checker`
   descriptor and raw payload, and the Unit `data/archer`) as the runtime proof.
-- `Bork2d.Api` references PolyType `1.4.1` for the `IShapeable<T>` shape contract and the
-  `AssetRef`/`DataRef` path marshalers (D-035). It stays free
-  of Nerdbank.MessagePack, Zstd/`System.IO.Compression`, `System.IO.Hashing`, and file I/O, so the
-  public contract does not pull the pack implementation into game code. `Bork2d.Assets.Pack`
-  exposes only the tooling surface (`PackBuilder`, `PackCompressionMode`) publicly and keeps its
-  PolyType/Nerdbank/Hashing pins for the pack and tooling.
+- `Bork2d.Engine` references PolyType `1.4.1` for the `IShapeable<T>` shape contract and the
+  `AssetRef`/`DataRef` path marshalers (D-035). Because the contract and the pack implementation
+  share one assembly, Engine also references Nerdbank.MessagePack and `System.IO.Hashing`; the public
+  signatures must not expose them (the dependency test enforces this). `Bork2d.Engine.Assets.Pack`
+  exposes only the tooling surface (`PackBuilder`, `PackCompressionMode`) publicly.
 - Zstd is the .NET 11 built-in codec; the pack header checksum uses the `System.IO.Hashing`
   package's `XxHash3`.
 - Asset paths are data, not type names; loading never resolves a type from a string.
@@ -132,16 +130,17 @@ See [Assets and tooling](assets-and-tooling.md).
 
 ## 5. Editor and tooling boundary
 
-The bake tooling is JIT and **build-time only**. `Bork2d.Bake` parses TOML with Tomlyn and decodes
-images with StbImageSharp; `Bork2d.Bake.Builder` is the public JIT builder/processor surface, and
+The bake tooling is JIT and **build-time only**. `Bork2d.Bake` contains both the internal
+implementation (Tomlyn parsing, StbImageSharp decoding, processors) and the public JIT
+builder/processor surface, and
 the game/fixture `MyGame.Assets` / `Bork2d.BakeFixture.Assets` executables host the builder,
 explicit `RegisterAsset<T>()` entries, and processor code (JIT). They may use
 `System.Text.Json`/image decoders and reference `Project.Common` types, but they never enter the
 runtime publish graph. There is no generated host, no `MetadataLoadContext`, no host ALC, and no
 reflection over `Project.Common`.
 `Bork2d.Editor` (M5) may use Avalonia, reflection, TOML writing, and a collectible load context for
-editor reload. None of these dependencies may leak into `Bork2d.Api`, `Bork2d.Common`,
-`Bork2d.Assets`, `Bork2d.Render`, `Bork2d.Runtime`, `Bork2d.BakeFixture`, or the published AOT app;
+editor reload. None of these dependencies may leak into `Bork2d.Engine`, `Bork2d.Render`,
+`Bork2d.Runtime`, `Bork2d.BakeFixture`, or the published AOT app;
 the runtime projects compile with AOT analyzers, and the dependency test proves the absence of
 Bake/Builder/Tomlyn/StbImageSharp and the assets executables. The runtime never parses TOML and
 never reflects over game members.
@@ -153,7 +152,7 @@ determinism and a possible future AOT editor, not a current AOT requirement.
 
 - SDL2 and the Vulkan loader are native dependencies, deployed per target RID.
 - `Bork2d.Runtime` pins `Silk.NET.SDL` `2.23.0` for the windowed platform (M2, D-M2-06). No other
-  engine project references it, no SDL type appears in `Bork2d.Api`, and Vulkan validation remains
+  engine project references it, no SDL type appears in `Bork2d.Engine`, and Vulkan validation remains
   M6.
 - The package brings `Ultz.Native.SDL` `2.32.10` transitively, which supplies
   `runtimes/win-x64/native/SDL2.dll`; the AOT publish output copies it next to the executable. The
@@ -185,7 +184,7 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
 ## 7. Testing and CI
 
 1. `dotnet build` with AOT/trim analyzers and warnings-as-errors, Debug and Release.
-2. `dotnet publish src/Bork2d/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64`
+2. `dotnet publish examples/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64`
    with zero AOT/trim warnings; `SDL2.dll` is copied next to the executable.
 3. The AOT smoke's build bakes the fixture packs. It imports
    `build/Bork2d.Assets.Copy.targets` and sets `Bork2dAssetsProjectFile`, so the copy target builds
@@ -193,7 +192,7 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    explicit `RegisterAsset<T>()` types, PPM/Unit processors, and builder configuration, bakes
    `assets.pck`/`dlc1.pck`, and the copy target places them next to the smoke output/publish. There
    is no generated host and no host build step. The publish output must contain no `Bork2d.Bake`,
-   `Bork2d.Bake.Builder`, `Bork2d.BakeFixture.Assets`, Tomlyn, or StbImageSharp assembly
+   `Bork2d.BakeFixture.Assets`, Tomlyn, or StbImageSharp assembly
    (`Bork2d.BakeFixture` is the expected game-side common assembly) and must contain both packs and
    `SDL2.dll`. The NativeAOT output is a single-file executable plus PDBs, so the managed assemblies
    are linked in; `Bork2d.BakeFixture.pdb` is the remaining on-disk proof that the fixture was in
@@ -217,8 +216,9 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    warnings; `IEngine.LoggerFactory` is usable.
 
 CI scope is exactly: pull requests targeting `develop` and pushes to `develop`; it restores,
-verifies formatting, builds Debug, and runs Debug tests. There is **no AOT job** in CI, so the
-publish/run gate above is mandatory locally.
+verifies formatting, builds Debug, and runs Debug tests. It does not build
+`examples/Bork2d.Examples.slnx`, so build that locally when the smoke or fixture projects change.
+There is **no AOT job** in CI, so the publish/run gate above is mandatory locally.
 
 ## 8. Risks
 

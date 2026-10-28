@@ -1,6 +1,5 @@
 using System.Numerics;
-using Bork2d.Api.Scene;
-using Bork2d.Common.Scene;
+using Bork2d.Engine.Scene;
 using Bork2d.Tests.TestDoubles;
 using Bork2d.Tests.TestSupport;
 using Xunit;
@@ -79,7 +78,7 @@ public sealed class SceneConcurrencyTests
     }
 
     private static void RunWorker(
-        Engine<GameLayer> engine,
+        GameEngine<GameLayer> engine,
         int worker,
         ITransform[][] transforms,
         ICamera<GameLayer>[] cameras,

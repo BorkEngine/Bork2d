@@ -1,6 +1,10 @@
 using System.Reflection;
-using Bork2d.Assets.Pack;
-using Bork2d.Bake.Builder;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
+using System.Text.RegularExpressions;
+using Bork2d.Bake;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Assets.Pack;
 using Bork2d.Tests.TestSupport;
 using Xunit;
 
@@ -8,6 +12,7 @@ namespace Bork2d.Tests.Architecture;
 
 public sealed class DependencyMatrixTests
 {
+    private const string EngineAssembly = "Bork2d.Engine";
     private const string LoggingAbstractions = "Microsoft.Extensions.Logging.Abstractions";
     private const string MessagePack = "Nerdbank.MessagePack";
     private const string PolyType = "PolyType";
@@ -16,76 +21,62 @@ public sealed class DependencyMatrixTests
     private const string StbImageSharp = "StbImageSharp";
     private const string MetadataLoadContext = "System.Reflection.MetadataLoadContext";
 
-    private static readonly string[] _forbiddenApiReferencePrefixes =
+    private static readonly string[] _forbiddenEngineReferencePrefixes =
     [
         "Silk.NET",
         "Vulkan",
         "Avalonia",
         "ZLogger",
-        "Nerdbank.MessagePack",
-        "System.IO.Hashing",
+        "Tomlyn",
+        "StbImageSharp",
+    ];
+
+    private static readonly HashSet<string> _allowedBakeEngineNamespaces =
+    [
+        "Bork2d.Engine",
+        "Bork2d.Engine.Rendering",
+        "Bork2d.Engine.Assets",
+        "Bork2d.Engine.Assets.Pack",
+        "Bork2d.Engine.Assets.Vfs",
     ];
 
     [Fact]
-    public void ApiReferencesOnlyTheAllowedContractSurface()
+    public void EngineReferencesOnlyTheAllowedContractAndImplementationSurface()
     {
-        var assembly = typeof(Bork2d.Api.Assets.IAssets).Assembly;
+        var assembly = typeof(IAssets).Assembly;
 
         Assert.Empty(Bork2dReferences(assembly));
 
         foreach (var reference in assembly.GetReferencedAssemblies())
         {
             Assert.False(
-                IsForbiddenApiReference(reference.Name),
-                $"Bork2d.Api must not reference '{reference.Name}'.");
+                IsForbiddenEngineReference(reference.Name),
+                $"{EngineAssembly} must not reference '{reference.Name}'.");
             Assert.True(
                 IsFrameworkReference(reference.Name)
-                    || reference.Name is LoggingAbstractions or PolyType,
-                $"Bork2d.Api may only reference the BCL, {LoggingAbstractions}, and {PolyType}, "
-                    + $"not '{reference.Name}'.");
+                    || reference.Name is LoggingAbstractions or PolyType or MessagePack or Hashing,
+                $"{EngineAssembly} may only reference the BCL, {LoggingAbstractions}, {PolyType}, "
+                    + $"{MessagePack}, and {Hashing}, not '{reference.Name}'.");
         }
     }
 
     [Fact]
-    public void ApiReferencesPolyTypeOnlyForTheShapeContract()
+    public void EngineReferencesTheGeneratedShapeAndHashingPackages()
     {
-        var references = typeof(Bork2d.Api.Assets.IAssets).Assembly
+        var references = typeof(IAssets).Assembly
             .GetReferencedAssemblies()
             .Select(reference => reference.Name)
             .ToArray();
 
         Assert.Contains(PolyType, references);
-        Assert.DoesNotContain(MessagePack, references);
-        Assert.DoesNotContain(Hashing, references);
-    }
-
-    [Fact]
-    public void CommonReferencesOnlyApi()
-    {
-        AssertReferenceMatrix(typeof(Bork2d.Common.Scene.Transform).Assembly, "Bork2d.Api");
-    }
-
-    [Fact]
-    public void CommonReferencesTheGeneratedShapeSerializationPackage()
-    {
-        var references = typeof(Bork2d.Common.Scene.Transform).Assembly
-            .GetReferencedAssemblies()
-            .Select(reference => reference.Name)
-            .ToArray();
-
         Assert.Contains(MessagePack, references);
+        Assert.Contains(Hashing, references);
     }
 
     [Fact]
-    public void CommonExposesNoPublicImplementationTypes()
+    public void EngineExposesOnlyTheDocumentedAreaNamespaces()
     {
-        Assert.Empty(typeof(Bork2d.Common.Scene.Transform).Assembly.GetExportedTypes());
-    }
-
-    [Fact]
-    public void ApiExposesOnlyTheDocumentedAreaNamespaces()
-    {
-        var namespaces = typeof(Bork2d.Api.IEngine<>).Assembly
+        var namespaces = typeof(Bork2d.Engine.IEngine<>).Assembly
             .GetExportedTypes()
             .Select(type => type.Namespace ?? string.Empty)
             .Distinct()
@@ -95,29 +86,98 @@ public sealed class DependencyMatrixTests
         Assert.Equal(
             new[]
             {
-                "Bork2d.Api",
-                "Bork2d.Api.Assets",
-                "Bork2d.Api.Input",
-                "Bork2d.Api.Platform",
-                "Bork2d.Api.Rendering",
-                "Bork2d.Api.Scene",
+                "Bork2d.Engine",
+                "Bork2d.Engine.Assets",
+                "Bork2d.Engine.Assets.Pack",
+                "Bork2d.Engine.Input",
+                "Bork2d.Engine.Platform",
+                "Bork2d.Engine.Rendering",
+                "Bork2d.Engine.Scene",
             },
             namespaces);
     }
 
     [Fact]
-    public void AssetsReferencesOnlyApiAndCommon()
+    public void EngineExposesOnlyThePackToolingFromTheAssetImplementation()
     {
-        AssertReferenceMatrix(
-            typeof(PackBuilder).Assembly,
-            "Bork2d.Api",
-            "Bork2d.Common");
+        var exported = typeof(IAssets).Assembly
+            .GetExportedTypes()
+            .Where(type => string.Equals(
+                type.Namespace,
+                "Bork2d.Engine.Assets.Pack",
+                StringComparison.Ordinal))
+            .Select(type => type.FullName ?? type.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "Bork2d.Engine.Assets.Pack.PackBuilder",
+                "Bork2d.Engine.Assets.Pack.PackCompressionMode",
+            },
+            exported);
     }
 
     [Fact]
-    public void AssetsExposesOnlyThePackToolingSurface()
+    public void EngineImplementationStaysInternal()
     {
-        var exported = typeof(PackBuilder).Assembly
+        AssertInternal(typeof(Bork2d.Engine.Scene.Transform));
+        AssertInternal(typeof(Bork2d.Engine.Scene.SceneRoot));
+        AssertInternal(typeof(Bork2d.Engine.Scene.Camera<>));
+        AssertInternal(typeof(Bork2d.Engine.Scene.SpriteRender<>));
+        AssertInternal(typeof(Bork2d.Engine.Scene.GameEngine<>));
+        AssertInternal(typeof(Bork2d.Engine.Assets.Loading.AssetService));
+        AssertInternal(typeof(Bork2d.Engine.Assets.Vfs.AssetFileSystem));
+        AssertInternal(typeof(Bork2d.Engine.Assets.Vfs.ResolvedAsset));
+        AssertInternal(typeof(Bork2d.Engine.Assets.Pack.PackArchive));
+        AssertInternal(typeof(Bork2d.Engine.Assets.Pack.PackHeader));
+    }
+
+    [Fact]
+    public void EnginePublicSignaturesExposeNoImplementationPackages()
+    {
+        Assembly assembly = typeof(IAssets).Assembly;
+
+        foreach (Type exported in assembly.GetExportedTypes())
+        {
+            foreach (Type signatureType in PublicSignatureTypes(exported).SelectMany(Flatten))
+            {
+                Type type = signatureType.IsByRef ? signatureType.GetElementType()! : signatureType;
+                if (type.IsGenericParameter || type.Assembly == assembly)
+                {
+                    continue;
+                }
+
+                string? name = type.Assembly.GetName().Name;
+                Assert.False(
+                    name is MessagePack or Hashing or Tomlyn or StbImageSharp,
+                    $"'{exported.FullName}' exposes the implementation type '{type.FullName}'.");
+            }
+        }
+    }
+
+    [Fact]
+    public void RenderReferencesOnlyEngine()
+    {
+        AssertReferenceMatrix(
+            typeof(Bork2d.Render.AssemblyReferenceAnchor).Assembly,
+            EngineAssembly);
+    }
+
+    [Fact]
+    public void RuntimeReferencesOnlyTheImplementationLayers()
+    {
+        AssertReferenceMatrix(
+            typeof(Bork2d.Runtime.AssemblyReferenceAnchor).Assembly,
+            EngineAssembly,
+            "Bork2d.Render");
+    }
+
+    [Fact]
+    public void RuntimeExposesOnlyTheBuilderAndApp()
+    {
+        var exported = typeof(Bork2d.Runtime.Bork2dApp).Assembly
             .GetExportedTypes()
             .Select(type => type.FullName ?? type.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
@@ -126,39 +186,24 @@ public sealed class DependencyMatrixTests
         Assert.Equal(
             new[]
             {
-                "Bork2d.Assets.Pack.PackBuilder",
-                "Bork2d.Assets.Pack.PackCompressionMode",
+                "Bork2d.Runtime.Bork2dApp",
+                "Bork2d.Runtime.Bork2dAppBuilder`1",
             },
             exported);
     }
 
     [Fact]
-    public void AssetFileSystemStaysInternal()
-    {
-        var assembly = typeof(PackBuilder).Assembly;
-        var type = typeof(Bork2d.Assets.Vfs.AssetFileSystem);
-
-        Assert.False(type.IsPublic);
-        Assert.DoesNotContain(type, assembly.GetExportedTypes());
-        Assert.False(typeof(Bork2d.Assets.Vfs.ResolvedAsset).IsPublic);
-        Assert.DoesNotContain(typeof(Bork2d.Assets.Vfs.ResolvedAsset), assembly.GetExportedTypes());
-        Assert.False(typeof(Bork2d.Assets.Loading.AssetService).IsPublic);
-        Assert.DoesNotContain(typeof(Bork2d.Assets.Loading.AssetService), assembly.GetExportedTypes());
-    }
-
-    [Fact]
-    public void BakeReferencesOnlyApiAndAssets()
+    public void BakeReferencesOnlyEngine()
     {
         AssertReferenceMatrix(
-            typeof(Bork2d.Bake.AssemblyReferenceAnchor).Assembly,
-            "Bork2d.Api",
-            "Bork2d.Assets");
+            typeof(BakeApplicationBuilder).Assembly,
+            EngineAssembly);
     }
 
     [Fact]
     public void BakeReferencesTheToolingPackagesAndNoRuntimeImplementation()
     {
-        var references = typeof(Bork2d.Bake.AssemblyReferenceAnchor).Assembly
+        var references = typeof(BakeApplicationBuilder).Assembly
             .GetReferencedAssemblies()
             .Select(reference => reference.Name ?? string.Empty)
             .ToArray();
@@ -166,29 +211,13 @@ public sealed class DependencyMatrixTests
         Assert.Contains(Tomlyn, references);
         Assert.Contains(Hashing, references);
         Assert.DoesNotContain(MetadataLoadContext, references);
-        Assert.DoesNotContain("Bork2d.Common", references);
         Assert.DoesNotContain("Bork2d.Runtime", references);
         Assert.DoesNotContain("Bork2d.Render", references);
+        Assert.DoesNotContain("Bork2d.BakeFixture", references);
     }
 
     [Fact]
-    public void BakeExposesNoPublicTypes()
-    {
-        Assert.Empty(typeof(Bork2d.Bake.AssemblyReferenceAnchor).Assembly.GetExportedTypes());
-    }
-
-    [Fact]
-    public void BakeBuilderReferencesBakeApiAndAssets()
-    {
-        AssertReferenceMatrix(
-            typeof(BakeApplicationBuilder).Assembly,
-            "Bork2d.Api",
-            "Bork2d.Assets",
-            "Bork2d.Bake");
-    }
-
-    [Fact]
-    public void BakeBuilderExposesTheDocumentedPublicSurface()
+    public void BakeExposesTheDocumentedBuilderSurface()
     {
         var exported = typeof(BakeApplicationBuilder).Assembly
             .GetExportedTypes()
@@ -199,20 +228,20 @@ public sealed class DependencyMatrixTests
         Assert.Equal(
             new[]
             {
-                "Bork2d.Bake.Builder.AssetProcessorContext",
-                "Bork2d.Bake.Builder.AssetProcessor`1",
-                "Bork2d.Bake.Builder.BakeApplication",
-                "Bork2d.Bake.Builder.BakeApplicationBuilder",
-                "Bork2d.Bake.Builder.IAssetOutputSink",
-                "Bork2d.Bake.Builder.IAssetProcessor",
-                "Bork2d.Bake.Builder.IAssetProcessorDiagnostics",
-                "Bork2d.Bake.Builder.SidecarPolicy",
+                "Bork2d.Bake.AssetProcessorContext",
+                "Bork2d.Bake.AssetProcessor`1",
+                "Bork2d.Bake.BakeApplication",
+                "Bork2d.Bake.BakeApplicationBuilder",
+                "Bork2d.Bake.IAssetOutputSink",
+                "Bork2d.Bake.IAssetProcessor",
+                "Bork2d.Bake.IAssetProcessorDiagnostics",
+                "Bork2d.Bake.SidecarPolicy",
             },
             exported);
     }
 
     [Fact]
-    public void BakeBuilderPublicSignaturesExposeNoImplementationTypes()
+    public void BakePublicSignaturesExposeNoImplementationTypes()
     {
         Assembly assembly = typeof(BakeApplicationBuilder).Assembly;
 
@@ -236,23 +265,56 @@ public sealed class DependencyMatrixTests
 
                 string ns = type.Namespace ?? string.Empty;
                 Assert.True(
-                    ns is "Bork2d.Bake.Builder",
+                    ns is "Bork2d.Bake",
                     $"'{exported.FullName}' exposes the internal type '{type.FullName}'.");
             }
         }
     }
 
     [Fact]
-    public void BakeBuilderDoesNotExposeTheOldHostOrCliAssemblies()
+    public void BakeImplementationStaysInternal()
     {
-        var references = typeof(BakeApplicationBuilder).Assembly
-            .GetReferencedAssemblies()
-            .Select(reference => reference.Name ?? string.Empty)
-            .ToArray();
+        AssertInternal(typeof(Bork2d.Bake.Baking.BakePipeline));
+        AssertInternal(typeof(Bork2d.Bake.Processors.IBakeAssetProcessor));
+        AssertInternal(typeof(Bork2d.Bake.Toml.TomlShapeBinder));
+        AssertInternal(typeof(Bork2d.Bake.Textures.StbTextureDecoder));
+    }
 
-        Assert.DoesNotContain("Bork2d.BakeHost", references);
-        Assert.DoesNotContain("Bork2d.Bake.Cli", references);
-        Assert.DoesNotContain(MetadataLoadContext, references);
+    [Fact]
+    public void BakeReferencesOnlyTheAllowedEngineNamespaces()
+    {
+        // Q-20 is no longer assembly-enforced because the engine contract and implementation share
+        // one assembly. The metadata guard proves the tooling only touches the public contract and
+        // the two internal tooling seams (the pack writer and the canonical path grammar).
+        Assembly assembly = typeof(BakeApplicationBuilder).Assembly;
+        using var stream = File.OpenRead(assembly.Location);
+        using var peReader = new PEReader(stream);
+        MetadataReader reader = peReader.GetMetadataReader();
+
+        int references = 0;
+        foreach (TypeReferenceHandle handle in reader.TypeReferences)
+        {
+            TypeReference reference = reader.GetTypeReference(handle);
+            if (reference.ResolutionScope.Kind != HandleKind.AssemblyReference)
+            {
+                continue;
+            }
+
+            AssemblyReference scope = reader.GetAssemblyReference(
+                (AssemblyReferenceHandle)reference.ResolutionScope);
+            if (!string.Equals(reader.GetString(scope.Name), EngineAssembly, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            references++;
+            string ns = reader.GetString(reference.Namespace);
+            Assert.True(
+                _allowedBakeEngineNamespaces.Contains(ns),
+                $"{EngineAssembly} tooling must not reference the engine namespace '{ns}'.");
+        }
+
+        Assert.True(references > 0, "Bake must reference the engine contract.");
     }
 
     [Fact]
@@ -260,41 +322,19 @@ public sealed class DependencyMatrixTests
     {
         Assembly[] runtimeAssemblies =
         [
-            typeof(Bork2d.Api.Assets.IAssets).Assembly,
-            typeof(Bork2d.Common.Scene.Transform).Assembly,
-            typeof(PackBuilder).Assembly,
+            typeof(IAssets).Assembly,
             typeof(Bork2d.Render.AssemblyReferenceAnchor).Assembly,
             typeof(Bork2d.Runtime.Bork2dApp).Assembly,
-            Assembly.Load("Bork2d.AotSmoke"),
         ];
 
         foreach (Assembly assembly in runtimeAssemblies)
         {
-            // Bork2d.BakeFixture is the game-side Project.Common-like fixture, not tooling; the AOT
-            // smoke references it deliberately. The builder, the assets executable, and the internal
-            // bake implementation must never appear in a runtime or publish graph.
-            bool isAotSmoke = string.Equals(
-                assembly.GetName().Name,
-                "Bork2d.AotSmoke",
-                StringComparison.Ordinal);
-
             foreach (AssemblyName reference in assembly.GetReferencedAssemblies())
             {
                 string name = reference.Name ?? string.Empty;
                 Assert.False(
-                    name is "Bork2d.Bake"
-                        or "Bork2d.Bake.Builder"
-                        or "Bork2d.BakeFixture.Assets"
-                        or "Bork2d.BakeHost"
-                        or "Bork2d.Bake.Cli",
+                    name.StartsWith("Bork2d.Bake", StringComparison.Ordinal),
                     $"{assembly.GetName().Name} must not reference '{name}'.");
-                if (!isAotSmoke)
-                {
-                    Assert.False(
-                        name.StartsWith("Bork2d.Bake", StringComparison.Ordinal),
-                        $"{assembly.GetName().Name} must not reference '{name}'.");
-                }
-
                 Assert.NotEqual(Tomlyn, name);
                 Assert.NotEqual(StbImageSharp, name);
             }
@@ -302,62 +342,19 @@ public sealed class DependencyMatrixTests
     }
 
     [Fact]
-    public void RenderReferencesOnlyApiCommonAndAssets()
+    public void BakeFixtureReferencesOnlyEngineAndNoTooling()
     {
-        AssertReferenceMatrix(
-            typeof(Bork2d.Render.AssemblyReferenceAnchor).Assembly,
-            "Bork2d.Api",
-            "Bork2d.Common",
-            "Bork2d.Assets");
-    }
+        Assembly assembly = typeof(Bork2d.BakeFixture.GameConfig).Assembly;
 
-    [Fact]
-    public void RuntimeReferencesOnlyTheImplementationLayers()
-    {
-        AssertReferenceMatrix(
-            typeof(Bork2d.Runtime.AssemblyReferenceAnchor).Assembly,
-            "Bork2d.Api",
-            "Bork2d.Common",
-            "Bork2d.Assets",
-            "Bork2d.Render");
-    }
+        AssertReferenceMatrix(assembly, EngineAssembly);
 
-    [Fact]
-    public void RuntimeExposesOnlyTheBuilderAndApp()
-    {
-        // The SDL adapter is internal to the composition root: adding Silk.NET.SDL must not leak a
-        // public type, and the public surface stays the M1 builder/app pair.
-        var exported = typeof(Bork2d.Runtime.Bork2dApp).Assembly
-            .GetExportedTypes()
-            .Select(type => type.FullName ?? type.Name)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.Equal(
-            new[]
-            {
-                "Bork2d.Runtime.Bork2dApp",
-                "Bork2d.Runtime.Bork2dAppBuilder`1",
-            },
-            exported);
-    }
-
-    [Fact]
-    public void BakeFixtureReferencesOnlyApiAndNoTooling()
-    {
-        // The fixture stands in for a game's Project.Common: public data types and Bork2d.Api only.
-        // It must stay usable from the AOT proof and must never pull the bake tooling into a game.
-        AssertReferenceMatrix(typeof(Bork2d.BakeFixture.GameConfig).Assembly, "Bork2d.Api");
-
-        var references = typeof(Bork2d.BakeFixture.GameConfig).Assembly
-            .GetReferencedAssemblies()
+        var references = assembly.GetReferencedAssemblies()
             .Select(reference => reference.Name ?? string.Empty)
             .ToArray();
 
         Assert.DoesNotContain(Tomlyn, references);
         Assert.DoesNotContain(StbImageSharp, references);
         Assert.DoesNotContain("Bork2d.Bake", references);
-        Assert.DoesNotContain("Bork2d.Bake.Builder", references);
         Assert.DoesNotContain("Bork2d.BakeFixture.Assets", references);
     }
 
@@ -382,18 +379,14 @@ public sealed class DependencyMatrixTests
     }
 
     [Fact]
-    public void BakeFixtureAssetsReferencesOnlyApiBuilderAndFixture()
+    public void BakeFixtureAssetsReferencesOnlyEngineBakeAndFixture()
     {
-        // The fixture assets executable is build-time only: it references the public builder and the
-        // game-side data-type fixture, plus Bork2d.Api for the TextureDescriptor its PPM acceptance
-        // processor emits. It is never referenced by the runtime or the AOT publish and exposes no
-        // public type of its own.
         Assembly assembly = Assembly.LoadFrom(RepositoryPaths.FixtureAssetsExecutable);
 
         AssertReferenceMatrix(
             assembly,
-            "Bork2d.Api",
-            "Bork2d.Bake.Builder",
+            EngineAssembly,
+            "Bork2d.Bake",
             "Bork2d.BakeFixture");
         Assert.Empty(assembly.GetExportedTypes());
 
@@ -409,33 +402,44 @@ public sealed class DependencyMatrixTests
     {
         AssertReferenceMatrix(
             typeof(DependencyMatrixTests).Assembly,
-            "Bork2d.Api",
-            "Bork2d.Assets",
+            EngineAssembly,
             "Bork2d.Bake",
-            "Bork2d.Bake.Builder",
             "Bork2d.BakeFixture",
             "Bork2d.BakeFixture.Assets",
-            "Bork2d.Common",
             "Bork2d.Render",
             "Bork2d.Runtime");
     }
 
     [Fact]
-    public void AotSmokeReferencesOnlyTheRuntimeSurfaceItUses()
+    public void EngineSolutionContainsOnlyTheFiveProjects()
     {
-        // Tests references Bork2d.AotSmoke as a project so its assembly is copied next to the
-        // test assembly. No test type uses it, so it is loaded by name here. The smoke takes a
-        // build-only reference to the fixture assets executable: it never references the builder or
-        // the assets executable, and BakeFixture is only the game-side Project.Common-like fixture
-        // whose baked packs the default headless run loads.
-        var assembly = Assembly.Load("Bork2d.AotSmoke");
+        string solutionPath = Path.Combine(
+            RepositoryPaths.Root,
+            "src",
+            "Bork2d",
+            "Bork2d.slnx");
+        string text = File.ReadAllText(solutionPath);
+        string[] projects = Regex.Matches(text, "Project Path=\"(?<path>[^\"]+)\"")
+            .Select(match => match.Groups["path"].Value)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
 
-        AssertReferenceMatrix(
-            assembly,
-            "Bork2d.Api",
-            "Bork2d.BakeFixture",
-            "Bork2d.Common",
-            "Bork2d.Runtime");
+        Assert.Equal(
+            new[]
+            {
+                "Bork2d.Bake/Bork2d.Bake.csproj",
+                "Bork2d.Engine/Bork2d.Engine.csproj",
+                "Bork2d.Render/Bork2d.Render.csproj",
+                "Bork2d.Runtime/Bork2d.Runtime.csproj",
+                "Bork2d.Tests/Bork2d.Tests.csproj",
+            },
+            projects);
+    }
+
+    private static void AssertInternal(Type type)
+    {
+        Assert.False(type.IsPublic);
+        Assert.DoesNotContain(type, type.Assembly.GetExportedTypes());
     }
 
     private static void AssertReferenceMatrix(Assembly assembly, params string[] expectedReferences)
@@ -505,10 +509,10 @@ public sealed class DependencyMatrixTests
         }
     }
 
-    private static bool IsForbiddenApiReference(string? name)
+    private static bool IsForbiddenEngineReference(string? name)
     {
         return name is not null
-            && _forbiddenApiReferencePrefixes.Any(
+            && _forbiddenEngineReferencePrefixes.Any(
                 prefix => name.StartsWith(prefix, StringComparison.Ordinal));
     }
 

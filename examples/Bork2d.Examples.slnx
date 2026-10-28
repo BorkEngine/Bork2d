@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Bork2d.AotSmoke/Bork2d.AotSmoke.csproj" />
+  <Project Path="Bork2d.BakeFixture/Bork2d.BakeFixture.csproj" />
+  <Project Path="Bork2d.BakeFixture.Assets/Bork2d.BakeFixture.Assets.csproj" />
+</Solution>

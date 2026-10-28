@@ -39,7 +39,7 @@ public sealed class MultiPackBakeTests
         Assert.True(File.Exists(result.Packs[0].PackPath));
         Assert.True(File.Exists(result.Packs[1].PackPath));
 
-        using var archive = Bork2d.Assets.Pack.PackArchive.Open(result.Packs[1].PackPath);
+        using var archive = Bork2d.Engine.Assets.Pack.PackArchive.Open(result.Packs[1].PackPath);
         Assert.Equal(
             BakeProjectFixture.DlcGamePath,
             Assert.Single(archive.Entries).Path);
@@ -212,7 +212,7 @@ public sealed class MultiPackBakeTests
         BakeDiagnostic diagnostic = Assert.Single(
             result.Diagnostics,
             candidate => candidate.Code == BakeDiagnosticCodes.ReferenceWrongType);
-        Assert.Contains("Bork2d.Api.Assets.TextureDescriptor", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("Bork2d.Engine.Assets.TextureDescriptor", diagnostic.Message, StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Combine(output.RootPath, "assets.pck")));
     }
 

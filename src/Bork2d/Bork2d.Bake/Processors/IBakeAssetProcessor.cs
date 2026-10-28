@@ -4,7 +4,7 @@ namespace Bork2d.Bake.Processors;
 
 /// <summary>
 /// The internal processor contract the bake framework runs. The public
-/// <c>Bork2d.Bake.Builder.IAssetProcessor</c> surface is adapted to this interface.
+/// <c>Bork2d.Bake.IAssetProcessor</c> surface is adapted to this interface.
 /// </summary>
 /// <remarks>
 /// <para>

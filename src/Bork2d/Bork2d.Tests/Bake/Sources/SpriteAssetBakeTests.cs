@@ -1,9 +1,9 @@
 using System.Numerics;
-using Bork2d.Api.Assets;
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Sources;
 using Bork2d.Bake.Toml;
+using Bork2d.Engine.Assets;
 using Bork2d.Tests.Assets.Service;
 using Bork2d.Tests.Assets.Vfs;
 using Bork2d.Tests.Bake.Baking;
@@ -19,7 +19,7 @@ namespace Bork2d.Tests.Bake.Sources;
 /// </summary>
 public sealed class SpriteAssetBakeTests
 {
-    private const string SpriteType = "Bork2d.Api.Assets.SpriteAsset";
+    private const string SpriteType = "Bork2d.Engine.Assets.SpriteAsset";
     private const string SpritePath = "sprites/player";
     private const string TexturePath = "textures/player";
     private const string TexturePayloadPath = "textures/player-raw";

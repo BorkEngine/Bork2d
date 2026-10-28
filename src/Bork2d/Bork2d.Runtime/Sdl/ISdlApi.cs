@@ -12,7 +12,7 @@ namespace Bork2d.Runtime.Sdl;
 /// desktop session or the native library.
 /// </para>
 /// <para>
-/// Failures are reported as <see cref="Bork2d.Api.Bork2dException"/> carrying
+/// Failures are reported as <see cref="Bork2d.Engine.Bork2dException"/> carrying
 /// <see cref="GetError"/>. Hints must be set before <see cref="InitializeVideo"/>.
 /// </para>
 /// <para>
@@ -40,7 +40,7 @@ internal interface ISdlApi : IDisposable
     bool SetHint(string name, string value);
 
     /// <summary>Initializes the SDL video subsystem only (<c>SDL_Init(SDL_INIT_VIDEO)</c>).</summary>
-    /// <exception cref="Bork2d.Api.Bork2dException">SDL video initialization failed.</exception>
+    /// <exception cref="Bork2d.Engine.Bork2dException">SDL video initialization failed.</exception>
     void InitializeVideo();
 
     /// <summary>Quits the SDL video subsystem. Idempotent.</summary>
@@ -52,7 +52,7 @@ internal interface ISdlApi : IDisposable
     /// <param name="height">The initial height in window points.</param>
     /// <param name="flags">The SDL window flags.</param>
     /// <returns>The created window; the caller disposes it to destroy the SDL window.</returns>
-    /// <exception cref="Bork2d.Api.Bork2dException">Window creation failed.</exception>
+    /// <exception cref="Bork2d.Engine.Bork2dException">Window creation failed.</exception>
     ISdlWindow CreateWindow(string title, int width, int height, SdlWindowFlags flags);
 
     /// <summary>Polls one pending event without blocking.</summary>
@@ -79,7 +79,7 @@ internal interface ISdlApi : IDisposable
 
     /// <summary>Shows or hides the mouse cursor.</summary>
     /// <param name="visible">Whether the cursor is visible.</param>
-    /// <exception cref="Bork2d.Api.Bork2dException">SDL failed to change the cursor state.</exception>
+    /// <exception cref="Bork2d.Engine.Bork2dException">SDL failed to change the cursor state.</exception>
     void ShowCursor(bool visible);
 
     /// <summary>Enables SDL text input.</summary>

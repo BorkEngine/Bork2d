@@ -1,9 +1,9 @@
-using Bork2d.Api;
-using Bork2d.Api.Input;
-using Bork2d.Api.Platform;
-using Bork2d.Assets.Loading;
-using Bork2d.Common.Scene;
-using Bork2d.Common.Time;
+using Bork2d.Engine;
+using Bork2d.Engine.Assets.Loading;
+using Bork2d.Engine.Input;
+using Bork2d.Engine.Platform;
+using Bork2d.Engine.Scene;
+using Bork2d.Engine.Time;
 using Bork2d.Runtime.Hosting;
 using Bork2d.Runtime.Input;
 using Bork2d.Runtime.Sdl;
@@ -327,7 +327,7 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
                 _options.WithoutAssetsSelected ? null : _options.AssetsPackPath,
                 loggerFactory);
 
-            var engine = new Engine<TLayer>(
+            var engine = new GameEngine<TLayer>(
                 time,
                 window,
                 assetService,

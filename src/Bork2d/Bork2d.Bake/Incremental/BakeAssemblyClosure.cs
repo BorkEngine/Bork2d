@@ -14,15 +14,15 @@ namespace Bork2d.Bake.Incremental;
 /// <para>
 /// The direct set is every <c>RegisterAsset&lt;T&gt;()</c> type assembly and every registered
 /// processor's CLR assembly (so the builder's built-in texture processor contributes
-/// <c>Bork2d.Bake.Builder</c>, the fixture processors contribute <c>Bork2d.BakeFixture.Assets</c>,
-/// and the data types contribute <c>Bork2d.BakeFixture</c> and <c>Bork2d.Api</c>). The closure then
+/// <c>Bork2d.Bake</c>, the fixture processors contribute <c>Bork2d.BakeFixture.Assets</c>,
+/// and the data types contribute <c>Bork2d.BakeFixture</c> and <c>Bork2d.Engine</c>). The closure then
 /// follows their references recursively.
 /// </para>
 /// <para>
 /// Framework and tooling dependencies are skipped so a runtime/framework update does not invalidate
 /// every game: names starting with <c>System</c>, <c>Microsoft</c>, or <c>Nerdbank</c>, plus
 /// <c>mscorlib</c>, <c>netstandard</c>, <c>WindowsBase</c>, <c>Bork2d.Bake</c>,
-/// <c>Bork2d.Assets</c>, <c>Tomlyn</c>, <c>StbImageSharp</c>, <c>PolyType</c>, and
+/// <c>Bork2d.Engine.Assets</c>, <c>Tomlyn</c>, <c>StbImageSharp</c>, <c>PolyType</c>, and
 /// <c>System.IO.Hashing</c>. Direct assemblies are always included even if their name matches a skip
 /// rule.
 /// </para>
@@ -43,7 +43,7 @@ internal static class BakeAssemblyClosure
         "netstandard",
         "WindowsBase",
         "Bork2d.Bake",
-        "Bork2d.Assets",
+        "Bork2d.Engine.Assets",
         "Tomlyn",
         "StbImageSharp",
         "PolyType",

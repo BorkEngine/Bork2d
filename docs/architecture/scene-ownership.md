@@ -1,6 +1,6 @@
 # Scene Ownership
 
-> **Status:** Current for the M1 scene graph in `Bork2d.Common`. Root-owned strong ownership
+> **Status:** Current for the M1 scene graph in `Bork2d.Engine`. Root-owned strong ownership
 > replaced the scaffold's weak-reference registry. Public members are listed in the
 > [API reference](../api/reference.md#2-ienginetlayer).
 
@@ -83,7 +83,7 @@ explicit release; `Root.DetachAll()` bounds the whole scene.
 The renderer never walks the live tree. After `Tick` (workers joined) the engine traverses the
 rooted tree in no specified order and builds internal **value-only** `CameraSnapshot` /
 `SpriteSnapshot` structs; no `Transform`/`Camera`/`SpriteRender` reference crosses the boundary.
-The structs are internal, not part of `Bork2d.Api`, and not implemented in M1: capture is M7 and
+The structs are internal, not part of `Bork2d.Engine`, and not implemented in M1: capture is M7 and
 camera ordering is M8. Details are in [Threading](threading.md#3-frame-snapshot).
 
 - Cameras are applied in ascending `ZIndex`; higher draws later, default `0`, ties unspecified.
