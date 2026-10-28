@@ -1,5 +1,0 @@
-attack = 11
-defense = 13
-
-[bork2d]
-type = "Bork2d.BakeFixture.StatsRoot"

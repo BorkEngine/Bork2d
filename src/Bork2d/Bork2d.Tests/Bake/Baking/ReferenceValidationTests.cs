@@ -13,8 +13,8 @@ namespace Bork2d.Tests.Bake.Baking;
 /// </summary>
 public sealed class ReferenceValidationTests
 {
-    private static readonly string _gameConfigType = typeof(Bork2d.BakeFixture.GameConfig).FullName!;
-    private static readonly string _statsRootType = typeof(Bork2d.BakeFixture.StatsRoot).FullName!;
+    private static readonly string _gameConfigType = typeof(Bork2d.Tests.Bake.Baking.GameConfig).FullName!;
+    private static readonly string _statsRootType = typeof(Bork2d.Tests.Bake.Baking.StatsRoot).FullName!;
     private static readonly string _textureType = typeof(TextureDescriptor).FullName!;
     private static readonly string _spriteType = typeof(SpriteAsset).FullName!;
 

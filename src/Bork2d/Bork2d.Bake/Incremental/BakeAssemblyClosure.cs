@@ -14,8 +14,8 @@ namespace Bork2d.Bake.Incremental;
 /// <para>
 /// The direct set is every <c>RegisterAsset&lt;T&gt;()</c> type assembly and every registered
 /// processor's CLR assembly (so the builder's built-in texture processor contributes
-/// <c>Bork2d.Bake</c>, the fixture processors contribute <c>Bork2d.BakeFixture.Assets</c>,
-/// and the data types contribute <c>Bork2d.BakeFixture</c> and <c>Bork2d.Engine</c>). The closure then
+/// <c>Bork2d.Bake</c>, a game's processors contribute its assets executable assembly, and the data
+/// types contribute the game's common assembly and <c>Bork2d.Engine</c>). The closure then
 /// follows their references recursively.
 /// </para>
 /// <para>

@@ -327,7 +327,7 @@ public sealed class TextureProcessorTests
             "art/player.png.toml",
             """
             [bork2d]
-            type = "Bork2d.BakeFixture.StatsRoot"
+            type = "Bork2d.Tests.Bake.Baking.StatsRoot"
             """);
 
         BakeResult result = project.Bake();

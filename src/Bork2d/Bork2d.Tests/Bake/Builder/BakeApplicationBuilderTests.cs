@@ -26,8 +26,8 @@ public sealed class BakeApplicationBuilderTests
             .WithPack("assets.pck", "Assets")
             .WithPack("dlc1.pck", "DLC1")
             .UseDefaultAssets()
-            .RegisterAsset<Bork2d.BakeFixture.GameConfig>()
-            .RegisterAsset<Bork2d.BakeFixture.StatsRoot>()
+            .RegisterAsset<Bork2d.Tests.Bake.Baking.GameConfig>()
+            .RegisterAsset<Bork2d.Tests.Bake.Baking.StatsRoot>()
             .UseDefaultProcessors()
             .WithTextureDefaults(TextureFilter.Linear, TextureWrap.Repeat)
             .AddProcessor(new FakeProcessor());
@@ -51,8 +51,8 @@ public sealed class BakeApplicationBuilderTests
         Assert.Equal("texture", project.Processors[0].Name);
         Assert.Equal("fake", project.Processors[1].Name);
         Assert.Contains("Bork2d.Engine.Assets.SpriteAsset", project.AssetTypes.Keys);
-        Assert.Contains("Bork2d.BakeFixture.GameConfig", project.AssetTypes.Keys);
-        Assert.Contains("Bork2d.BakeFixture.StatsRoot", project.AssetTypes.Keys);
+        Assert.Contains("Bork2d.Tests.Bake.Baking.GameConfig", project.AssetTypes.Keys);
+        Assert.Contains("Bork2d.Tests.Bake.Baking.StatsRoot", project.AssetTypes.Keys);
     }
 
     [Fact]
@@ -146,12 +146,12 @@ public sealed class BakeApplicationBuilderTests
         BakeApplicationBuilder builder = new BakeApplicationBuilder()
             .WithProjectRoot(directory.RootPath)
             .WithPack("assets.pck", "Assets")
-            .RegisterAsset<Bork2d.BakeFixture.GameConfig>()
-            .RegisterAsset<Bork2d.BakeFixture.GameConfig>();
+            .RegisterAsset<Bork2d.Tests.Bake.Baking.GameConfig>()
+            .RegisterAsset<Bork2d.Tests.Bake.Baking.GameConfig>();
 
         BakeDiagnostic diagnostic = AssertConfigError(builder, BakeDiagnosticCodes.AssetTypeDuplicate);
 
-        Assert.Contains("Bork2d.BakeFixture.GameConfig", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("Bork2d.Tests.Bake.Baking.GameConfig", diagnostic.Message, StringComparison.Ordinal);
     }
 
     [Fact]

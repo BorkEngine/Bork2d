@@ -29,8 +29,8 @@ public sealed class BakeSourceBinderTests
         Assert.Equal(
             new[]
             {
-                "Bork2d.BakeFixture.GameConfig",
-                "Bork2d.BakeFixture.StatsRoot",
+                "Bork2d.Tests.Bake.Baking.GameConfig",
+                "Bork2d.Tests.Bake.Baking.StatsRoot",
                 "Bork2d.Engine.Assets.SpriteAsset",
             },
             assets.Select(asset => asset.TypeName));
@@ -47,7 +47,7 @@ public sealed class BakeSourceBinderTests
         Assert.Empty(diagnostics.GetSorted());
 
         BoundAsset config = assets.Single(asset => asset.AssetPath == "data/config");
-        var gameConfig = Assert.IsType<Bork2d.BakeFixture.GameConfig>(config.Value);
+        var gameConfig = Assert.IsType<Bork2d.Tests.Bake.Baking.GameConfig>(config.Value);
         Assert.Equal("campaign", gameConfig.Name);
         BakeReferenceSite texture = Assert.Single(config.References);
         Assert.Equal("texture", texture.MemberPath);
@@ -65,7 +65,7 @@ public sealed class BakeSourceBinderTests
         Assert.Single(sprite.References);
 
         BoundAsset stats = assets.Single(asset => asset.AssetPath == "roots/stats");
-        Assert.Equal(new Bork2d.BakeFixture.StatsRoot(11, 13), stats.Value);
+        Assert.Equal(new Bork2d.Tests.Bake.Baking.StatsRoot(11, 13), stats.Value);
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public sealed class BakeSourceBinderTests
             bogus = true
 
             [bork2d]
-            type = "Bork2d.BakeFixture.GameConfig"
+            type = "Bork2d.Tests.Bake.Baking.GameConfig"
             """);
         var diagnostics = new BakeDiagnostics();
 
@@ -121,7 +121,7 @@ public sealed class BakeSourceBinderTests
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         byte[] content = Encoding.UTF8.GetBytes(
             "name = \"caf\u00e9\"\nhealth = 1\nmust = \"m\"\n\n[bork2d]\n"
-                + "type = \"Bork2d.BakeFixture.GameConfig\"\n");
+                + "type = \"Bork2d.Tests.Bake.Baking.GameConfig\"\n");
         File.WriteAllBytes(path, [0xEF, 0xBB, 0xBF, .. content]);
 
         var diagnostics = new BakeDiagnostics();
@@ -130,7 +130,7 @@ public sealed class BakeSourceBinderTests
         Assert.Empty(diagnostics.GetSorted());
         BoundAsset asset = Assert.Single(assets);
         Assert.Equal("data/bom", asset.AssetPath);
-        Assert.Equal("caf\u00e9", Assert.IsType<Bork2d.BakeFixture.GameConfig>(asset.Value).Name);
+        Assert.Equal("caf\u00e9", Assert.IsType<Bork2d.Tests.Bake.Baking.GameConfig>(asset.Value).Name);
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public sealed class BakeSourceBinderTests
             texture = "art/player"
 
             [bork2d]
-            type = "Bork2d.BakeFixture.GameConfig"
+            type = "Bork2d.Tests.Bake.Baking.GameConfig"
             """);
         var diagnostics = new BakeDiagnostics();
 
@@ -193,7 +193,7 @@ public sealed class BakeSourceBinderTests
             defense = 2
 
             [bork2d]
-            type = "Bork2d.BakeFixture.GameConfig"
+            type = "Bork2d.Tests.Bake.Baking.GameConfig"
             """);
         project.WriteAsset(
             "roots/stats.toml",
@@ -202,7 +202,7 @@ public sealed class BakeSourceBinderTests
             defense = 13
 
             [bork2d]
-            type = "Bork2d.BakeFixture.StatsRoot"
+            type = "Bork2d.Tests.Bake.Baking.StatsRoot"
             """);
         project.WriteAsset(
             "sprites/player.toml",

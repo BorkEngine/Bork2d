@@ -1,6 +1,6 @@
 using PolyType;
 
-namespace Bork2d.BakeFixture;
+namespace Bork2d.Tests.Bake.Baking;
 
 /// <summary>
 /// A top-level <c>readonly record struct</c> asset root (D-M4-11): baked as custom data, loaded with

@@ -213,7 +213,6 @@ public sealed class DependencyMatrixTests
         Assert.DoesNotContain(MetadataLoadContext, references);
         Assert.DoesNotContain("Bork2d.Runtime", references);
         Assert.DoesNotContain("Bork2d.Render", references);
-        Assert.DoesNotContain("Bork2d.BakeFixture", references);
     }
 
     [Fact]
@@ -342,70 +341,12 @@ public sealed class DependencyMatrixTests
     }
 
     [Fact]
-    public void BakeFixtureReferencesOnlyEngineAndNoTooling()
-    {
-        Assembly assembly = typeof(Bork2d.BakeFixture.GameConfig).Assembly;
-
-        AssertReferenceMatrix(assembly, EngineAssembly);
-
-        var references = assembly.GetReferencedAssemblies()
-            .Select(reference => reference.Name ?? string.Empty)
-            .ToArray();
-
-        Assert.DoesNotContain(Tomlyn, references);
-        Assert.DoesNotContain(StbImageSharp, references);
-        Assert.DoesNotContain("Bork2d.Bake", references);
-        Assert.DoesNotContain("Bork2d.BakeFixture.Assets", references);
-    }
-
-    [Fact]
-    public void BakeFixtureExposesOnlyItsRegisteredDataTypes()
-    {
-        var exported = typeof(Bork2d.BakeFixture.GameConfig).Assembly
-            .GetExportedTypes()
-            .Select(type => type.FullName ?? type.Name)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.Equal(
-            new[]
-            {
-                "Bork2d.BakeFixture.GameConfig",
-                "Bork2d.BakeFixture.Stats",
-                "Bork2d.BakeFixture.StatsRoot",
-                "Bork2d.BakeFixture.Unit",
-            },
-            exported);
-    }
-
-    [Fact]
-    public void BakeFixtureAssetsReferencesOnlyEngineBakeAndFixture()
-    {
-        Assembly assembly = Assembly.LoadFrom(RepositoryPaths.FixtureAssetsExecutable);
-
-        AssertReferenceMatrix(
-            assembly,
-            EngineAssembly,
-            "Bork2d.Bake",
-            "Bork2d.BakeFixture");
-        Assert.Empty(assembly.GetExportedTypes());
-
-        var references = assembly.GetReferencedAssemblies()
-            .Select(reference => reference.Name ?? string.Empty)
-            .ToArray();
-        Assert.DoesNotContain(Tomlyn, references);
-        Assert.DoesNotContain(StbImageSharp, references);
-    }
-
-    [Fact]
-    public void TestsMayReferenceEveryProject()
+    public void TestsMayReferenceEveryEngineProject()
     {
         AssertReferenceMatrix(
             typeof(DependencyMatrixTests).Assembly,
             EngineAssembly,
             "Bork2d.Bake",
-            "Bork2d.BakeFixture",
-            "Bork2d.BakeFixture.Assets",
             "Bork2d.Render",
             "Bork2d.Runtime");
     }
