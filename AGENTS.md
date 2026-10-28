@@ -338,13 +338,14 @@ dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build
 dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
 ```
 
-AOT publish/run — **required local gate**, not CI. Use the AOT smoke project in the examples
-solution (currently `examples/Bork2d.AotSmoke`):
+AOT publish/run — **required local gate**, not CI. Use the Pong example desktop app in the examples
+solution (currently `examples/pong/Pong.Desktop`):
 
 ```powershell
-dotnet publish examples/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj `
+dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj `
     -c Release -r win-x64 --nologo
-& examples/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe
+& examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe --headless
+& examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe --windowed --ticks 120
 ```
 
 Additional gates:
@@ -363,7 +364,7 @@ Additional gates:
 Workflow triggers are `on: pull_request: branches: [develop]` and `on: push: branches: [develop]`.
 AOT publish/run is **not** in CI; it is a required local gate. Because CI does not catch AOT
 regressions, run the AOT gate locally on every runtime-affecting change. CI also does not build
-the examples solution (`examples/Bork2d.Examples.slnx`); the local AOT gate exercises its smoke
+the examples solution (`examples/pong/Pong.slnx`); the local AOT gate exercises its Pong desktop
 app, and the examples solution is built locally when it changes.
 
 Install the SDK pinned by `global.json` explicitly in CI; hosted Windows runners do not ship
@@ -464,7 +465,8 @@ status is **not** standing permission to change the API unilaterally.
   minimum level Debug in Debug builds, Information in Release; no file sink by default.
 - Categories: `Bork2d.Runtime`, `Bork2d.Engine`, `Bork2d.Engine.Assets`, `Bork2d.Render`.
 - Log startup mode and validation outcome. Do not log per sprite/per frame in hot paths.
-- The AOT smoke app must exercise the default logging path with zero trim/AOT warnings.
+- The Pong example's AOT headless run must exercise the default logging path with zero trim/AOT
+  warnings.
 
 ### Performance
 
