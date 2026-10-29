@@ -20,8 +20,8 @@
 > removed. The AOT gate (`Pong.Desktop`) loads the baked 7-entry Pong pack and its publish contains no
 > Bake/assets-executable/Tomlyn/StbImageSharp assembly. The project-consolidation refactor
 > (D-041/D-042, merged 2026-10-28, PR #9) merged the pack implementation into `Bork2d.Engine` and the
-> builder into `Bork2d.Bake`; the Pong example (D-043/D-044, implemented on `task/pong-example`, merged
-> pending) replaced the exploratory examples. The M3 record and M4 spec are
+> builder into `Bork2d.Bake`; the Pong example (D-043/D-044, merged 2026-10-29, PR #10)
+> replaced the exploratory examples. The M3 record and M4 spec are
 > historical; the [file-processors spec](../specs/file-processors.md) and
 > [asset processors](asset-processors.md) own the current bake design.
 >

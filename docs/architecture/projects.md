@@ -3,8 +3,8 @@
 > **Status:** `Current`, merged into `develop` (2026-10-28, PR #9; D-041/D-042) and enforced by the
 > dependency test. The engine solution has five projects; the Pong example (`Pong.Common`,
 > `Pong.Assets`, `Pong.Desktop`, `Pong.Tests`) lives in `examples/pong/Pong.slnx` and replaces the
-> exploratory smoke/fixture projects (D-043/D-044; implemented on `task/pong-example`, merged
-> pending). `Bork2d.Engine` carries the `Bork2d.Engine.*` public contract plus the internal engine
+> exploratory smoke/fixture projects (D-043/D-044; merged 2026-10-29, PR #10).
+> `Bork2d.Engine` carries the `Bork2d.Engine.*` public contract plus the internal engine
 > implementation, and `Bork2d.Bake` carries the public bake-tooling surface plus the internal bake
 > implementation.
 

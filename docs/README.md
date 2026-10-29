@@ -17,7 +17,7 @@
 > project-consolidation refactor (D-041/D-042,
 > [spec](specs/refactor-projects.md)) is merged into `develop` (2026-10-28, PR #9); it reduced the
 > engine solution to five projects. The Pong example (D-043/D-044,
-> [spec](specs/pong-example.md)) replaces the exploratory smoke/fixture projects with
+> [spec](specs/pong-example.md)) is merged into `develop` (2026-10-29, PR #10) and replaces the exploratory smoke/fixture projects with
 > `examples/pong` and is the AOT gate: `Pong.Desktop` publishes with no tooling assembly in the
 > output, loads the 7-entry Pong pack headless, and runs `--windowed --ticks 120`. Verification is
 > the local gate set: Debug/Release zero-warning builds, 907 deterministic plus 12

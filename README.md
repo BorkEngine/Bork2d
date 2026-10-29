@@ -18,7 +18,7 @@ that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets sh
 > [spec](docs/specs/refactor-projects.md)) is merged (2026-10-28, PR #9) and reduces the engine
 > solution to five projects: the public contract and engine implementation live in `Bork2d.Engine`,
 > and the bake tooling lives in `Bork2d.Bake`. The Pong example (D-043/D-044,
-> [spec](docs/specs/pong-example.md)) is implemented on `task/pong-example` (merged pending); it
+> [spec](docs/specs/pong-example.md)) is merged into `develop` (2026-10-29, PR #10); it
 > replaces the exploratory smoke/fixture projects with `examples/pong` and is the NativeAOT gate.
 > See the [roadmap](docs/roadmap.md), the
 > [file-processors spec](docs/specs/file-processors.md), and the

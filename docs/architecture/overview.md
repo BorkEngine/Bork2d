@@ -1,7 +1,7 @@
 # Architecture Overview
 
 > **Status:** M1–M4 are merged into `develop`; **D-036/D-037/D-038 are merged (2026-10-27, PR #8)**
-> and the Pong example (D-043/D-044) is implemented on `task/pong-example` (merged pending).
+> and the Pong example (D-043/D-044) is merged into `develop` (2026-10-29, PR #10).
 > The builder, validation, windowed SDL host
 > (window/input/time/loop), one-tick headless/offscreen host, scene graph, logging, asset pipeline,
 > builder-configured bake, and AOT baseline are `Current`; the editor (M5), Vulkan and frame handoff

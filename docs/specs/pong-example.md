@@ -1,7 +1,7 @@
 # Pong Example — Task Spec
 
-> **Status:** implemented 2026-10-28 (WP-1…WP-5 on `task/pong-example`; PR pending). Implementation
-> runs on `task/pong-example/wp-1` … `wp-5` and integrates through `task/pong-example/common`. This
+> **Status:** merged into `develop` (2026-10-29, PR #10, merge `0273f58`). Implementation
+> ran on `task/pong-example/wp-1` … `wp-5` and integrated through `task/pong-example/common`. This
 > document is the scope authority for the task; the owner-approved decisions are D-043 and D-044.
 > As-built evidence is in §12.
 
@@ -290,7 +290,7 @@ Sequential; each branch starts from the latest `origin/task/pong-example/common`
 | WP-2 | `task/pong-example/wp-2` | Delete old examples/solution and fixture-specific tests; self-contained bake test types; update `Bork2d.Tests`, `RepositoryPaths`, dependency guards. | Engine solution builds/tests/format; no `examples` references remain in the engine solution. |
 | WP-3 | `task/pong-example/wp-3` | Pong solution layout, `Pong.Common` (types/settings/simulation/AI), `Pong.Assets` (paddle PNG, circle processor, TOMLs, bake), `Pong.Desktop` headless host, pack copy. | `examples/pong` builds; `Pong.Assets` bakes 7 entries; headless smoke loads them and exits 0. |
 | WP-4 | `task/pong-example/wp-4` | Full gameplay in `PongGame` (input, AI, title, score logs, resize) and `Pong.Tests` (simulation, bake/load, game smoke). | Pong tests pass; windowed `--ticks N` exits 0; title/prompt behavior covered. |
-| WP-5 | `task/pong-example/wp-5` | AOT gate, docs (roadmap, projects, nativeaot, logging, API guide, README, contributing), full gates, PR. | AOT publish/run headless + windowed; docs check; PR opened to `develop`, not merged. |
+| WP-5 | `task/pong-example/wp-5` | AOT gate, docs (roadmap, projects, nativeaot, logging, API guide, README, contributing), full gates, PR. | AOT publish/run headless + windowed; docs check; PR merged to `develop` (2026-10-29, #10). |
 
 ## 10. Acceptance criteria
 
@@ -325,8 +325,8 @@ Sequential; each branch starts from the latest `origin/task/pong-example/common`
 ## 12. As-built evidence
 
 Implemented on `task/pong-example` from `origin/task/pong-example/common` (base `45a69b4` for WP-1;
-the integration head before WP-5 is `4b434c5`). Each work package was merged with `--no-ff` into
-`task/pong-example/common`.
+the integration head before WP-5 was `4b434c5`); each work package was merged with `--no-ff` into
+`task/pong-example/common`; the final PR #10 merged as `0273f58` on 2026-10-29.
 
 | WP | Commits | Merge into `task/pong-example/common` | Delivered |
 | --- | --- | --- | --- |

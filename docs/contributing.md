@@ -1,8 +1,8 @@
 # Contributing
 
 > **Status:** current through M4, the merged D-036/D-037/D-038 asset-processor task
-> (2026-10-27, PR #8), and the Pong example (D-043/D-044; implemented on `task/pong-example`,
-> merged pending). The warning/style/format/AOT gates and the docs link check are
+> (2026-10-27, PR #8), and the Pong example (D-043/D-044; merged 2026-10-29, PR #10).
+> The warning/style/format/AOT gates and the docs link check are
 > active. CI runs the docs link check, build, tests, and format verification on PRs to `develop` and
 > pushes to `develop`; the NativeAOT publish/run gate (`Pong.Desktop --headless` loading the baked
 > Pong pack, and `--windowed --ticks 120`) is a required local gate.
