@@ -9,7 +9,8 @@
 > runtime integration), and the builder-configured bake: a game-owned `MyGame.Assets` executable
 > registers explicit data types and asset processors, bakes on build, and records a schema-3
 > incremental manifest. The project descriptor, generated host, `Bork2d.Bake.Cli`, and
-> `generate-host` are removed. The editor and renderer are target designs for later milestones. Check
+> `generate-host` are removed. The editor and renderer are target designs for later milestones; M6
+> (Vulkan bring-up) has a [spec](specs/m6-vulkan-bringup.md) but is **not implemented**. Check
 > status markers before treating an API as implemented.
 >
 > The [file-processors spec](specs/file-processors.md) owns implementation scope/acceptance; the
@@ -76,6 +77,7 @@ automatically wins. The [decision log](decisions.md) records the accepted choice
 | [File-processors implementation spec](specs/file-processors.md) | implementers | Locked scope, public API, semantics, work packages, tests, acceptance criteria. |
 | [Pong example spec](specs/pong-example.md) | implementers | Pong game/asset contract, work packages, acceptance criteria, and as-built evidence (§12). |
 | [Rendering](architecture/rendering.md) | contributors | Vulkan 1.3, one draw per camera, generated quads, bindless, present. |
+| [M6 spec](specs/m6-vulkan-bringup.md) | implementers | Vulkan bring-up scope, threads, windowed/offscreen clear, work packages, open decisions, acceptance. |
 | [NativeAOT](architecture/nativeaot.md) | contributors | Runtime AOT constraints, generated shapes, local publish gate. |
 | [Logging](architecture/logging.md) | contributors | MEL/ZLogger, `IEngine.LoggerFactory`, default format. |
 | [API guide](api/guide.md) | game developers | Startup, modes, game loop, layers, cameras, sprites, input, assets. |
