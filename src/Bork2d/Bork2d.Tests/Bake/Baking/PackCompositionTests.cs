@@ -26,11 +26,11 @@ public sealed class PackCompositionTests
         using var project = TestBakeProject.Create("composition");
         using var directory = TempBakeDirectory.Create();
         var diagnostics = new BakeDiagnostics();
-        var game = new Bork2d.BakeFixture.GameConfig
+        var game = new Bork2d.Tests.Bake.Baking.GameConfig
         {
             Name = "campaign",
             Health = 7,
-            Stats = new Bork2d.BakeFixture.Stats(1, 2),
+            Stats = new Bork2d.Tests.Bake.Baking.Stats(1, 2),
         };
         byte[] payload = Enumerable.Range(1, 16).Select(value => (byte)value).ToArray();
 
@@ -63,11 +63,11 @@ public sealed class PackCompositionTests
         using var host = new AssetServiceHost(packPath);
         host.Start();
 
-        Bork2d.BakeFixture.GameConfig loaded =
-            await host.Service.LoadAsset<Bork2d.BakeFixture.GameConfig>("data/game");
+        Bork2d.Tests.Bake.Baking.GameConfig loaded =
+            await host.Service.LoadAsset<Bork2d.Tests.Bake.Baking.GameConfig>("data/game");
         Assert.Equal("campaign", loaded.Name);
         Assert.Equal(7, loaded.Health);
-        Assert.Equal(new Bork2d.BakeFixture.Stats(1, 2), loaded.Stats);
+        Assert.Equal(new Bork2d.Tests.Bake.Baking.Stats(1, 2), loaded.Stats);
 
         TextureDescriptor descriptor = await host.Service.LoadAsset<TextureDescriptor>(TexturePath);
         Assert.Equal(PayloadPath, descriptor.Payload.Path);
@@ -116,7 +116,7 @@ public sealed class PackCompositionTests
         var invalid = new PackBuilder(PackCompressionMode.Debug);
         invalid.AddMessagePack(
             "data/game",
-            new Bork2d.BakeFixture.GameConfig
+            new Bork2d.Tests.Bake.Baking.GameConfig
             {
                 Name = "campaign",
                 Texture = "data/missing",
@@ -137,7 +137,7 @@ public sealed class PackCompositionTests
         using var directory = TempBakeDirectory.Create();
         var diagnostics = new BakeDiagnostics();
 
-        var value = new Bork2d.BakeFixture.GameConfig { Name = "campaign" };
+        var value = new Bork2d.Tests.Bake.Baking.GameConfig { Name = "campaign" };
 
         // A non-canonical output path is rejected by PackBuilder when the typed writer runs; the
         // composer converts the writer exception into an internal baker diagnostic.
@@ -163,7 +163,7 @@ public sealed class PackCompositionTests
     private static BoundAsset Custom(string assetPath, object value)
         => new(
             assetPath,
-            typeof(Bork2d.BakeFixture.GameConfig).FullName!,
+            typeof(Bork2d.Tests.Bake.Baking.GameConfig).FullName!,
             value,
             $"Assets/{assetPath}.toml",
             $"{assetPath}.toml",

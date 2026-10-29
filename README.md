@@ -11,21 +11,23 @@ that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets sh
 > runs an uncapped loop; the runtime loads and browses `assets.pck` through the app-scoped asset
 > service. The bake is the game-owned builder flow (D-036/D-037/D-038): a build-time
 > `MyGame.Assets` executable registers explicit data types and asset processors, bakes on build, and
-> records a schema-3 incremental manifest; PPM and Unit are the acceptance processors. There is still
+> records a schema-3 incremental manifest; Pong's `CircleProcessor` is the worked custom processor
+> (the former PPM/Unit fixture processors were removed with the exploratory examples). There is still
 > no renderer (M8), and headless/offscreen keep the one-tick `Setup` → `Tick` → `Teardown` sequence.
 > The project-consolidation refactor (D-041/D-042,
 > [spec](docs/specs/refactor-projects.md)) is merged (2026-10-28, PR #9) and reduces the engine
 > solution to five projects: the public contract and engine implementation live in `Bork2d.Engine`,
-> and the bake tooling lives in `Bork2d.Bake`; the smoke and fixture projects live in the separate
-> examples solution.
+> and the bake tooling lives in `Bork2d.Bake`. The Pong example (D-043/D-044,
+> [spec](docs/specs/pong-example.md)) is implemented on `task/pong-example` (merged pending); it
+> replaces the exploratory smoke/fixture projects with `examples/pong` and is the NativeAOT gate.
 > See the [roadmap](docs/roadmap.md), the
 > [file-processors spec](docs/specs/file-processors.md), and the
 > [asset-processors architecture](docs/architecture/asset-processors.md).
 
 ## Projects
 
-The engine solution is `src/Bork2d/Bork2d.slnx`; the examples (smoke and fixture) live in
-`examples/Bork2d.Examples.slnx`.
+The engine solution is `src/Bork2d/Bork2d.slnx`; the Pong example is
+`examples/pong/Pong.slnx`.
 
 | Project | Role |
 | --- | --- |
@@ -33,17 +35,19 @@ The engine solution is `src/Bork2d/Bork2d.slnx`; the examples (smoke and fixture
 | [`Bork2d.Bake`](src/Bork2d/Bork2d.Bake) | Public JIT builder/processor/command surface plus the internal bake implementation (TOML binder, processors, texture pipeline, pack composition, schema-3 incremental planner). |
 | [`Bork2d.Render`](src/Bork2d/Bork2d.Render) | Vulkan renderer; reference-wired and empty until M6/M8. |
 | [`Bork2d.Runtime`](src/Bork2d/Bork2d.Runtime) | Public builder/host; logging, validation, SDL window/input/time, windowed loop, one-tick modes. |
-| [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite, dependency-matrix/public-surface tests, and the Q-20 metadata guard. |
-| [`Bork2d.AotSmoke`](examples/Bork2d.AotSmoke) | Example NativeAOT smoke: headless one-tick run loading the baked fixture packs (8 main / 9 merged entries) plus `--windowed [--ticks N]` SDL demo; local publish/run gate. |
-| [`Bork2d.BakeFixture`](examples/Bork2d.BakeFixture) | AOT-safe game-side fixture data types (`GameConfig`, `Stats`, `StatsRoot`, `Unit`). |
-| [`Bork2d.BakeFixture.Assets`](examples/Bork2d.BakeFixture.Assets) | Build-only fixture assets executable; owns `Assets/`/`DLC1/`, PPM/Unit processors, and bakes on build. |
+| [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite (907 deterministic + 12 conditional), dependency-matrix/public-surface tests, and the Q-20 metadata guard. |
+| [`Pong.Common`](examples/pong/Pong.Common) | Game library: `GameSettings` (struct root), simulation, AI, title, and `PongGame`; `Bork2d.Engine` only. |
+| [`Pong.Assets`](examples/pong/Pong.Assets) | Build-only assets executable: `Assets/`, `CircleProcessor`, and the `BakeApplicationBuilder` config; bakes the 7-entry `assets.pck`. |
+| [`Pong.Desktop`](examples/pong/Pong.Desktop) | AOT desktop host and the NativeAOT gate: `--headless` smoke and the interactive `--windowed [--ticks N]` example. |
+| [`Pong.Tests`](examples/pong/Pong.Tests) | 20 game tests: simulation/AI/title, bake/load integration, and the headless game. |
 | `Bork2d.Editor` | Planned Avalonia editor library/app (M5); JIT, not in either solution. |
 
 Game developers consume only `Bork2d.Engine` and `Bork2d.Runtime`. `Bork2d.Engine` is grouped by area
 (`Bork2d.Engine.Scene`, `.Rendering`, `.Input`, `.Platform`, `.Assets`); the tooling pack writer lives
-in `Bork2d.Engine.Assets.Pack` and the builder/processor surface in `Bork2d.Bake`. A game solution
-adds `Project.Common`, `MyGame.Assets`, `Project.Desktop`, and `Project.Editor`; those templates are
-M9. `MyGame.Assets` is build-time only and never enters the runtime or AOT publish graph.
+in `Bork2d.Engine.Assets.Pack` and the builder/processor surface in `Bork2d.Bake`. The Pong example
+is the current game solution shape; the M9 template adds `Project.Common`, `MyGame.Assets`,
+`Project.Desktop`, and `Project.Editor`. `MyGame.Assets` is build-time only and never enters the
+runtime or AOT publish graph.
 
 ## Build
 
@@ -52,22 +56,25 @@ dotnet build src/Bork2d/Bork2d.slnx -c Debug
 dotnet build src/Bork2d/Bork2d.slnx -c Release
 dotnet test src/Bork2d/Bork2d.slnx -c Debug
 dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
-dotnet build examples/Bork2d.Examples.slnx -c Debug
-dotnet format examples/Bork2d.Examples.slnx --verify-no-changes --no-restore
+dotnet build examples/pong/Pong.slnx -c Debug
+dotnet test examples/pong/Pong.slnx -c Debug
+dotnet format examples/pong/Pong.slnx --verify-no-changes --no-restore
 ```
 
 Requires the .NET SDK pinned by `global.json` (`11.0.100-rc.1`, target `net11.0`) on Windows.
-Warnings and C# style violations are build errors. The examples solution is not a CI job; the local
-AOT gate exercises its smoke app. The NativeAOT publish/run smoke is a required local gate:
+Warnings and C# style violations are build errors. The Pong solution is not a CI job; the local
+AOT gate exercises its desktop app. The NativeAOT publish/run gate is required locally:
 
 ```powershell
-dotnet publish examples/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
-& examples/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe
-& examples/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed --ticks 120
+dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-x64
+$pong = 'examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe'
+& $pong --headless                 # baked 7-entry pack + one tick
+& $pong --windowed --ticks 120     # windowed gate: exit 0 after exactly 120 ticks
 ```
 
 The windowed run needs a desktop session; `--windowed` without `--ticks` is interactive
-(Escape/close). The opt-in real-window tests use the same SDL2 native:
+(Escape/close; the window is black until the M8 renderer). The opt-in real-window tests use the same
+SDL2 native:
 
 ```powershell
 $env:BORK2D_RUN_WINDOW_TESTS = '1'
@@ -115,4 +122,4 @@ Start at the [documentation index](docs/README.md).
   same object later. No entity `Dispose`/`IsAlive`, IDs, or ordered discovery.
 - Layers are `[Flags]` bits; absolute units, Y-up; `Camera.Size` is half the visible height.
 - Warnings-as-errors, style-as-errors, `dotnet format`, the docs link check, and the local AOT
-  smoke are the quality gate.
+  gate are the quality gate.

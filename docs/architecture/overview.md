@@ -1,6 +1,7 @@
 # Architecture Overview
 
-> **Status:** M1–M4 are merged into `develop`; **D-036/D-037/D-038 are merged (2026-10-27, PR #8).**
+> **Status:** M1–M4 are merged into `develop`; **D-036/D-037/D-038 are merged (2026-10-27, PR #8)**
+> and the Pong example (D-043/D-044) is implemented on `task/pong-example` (merged pending).
 > The builder, validation, windowed SDL host
 > (window/input/time/loop), one-tick headless/offscreen host, scene graph, logging, asset pipeline,
 > builder-configured bake, and AOT baseline are `Current`; the editor (M5), Vulkan and frame handoff
@@ -166,7 +167,8 @@ Source file types are registered processors (D-036).
 - [Threading and frame handoff](threading.md) — bounded run-ahead and the snapshot ring.
 - [Assets and tooling](assets-and-tooling.md) — `assets.pck`, overlays, sprites, editor, bake.
 - [Asset processors and `MyGame.Assets`](asset-processors.md) — target processor contract,
-  sidecars, builder/no descriptor, PPM/Unit tests.
+  sidecars, builder/no descriptor, and Pong's `CircleProcessor` example.
+- [Pong example](../specs/pong-example.md) — the living game and AOT gate.
 - [Rendering](rendering.md) — windowed/offscreen Vulkan and the one-draw contract.
 - [Logging](logging.md) — ZLogger and `IEngine.LoggerFactory`.
 - [NativeAOT](nativeaot.md) — runtime constraints and source generation.

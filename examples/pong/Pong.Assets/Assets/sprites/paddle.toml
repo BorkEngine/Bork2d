@@ -1,0 +1,8 @@
+texture = "art/paddle"
+uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
+scale = 64.0
+pivot = [0.5, 0.5]
+topology = "quad"
+
+[bork2d]
+type = "Bork2d.Engine.Assets.SpriteAsset"

@@ -6,10 +6,11 @@
 > The windowed platform logs startup/stop/commands/failures, the runtime host logs the loop stop
 > with ticks and elapsed time, and the asset service logs start/overlay/error/stop events; there is
 > no per-frame or per-asset-per-tick logging. Configuration is identical in all modes, and the
-> default path runs in the AOT smoke (headless with a pack and `--windowed`) with zero trim/AOT
-> warnings. The suite is 954 tests (942 deterministic plus 12 opt-in/conditional). The
-> project-consolidation refactor (D-041/D-042) renamed the engine categories to `Bork2d.Engine` and
-> `Bork2d.Engine.Assets`; `Bork2d.Runtime` and `Bork2d.Render` are unchanged.
+> default path runs in the AOT gate (`Pong.Desktop`, headless with the baked pack and `--windowed`)
+> with zero trim/AOT warnings. The suite is 919 tests (907 deterministic plus 12 opt-in/conditional).
+> The project-consolidation refactor (D-041/D-042) renamed the engine categories to `Bork2d.Engine` and
+> `Bork2d.Engine.Assets`; `Bork2d.Runtime` and `Bork2d.Render` are unchanged. The Pong example
+> (D-043/D-044) owns the game-side title/logging behavior.
 
 ## 1. Surface
 
@@ -142,9 +143,9 @@ The startup and loop-stop lines at 150% display scaling look like:
 ```
 
 A normal shutdown therefore ends with the loop-stop line followed by the platform-stop line; both
-are one-shot, Information, and carry no per-frame data. The M2 `--windowed` AOT demo logs its
-setup/teardown/tick-limit summaries through the same default path; game input transitions are
-Information-level events (they occur on a transition, never once per frame).
+are one-shot, Information, and carry no per-frame data. The Pong `--windowed` AOT run logs its
+setup/teardown through the same default path; game input transitions are Information-level events
+(they occur on a transition, never once per frame), and the window title carries the score/prompt.
 
 ### 5.2 Asset service (M3)
 
@@ -169,14 +170,14 @@ A default headless run with a five-entry pack looks like:
 2026-10-26 16:11:58.721 [Information] Bork2d.Engine.Assets: Asset service stopped: pending 0, canceled 0, mounted packs 1.
 ```
 
-The `WithoutAssets()` mode logs `mode Empty` with zero entries and the same start/stop lines. The
-AOT smoke's default run exercises these lines through the default logging path without trim/AOT
-warnings.
+The `WithoutAssets()` mode logs `mode Empty` with zero entries and the same start/stop lines. Pong's
+headless AOT run exercises these lines through the default logging path without trim/AOT warnings,
+and its `PongGame` category logs setup/teardown and score/state transitions at Information.
 
 ## 6. NativeAOT
 
 - Microsoft.Extensions.Logging is trim/AOT-friendly; the ZLogger console provider is validated
-  under `PublishAot` by `Bork2d.AotSmoke` with zero trim/AOT warnings.
+  under `PublishAot` by `Pong.Desktop` with zero trim/AOT warnings.
 - No runtime reflection-based provider discovery; providers are configured explicitly.
 - Source-generated log methods (`[LoggerMessage]`) are optional but encouraged for hot or
   high-volume messages. If ZLogger or a provider becomes AOT-incompatible, isolate it in the

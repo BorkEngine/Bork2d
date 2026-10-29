@@ -4,7 +4,7 @@
         Bork2d.Assets.targets - MSBuild integration for a game-owned assets executable.
 
         Import this file from the assets executable project (for example MyGame.Assets or
-        Bork2d.BakeFixture.Assets). The executable owns the pack paths, roots, texture defaults,
+        Pong.Assets). The executable owns the pack paths, roots, texture defaults,
         explicit data-type registrations, and processors, so MSBuild needs no pack-path property and
         there is no project descriptor and no generated host.
 

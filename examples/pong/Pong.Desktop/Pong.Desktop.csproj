@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <IsPackable>false</IsPackable>
+        <PublishAot>true</PublishAot>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <!--
+            Narrow AOT-publisher suppression. Silk.NET.Core.Loader.DefaultPathResolver (reached via
+            Sdl.GetApi()) probes Assembly.Location/CodeBase/DependencyContext for native-library
+            candidates; ILC reports those single-file probes as IL3000/IL3002. Bork2d's SDL2 native
+            ships from Silk.NET.SDL and is resolved by the runtime's normal native-asset lookup, so
+            the flagged fallback paths are not used. Only these two trim codes are suppressed, and
+            only in this AOT publisher (the Pong desktop app is the AOT gate too).
+            Remove the suppression when Silk.NET stops probing those APIs.
+        -->
+        <NoWarn>$(NoWarn);IL3000;IL3002</NoWarn>
+    </PropertyGroup>
+
+    <!--
+        The assets executable is a build-time dependency only. The imported copy target builds it
+        out of process, bakes assets.pck next to its own executable, and asks it to copy the pack
+        to this app's output and publish directories. It is deliberately not a ProjectReference:
+        the SDK copies an executable reference's apphost, deps.json, and runtimeconfig.json
+        transitively and rejects a self-contained AOT app referencing a JIT executable. Neither
+        the builder nor the assets executable enters this app's compile or publish graph.
+    -->
+    <PropertyGroup>
+        <Bork2dAssetsProjectDirectory>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\Pong.Assets'))</Bork2dAssetsProjectDirectory>
+        <Bork2dAssetsProjectFile>$(Bork2dAssetsProjectDirectory)\Pong.Assets.csproj</Bork2dAssetsProjectFile>
+        <Bork2dAssetsExecutable>$(Bork2dAssetsProjectDirectory)\bin\$(Configuration)\net11.0\Pong.Assets.dll</Bork2dAssetsExecutable>
+        <Bork2dAssetsTargetFramework>net11.0</Bork2dAssetsTargetFramework>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\..\src\Bork2d\Bork2d.Runtime\Bork2d.Runtime.csproj" />
+        <ProjectReference Include="..\Pong.Common\Pong.Common.csproj" />
+    </ItemGroup>
+
+    <!-- Tooling only: imported, never referenced. -->
+    <Import Project="..\..\..\build\Bork2d.Assets.Copy.targets" />
+
+</Project>

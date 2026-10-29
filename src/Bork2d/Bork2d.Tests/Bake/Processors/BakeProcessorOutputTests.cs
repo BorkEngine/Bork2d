@@ -31,10 +31,10 @@ public sealed class BakeProcessorOutputTests
                     {
                         context.Outputs.AddAsset(
                             context.BaseAssetPath,
-                            new Bork2d.BakeFixture.StatsRoot(11, 13));
+                            new Bork2d.Tests.Bake.Baking.StatsRoot(11, 13));
                         context.Outputs.AddAsset(
                             context.BaseAssetPath + "-alt",
-                            new Bork2d.BakeFixture.StatsRoot(1, 2));
+                            new Bork2d.Tests.Bake.Baking.StatsRoot(1, 2));
                         context.Outputs.AddData(
                             context.BaseAssetPath + "-raw",
                             "hello"u8);
@@ -50,7 +50,7 @@ public sealed class BakeProcessorOutputTests
 
         BakeProcessorOutput asset = Assert.Single(outputs, output => output.Path == "data/archer");
         Assert.False(asset.IsRaw);
-        Assert.Equal(typeof(Bork2d.BakeFixture.StatsRoot).FullName, asset.TypeName);
+        Assert.Equal(typeof(Bork2d.Tests.Bake.Baking.StatsRoot).FullName, asset.TypeName);
         Assert.NotNull(asset.Write);
 
         BakeProcessorOutput alt = Assert.Single(outputs, output => output.Path == "data/archer-alt");
@@ -75,7 +75,7 @@ public sealed class BakeProcessorOutputTests
                     {
                         context.Outputs.AddAsset(
                             context.BaseAssetPath,
-                            new Bork2d.BakeFixture.StatsRoot(21, 34));
+                            new Bork2d.Tests.Bake.Baking.StatsRoot(21, 34));
                         context.Outputs.AddData(context.BaseAssetPath + "-raw", [9, 8, 7]);
                     }),
             ]);
@@ -99,9 +99,9 @@ public sealed class BakeProcessorOutputTests
         using var host = new AssetServiceHost(directory.FullPath("assets.pck"));
         host.Start();
 
-        Bork2d.BakeFixture.StatsRoot value =
-            await host.Service.LoadAsset<Bork2d.BakeFixture.StatsRoot>("data/archer");
-        Assert.Equal(new Bork2d.BakeFixture.StatsRoot(21, 34), value);
+        Bork2d.Tests.Bake.Baking.StatsRoot value =
+            await host.Service.LoadAsset<Bork2d.Tests.Bake.Baking.StatsRoot>("data/archer");
+        Assert.Equal(new Bork2d.Tests.Bake.Baking.StatsRoot(21, 34), value);
         Assert.Equal(new byte[] { 9, 8, 7 }, await host.Service.LoadData("data/archer-raw"));
     }
 
@@ -117,7 +117,7 @@ public sealed class BakeProcessorOutputTests
                     "stats",
                     context => context.Outputs.AddAsset(
                         "other/path",
-                        new Bork2d.BakeFixture.StatsRoot(1, 2))),
+                        new Bork2d.Tests.Bake.Baking.StatsRoot(1, 2))),
             ]);
         project.WriteAssetBytes("data/archer.stats", [1]);
 
@@ -170,10 +170,10 @@ public sealed class BakeProcessorOutputTests
                     {
                         context.Outputs.AddAsset(
                             context.BaseAssetPath,
-                            new Bork2d.BakeFixture.StatsRoot(1, 2));
+                            new Bork2d.Tests.Bake.Baking.StatsRoot(1, 2));
                         context.Outputs.AddAsset(
                             context.BaseAssetPath,
-                            new Bork2d.BakeFixture.StatsRoot(3, 4));
+                            new Bork2d.Tests.Bake.Baking.StatsRoot(3, 4));
                     }),
             ]);
         project.WriteAssetBytes("data/archer.stats", [1]);
@@ -208,7 +208,7 @@ public sealed class BakeProcessorOutputTests
 
                         context.Outputs.AddAsset(
                             context.BaseAssetPath,
-                            new Bork2d.BakeFixture.StatsRoot(1, 2));
+                            new Bork2d.Tests.Bake.Baking.StatsRoot(1, 2));
                     }),
             ]);
         project.WriteAssetBytes("data/archer.stats", [1]);
@@ -241,7 +241,7 @@ public sealed class BakeProcessorOutputTests
                     {
                         context.Outputs.AddAsset(
                             context.BaseAssetPath,
-                            new Bork2d.BakeFixture.StatsRoot(1, 2));
+                            new Bork2d.Tests.Bake.Baking.StatsRoot(1, 2));
                         context.Diagnostics.Error("BK7101", "the source is invalid");
                     }),
             ]);
@@ -272,7 +272,7 @@ public sealed class BakeProcessorOutputTests
                     {
                         context.Outputs.AddAsset(
                             context.BaseAssetPath,
-                            new Bork2d.BakeFixture.StatsRoot(1, 2));
+                            new Bork2d.Tests.Bake.Baking.StatsRoot(1, 2));
                         context.Diagnostics.Warning("BK7102", "just a note");
                     }),
             ]);
@@ -311,7 +311,7 @@ public sealed class BakeProcessorOutputTests
             "stats",
             context => context.Outputs.AddAsset(
                 context.BaseAssetPath,
-                new Bork2d.BakeFixture.StatsRoot(1, 2)));
+                new Bork2d.Tests.Bake.Baking.StatsRoot(1, 2)));
         using var project = TestBakeProject.Create("outputs-reuse", processors: [processor]);
         project.WriteAssetBytes("data/archer.stats", [1]);
         project.WriteAssetBytes("data/knight.stats", [2]);
@@ -332,7 +332,7 @@ public sealed class BakeProcessorOutputTests
             _ => new TestSidecar { Value = 7 },
             (context, sidecar) => context.Outputs.AddAsset(
                 context.BaseAssetPath,
-                new Bork2d.BakeFixture.StatsRoot(sidecar.Value, sidecar.Value + 1)));
+                new Bork2d.Tests.Bake.Baking.StatsRoot(sidecar.Value, sidecar.Value + 1)));
         using var project = TestBakeProject.Create("outputs-sidecar", processors: [processor]);
         project.WriteAssetBytes("data/archer.unit", [1]);
         project.WriteAsset("data/archer.unit.toml", "value = 12\n");
@@ -343,7 +343,7 @@ public sealed class BakeProcessorOutputTests
         Assert.Empty(diagnostics.GetSorted());
         BakeProcessorOutput output = Assert.Single(outputs);
         Assert.Equal("data/archer", output.Path);
-        Assert.Equal(typeof(Bork2d.BakeFixture.StatsRoot).FullName, output.TypeName);
+        Assert.Equal(typeof(Bork2d.Tests.Bake.Baking.StatsRoot).FullName, output.TypeName);
     }
 
     [Fact]
@@ -355,7 +355,7 @@ public sealed class BakeProcessorOutputTests
             _ => new TestSidecar { Value = 5 },
             (context, sidecar) => context.Outputs.AddAsset(
                 context.BaseAssetPath,
-                new Bork2d.BakeFixture.StatsRoot(sidecar.Value, 0)));
+                new Bork2d.Tests.Bake.Baking.StatsRoot(sidecar.Value, 0)));
         using var directory = TempBakeDirectory.Create();
         string sourceDirectory = directory.CreateDirectory("Assets/art");
         File.WriteAllBytes(Path.Combine(sourceDirectory, "player.png"), [1, 2, 3]);

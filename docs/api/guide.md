@@ -1,7 +1,8 @@
 # API Guide
 
-> **Status:** implemented through M4 and the D-036/D-037/D-038 asset-processor task merged into
-> `develop` (2026-10-27, PR #8). M1 (foundation), M2 (SDL windowed host), and M3 (pack, VFS,
+> **Status:** implemented through M4, the D-036/D-037/D-038 asset-processor task merged into
+> `develop` (2026-10-27, PR #8), and the Pong example (D-043/D-044; implemented on
+> `task/pong-example`, merged pending). M1 (foundation), M2 (SDL windowed host), and M3 (pack, VFS,
 > runtime integration) exist in `Bork2d.Runtime`/`Bork2d.Engine` and are merged into `develop`.
 > `Build()` validates and `Run()` runs the uncapped windowed loop (window, input, time) or the
 > one-tick headless/offscreen sequence, opening the base pack (or the `WithoutAssets()` empty
@@ -11,16 +12,21 @@
 > Assets/processors are configured in a build-time `MyGame.Assets` executable with
 > `BakeApplicationBuilder`; the project descriptor and generated host are removed, data types are
 > registered explicitly, and source file types are registered processors. Runtime game code still
-> references only `Bork2d.Engine`/`Bork2d.Runtime`. Implementation scope:
-> [file-processors spec](../specs/file-processors.md).
+> references only `Bork2d.Engine`/`Bork2d.Runtime`. The Pong example (`examples/pong`) is the worked
+> end-to-end game and the AOT gate. Implementation scope:
+> [file-processors spec](../specs/file-processors.md); Pong:
+> [Pong spec](../specs/pong-example.md).
 
 ## 1. What you reference
 
+The Pong example is the current worked instance; the M9 template uses the generic names in
+parentheses.
+
 | Project | References | Contains |
 | --- | --- | --- |
-| `Project.Common` | `Bork2d.Engine` only | Gameplay classes and runtime `[GenerateShape]` data types. |
-| `MyGame.Assets` | `Bork2d.Bake` + `Project.Common` | Build-time executable: asset roots, processors, `BakeApplicationBuilder` config, CLI; bakes on build. |
-| `Project.Desktop` | `Bork2d.Runtime` + `Project.Common`; build-only `MyGame.Assets` | Entry point that builds and runs the app. |
+| `Pong.Common` (`Project.Common`) | `Bork2d.Engine` only | Gameplay classes and runtime `[GenerateShape]` data types: `PongGame`, `PongSimulation`, `PongAi`, `PongTitle`, `PongSide`, `GameSettings`. |
+| `Pong.Assets` (`MyGame.Assets`) | `Bork2d.Bake` + `Pong.Common` | Build-time executable: asset roots, processors (`CircleProcessor`), `BakeApplicationBuilder` config, CLI; bakes on build. |
+| `Pong.Desktop` (`Project.Desktop`) | `Bork2d.Runtime` + `Pong.Common`; build-only `Pong.Assets` | Entry point that builds and runs the app; the NativeAOT gate. |
 | `Project.Editor` (M5) | `Bork2d.Editor` + `Project.Common` | Thin Avalonia editor host. |
 
 Do not reference `Bork2d.Render` from runtime game code; it is an implementation detail
@@ -93,23 +99,31 @@ the `ILoggingBuilder`, owns provider configuration, and the app disposes the fac
 `Setup`; the factory is not available in the game constructor. See
 [Logging](../architecture/logging.md).
 
-### Windowed AOT demo
+### Pong example (AOT host)
 
-`Bork2d.AotSmoke` is the reference windowed host. With no arguments it runs the headless one-tick
-smoke against the baked fixture packs (8 main / 9 merged entries); the demo is opt-in and
-NativeAOT-published:
+`Pong.Desktop` is the reference game host and the NativeAOT gate. `--headless` runs the one-tick
+acceptance smoke against the baked 7-entry pack; the windowed runs are the playable example:
 
 ```powershell
-dotnet publish examples/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64 --nologo
-& examples/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed
-& examples/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe --windowed --ticks 120
+dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-x64 --nologo
+& examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe --headless
+& examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe --windowed
+& examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe --windowed --ticks 120
 ```
 
-The interactive demo creates a camera/transform/sprite tree, moves the transform with WASD or the
-arrow keys using `ITime.DeltaTime`, logs input transitions and text rather than every frame, and
-exits on Escape (`IEngine.Exit()`) or the window close button. `--ticks N` exits with code 0 after
-exactly `N` completed ticks and is the automated acceptance run; `--ticks` requires `--windowed`
-and `N >= 1`. Invalid or unknown arguments print usage and exit with code 2.
+- `--headless`: loads `AppContext.BaseDirectory/assets.pck`, constructs `PongGame`, runs one
+  headless tick, asserts setup/tick/teardown, the 7 pack entries, the settings/sprites/textures/raw
+  byte counts and tints, then exits 0.
+- `--windowed` (or no arguments): interactive 1280×720 resizable window. `W`/`S` move the left
+  paddle, `Space` pauses/resumes, `R` resets the match, `Escape` exits; the right paddle is AI.
+- `--windowed --ticks N`: automated acceptance; exits 0 after exactly `N` completed ticks. `--ticks`
+  requires `--windowed` and `N >= 1`; invalid or unknown arguments print usage and exit with code 2.
+- The window title carries the score and state/prompt
+  (`Pong - 3 : 2 - Serving...`, `Pong - 3 : 2 - Paused - Space to resume`,
+  `Pong - 11 : 7 - Left wins - R to restart, Esc to quit`); scores, pause, match end, and setup are
+  logged at Information, never per frame.
+- **Rendering is still M8:** the window is intentionally black. Sprites, camera, and layers are
+  wired, so the example becomes visibly rendered when the renderer lands.
 
 ## 3. Write a game
 
@@ -473,7 +487,7 @@ return await new BakeApplicationBuilder()
     .RegisterAsset<LevelTuning>()
     .UseDefaultProcessors()                    // built-in texture processor
     .WithTextureDefaults(TextureFilter.Linear, TextureWrap.Clamp)
-    .AddProcessor(new PpmProcessor())
+    .AddProcessor(new CircleProcessor())         // game processor (Pong's .circle source)
     .Build()
     .RunAsync(args);
 ```
@@ -561,60 +575,76 @@ type = "MyGame.Data.GameConfig"
 
 ### Asset processors and `MyGame.Assets`
 
-`Status: Current (D-036/D-037/D-038).`
+`Status: Current (D-036/D-037/D-038); the Pong example's CircleProcessor is the worked instance.`
 
-A non-TOML source type is handled by a processor registered in `MyGame.Assets`. The processor
-declares extensions, a sidecar policy, a `[GenerateShape]` sidecar type when it needs settings, and
-code that emits shaped asset instances and optional raw data (the engine serializes MessagePack):
+A non-TOML source type is handled by a processor registered in the assets executable. The processor
+declares extensions and a sidecar policy, and emits shaped asset instances and optional raw data
+(the engine serializes MessagePack). Pong's sidecar-less processor:
 
 ```csharp
-[GenerateShape]
-public sealed partial class UnitSidecar
+using System.Text.Json;
+using Bork2d.Bake;
+using Bork2d.Engine.Assets;
+using PolyType;
+
+internal sealed class CircleProcessor : IAssetProcessor
 {
-    public string? Name { get; set; }
-}
+    public string Name => "circle";
+    public IReadOnlyList<string> Extensions => ["circle"];
+    public SidecarPolicy Policy => SidecarPolicy.None;
+    public ITypeShape? SidecarShape => null;
 
-public sealed class UnitProcessor : AssetProcessor<UnitSidecar>
-{
-    public override IReadOnlyList<string> Extensions => ["unit"];
-
-    // Called only when archer.unit.toml does not exist.
-    protected override UnitSidecar CreateDefaultSidecar(AssetProcessorContext context)
-        => new() { Name = context.SourceFileNameWithoutExtension };
-
-    protected override void Process(AssetProcessorContext context, UnitSidecar sidecar)
+    public void Process(AssetProcessorContext context)
     {
-        var json = ParseJson(context.SourcePath); // pseudo-helper; processor-owned JSON
-        string name = string.IsNullOrWhiteSpace(sidecar.Name)
-            ? context.SourceFileNameWithoutExtension
-            : sidecar.Name;
+        // The processor owns its JSON (no sidecar); bad input is BK7001/BK7002.
+        CircleValues values = ParseCircle(context.SourcePath);
+        byte[] rgba8 = RenderCircle(values.Resolution, values.Size);
+
         context.Outputs.AddAsset(
             context.BaseAssetPath,
-            new Unit(name, json.Health, json.Attack)); // Unit is [GenerateShape] in Project.Common
+            new TextureDescriptor
+            {
+                Payload = context.BaseAssetPath + "-raw",
+                Width = (uint)values.Resolution,
+                Height = (uint)values.Resolution,
+                Format = TextureFormat.Rgba8,
+                Filter = TextureFilter.Linear,
+                Wrap = TextureWrap.Clamp,
+            });
+        context.Outputs.AddData(context.BaseAssetPath + "-raw", rgba8);
     }
 }
 ```
 
-```json
-{
-    "Health": 50,
-    "Attack": 20
-}
-```
-
-```toml
-# Assets/data/archer.unit.toml (created with name = "archer" if missing)
-name = "archer"
-```
+When a processor needs settings, derive from `AssetProcessor<TSidecar>` and give the sidecar a
+`[GenerateShape]` type; a `Required` policy creates `<source>.toml` once through
+`CreateDefaultSidecar` when it is missing:
 
 ```csharp
 [GenerateShape]
-public readonly partial record struct Unit(string Name, int Health, int Attack);
+public sealed partial class MySidecar
+{
+    public string? Name { get; set; }
+}
+
+public sealed class MyProcessor : AssetProcessor<MySidecar>
+{
+    public override IReadOnlyList<string> Extensions => ["myext"];
+
+    protected override MySidecar CreateDefaultSidecar(AssetProcessorContext context)
+        => new() { Name = context.SourceFileNameWithoutExtension };
+
+    protected override void Process(AssetProcessorContext context, MySidecar sidecar)
+    {
+        // MyAsset is [GenerateShape] in Project.Common.
+        context.Outputs.AddAsset(context.BaseAssetPath, new MyAsset(sidecar.Name));
+    }
+}
 ```
 
 - A processor may emit any number of outputs. The output path is base-path-derived
-  (`data/archer`); a processor may add `-suffix` outputs such as a raw payload, but it cannot write
-  outside its source's base path.
+  (`textures/ball`, `data/myasset`); a processor may add `-suffix` outputs such as a raw payload,
+  but it cannot write outside its source's base path.
 - `AddAsset<T>` supplies a typed instance; the engine serializes it as MessagePack. `AddData` is only
   for opaque raw bytes. A processor never serializes MessagePack or calls `PackBuilder`.
 - The built-in PNG/JPG/JPEG/BMP/TGA importer is a processor registered automatically. A later
@@ -627,7 +657,8 @@ public readonly partial record struct Unit(string Name, int Health, int Attack);
   `None` has no sidecar. There is no optional-without-file policy.
 - Processor errors use `BK7xxx`; sidecar binding errors use `BK2xxx`; texture decode/probe errors
   remain `BK4xxx`.
-- The full contract is in [asset processors](../architecture/asset-processors.md).
+- The full contract, including Pong's `CircleProcessor`, is in
+  [asset processors](../architecture/asset-processors.md).
 
 ### Building a pack (tooling only)
 
@@ -689,10 +720,11 @@ builder.Write("assets.pck"); // overwrites; relative paths resolve against the c
   and not shipped with the game.
 - `partial` on a `[GenerateShape]` type is PolyType's rule, not a Bork2d attribute; a missing shape
   is a compile-time error. There is no runtime TOML, reflection serializer, or bake reference.
-- The runtime libraries are `IsAotCompatible`; AOT publish/run is a required local gate. The
-  default AOT smoke loads the baked fixture packs (class root, struct root through
-  `AssetRef<StatsRoot>`, sprite, texture/PPM descriptors, exact raw payloads, and the Unit), asserts
-  8 main / 9 merged entries, and exits 0; the windowed demo uses `WithoutAssets()`.
+- The runtime libraries are `IsAotCompatible`; AOT publish/run is a required local gate.
+  `Pong.Desktop --headless` loads the baked 7-entry pack (the `GameSettings` struct root with
+  `AssetRef<SpriteAsset>` links, the paddle/ball sprites and descriptors, exact raw payloads, and the
+  tints) and exits 0; `--windowed --ticks 120` runs the same pack and exits 0. The window stays black
+  until the M8 renderer.
 
 See [NativeAOT](../architecture/nativeaot.md).
 

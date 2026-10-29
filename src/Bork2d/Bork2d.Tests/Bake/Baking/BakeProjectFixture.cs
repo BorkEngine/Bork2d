@@ -60,7 +60,7 @@ public static class BakeProjectFixture
         defense = 7
 
         [bork2d]
-        type = "Bork2d.BakeFixture.GameConfig"
+        type = "Bork2d.Tests.Bake.Baking.GameConfig"
         """;
 
     /// <summary>The standard struct-root source.</summary>
@@ -69,7 +69,7 @@ public static class BakeProjectFixture
         defense = 13
 
         [bork2d]
-        type = "Bork2d.BakeFixture.StatsRoot"
+        type = "Bork2d.Tests.Bake.Baking.StatsRoot"
         """;
 
     /// <summary>The standard sprite source.</summary>
@@ -115,8 +115,8 @@ public static class BakeProjectFixture
         if (registerFixtureTypes)
         {
             builder
-                .RegisterAsset<Bork2d.BakeFixture.GameConfig>()
-                .RegisterAsset<Bork2d.BakeFixture.StatsRoot>();
+                .RegisterAsset<Bork2d.Tests.Bake.Baking.GameConfig>()
+                .RegisterAsset<Bork2d.Tests.Bake.Baking.StatsRoot>();
         }
 
         // Defaults first: a later custom processor overrides the built-in texture processor for a

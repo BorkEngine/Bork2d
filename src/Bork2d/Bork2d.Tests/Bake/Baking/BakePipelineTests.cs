@@ -52,14 +52,14 @@ public sealed class BakePipelineTests
         using var host = new AssetServiceHost(packPath);
         host.Start();
 
-        Bork2d.BakeFixture.GameConfig config =
-            await host.Service.LoadAsset<Bork2d.BakeFixture.GameConfig>(BakeProjectFixture.GamePath);
+        Bork2d.Tests.Bake.Baking.GameConfig config =
+            await host.Service.LoadAsset<Bork2d.Tests.Bake.Baking.GameConfig>(BakeProjectFixture.GamePath);
         Assert.Equal("campaign", config.Name);
         Assert.Equal(120, config.Health);
         Assert.Equal(4, config.MaxPlayers);
         Assert.Equal("present", config.Must);
         Assert.Null(config.DebugLabel);
-        Assert.Equal(new Bork2d.BakeFixture.Stats(3, 7), config.Stats);
+        Assert.Equal(new Bork2d.Tests.Bake.Baking.Stats(3, 7), config.Stats);
         Assert.Equal(new Color(1f, 0.5f, 0.25f, 1f), config.Tint);
         Assert.Equal(BakeProjectFixture.TexturePath, config.Texture.Path);
 
@@ -80,12 +80,12 @@ public sealed class BakePipelineTests
         Assert.Equal(SpriteTopology.Triangles, sprite.Topology);
         Assert.Equal(new ushort[] { 0, 1, 2, 0, 2, 3 }, sprite.Indices);
 
-        Bork2d.BakeFixture.StatsRoot stats =
-            await host.Service.LoadAsset<Bork2d.BakeFixture.StatsRoot>(BakeProjectFixture.StatsPath);
-        Assert.Equal(new Bork2d.BakeFixture.StatsRoot(11, 13), stats);
+        Bork2d.Tests.Bake.Baking.StatsRoot stats =
+            await host.Service.LoadAsset<Bork2d.Tests.Bake.Baking.StatsRoot>(BakeProjectFixture.StatsPath);
+        Assert.Equal(new Bork2d.Tests.Bake.Baking.StatsRoot(11, 13), stats);
 
-        var statsReference = new AssetRef<Bork2d.BakeFixture.StatsRoot>(BakeProjectFixture.StatsPath);
-        Bork2d.BakeFixture.StatsRoot referenced = await host.Service.LoadAsset(statsReference);
+        var statsReference = new AssetRef<Bork2d.Tests.Bake.Baking.StatsRoot>(BakeProjectFixture.StatsPath);
+        Bork2d.Tests.Bake.Baking.StatsRoot referenced = await host.Service.LoadAsset(statsReference);
         Assert.Equal(stats, referenced);
 
         Assert.True(host.Service.Exists(BakeProjectFixture.TexturePath));
@@ -215,7 +215,7 @@ public sealed class BakePipelineTests
             defense = 5
 
             [bork2d]
-            type = "Bork2d.BakeFixture.StatsRoot"
+            type = "Bork2d.Tests.Bake.Baking.StatsRoot"
             """);
         using var directory = TempBakeDirectory.Create();
 
@@ -226,7 +226,7 @@ public sealed class BakePipelineTests
         Assert.Contains(
             result.Entries,
             entry => entry.Path == "textures/notes"
-                && entry.TypeName == "Bork2d.BakeFixture.StatsRoot");
+                && entry.TypeName == "Bork2d.Tests.Bake.Baking.StatsRoot");
         Assert.DoesNotContain(
             result.Entries,
             entry => entry.Path == "textures/notes-raw");
@@ -246,7 +246,7 @@ public sealed class BakePipelineTests
             must = "m"
 
             [bork2d]
-            type = "Bork2d.BakeFixture.GameConfig"
+            type = "Bork2d.Tests.Bake.Baking.GameConfig"
             """);
         using var directory = TempBakeDirectory.Create();
         string packPath = directory.FullPath("assets.pck");
@@ -275,7 +275,7 @@ public sealed class BakePipelineTests
             defense = 4
 
             [bork2d]
-            type = "Bork2d.BakeFixture.StatsRoot"
+            type = "Bork2d.Tests.Bake.Baking.StatsRoot"
             """);
         using var directory = TempBakeDirectory.Create();
         string packPath = directory.FullPath("assets.pck");
@@ -330,7 +330,7 @@ public sealed class BakePipelineTests
             attack = "strong"
 
             [bork2d]
-            type = "Bork2d.BakeFixture.GameConfig"
+            type = "Bork2d.Tests.Bake.Baking.GameConfig"
             """);
 
         BakeResult firstRun = RunBake(project.Project, project.FullPath("out-first"));
@@ -373,7 +373,7 @@ public sealed class BakePipelineTests
         },
     };
 
-    private const string TypeTable = "\n[bork2d]\ntype = \"Bork2d.BakeFixture.GameConfig\"\n";
+    private const string TypeTable = "\n[bork2d]\ntype = \"Bork2d.Tests.Bake.Baking.GameConfig\"\n";
 
     private static BakeResult RunBake(BakeProject project, string outputRoot, bool check = false)
         => BakePipeline.Run(

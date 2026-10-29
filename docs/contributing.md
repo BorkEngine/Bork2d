@@ -1,21 +1,21 @@
 # Contributing
 
-> **Status:** current through M4 and the merged D-036/D-037/D-038 asset-processor task
-> (2026-10-27, PR #8). The warning/style/format/AOT gates and the docs link check are
+> **Status:** current through M4, the merged D-036/D-037/D-038 asset-processor task
+> (2026-10-27, PR #8), and the Pong example (D-043/D-044; implemented on `task/pong-example`,
+> merged pending). The warning/style/format/AOT gates and the docs link check are
 > active. CI runs the docs link check, build, tests, and format verification on PRs to `develop` and
-> pushes to `develop`; the NativeAOT publish/run smoke (headless loading the **baked fixture packs**,
-> and windowed) is a required local gate.
+> pushes to `develop`; the NativeAOT publish/run gate (`Pong.Desktop --headless` loading the baked
+> Pong pack, and `--windowed --ticks 120`) is a required local gate.
 >
-> The docs and gates cover `Bork2d.Bake`, the build-time
-> `MyGame.Assets`/`Bork2d.BakeFixture.Assets` executables, explicit `RegisterAsset<T>()`
-> registrations, the PPM/Unit processors, and the schema-3 incremental bake. There is no project
-> descriptor, generated host, or `Bork2d.Bake.Cli`. The local AOT gate loads packs baked by the
-> fixture assets executable; no builder/processor assembly enters the publish. Implementation scope:
-> [file-processors spec](specs/file-processors.md). The project-consolidation refactor
-> (D-041/D-042, [spec](specs/refactor-projects.md)) is merged (2026-10-28, PR #9); it moved the
-> engine contract/implementation into `Bork2d.Engine`, merged the bake tooling into `Bork2d.Bake`,
-> and moved the smoke/fixture projects to `examples/Bork2d.Examples.slnx`; CI does not build that
-> examples solution.
+> The docs and gates cover `Bork2d.Bake`, the build-time `MyGame.Assets`/`Pong.Assets` executables,
+> explicit `RegisterAsset<T>()` registrations, Pong's `CircleProcessor`, and the schema-3 incremental
+> bake. There is no project descriptor, generated host, or `Bork2d.Bake.Cli`. The local AOT gate
+> loads the pack baked by the Pong assets executable; no builder/processor assembly enters the
+> publish. Implementation scope: [file-processors spec](specs/file-processors.md). The
+> project-consolidation refactor (D-041/D-042, [spec](specs/refactor-projects.md)) is merged
+> (2026-10-28, PR #9); it moved the engine contract/implementation into `Bork2d.Engine`, merged the
+> bake tooling into `Bork2d.Bake`, and replaced the exploratory smoke/fixture projects with
+> `examples/pong`; CI does not build the Pong solution.
 
 ## 1. Prerequisites
 
@@ -25,7 +25,7 @@
 - A desktop session for the windowed demo and the opt-in real-window tests.
 - SDL2: **no separate install**. `Bork2d.Runtime` pins `Silk.NET.SDL` 2.23.0, whose
   `Ultz.Native.SDL` 2.32.10 dependency supplies `runtimes/win-x64/native/SDL2.dll`. The loaded
-  binary reports `SDL_GetVersion` 2.30.8, and `Bork2d.AotSmoke`'s publish output includes
+  binary reports `SDL_GetVersion` 2.30.8, and `Pong.Desktop`'s publish output includes
   `SDL2.dll` next to the executable. Deployment is therefore a normal `dotnet publish -r win-x64`;
   a clean machine needs the Windows desktop session and whatever runtime the SDL2 build requires
   (full clean-machine validation remains M10).
@@ -39,49 +39,44 @@ dotnet build src/Bork2d/Bork2d.slnx -c Debug
 dotnet build src/Bork2d/Bork2d.slnx -c Release
 dotnet test src/Bork2d/Bork2d.slnx -c Debug
 dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
-dotnet build examples/Bork2d.Examples.slnx -c Debug
-dotnet format examples/Bork2d.Examples.slnx --verify-no-changes --no-restore
+dotnet build examples/pong/Pong.slnx -c Debug
+dotnet build examples/pong/Pong.slnx -c Release
+dotnet test examples/pong/Pong.slnx -c Debug
+dotnet format examples/pong/Pong.slnx --verify-no-changes --no-restore
 pwsh scripts/check-docs.ps1
 ```
 
-The examples solution is not a CI job; build and format it locally when the smoke or fixture
-projects change.
+The Pong solution is not a CI job; build, test, and format it locally when the example changes.
+A `Pong.slnx` Release build still builds the external engine project references in Debug (the
+`.slnx` has no configuration mapping outside `examples/pong`); the direct AOT publish is the Release
+proof.
 
-The suite is **954 tests**: 942 deterministic tests run in CI; 12 opt-in/conditional tests are
+The engine suite is **919 tests**: 907 deterministic tests run in CI; 12 opt-in/conditional tests are
 skipped unless the environment variable or capability is present (9 `[WindowFact]` real-window tests
 and 3 reparse-point capability tests). The deterministic set includes the pack-format/writer tests,
 the path/VFS/browse/contract tests, the loader/threading and error-contract tests, generic pack-time
 reference validation, the public asset-reference/pack-build contracts, the runtime asset
 lifecycle/error-matrix tests, the builder/no-descriptor/no-host tests, explicit/default
 `RegisterAsset<T>()` tests, processor registration/override and sidecar policies, the shape-driven
-TOML binder, the texture/PPM/Unit processors, pack composition/determinism, schema-3
-incremental/MSBuild tests, and the 8-main/9-merged fixture pack proof. They build packs in memory or
+TOML binder, the processor/bake suites, and schema-3 incremental tests. They build packs in memory or
 in temp files, generate their own test images, and use **no committed binary test/pack fixtures**.
-The committed images and processor sources (`Assets/art/player.png`, `Assets/art/checker.ppm`,
-`Assets/data/archer.unit`, and their sidecars) are fixture **source assets** that the executable
-bakes; they are not test packs or generated outputs. Run only the asset/pack tests with:
+`Pong.Tests` adds 20 game tests (simulation/AI/title, bake/load integration, and the headless game).
+The committed game sources (`examples/pong/Pong.Assets/Assets/art/paddle.png`,
+`Assets/textures/ball.circle`, and the TOMLs) are **source assets** that the Pong executable bakes;
+they are not test packs or generated outputs. Run only the asset/pack tests with:
 
 ```powershell
 dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "FullyQualifiedName~Pack|FullyQualifiedName~Asset"
 ```
 
-Run the bake tests (bake pipeline, incremental, explicit registration, CLI, and the
-`dotnet build`/publish/clean MSBuild integration) with:
+Run the bake tests (bake pipeline, incremental, explicit registration, CLI, and the processor
+contract) with:
 
 ```powershell
 dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "FullyQualifiedName~Bake"
 ```
 
-The MSBuild integration test writes a temporary `MyGame.Assets`-style executable (builder
-configuration, explicit `RegisterAsset<T>()`, sources, and a generated PNG in test code), references
-`Bork2d.BakeFixture`, imports `build/Bork2d.Assets.targets`, writes a temporary desktop app that takes
-a build-only reference and imports `build/Bork2d.Assets.Copy.targets`, and runs `dotnet build`,
-`dotnet publish`, a second `dotnet build` (asserting the up-to-date no-op), and `dotnet clean` as
-child processes. There is no descriptor, host build, or pack-path property. It therefore needs a
-warmed repository build and adds a few seconds to the Debug pass; it is not marked slower and runs in
-the normal suite.
-
-On a desktop session run the whole suite (including the opt-in window tests) with:
+On a desktop session run the whole engine suite (including the opt-in window tests) with:
 
 ```powershell
 $env:BORK2D_RUN_WINDOW_TESTS = '1'
@@ -92,32 +87,34 @@ Remove-Item Env:BORK2D_RUN_WINDOW_TESTS
 NativeAOT publish/run is required for runtime-affecting changes (both runs are local, never CI):
 
 ```powershell
-dotnet publish examples/Bork2d.AotSmoke/Bork2d.AotSmoke.csproj -c Release -r win-x64
-$smoke = 'examples/Bork2d.AotSmoke/bin/Release/net11.0/win-x64/publish/Bork2d.AotSmoke.exe'
-& $smoke                                  # headless: scene + baked fixture pack load/assertions
-& $smoke --windowed --ticks 120           # windowed gate: exit 0 after exactly 120 ticks
+dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-x64
+$pong = 'examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe'
+& $pong --headless                        # headless: baked 7-entry pack load/assertions
+& $pong --windowed --ticks 120            # windowed gate: exit 0 after exactly 120 ticks
 ```
 
-The publish must report zero AOT/trim warnings and contain `assets.pck`, `dlc1.pck`, and `SDL2.dll`.
-The AOT smoke imports `build/Bork2d.Assets.Copy.targets` and sets `Bork2dAssetsProjectFile`, so its
-build builds the build-only `Bork2d.BakeFixture.Assets` executable out of process; that executable
-owns the fixture roots, explicit type registrations, PPM/Unit processors, and builder configuration,
-bakes the packs, and the copy target places them next to the built and published executable. There
-is no generated host, and the AOT publish never contains the builder/processor assemblies or the
-assets executable. The default headless run mounts the main pack from `AppContext.BaseDirectory`
-(not the process CWD), overlays `dlc1.pck` with `LoadPack`, and exits `0` only when the scene, the
-baked class root (nested struct/`Color`/texture reference), the `StatsRoot` through
-`AssetRef<StatsRoot>`, the sprite referencing `art/player`, the `art/player` descriptor and exact
-`art/player-raw` payload, the PPM `art/checker` descriptor/payload, the Unit `data/archer`, the DLC
-`data/dlc` and its DLC → main texture reference, and browse/exists (8 main, 9 merged) all pass. The
-windowed run uses `WithoutAssets()`, so it needs a desktop session but no pack; it asserts one
-`Setup`, exactly `N` ticks, and one `Teardown`. The interactive `--windowed` run is the manual
-visibility/input check. Inspect the publish directory: it is a NativeAOT single-file output plus
-PDBs, so the managed assemblies are linked in. It must contain `assets.pck`, `dlc1.pck`, `SDL2.dll`,
-the engine/runtime/render/fixture PDBs, and must not contain a `Bork2d.Bake.dll`,
-`Bork2d.BakeFixture.Assets*`, `Tomlyn*`, or `StbImageSharp*` file.
-`dotnet clean src/Bork2d/Bork2d.slnx` and `dotnet clean examples/Bork2d.Examples.slnx` remove the
-fixture packs and the incremental state under the assets project's `obj/bork2d/bake`.
+The publish must report zero AOT/trim warnings and contain `assets.pck` and `SDL2.dll`.
+`Pong.Desktop` imports `build/Bork2d.Assets.Copy.targets` and sets `Bork2dAssetsProjectFile`, so its
+build restores and builds the build-only `Pong.Assets` executable out of process; that executable
+owns the `Assets/` root, the `GameSettings` registration, `CircleProcessor`, and the builder
+configuration, bakes the pack, and the copy target places it next to the built and published
+executable. The restore step makes the direct publish work from a clean clone; the app's own publish
+never references the assets project. There is no
+generated host, and the AOT publish never contains the builder/processor assemblies or the assets
+executable. The headless run mounts the pack from `AppContext.BaseDirectory` (not the process CWD)
+and exits `0` only when the scene, the `GameSettings` struct root, the `sprites/paddle` and
+`sprites/ball` sprites, the `art/paddle` descriptor and exact 6144-byte raw payload, the
+`CircleProcessor` `textures/ball` descriptor and exact 16384-byte raw payload, the red/blue tints, the
+7-entry browse, and the detached world all pass. The `--windowed --ticks 120` run loads the same pack
+and asserts one `Setup`, exactly `N` ticks, and one `Teardown`. The interactive `--windowed` run is
+the manual visibility/input check (the window is black until the M8 renderer; the title carries the
+score/state). Inspect the publish directory: it is a NativeAOT single-file output plus PDBs, so the
+managed assemblies are linked in. It must contain `Pong.Desktop.exe`, `assets.pck`, `SDL2.dll`, and
+the engine/runtime/`Pong.Common` PDBs (`Pong.Common.pdb` is the on-disk proof that the game assembly
+is in the graph), and must not contain a `Pong.Assets`, `Bork2d.Bake`, `Tomlyn`, or `StbImageSharp`
+assembly.
+`dotnet clean src/Bork2d/Bork2d.slnx` and `dotnet clean examples/pong/Pong.slnx` remove the packs and
+the incremental state under the assets project's `obj/bork2d/bake`.
 
 ## 3. Build, style, and warnings
 
@@ -152,11 +149,11 @@ documented. The rule applies to every new public API; do not remove it.
   builder/processor surface in `Bork2d.Bake` for the build-time `MyGame.Assets` executable. Data
   types are registered explicitly with `RegisterAsset<T>()`; there is no generated host or
   reflection. The builder is never referenced by the runtime app or AOT publish.
-- The example `Bork2d.AotSmoke` takes a build-only dependency on the fixture assets executable
-  (through `Bork2dAssetsProjectFile`, not a `ProjectReference`); it loads the baked packs through
-  the public `IAssets` API and does not reference the pack tooling, builder, processor assemblies,
-  or the assets executable. Tests reference only the two example fixture projects, not the smoke. It
-  updates the dependency test/docs when the graph changes.
+- The example `Pong.Desktop` takes a build-only dependency on `Pong.Assets` (through
+  `Bork2dAssetsProjectFile`, not a `ProjectReference`); it loads the baked pack through the public
+  `IAssets` API and does not reference the pack tooling, builder, processor assemblies, or the assets
+  executable. `Pong.Tests` references `Pong.Common`/`Pong.Assets`; `Bork2d.Tests` references no
+  example project. Update the dependency test/docs when the graph changes.
 - Editor/tooling stays JIT; no Avalonia, TOML, or reflection in runtime projects.
 - Runtime stays NativeAOT/trim-safe: no runtime reflection, assembly scanning, runtime TOML,
   dynamic code, or unregistered Nerdbank shapes.
@@ -172,20 +169,20 @@ documented. The rule applies to every new public API; do not remove it.
 - Add unit tests with behavior changes; pack/format tests for asset changes; threading tests for
   handoff changes; GPU/visual tests for renderer changes. Asset/pack tests build packs in memory or
   in temp files (`PackBuilder`/`TempPackDirectory`) and never commit binary **test/pack** fixtures;
-  the bake tests generate their own source trees and textures in temp directories, and the default
-  AOT smoke loads the fixture-baked packs. The committed fixture sources are
-  `examples/Bork2d.BakeFixture.Assets/Assets/art/player.png`, `Assets/art/checker.ppm`, and
-  `Assets/data/archer.unit` (plus sidecars) — authoring inputs, not test packs or generated outputs.
-  Processor tests must use the public builder/processor path (the PPM and Unit test processors),
-  cover registration/override and sidecar policies, and assert exact baked payloads.
+  the bake tests generate their own source trees and textures in temp directories, and the Pong AOT
+  gate loads the game-baked pack. The committed game sources are
+  `examples/pong/Pong.Assets/Assets/art/paddle.png`, `Assets/textures/ball.circle`, and the TOMLs
+  (plus sidecars) — authoring inputs, not test packs or generated outputs. Processor tests must use
+  the public builder/processor path (Pong's `CircleProcessor` and the self-contained processor
+  contract tests), cover registration/override and sidecar policies, and assert exact baked payloads.
   Asset-loader tests are deterministic: they use a narrow
   internal hook plus bounded signals/joins (no sleeps, retries, or timing assertions) to prove FIFO
   order, asynchronous completion, and shutdown cancellation.
 - Real-window tests use `[WindowFact]`, are skipped without `BORK2D_RUN_WINDOW_TESTS=1`, share the
   serialized `RealSdlWindow` collection, and may use only signals/bounded waits (no sleeps). Run
   them locally before a window/runtime PR.
-- The dependency test and docs link check run in CI. The AOT publish smoke (headless and windowed)
-  is a required local gate, not a CI job.
+- The dependency test and docs link check run in CI. The AOT publish gate (`Pong.Desktop` headless
+  and windowed) is a required local gate, not a CI job.
 - GPU/validation checks need a Vulkan 1.3 runner from M8; headless/data tests must run without a
   GPU.
 - Do not merge with disabled tests, flaky retries without a tracking entry, or a lowered warning
@@ -207,12 +204,12 @@ documented. The rule applies to every new public API; do not remove it.
 - [ ] `dotnet test` passes; the opt-in real-window tests pass locally with
       `BORK2D_RUN_WINDOW_TESTS=1` for window/runtime changes.
 - [ ] `dotnet format --verify-no-changes` and `scripts/check-docs.ps1` pass.
-- [ ] The examples solution builds and formats when the examples changed.
+- [ ] The Pong solution builds, tests, and formats when the example changed.
 - [ ] Dependency matrix respected; no unintended public types.
 - [ ] Files sit in the area folder and the namespace matches it (IDE0130).
 - [ ] No runtime reflection/TOML/dynamic code.
-- [ ] NativeAOT smoke publishes/runs when runtime-affecting, including
-      `--windowed --ticks 120` for window/runtime changes.
+- [ ] `Pong.Desktop` publishes/runs when runtime-affecting, including `--windowed --ticks 120` for
+      window/runtime changes.
 - [ ] Pack format/version updated if assets changed.
 - [ ] Owning docs/API/decision log updated; status markers honest.
 - [ ] No unjustified suppressions.

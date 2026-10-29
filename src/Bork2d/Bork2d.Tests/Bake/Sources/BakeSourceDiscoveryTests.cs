@@ -22,7 +22,7 @@ public sealed class BakeSourceDiscoveryTests
             value = 1
 
             [bork2d]
-            type = "Bork2d.BakeFixture.StatsRoot"
+            type = "Bork2d.Tests.Bake.Baking.StatsRoot"
             """);
         project.WriteAsset("data/readme.md", "not a source\n");
         project.WriteAsset("art/player.png.toml", "filter = \"nearest\"\n");
@@ -46,7 +46,7 @@ public sealed class BakeSourceDiscoveryTests
 
         BakeSource data = Assert.Single(sources, source => source.AssetPath == "data/a");
         Assert.Equal("data/a.toml", data.RelativePath);
-        Assert.Equal("Bork2d.BakeFixture.StatsRoot", data.TypeName);
+        Assert.Equal("Bork2d.Tests.Bake.Baking.StatsRoot", data.TypeName);
         Assert.Equal(4, data.TypeLine);
         Assert.Equal(8, data.TypeColumn);
 
@@ -118,7 +118,7 @@ public sealed class BakeSourceDiscoveryTests
             "art/player.png.toml",
             """
             [bork2d]
-            type = "Bork2d.BakeFixture.StatsRoot"
+            type = "Bork2d.Tests.Bake.Baking.StatsRoot"
             """);
 
         var diagnostics = new BakeDiagnostics();
@@ -166,7 +166,7 @@ public sealed class BakeSourceDiscoveryTests
             "data/bad.toml",
             """
             [bork2d]
-            type = "Bork2d.BakeFixture.StatsRoot"
+            type = "Bork2d.Tests.Bake.Baking.StatsRoot"
             kind = "MessagePack"
             """);
 
@@ -223,8 +223,8 @@ public sealed class BakeSourceDiscoveryTests
             "data/bad.toml",
             """
             [bork2d]
-            type = "Bork2d.BakeFixture.StatsRoot"
-            type = "Bork2d.BakeFixture.StatsRoot"
+            type = "Bork2d.Tests.Bake.Baking.StatsRoot"
+            type = "Bork2d.Tests.Bake.Baking.StatsRoot"
             """);
 
         var diagnostics = new BakeDiagnostics();
@@ -242,7 +242,7 @@ public sealed class BakeSourceDiscoveryTests
     public void NonTableBork2dRootValueIsAnError()
     {
         using var project = TestBakeProject.Create("discovery-non-table");
-        project.WriteAsset("data/bad.toml", "bork2d = \"Bork2d.BakeFixture.StatsRoot\"\n");
+        project.WriteAsset("data/bad.toml", "bork2d = \"Bork2d.Tests.Bake.Baking.StatsRoot\"\n");
 
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeSource> sources = BakeSourceDiscovery.Discover(
@@ -308,5 +308,5 @@ public sealed class BakeSourceDiscoveryTests
     private static void WriteTyped(TestBakeProject project, string path)
         => project.WriteAsset(
             path,
-            "value = 1\n\n[bork2d]\ntype = \"Bork2d.BakeFixture.StatsRoot\"\n");
+            "value = 1\n\n[bork2d]\ntype = \"Bork2d.Tests.Bake.Baking.StatsRoot\"\n");
 }
