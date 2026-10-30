@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using Bork2d.Bake;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Assets.Pack;
@@ -166,12 +167,84 @@ public sealed class DependencyMatrixTests
     }
 
     [Fact]
+    public void RenderReferencesTheVulkanBindingsAndNoWindowTools()
+    {
+        var references = typeof(Bork2d.Render.AssemblyReferenceAnchor).Assembly
+            .GetReferencedAssemblies()
+            .Select(reference => reference.Name ?? string.Empty)
+            .ToArray();
+
+        Assert.Contains("Silk.NET.Vulkan", references);
+        Assert.Contains("Silk.NET.Vulkan.Extensions.KHR", references);
+        Assert.Contains("Silk.NET.Vulkan.Extensions.EXT", references);
+        Assert.DoesNotContain("Silk.NET.SDL", references);
+        Assert.DoesNotContain("Bork2d.Runtime", references);
+        Assert.DoesNotContain("Bork2d.Bake", references);
+    }
+
+    [Fact]
+    public void RenderExposesNoPublicTypes()
+    {
+        var exported = typeof(Bork2d.Render.AssemblyReferenceAnchor).Assembly
+            .GetExportedTypes();
+
+        Assert.Empty(exported);
+    }
+
+    [Fact]
+    public void RenderProjectPinsTheVulkanPackagesAndEnablesUnsafeAndAotAnalysis()
+    {
+        string projectPath = Path.Combine(
+            RepositoryPaths.Root,
+            "src",
+            "Bork2d",
+            "Bork2d.Render",
+            "Bork2d.Render.csproj");
+        XDocument project = XDocument.Load(projectPath);
+
+        Dictionary<string, string> packages = project
+            .Descendants("PackageReference")
+            .ToDictionary(
+                reference => reference.Attribute("Include")!.Value,
+                reference => reference.Attribute("Version")!.Value,
+                StringComparer.Ordinal);
+
+        Assert.Equal("2.23.0", packages["Silk.NET.Vulkan"]);
+        Assert.Equal("2.23.0", packages["Silk.NET.Vulkan.Extensions.KHR"]);
+        Assert.Equal("2.23.0", packages["Silk.NET.Vulkan.Extensions.EXT"]);
+
+        Dictionary<string, string> properties = project
+            .Descendants("PropertyGroup")
+            .SelectMany(group => group.Elements())
+            .ToDictionary(
+                property => property.Name.LocalName,
+                property => property.Value.Trim(),
+                StringComparer.Ordinal);
+
+        Assert.Equal("true", properties["AllowUnsafeBlocks"]);
+        Assert.Equal("true", properties["IsAotCompatible"]);
+        Assert.Equal("true", properties["EnableTrimAnalyzer"]);
+        Assert.Equal("true", properties["EnableAotAnalyzer"]);
+    }
+
+    [Fact]
     public void RuntimeReferencesOnlyTheImplementationLayers()
     {
+        Assembly runtimeAssembly = typeof(Bork2d.Runtime.AssemblyReferenceAnchor).Assembly;
+
         AssertReferenceMatrix(
-            typeof(Bork2d.Runtime.AssemblyReferenceAnchor).Assembly,
+            runtimeAssembly,
             EngineAssembly,
             "Bork2d.Render");
+
+        string[] references = runtimeAssembly
+            .GetReferencedAssemblies()
+            .Select(reference => reference.Name ?? string.Empty)
+            .ToArray();
+
+        Assert.DoesNotContain("Silk.NET.Vulkan", references);
+        Assert.DoesNotContain("Silk.NET.Vulkan.Extensions.KHR", references);
+        Assert.DoesNotContain("Silk.NET.Vulkan.Extensions.EXT", references);
     }
 
     [Fact]
