@@ -342,9 +342,6 @@ approvals; only unresolved choices are listed here.
 
 | Decision | Needed by | Default if unresolved |
 | --- | --- | --- |
-| Frame count in flight / ring depth | M6/M7 | 2 GPU frames, 3 snapshot slots. |
-| Allocator: minimal suballocator vs VMA | M6 | Minimal first; VMA if profiling demands. |
-| sRGB fallback when no sRGB format exists | M6 | Fail startup; require sRGB. |
 | Headless timer accuracy / fractional rates | M7 | Integer `ticksPerSecond`; `0` uncapped. |
 | Bindless page capacity and overflow policy | M8 | 4096 pages; hard failure on overflow. |
 | Shader compiler/build integration | M8 | `glslangValidator` build target; embedded SPIR-V. |
@@ -352,6 +349,8 @@ approvals; only unresolved choices are listed here.
 | Validation warning policy | M8 | Errors fail; warnings are reviewed. |
 | Multi-GPU / device override | M10 | First suitable device; no override in 0.1. |
 | Packaging: project references vs NuGet | M9 | Project references in the template; NuGet later. |
+
+The M6 allocator, sRGB, and frame-count choices are resolved in D-M6-03, D-M6-04, and D-M6-11.
 
 ## 10. Progress log
 
