@@ -51,15 +51,16 @@ A `Pong.slnx` Release build still builds the external engine project references 
 `.slnx` has no configuration mapping outside `examples/pong`); the direct AOT publish is the Release
 proof.
 
-The engine suite is **919 tests**: 907 deterministic tests run in CI; 12 opt-in/conditional tests are
-skipped unless the environment variable or capability is present (9 `[WindowFact]` real-window tests
-and 3 reparse-point capability tests). The deterministic set includes the pack-format/writer tests,
-the path/VFS/browse/contract tests, the loader/threading and error-contract tests, generic pack-time
-reference validation, the public asset-reference/pack-build contracts, the runtime asset
-lifecycle/error-matrix tests, the builder/no-descriptor/no-host tests, explicit/default
+The engine suite is **984 tests**: 971 deterministic tests run in CI; 13 opt-in/conditional tests are
+skipped unless the environment variable or capability is present (9 `[WindowFact]` real-window tests,
+3 reparse-point capability tests, and 1 `[GpuFact]` real-GPU test). The deterministic set includes the
+pack-format/writer tests, the path/VFS/browse/contract tests, the loader/threading and error-contract
+tests, generic pack-time reference validation, the public asset-reference/pack-build contracts, the
+runtime asset lifecycle/error-matrix tests, the builder/no-descriptor/no-host tests, explicit/default
 `RegisterAsset<T>()` tests, processor registration/override and sidecar policies, the shape-driven
-TOML binder, the processor/bake suites, and schema-3 incremental tests. They build packs in memory or
-in temp files, generate their own test images, and use **no committed binary test/pack fixtures**.
+TOML binder, the processor/bake suites, schema-3 incremental tests, and the M6 WP-2 renderer
+seam/policy tests. They build packs in memory or in temp files, generate their own test images, and
+use **no committed binary test/pack fixtures**.
 `Pong.Tests` adds 20 game tests (simulation/AI/title, bake/load integration, and the headless game).
 The committed game sources (`examples/pong/Pong.Assets/Assets/art/paddle.png`,
 `Assets/textures/ball.circle`, and the TOMLs) are **source assets** that the Pong executable bakes;
@@ -83,6 +84,18 @@ $env:BORK2D_RUN_WINDOW_TESTS = '1'
 dotnet test src/Bork2d/Bork2d.slnx -c Debug
 Remove-Item Env:BORK2D_RUN_WINDOW_TESTS
 ```
+
+On a Vulkan 1.3 machine run the opt-in real-GPU tests with:
+
+```powershell
+$env:BORK2D_RUN_GPU_TESTS = '1'
+dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "Category=Gpu"
+Remove-Item Env:BORK2D_RUN_GPU_TESTS
+```
+
+The `[GpuFact]` tests are skipped by default and are not a CI job (D-M6-05). They create a
+validation-enabled instance and select a device; they skip at runtime when the loader, a suitable
+device, or the validation layer is unavailable. Run them locally before a renderer PR.
 
 NativeAOT publish/run is required for runtime-affecting changes (both runs are local, never CI):
 
@@ -180,11 +193,13 @@ documented. The rule applies to every new public API; do not remove it.
   order, asynchronous completion, and shutdown cancellation.
 - Real-window tests use `[WindowFact]`, are skipped without `BORK2D_RUN_WINDOW_TESTS=1`, share the
   serialized `RealSdlWindow` collection, and may use only signals/bounded waits (no sleeps). Run
-  them locally before a window/runtime PR.
+  them locally before a window/runtime PR. Real-GPU tests use `[GpuFact]`, are skipped without
+  `BORK2D_RUN_GPU_TESTS=1`, share the serialized `RealGpu` collection, skip when the loader/device/
+  validation layer is unavailable, and likewise use no sleeps. Run them locally before a renderer PR.
 - The dependency test and docs link check run in CI. The AOT publish gate (`Pong.Desktop` headless
   and windowed) is a required local gate, not a CI job.
-- GPU/validation checks need a Vulkan 1.3 runner from M8; headless/data tests must run without a
-  GPU.
+- GPU/validation checks need a Vulkan 1.3 machine from M6; the deterministic suite, headless builds,
+  and data tests must run without a GPU.
 - Do not merge with disabled tests, flaky retries without a tracking entry, or a lowered warning
   level.
 

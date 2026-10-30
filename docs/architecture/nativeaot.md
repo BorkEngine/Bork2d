@@ -11,7 +11,8 @@
 > sprites, the paddle PNG and `CircleProcessor` ball descriptors with their exact raw payloads, and
 > the 7-entry browse; it runs one headless tick and exits 0. The windowed `--windowed [--ticks N]`
 > run uses the same pack. Both keep the default logging path. The editor and build tools stay JIT;
-> Vulkan AOT validation is M6.
+> M6 WP-2 pins the Vulkan bindings and proves the headless AOT publish/run stays Vulkan-free (the
+> renderer foundation is not on the headless path); the windowed/offscreen AOT proof is WP-5.
 >
 > The build-time `MyGame.Assets`/`Pong.Assets` executables, `Bork2d.Bake`, and processors are JIT and
 > never enter the runtime/AOT graph. Runtime data types stay in `Project.Common`/`Pong.Common`. The
@@ -23,7 +24,7 @@
 | Component | NativeAOT required? | Why |
 | --- | --- | --- |
 | `Bork2d.Engine` | Yes | Public contract plus the runtime scene, transforms, time, snapshot policy, generated shapes, pack parsing, decompression, MessagePack decoding, and pack-time reference validation. |
-| `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. |
+| `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. M6 WP-2 adds the instance/validation/device-selection foundation; the swapchain/offscreen/clear renderer is WP-3/WP-4 and the renderer is not on the headless path. |
 | `Bork2d.Runtime` | Yes | Builder, host, and app-owned logging. |
 | `Pong.Desktop` | Yes | The AOT desktop example and the local gate, published with `PublishAot`. It references `Bork2d.Engine`/`Bork2d.Runtime` plus the game-side `Pong.Common` and loads the baked 7-entry Pong pack (`--headless`) or runs the same pack windowed (`--windowed [--ticks N]`). |
 | `Pong.Common` | Yes | Game-side runtime library: `GameSettings` (a `[GenerateShape]` struct root with sprite references), `PongGame`, `PongSimulation`, `PongAi`, and `PongTitle`; it references `Bork2d.Engine` only. |
@@ -175,6 +176,16 @@ determinism and a possible future AOT editor, not a current AOT requirement.
   `SDL2.dll` is present in the output. M2 verified the real windowed runtime and its AOT demo
   (`--windowed --ticks 120`, and a 5,000,000-tick live-window run) with the same zero-warning
   publish.
+- `Bork2d.Render` pins `Silk.NET.Vulkan` `2.23.0`, `Silk.NET.Vulkan.Extensions.KHR` `2.23.0`, and
+  `Silk.NET.Vulkan.Extensions.EXT` `2.23.0` (the debug-utils messenger/labels). Vulkan is a system
+  dependency: `vulkan-1.dll` comes from the driver/loader, is never copied by publish, and is never
+  needed by the headless AOT gate. `Bork2d.Render` exposes no public types. The WP-2 headless
+  publish is zero-warning and the published `--headless` app exits 0 without loading Vulkan; no
+  additional suppression was required. The Vulkan loader code is reachable only from the
+  windowed/offscreen renderer added in WP-3/WP-4. If ILC then reports `IL3000`/`IL3002` from the
+  Silk.NET Vulkan resolver, D-M6-10 allows extending the existing narrow `Pong.Desktop` suppression
+  only with a proven zero-warning publish and a running published app (no custom resolver, no
+  broader suppression).
 - No runtime shader compilation: SPIR-V is built offline.
 - The headless server must not initialize SDL or Vulkan; `WithHeadless(...)` must not load or
   call the graphics/windowing paths.

@@ -1,8 +1,10 @@
 # Rendering
 
 > **Status:** target design for the renderer. Window creation, input, time, and the windowed host
-> loop are `Current` in `Bork2d.Runtime` (M2); `Bork2d.Render` is still empty: Vulkan bring-up is
-> roadmap **M6**, frame handoff **M7**, sprite rendering **M8**. Everything below about pixels is
+> loop are `Current` in `Bork2d.Runtime` (M2); the `Bork2d.Render` foundation is `Current` in M6
+> WP-2 (Vulkan packages, instance/validation bootstrap, device selection, and the pure
+> surface/swapchain policies). The windowed swapchain/present path and the offscreen targets are
+> WP-3/WP-4, frame handoff is M7, and sprite rendering is M8. Everything below about pixels is
 > `Planned` unless [Current status](#11-current-status) says otherwise.
 ## 1. Scope
 
@@ -237,8 +239,10 @@ Provisional targets (validated in M8, not commitments):
 | Area | Status |
 | --- | --- |
 | SDL window creation, input, time, and the windowed loop | `Current` M2 (`Bork2d.Runtime`; no Vulkan, surface, or render thread) |
-| `Bork2d.Render` | `Empty`: project scaffold |
-| Vulkan instance/device/swapchain, offscreen targets, dynamic rendering | `Planned` M6 |
+| `Bork2d.Render` | `Partial`: M6 WP-2 adds the internal seam, Vulkan packages, instance/validation/debug-utils bootstrap, physical/logical device selection, and the pure surface-format/present-mode/swapchain policies |
+| Vulkan instance/validation bootstrap and device/queue/feature logging | `Current` M6 WP-2 |
+| Windowed swapchain, acquire/present, resize/minimize/fullscreen recreation, surface-loss recovery | `Planned` M6 WP-3 |
+| Offscreen targets, dynamic-rendering clear, discard, and the offscreen loop | `Planned` M6 WP-4 |
 | Snapshot consumption, frame handoff, bounded run-ahead | `Planned` M7 |
 | Sprite pipeline, bindless pages, shader build, asset upload | `Planned` M8 |
 | Headless | `Current` for the asset/tick path with no SDL/Vulkan; the renderer is intentionally absent because headless has no GPU work |

@@ -10,8 +10,10 @@
 > registers explicit data types and asset processors, bakes on build, and records a schema-3
 > incremental manifest. The project descriptor, generated host, `Bork2d.Bake.Cli`, and
 > `generate-host` are removed. The editor and the full renderer are target designs for later
-> milestones; M6 (Vulkan bring-up) is **in progress** (started 2026-10-30; WP-1 records the
-> decisions; no renderer code yet). Check status markers before treating an API as implemented.
+> milestones; M6 (Vulkan bring-up) is **in progress** (started 2026-10-30). WP-1 records the
+> decisions and WP-2 adds the `Bork2d.Render` foundation (instance/validation/device selection and
+> pure policies); the windowed/offscreen renderer is WP-3–WP-5. Check status markers before
+> treating an API as implemented.
 >
 > The [file-processors spec](specs/file-processors.md) owns implementation scope/acceptance; the
 > [asset processors](architecture/asset-processors.md) doc owns the architecture. The
@@ -21,8 +23,8 @@
 > [spec](specs/pong-example.md)) is merged into `develop` (2026-10-29, PR #10) and replaces the exploratory smoke/fixture projects with
 > `examples/pong` and is the AOT gate: `Pong.Desktop` publishes with no tooling assembly in the
 > output, loads the 7-entry Pong pack headless, and runs `--windowed --ticks 120`. Verification is
-> the local gate set: Debug/Release zero-warning builds, 907 deterministic plus 12
-> opt-in/conditional tests (919 total) for the engine and 20 Pong tests, `dotnet format` for both
+> the local gate set: Debug/Release zero-warning builds, 971 deterministic plus 13
+> opt-in/conditional tests (984 total) for the engine and 20 Pong tests, `dotnet format` for both
 > solutions, the docs link check, `git diff --check`, and the local AOT publish/run. CI runs on pull
 > requests to `develop` and pushes to `develop`; it does not build the Pong solution.
 
