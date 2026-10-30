@@ -3,9 +3,11 @@
 > **Status:** target design for the renderer. Window creation, input, time, and the windowed host
 > loop are `Current` in `Bork2d.Runtime` (M2); the `Bork2d.Render` foundation is `Current` in M6
 > WP-2 (Vulkan packages, instance/validation bootstrap, device selection, and the pure
-> surface/swapchain policies). The windowed swapchain/present path and the offscreen targets are
-> WP-3/WP-4, frame handoff is M7, and sprite rendering is M8. Everything below about pixels is
-> `Planned` unless [Current status](#11-current-status) says otherwise.
+> surface/swapchain policies), and the windowed swapchain/clear/present path is `Current` in M6
+> WP-3. Offscreen targets are WP-4, frame handoff is M7, and sprite rendering is M8. The windowed
+> renderer is not wired into the Runtime host until WP-4, so a game run still shows no GPU output.
+> Everything below about pixels is `Planned` unless [Current status](#11-current-status) says
+> otherwise.
 ## 1. Scope
 
 The renderer turns one immutable [frame snapshot](threading.md#3-frame-snapshot) into pixels:
@@ -51,6 +53,13 @@ future work); log device, API version, driver, and limits, and validate page cap
    set, push the view-projection, and `vkCmdDraw(4, instanceCount, 0, firstInstance)`.
 4. End, transition to `PRESENT_SRC_KHR`, submit, present; the fence frees the snapshot slot,
    command buffer, and instance buffer.
+
+**M6 WP-3 is the shape without a snapshot.** The render thread waits the frame fence, acquires an
+image, transitions it from `UNDEFINED` to `COLOR_ATTACHMENT_OPTIMAL`, begins one dynamic-rendering
+pass with `loadOp = CLEAR` to opaque black, ends it, transitions to `PRESENT_SRC_KHR`, submits with
+synchronization 2, and presents. Steps 1 and 3 are M7/M8: there is no snapshot, camera, draw,
+instance buffer, or descriptor set yet. The renderer is implemented but the Runtime host does not
+start it until WP-4, so a windowed game run is still uncleared.
 ### 3.2 Offscreen
 
 Same as windowed without surface/swapchain/present; one permanent color image per slot (or layout
@@ -184,37 +193,50 @@ ascending `ZIndex` (default `0`); ties are unspecified. A later `Clear.Color` wi
 `Clear.None` overlays (the HUD pattern). Camera order is D-026, applied in M8.
 ## 9. Synchronization and presentation
 
-- Windowed: at least 3 swapchain images and 2 GPU frames in flight; offscreen: at least 2 targets and
-  2 frames, no present. Each slot owns a command buffer, semaphores (or offscreen equivalents),
-  fence, persistently mapped instance buffer, and descriptor set.
-- A **snapshot slot is held until the GPU frame fence**, not just until instances are copied: this
-  bounds run-ahead to the ring, and the GPU never dereferences snapshot memory.
-- Wait on the frame fence before reusing that slot's buffers. Windowed: `imageAvailable` at
-  `COLOR_ATTACHMENT_OUTPUT`; `renderFinished` signalled after submission and awaited by present.
-  Layouts `UNDEFINED → COLOR_ATTACHMENT_OPTIMAL` then `→ PRESENT_SRC_KHR`; offscreen stays in
+- Windowed: 3 swapchain images (`minImageCount + 1`, clamped) and 2 GPU frames in flight; offscreen:
+  at least 2 targets and 2 frames, no present. Each frame owns a command buffer/pool, a fence, and
+  an image-available semaphore; each swapchain image owns its render-finished semaphore (M6 WP-3).
+  Offscreen targets/semaphores are WP-4; the snapshot slot's instance buffer and descriptor set are
+  M7/M8.
+- **M7:** a **snapshot slot is held until the GPU frame fence**, not just until instances are
+  copied: this bounds run-ahead to the ring, and the GPU never dereferences snapshot memory.
+- Wait on the frame fence before reusing that frame's command buffer/fence/image-available
+  semaphore. Windowed: `imageAvailable` waits at `COLOR_ATTACHMENT_OUTPUT`; `renderFinished`
+  (per swapchain image) is signalled after submission and awaited by present. Layouts
+  `UNDEFINED → COLOR_ATTACHMENT_OPTIMAL` then `→ PRESENT_SRC_KHR`; offscreen stays in
   color-attachment layout.
-- Uploads are recorded on the render thread before drawing in v1. `vkDeviceWaitIdle` is only for
-  recreation/shutdown; `VK_KHR_synchronization2` is the only submission path.
+- Uploads are recorded on the render thread before drawing in v1 (M8). `vkDeviceWaitIdle` is only
+  for recreation/shutdown; `VK_KHR_synchronization2` is the only submission path.
 - No fixed rate or limiter: windowed follows presentation/GPU completion, offscreen GPU completion.
   See [Threading](threading.md#4-triple-buffer-handoff).
 
 **Windowed presentation.** Preferred formats `B8G8R8A8_SRGB` then `R8G8B8A8_SRGB`, color space
 `VK_COLOR_SPACE_SRGB_NONLINEAR_KHR`. `FIFO` with vsync; `MAILBOX`/`IMMEDIATE` without vsync when
-supported, `FIFO` fallback. Extent from the SDL framebuffer size; zero extent (minimized) skips
-acquire/present. `OUT_OF_DATE`/`SUBOPTIMAL` recreate the swapchain (device idle, coalesced resize);
-present on a new snapshot, not every refresh. Device loss is fatal.
+supported, `FIFO` fallback. Extent from the SDL drawable size; zero extent (minimized) skips
+acquire/present and blocks on the control wake event. `OUT_OF_DATE` recreates and retries without
+presenting; `SUBOPTIMAL` presents the current frame first and recreates on the next iteration
+(D-M6-15); both use `vkDeviceWaitIdle` and pass the old handle as `oldSwapchain`. Device loss is
+fatal; surface loss gets exactly one replacement-surface recovery (D-M6-16). Presentation happens
+every frame, not on a new snapshot; snapshot coupling is M7. **`Current` in M6 WP-3** for the
+renderer; the Runtime host still starts no renderer until WP-4.
 
 **Offscreen.** No surface, swapchain, or present; fixed `WithOffscreen(w, h)` extent; one or two
 color images; same pass and draws; frames discarded with no public readback; pacing by GPU
-completion.
+completion. **`Planned` (WP-4).**
 ## 10. Debugging, validation, and performance
 
 - Validation layers in debug and with `WithValidation(true)`, plus a debug messenger; errors are
-  fatal in debug/test; `VK_EXT_debug_utils` labels frames, cameras, passes, and pages.
-- Counters: draws, instances, skipped sprites, resident pages, snapshot sequence, render CPU, present mode.
+  fatal in debug/test; `VK_EXT_debug_utils` names the instance, device, swapchain images, image
+  views, command buffers, and the clear pass. **`Current` in M6 WP-3** for the windowed path; no
+  per-frame or per-draw label churn.
+- Counters: draws, instances, skipped sprites, resident pages, snapshot sequence, render CPU, present
+  mode (M7/M8). **`Current` in M6 WP-3:** frames presented, swapchain recreations, validation
+  errors/warnings, last frame number, last present result; logged once at stop.
 - Failures: no suitable device/feature or shader failure is fatal; `OUT_OF_DATE`/`SUBOPTIMAL`
-  recreate; device loss is fatal; invalid sprite/layer is skipped with a diagnostic;
-  bindless-capacity overflow is a configuration error (provisional 4096 pages); validation errors fail debug/test.
+  recreate; device loss is fatal; surface loss recovers once; invalid sprite/layer is skipped with a
+  diagnostic; bindless-capacity overflow is a configuration error (provisional 4096 pages);
+  validation errors fail debug/test. **`Current` in M6 WP-3** for the windowed failure path; the
+  offscreen/shader/draw failures are WP-4/M8.
 
 Rules: one `vkCmdDraw` per non-empty camera; no per-sprite descriptors or indirect draws; persistent
 instance buffers and zero steady-state allocations; sort once per snapshot, filter per camera, cache
@@ -238,10 +260,10 @@ Provisional targets (validated in M8, not commitments):
 
 | Area | Status |
 | --- | --- |
-| SDL window creation, input, time, and the windowed loop | `Current` M2 (`Bork2d.Runtime`; no Vulkan, surface, or render thread) |
-| `Bork2d.Render` | `Partial`: M6 WP-2 adds the internal seam, Vulkan packages, instance/validation/debug-utils bootstrap, physical/logical device selection, and the pure surface-format/present-mode/swapchain policies |
+| SDL window creation, input, time, and the windowed loop | `Current` M2 (`Bork2d.Runtime`). The platform itself creates no Vulkan object or render thread; the SDL Vulkan seam (loader, instance extensions, surface, drawable size) and the windowed renderer are separate M6 WP-3 pieces, not host-wired until WP-4. |
+| `Bork2d.Render` | `Partial`: M6 WP-2 adds the internal seam, Vulkan packages, instance/validation/debug-utils bootstrap, physical/logical device selection, and the pure surface-format/present-mode/swapchain policies; M6 WP-3 adds the windowed renderer. Offscreen is WP-4. |
 | Vulkan instance/validation bootstrap and device/queue/feature logging | `Current` M6 WP-2 |
-| Windowed swapchain, acquire/present, resize/minimize/fullscreen recreation, surface-loss recovery | `Planned` M6 WP-3 |
+| Windowed swapchain, acquire/present, dynamic-rendering clear, resize/minimize/fullscreen recreation, surface-loss recovery, counters | `Current` M6 WP-3 (renderer implemented and GPU-tested; the Runtime host starts it in WP-4) |
 | Offscreen targets, dynamic-rendering clear, discard, and the offscreen loop | `Planned` M6 WP-4 |
 | Snapshot consumption, frame handoff, bounded run-ahead | `Planned` M7 |
 | Sprite pipeline, bindless pages, shader build, asset upload | `Planned` M8 |

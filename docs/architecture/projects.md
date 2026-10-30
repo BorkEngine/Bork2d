@@ -7,8 +7,10 @@
 > `Bork2d.Engine` carries the `Bork2d.Engine.*` public contract plus the internal engine
 > implementation, and `Bork2d.Bake` carries the public bake-tooling surface plus the internal bake
 > implementation. M6 WP-2 adds the `Bork2d.Render` foundation (Vulkan packages, instance and
-> validation bootstrap, device selection, and the pure swapchain/surface policies); the windowed
-> swapchain and offscreen renderer stay WP-3/WP-4.
+> validation bootstrap, device selection, and the pure swapchain/surface policies); M6 WP-3 adds the
+> windowed renderer (swapchain, frames, clear/present, recreation, counters) and the SDL Vulkan
+> surface seam in `Bork2d.Runtime`. The offscreen renderer stays WP-4, and the Runtime host does not
+> start the windowed renderer until WP-4.
 
 ## 1. Current projects
 
@@ -20,7 +22,7 @@ All engine projects target `net11.0` and live in `src/Bork2d/`; the Pong example
 | --- | --- | --- | --- |
 | `Bork2d.Engine` | none (Bork2d) | `Current` | Public contract (`Bork2d.Engine`, `.Scene`, `.Rendering`, `.Input`, `.Platform`, `.Assets`) plus the internal root-owned scene tree, transforms, time, MessagePack shape policy, v1 pack reader/writer, VFS, loader, and asset service. The tooling-only `Bork2d.Engine.Assets.Pack.PackBuilder`/`PackCompressionMode` stay public for pack creation. |
 | `Bork2d.Bake` | `Bork2d.Engine` | `Current` | Public JIT tooling surface (`BakeApplicationBuilder`, `BakeApplication`, `RegisterAsset<T>()`, `UseDefaultAssets()`, `UseDefaultProcessors()`, processor contracts, sidecar policy, output sink, commands) plus the internal implementation (Tomlyn binder, processor registry, texture processor, pack composition, schema-3 incremental planner). |
-| `Bork2d.Render` | `Bork2d.Engine` + `Silk.NET.Vulkan*` | `Partial` (M6 WP-2) | Vulkan instance/validation/debug-utils bootstrap, physical and logical device selection (features, extensions, limits), the internal renderer seam, and the pure surface-format/present-mode/swapchain policies. Windowed swapchain, offscreen targets, dynamic-rendering clear, and present are WP-3/WP-4 (M6). |
+| `Bork2d.Render` | `Bork2d.Engine` + `Silk.NET.Vulkan*` | `Partial` (M6 WP-2/WP-3) | Vulkan instance/validation/debug-utils bootstrap, physical and logical device selection (features, extensions, limits), the internal renderer seam and control channel, the pure surface-format/present-mode/swapchain policies, and the windowed renderer: swapchain create/recreate, two frames in flight, dynamic-rendering clear, present, resize/minimize/fullscreen, surface-loss recovery, counters, and validation observation. Offscreen targets and the Runtime host wiring are WP-4; sprites are M8. |
 | `Bork2d.Runtime` | `Bork2d.Engine`, `Bork2d.Render` | `Current` (M3) | Public builder/app, validation, windowed SDL host (window, input, time, uncapped loop), one-tick headless/offscreen host, app-owned logging, and the app-scoped asset-service lifecycle. |
 | `Bork2d.Tests` | `Bork2d.Engine`, `Bork2d.Bake`, `Bork2d.Render`, `Bork2d.Runtime` | `Current` | Deterministic xUnit suite, dependency-matrix/public-surface tests, and the Q-20 metadata guard. It references no example project. |
 | `Pong.Common` (examples) | `Bork2d.Engine` | `Current` (D-043/D-044; AOT-compatible) | The game-side runtime library: `GameLayer`, the `[GenerateShape]` `GameSettings` struct root, `PongSide`, the engine-free deterministic `PongSimulation`, `PongAi`, `PongTitle`, and `PongGame` (the `IGame<GameLayer>` implementation, loaded sprite/descriptor chain, title, score logging, resize). |
@@ -48,7 +50,9 @@ surface hides Tomlyn, StbImageSharp, the internal bake implementation, and `Pack
 `Silk.NET.Vulkan.Extensions.EXT` `2.23.0` (the `VK_EXT_debug_utils` messenger and labels). It sets
 `AllowUnsafeBlocks` for the opaque native handles and keeps `IsAotCompatible` with the trim and AOT
 analyzers. It references no `Bork2d.Runtime`, `Bork2d.Bake`, or `Silk.NET.SDL`; the dependency test
-enforces that and the exact package pins.
+enforces that and the exact package pins. The SDL Vulkan surface seam
+(`VulkanLoadLibrary`/`GetVulkanInstanceExtensions`/`CreateVulkanSurface`/`GetVulkanDrawableSize`)
+stays in `Bork2d.Runtime/Sdl` and passes only opaque `nint` handles across the Render boundary.
 
 `Pong.Desktop` is the only project that sets `PublishAot`; libraries do not publish
 independently, and no runtime project references the bake tooling or its packages. The
@@ -176,7 +180,7 @@ Folder names are PascalCase and match the namespace segment exactly; a file in
 | `Pong.Common` (examples) | — (game library) | `GameLayer`, `GameSettings`, `PongSide`, `PongSimulation`, `PongAi`, `PongTitle`, `PongGame` |
 | `Pong.Assets` (examples) | `Processors/`; `Assets/` (TOML data/sprites/settings, the paddle PNG, and the `.circle` source) | `Program` (top-level statements) |
 | `Pong.Desktop` (examples) | — | `Program`, `PongArguments` |
-| `Bork2d.Render` | `Vulkan/` → `.Vulkan` (instance, validation, device selection, pure policies); `Diagnostics/` → `.Diagnostics` (renderer status/counters/log category) | `IRenderer`, `IRendererFactory`, `RendererStartInfo`, `RendererMode`, `WindowExtent`, `AssemblyReferenceAnchor` |
+| `Bork2d.Render` | `Vulkan/` → `.Vulkan` (instance, validation, device selection, pure policies, windowed renderer/factory, swapchain, frames); `Diagnostics/` → `.Diagnostics` (renderer status/counters/log category) | `IRenderer`, `IRendererFactory`, `RendererStartInfo`, `RendererMode`, `WindowExtent`, `RendererControlChannel`, `RendererControlMessage`, `AssemblyReferenceAnchor` |
 
 `Bork2d.Engine` keeps `IEngine`, `IGame`, and `Bork2dException` in the root namespace. The rest of
 the public contract is grouped by area:

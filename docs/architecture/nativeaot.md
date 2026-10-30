@@ -12,7 +12,9 @@
 > the 7-entry browse; it runs one headless tick and exits 0. The windowed `--windowed [--ticks N]`
 > run uses the same pack. Both keep the default logging path. The editor and build tools stay JIT;
 > M6 WP-2 pins the Vulkan bindings and proves the headless AOT publish/run stays Vulkan-free (the
-> renderer foundation is not on the headless path); the windowed/offscreen AOT proof is WP-5.
+> renderer foundation is not on the headless path); WP-3 implements the windowed renderer but does
+> not wire it into the Runtime host, so the AOT publish graph still does not reach the Vulkan loader.
+> The windowed/offscreen AOT publish/run proof remains WP-5 (after the WP-4 host wiring).
 >
 > The build-time `MyGame.Assets`/`Pong.Assets` executables, `Bork2d.Bake`, and processors are JIT and
 > never enter the runtime/AOT graph. Runtime data types stay in `Project.Common`/`Pong.Common`. The
@@ -24,7 +26,7 @@
 | Component | NativeAOT required? | Why |
 | --- | --- | --- |
 | `Bork2d.Engine` | Yes | Public contract plus the runtime scene, transforms, time, snapshot policy, generated shapes, pack parsing, decompression, MessagePack decoding, and pack-time reference validation. |
-| `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. M6 WP-2 adds the instance/validation/device-selection foundation; the swapchain/offscreen/clear renderer is WP-3/WP-4 and the renderer is not on the headless path. |
+| `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. M6 WP-2 adds the instance/validation/device-selection foundation; WP-3 adds the windowed swapchain/clear/present renderer; offscreen is WP-4 and sprites/uploads are M8. The renderer is not on the headless path, and the Runtime host does not reference it until WP-4. |
 | `Bork2d.Runtime` | Yes | Builder, host, and app-owned logging. |
 | `Pong.Desktop` | Yes | The AOT desktop example and the local gate, published with `PublishAot`. It references `Bork2d.Engine`/`Bork2d.Runtime` plus the game-side `Pong.Common` and loads the baked 7-entry Pong pack (`--headless`) or runs the same pack windowed (`--windowed [--ticks N]`). |
 | `Pong.Common` | Yes | Game-side runtime library: `GameSettings` (a `[GenerateShape]` struct root with sprite references), `PongGame`, `PongSimulation`, `PongAi`, and `PongTitle`; it references `Bork2d.Engine` only. |
@@ -181,11 +183,13 @@ determinism and a possible future AOT editor, not a current AOT requirement.
   dependency: `vulkan-1.dll` comes from the driver/loader, is never copied by publish, and is never
   needed by the headless AOT gate. `Bork2d.Render` exposes no public types. The WP-2 headless
   publish is zero-warning and the published `--headless` app exits 0 without loading Vulkan; no
-  additional suppression was required. The Vulkan loader code is reachable only from the
-  windowed/offscreen renderer added in WP-3/WP-4. If ILC then reports `IL3000`/`IL3002` from the
-  Silk.NET Vulkan resolver, D-M6-10 allows extending the existing narrow `Pong.Desktop` suppression
-  only with a proven zero-warning publish and a running published app (no custom resolver, no
-  broader suppression).
+  additional suppression was required. WP-3 adds the windowed renderer and its control channel, but
+  the Runtime host does not reference the production factory until WP-4, so the `Pong.Desktop`
+  publish graph still does not reach the Vulkan loader from this work package. When the WP-4 host
+  wiring makes the renderer reachable, if ILC reports `IL3000`/`IL3002` from the Silk.NET Vulkan
+  resolver, D-M6-10 allows extending the existing narrow `Pong.Desktop` suppression only with a
+  proven zero-warning publish and a running published app (no custom resolver, no broader
+  suppression). The windowed AOT proof is WP-5.
 - No runtime shader compilation: SPIR-V is built offline.
 - The headless server must not initialize SDL or Vulkan; `WithHeadless(...)` must not load or
   call the graphics/windowing paths.
@@ -217,7 +221,8 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    `Setup` and one `Teardown`, loading the same pack. The interactive `--windowed` run observes the
    visible window, reads W/S/Space/R/Escape, and exits on Escape/close (the window stays black until
    the M8 renderer; the title/logs carry the score and state).
-6. Run a windowed/offscreen AOT-published app on a GPU machine before release (M8+).
+6. Run the windowed/offscreen AOT-published app on a GPU machine as the WP-5 gate (after the WP-4
+   Runtime host wiring); the headless gate above stays GPU-free.
 7. `Pong.Desktop` loads the baked pack produced by the same tooling a game uses; the constrained
    `IShapeable<T>` contract makes a missing shape a compile-time error. `GameSettings` is a
    `readonly record struct` root with `AssetRef<SpriteAsset>` members, so it proves the D-M4-11

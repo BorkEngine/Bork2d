@@ -7,12 +7,13 @@
 > with ticks and elapsed time, and the asset service logs start/overlay/error/stop events; there is
 > no per-frame or per-asset-per-tick logging. Configuration is identical in all modes, and the
 > default path runs in the AOT gate (`Pong.Desktop`, headless with the baked pack and `--windowed`)
-> with zero trim/AOT warnings. The suite is 986 tests (973 deterministic plus 13 opt-in/conditional).
-> The project-consolidation refactor (D-041/D-042) renamed the engine categories to `Bork2d.Engine` and
-> `Bork2d.Engine.Assets`; `Bork2d.Runtime` and `Bork2d.Render` are unchanged. M6 WP-2 makes the
-> `Bork2d.Render` category current for instance, validation, and device-selection events (§5.3); the
-> windowed/offscreen frame diagnostics arrive with WP-3/WP-4. The Pong example
-> (D-043/D-044) owns the game-side title/logging behavior.
+> with zero trim/AOT warnings. The suite is 1014 tests (1000 deterministic plus 14
+> opt-in/conditional). The project-consolidation refactor (D-041/D-042) renamed the engine categories
+> to `Bork2d.Engine` and `Bork2d.Engine.Assets`; `Bork2d.Runtime` and `Bork2d.Render` are unchanged.
+> M6 WP-2 makes the `Bork2d.Render` category current for instance, validation, and device-selection
+> events (§5.3); M6 WP-3 adds the swapchain-created, swapchain-recreated, minimized, and renderer
+> start/stop counter lines. Offscreen target diagnostics remain WP-4. The Pong example (D-043/D-044)
+> owns the game-side title/logging behavior.
 
 ## 1. Surface
 
@@ -109,7 +110,7 @@ game code creates its own categories.
 | `Bork2d.Runtime` | builder, modes, lifecycle, windowing |
 | `Bork2d.Engine` | reserved for scene/time/snapshot diagnostics; no current log sites |
 | `Bork2d.Engine.Assets` | pack parsing, decompression, loading |
-| `Bork2d.Render` | Vulkan instance/validation/device selection (M6 WP-2); swapchain/target/frame diagnostics are WP-3/WP-4 |
+| `Bork2d.Render` | Vulkan instance/validation/device selection (M6 WP-2); windowed swapchain create/recreate/minimize and renderer start/stop counters (M6 WP-3); offscreen target diagnostics are WP-4 |
 | game-defined | `CreateLogger("MyGame")` or `CreateLogger<T>()` |
 Startup logs use `Bork2d.Runtime` and one structured message after validation:
 
@@ -176,12 +177,14 @@ The `WithoutAssets()` mode logs `mode Empty` with zero entries and the same star
 headless AOT run exercises these lines through the default logging path without trim/AOT warnings,
 and its `PongGame` category logs setup/teardown and score/state transitions at Information.
 
-### 5.3 Renderer (M6 WP-2)
+### 5.3 Renderer (M6 WP-2/WP-3)
 
-The M6 WP-2 renderer foundation logs from `Bork2d.Render`. Every event is one-shot: physical-device
-candidates are enumerated once at startup, the selected device is logged once, and validation
-messages are emitted only when the layer reports them. There is no per-frame, per-draw, or per-image
-logging.
+The M6 renderer logs from `Bork2d.Render`. WP-2 covers the instance/validation/device foundation;
+WP-3 adds the windowed swapchain, frames, clear/present, recreation, and renderer start/stop
+counters. Every event is one-shot: physical-device candidates are enumerated once at startup, the
+selected device is logged once, the swapchain is logged when it is created (Information) or
+recreated/minimized (Debug), and validation messages are emitted only when the layer reports them.
+There is no per-frame, per-draw, or per-image logging. The offscreen target/frame lines are WP-4.
 
 | Event | Level | Fields |
 | --- | --- | --- |
@@ -191,13 +194,21 @@ logging.
 | Debug utils unavailable while validation is on | Warning | the missing extension; no messenger/labels |
 | Physical-device candidate | Debug | name, type, API version, driver version, queue families, extension count, accepted/rejected reason |
 | Device selected | Information | name, type, vendor/device id, API/driver version, queue family, enabled extensions/features, attachment/image/framebuffer limits, `maxPerStageDescriptorUpdateAfterBindSampledImages` |
+| Swapchain created | Information | format, color space, requested/actual present mode, extent, image count |
+| Swapchain recreated | Debug | reason (`Resize`/`Fullscreen`/`OutOfDate`/`Suboptimal`/`SurfaceLost`), old/new extent, format, present mode, image count |
+| Minimized / zero extent | Debug | skipped acquire/present and the last extent |
+| Renderer started | Information | mode, extent, format, color space, present mode, image count, frames in flight, validation on/off |
+| Surface lost and recovered | Warning | `VkResult`, attempt number, new extent, present mode |
+| Renderer stopped | Information | mode, reason, frames presented, swapchain recreations, validation errors/warnings, last frame number, last present result |
+| Fatal renderer failure | Error | the exception (Vulkan operation/result or validation detail); the host rethrows it after teardown |
 | Validation message | Warning/Error (Info/Verbose at Debug) | severity, type, message id/name, objects, message; errors are fatal only with validation enabled (D-M6-21) |
 | Surface destruction or debug-messenger/device cleanup failure | Error/Warning | the operation and result; normal shutdown keeps its existing outcome (D-M6-27) |
 
 A validation-enabled startup ends with the loader/instance/device lines followed by one selected
-device line; the `[GpuFact]` real-GPU test asserts zero validation errors/warnings at clean
-shutdown. Frame-presented/discarded and swapchain-recreation counters are logged once at stop by the
-renderer added in WP-3/WP-4.
+device line, the swapchain-created line, and the renderer-started line. The `[GpuFact]` windowed
+test asserts zero validation errors/warnings at clean shutdown and records the counters. The renderer
+logs frame-presented/recreation/validation counters once at stop; the offscreen discarded-frame
+counter is WP-4. No line is emitted from the acquire/record/present hot path.
 
 ## 6. NativeAOT
 
