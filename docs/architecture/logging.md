@@ -1,7 +1,7 @@
 # Logging
 
-> **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4) and M6 WP-4 (M6 in
-> progress; WP-5 owns the AOT/Pong gate). The builder creates an app-owned
+> **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4) and M6 (Vulkan
+> bring-up; implemented 2026-10-30, final PR pending human review). The builder creates an app-owned
 > Microsoft.Extensions.Logging factory, installs a plain-text ZLogger console provider by default,
 > logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`. The
 > windowed platform logs startup/stop/commands/failures, the runtime host logs the windowed and

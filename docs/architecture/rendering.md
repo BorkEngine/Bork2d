@@ -1,9 +1,9 @@
 # Rendering
 
 > **Status:** target design for the renderer. Window creation, input, time, and the tick loops are
-> `Current` in `Bork2d.Runtime` (M2/M6); the `Bork2d.Render` foundation is `Current` in M6 WP-2,
-> the windowed swapchain/clear/present path is `Current` in M6 WP-3, and offscreen targets plus the
-> windowed/offscreen host wiring are `Current` in M6 WP-4. A windowed game run now presents a
+> `Current` in `Bork2d.Runtime` (M2/M6); the `Bork2d.Render` foundation, the windowed
+> swapchain/clear/present path, and offscreen targets plus the windowed/offscreen host wiring are
+> `Current` in M6 (implemented 2026-10-30; final PR pending human review). A windowed game run now presents a
 > continuous opaque-black clear; offscreen loops until `Exit`, discards frames, and advances
 > `ITime`. Frame handoff/pacing is M7, and sprite rendering is M8. Everything below about pixels is
 > `Planned` unless [Current status](#11-current-status) says otherwise.

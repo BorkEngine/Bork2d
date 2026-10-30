@@ -1,7 +1,8 @@
 # API Reference
 
-> **Status:** the implemented M2/M3/M4 contract plus M6 WP-4 (windowed/offscreen renderer host
-> wiring) on top of the asset-processor task merged into `develop` (2026-10-27, PR #8). M1
+> **Status:** the implemented M2/M3/M4 contract plus M6 (Vulkan bring-up; implemented 2026-10-30,
+> final PR pending human review) on top of the asset-processor task merged into `develop`
+> (2026-10-27, PR #8). M1
 > (foundation), M2 (SDL windowed host), M3 (pack, VFS,
 > runtime integration), and M4 (serialization/bake) are implemented and merged into `develop`.
 > `Current` means implemented in this tree and covered by tests; `Partial` means the declaration
@@ -616,7 +617,7 @@ do not serialize them; an undefined value is a safe query that returns `false`. 
 
 ## 12. Runtime surface
 
-`Status: Current (M2/M3, M6 WP-4).` The builder, windowed/offscreen Vulkan hosts, headless one-tick
+`Status: Current (M2/M3, M6).` The builder, windowed/offscreen Vulkan hosts, headless one-tick
 app, validation, app-owned logging, window/input proxies, time, and the asset-service lifecycle are
 implemented. Windowed and offscreen require Vulkan 1.3; the renderer is composed internally and adds
 no public member (D-M6-24). Frame handoff/pacing and sprites remain later milestones.

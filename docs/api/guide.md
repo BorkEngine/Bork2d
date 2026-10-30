@@ -2,7 +2,7 @@
 
 > **Status:** implemented through M4, the D-036/D-037/D-038 asset-processor task merged into
 > `develop` (2026-10-27, PR #8), the Pong example (D-043/D-044; merged 2026-10-29, PR #10), and
-> M6 WP-4 (windowed/offscreen renderer host wiring; M6 is in progress). M1 (foundation), M2 (SDL
+> M6 (Vulkan bring-up; implemented 2026-10-30, final PR pending human review). M1 (foundation), M2 (SDL
 > windowed host), and M3 (pack, VFS, runtime integration) exist in
 > `Bork2d.Runtime`/`Bork2d.Engine` and are merged into `develop`.
 > `Build()` validates and `Run()` runs the Vulkan-backed windowed loop (window, input, time) or the

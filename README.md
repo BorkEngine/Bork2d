@@ -10,9 +10,12 @@ that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets sh
 > window, creates the Vulkan instance/surface on the OS thread, and runs the renderer and an
 > uncapped loop; offscreen mode runs the renderer against a fixed sRGB target until `Exit` and
 > advances `ITime`; headless keeps the one-tick, no-GPU path. The runtime loads and browses
-> `assets.pck` through the app-scoped asset service. M6 is in progress: WP-1–WP-4 are delivered
-> (decisions, Render foundation, windowed renderer, offscreen renderer + Runtime host wiring), and
-> **WP-5 owns the windowed/offscreen AOT/Pong gate**. The bake is the game-owned builder flow
+> `assets.pck` through the app-scoped asset service. **M6 (Vulkan bring-up) is implemented
+> (2026-10-30) and awaits the final human-reviewed PR** (not merged): the Render foundation, the
+> windowed renderer, the offscreen renderer, and the Runtime host wiring are complete, and the
+> AOT/Pong gate proves the published `--headless`, `--windowed --ticks 120`, and
+> `--offscreen --ticks 120` runs with a zero-warning publish. The bake is the game-owned builder
+> flow
 > (D-036/D-037/D-038): a build-time
 > `MyGame.Assets` executable registers explicit data types and asset processors, bakes on build, and
 > records a schema-3 incremental manifest; Pong's `CircleProcessor` is the worked custom processor
@@ -42,8 +45,8 @@ The engine solution is `src/Bork2d/Bork2d.slnx`; the Pong example is
 | [`Bork2d.Tests`](src/Bork2d/Bork2d.Tests) | xUnit suite (1028 deterministic + 16 conditional), dependency-matrix/public-surface tests, and the Q-20 metadata guard. |
 | [`Pong.Common`](examples/pong/Pong.Common) | Game library: `GameSettings` (struct root), simulation, AI, title, and `PongGame`; `Bork2d.Engine` only. |
 | [`Pong.Assets`](examples/pong/Pong.Assets) | Build-only assets executable: `Assets/`, `CircleProcessor`, and the `BakeApplicationBuilder` config; bakes the 7-entry `assets.pck`. |
-| [`Pong.Desktop`](examples/pong/Pong.Desktop) | AOT desktop host and the NativeAOT gate: `--headless` smoke and the interactive `--windowed [--ticks N]` example. |
-| [`Pong.Tests`](examples/pong/Pong.Tests) | 20 game tests: simulation/AI/title, bake/load integration, and the headless game. |
+| [`Pong.Desktop`](examples/pong/Pong.Desktop) | AOT desktop host and the NativeAOT gate: `--headless` smoke, the interactive `--windowed [--ticks N]` example, and `--offscreen --ticks N`. |
+| [`Pong.Tests`](examples/pong/Pong.Tests) | 41 game tests: simulation/AI/title, bake/load integration, the headless game, and the linked `PongArgumentsTests`. |
 | `Bork2d.Editor` | Planned Avalonia editor library/app (M5); JIT, not in either solution. |
 
 Game developers consume only `Bork2d.Engine` and `Bork2d.Runtime`. `Bork2d.Engine` is grouped by area
@@ -74,12 +77,13 @@ dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-
 $pong = 'examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe'
 & $pong --headless                 # baked 7-entry pack + one tick
 & $pong --windowed --ticks 120     # windowed gate: exit 0 after exactly 120 ticks
+& $pong --offscreen --ticks 120    # offscreen gate: exit 0 after exactly 120 ticks
 ```
 
 The windowed run needs a desktop session **and a Vulkan 1.3 loader/device**; `--windowed` without
-`--ticks` is interactive (Escape/close). The window shows the M6 black clear; sprites arrive in M8.
-The published `--windowed --ticks 120` / `--offscreen --ticks 120` runs are the WP-5 AOT gate; WP-4
-does not claim them. The opt-in real-window and real-GPU tests use the same SDL2/Vulkan runtime:
+`--ticks` is interactive (Escape/close), and `--offscreen` runs non-interactively and discards
+frames. The window shows the M6 black clear; sprites arrive in M8. The three published runs are the
+M6 AOT gate. The opt-in real-window and real-GPU tests use the same SDL2/Vulkan runtime:
 
 ```powershell
 $env:BORK2D_RUN_WINDOW_TESTS = '1'
@@ -110,7 +114,7 @@ Start at the [documentation index](docs/README.md).
   `0` = uncapped) from M7; today it runs one tick.
 - Target modes: windowed, offscreen (windowless Vulkan target, frames discarded, loop until `Exit`),
   and headless (no GPU/SDL/renderer, one tick). Windowed and offscreen run the real renderer
-  (M6 WP-4) and present/discard an opaque-black clear; frame handoff/pacing is M7.
+  (M6) and present/discard an opaque-black clear; frame handoff/pacing is M7.
 - GPU tests are opt-in (`BORK2D_RUN_GPU_TESTS=1`, serialized `RealGpu` collection): the windowed
   test creates a real SDL window/instance/surface, and two offscreen tests cover the renderer and
   the app host, all asserting validation-clean runs where the layer is available.

@@ -2,12 +2,12 @@
 
 > **Status:** M1–M4 are merged into `develop`; **D-036/D-037/D-038 are merged (2026-10-27, PR #8)**
 > and the Pong example (D-043/D-044) is merged into `develop` (2026-10-29, PR #10). M6 (Vulkan
-> bring-up) is in progress: WP-1–WP-4 are delivered, so the builder, windowed/offscreen Vulkan
-> hosts, headless one-tick host, scene graph, logging, asset pipeline, builder-configured bake, and
-> AOT baseline are `Current`. Windowed and offscreen now run a real render thread that clears an
-> opaque-black sRGB target (windowed presents; offscreen discards and loops until `Exit`); frame
-> handoff/pacing (M7) and the sprite renderer (M8) are `Planned`. WP-5 owns the windowed/offscreen
-> AOT/Pong gate. Status detail is in [the roadmap](../roadmap.md). The engine suite is 1044 tests
+> bring-up) is implemented (2026-10-30; final PR pending human review), so the builder,
+> windowed/offscreen Vulkan hosts, headless one-tick host, scene graph, logging, asset pipeline,
+> builder-configured bake, and AOT baseline are `Current`. Windowed and offscreen run a real render
+> thread that clears an opaque-black sRGB target (windowed presents; offscreen discards and loops
+> until `Exit`); frame handoff/pacing (M7) and the sprite renderer (M8) are `Planned`. The
+> windowed/offscreen AOT/Pong gate is proven. Status detail is in [the roadmap](../roadmap.md). The engine suite is 1044 tests
 > (1028 deterministic + 16 opt-in/conditional).
 >
 > Source file types are registered asset processors with `[GenerateShape]` sidecars when settings are

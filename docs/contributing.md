@@ -1,13 +1,13 @@
 # Contributing
 
 > **Status:** current through M4, the merged D-036/D-037/D-038 asset-processor task
-> (2026-10-27, PR #8), the Pong example (D-043/D-044; merged 2026-10-29, PR #10), and M6 WP-4
-> (Vulkan renderer host wiring; M6 is in progress). M6 WP-2 adds the Render foundation, WP-3 the
-> windowed renderer and opt-in windowed GPU test, and WP-4 the offscreen renderer, Runtime host
-> wiring, and opt-in offscreen GPU tests. **The windowed/offscreen AOT proof is WP-5**, not WP-4.
-> The warning/style/format/AOT gates and the docs link check are active. CI runs the docs link
+> (2026-10-27, PR #8), the Pong example (D-043/D-044; merged 2026-10-29, PR #10), and M6 (Vulkan
+> bring-up; implemented 2026-10-30, final PR pending human review). M6 delivered the Render
+> foundation, the windowed renderer and opt-in windowed GPU test, the offscreen renderer, Runtime
+> host wiring, and opt-in offscreen GPU tests; WP-5 proves the three-mode AOT gate. The
+> warning/style/format/AOT gates and the docs link check are active. CI runs the docs link
 > check, build, tests, and format verification on PRs to `develop` and pushes to `develop`; the
-> NativeAOT publish/run gate (`Pong.Desktop --headless` loading the baked Pong pack) is a required
+> NativeAOT publish/run gate (`Pong.Desktop` headless, windowed, and offscreen) is a required
 > local gate.
 >
 > The docs and gates cover `Bork2d.Bake`, the build-time `MyGame.Assets`/`Pong.Assets` executables,
@@ -69,7 +69,8 @@ lifecycle tests, the renderer host lifecycle matrix (Setup-before-readiness, fir
 offscreen `Exit`/`ITime`, headless no renderer), the platform Vulkan start/posts/surface-replacement
 tests, and the offscreen factory validation tests. They build packs in memory or in temp files,
 generate their own test images, and use **no committed binary test/pack fixtures**.
-`Pong.Tests` adds 20 game tests (simulation/AI/title, bake/load integration, and the headless game).
+`Pong.Tests` adds 41 game tests (simulation/AI/title, bake/load integration, the headless game, and
+the linked `PongArgumentsTests`).
 The committed game sources (`examples/pong/Pong.Assets/Assets/art/paddle.png`,
 `Assets/textures/ball.circle`, and the TOMLs) are **source assets** that the Pong executable bakes;
 they are not test packs or generated outputs. Run only the asset/pack tests with:
@@ -112,21 +113,25 @@ and asserts `Setup`/`Tick`/`Teardown`, advanced `ITime`, discarded frames, a joi
 zero validation messages. They skip at runtime when the loader, desktop session, a suitable device,
 or the validation layer is unavailable. Run them locally before a renderer PR.
 
-NativeAOT publish/run is required for runtime-affecting changes (both runs are local, never CI):
+NativeAOT publish/run is required for runtime-affecting changes (the runs are local, never CI):
 
 ```powershell
 dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-x64
 $pong = 'examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe'
 & $pong --headless                        # headless: baked 7-entry pack load/assertions
 & $pong --windowed --ticks 120            # windowed gate: exit 0 after exactly 120 ticks
+& $pong --offscreen --ticks 120           # offscreen gate: exit 0 after exactly 120 ticks
 ```
 
-The publish must report zero AOT/trim warnings and contain `assets.pck` and `SDL2.dll`. M6 WP-4
-wires the windowed/offscreen renderer into the Runtime host, so the AOT publish graph now compiles
-the Vulkan bindings; the published `--headless` run still never loads Vulkan, and the published
-windowed (`--windowed --ticks 120`) / offscreen (`--offscreen --ticks 120`) runs are the **WP-5**
-AOT gate on a GPU machine and are not claimed by WP-4. Any `IL3000`/`IL3002` warning is reported to
-WP-5 rather than suppressed here.
+The publish must report zero AOT/trim warnings and contain `assets.pck` and `SDL2.dll` (and no
+`vulkan-1.dll`, which is the system loader). M6 wires the windowed/offscreen renderer into the
+Runtime host, so the AOT publish graph compiles the Vulkan bindings; the published `--headless` run
+still never loads Vulkan, and the published windowed (`--windowed --ticks 120`) and offscreen
+(`--offscreen --ticks 120`) runs are the three-mode AOT gate on a GPU machine. The offscreen gate
+exits on `Exit`; its continuous frame count is not asserted (D-M6-13), and the GPU tests prove the
+discard path. Any `IL3000`/`IL3002` warning stays covered by the existing narrow `Pong.Desktop`
+suppression; a diagnostic publish with `NoWarn` cleared reports only those two codes (see
+[NativeAOT §6](architecture/nativeaot.md#6-native-libraries-and-silknet)).
 `Pong.Desktop` imports `build/Bork2d.Assets.Copy.targets` and sets `Bork2dAssetsProjectFile`, so its
 build restores and builds the build-only `Pong.Assets` executable out of process; that executable
 owns the `Assets/` root, the `GameSettings` registration, `CircleProcessor`, and the builder
@@ -217,8 +222,8 @@ documented. The rule applies to every new public API; do not remove it.
   them locally before a window/runtime PR. Real-GPU tests use `[GpuFact]`, are skipped without
   `BORK2D_RUN_GPU_TESTS=1`, share the serialized `RealGpu` collection, skip when the loader/device/
   validation layer is unavailable, and likewise use no sleeps. Run them locally before a renderer PR.
-- The dependency test and docs link check run in CI. The AOT publish gate (`Pong.Desktop` headless
-  and windowed) is a required local gate, not a CI job.
+- The dependency test and docs link check run in CI. The AOT publish gate (`Pong.Desktop` headless,
+  windowed, and offscreen) is a required local gate, not a CI job.
 - GPU/validation checks need a Vulkan 1.3 machine from M6; the deterministic suite, headless builds,
   and data tests must run without a GPU.
 - Do not merge with disabled tests, flaky retries without a tracking entry, or a lowered warning
@@ -244,8 +249,8 @@ documented. The rule applies to every new public API; do not remove it.
 - [ ] Dependency matrix respected; no unintended public types.
 - [ ] Files sit in the area folder and the namespace matches it (IDE0130).
 - [ ] No runtime reflection/TOML/dynamic code.
-- [ ] `Pong.Desktop` publishes/runs when runtime-affecting, including `--windowed --ticks 120` for
-      window/runtime changes.
+- [ ] `Pong.Desktop` publishes/runs when runtime-affecting, including `--windowed --ticks 120` and
+      `--offscreen --ticks 120` for window/renderer changes.
 - [ ] Pack format/version updated if assets changed.
 - [ ] Owning docs/API/decision log updated; status markers honest.
 - [ ] No unjustified suppressions.
