@@ -702,6 +702,13 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             _logger);
 
         _swapchain = created;
+
+        // A surface-defined CurrentExtent is the authority: WindowedSwapchain.ResolveExtent may
+        // ignore the posted hint. Sync the request to what the swapchain actually got so
+        // SwapchainPolicy.DecideFrame cannot see a permanent mismatch and recreate forever. Later
+        // platform posts update _requestedExtent and trigger the next recreation normally.
+        _requestedExtent = new WindowExtent((int)created.Extent.Width, (int)created.Extent.Height);
+
         old?.Dispose();
         _lastResult = Result.Success;
         if (reason is not null)
