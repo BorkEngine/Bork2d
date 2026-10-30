@@ -287,6 +287,45 @@ internal sealed unsafe class VulkanInstance : IVulkanInstance
         _debugUtils.CmdEndDebugUtilsLabel(new CommandBuffer((nint)commandBuffer));
     }
 
+    /// <inheritdoc/>
+    public nint CreateDebugLabel(string label)
+    {
+        if (_debugUtils is null || string.IsNullOrEmpty(label))
+        {
+            return 0;
+        }
+
+        return SilkMarshal.StringToPtr(label, NativeStringEncoding.UTF8);
+    }
+
+    /// <inheritdoc/>
+    public void DestroyDebugLabel(nint label)
+    {
+        if (label == 0)
+        {
+            return;
+        }
+
+        SilkMarshal.FreeString(label, NativeStringEncoding.UTF8);
+    }
+
+    /// <inheritdoc/>
+    public void BeginCachedCommandBufferLabel(nint device, nint commandBuffer, nint label)
+    {
+        if (_debugUtils is null || label == 0)
+        {
+            return;
+        }
+
+        var info = new DebugUtilsLabelEXT
+        {
+            SType = StructureType.DebugUtilsLabelExt,
+            PLabelName = (byte*)label,
+        };
+
+        _debugUtils.CmdBeginDebugUtilsLabel(new CommandBuffer((nint)commandBuffer), &info);
+    }
+
     private static VulkanInstance CreateCore(
         Vk vk,
         VulkanInstanceRequest request,

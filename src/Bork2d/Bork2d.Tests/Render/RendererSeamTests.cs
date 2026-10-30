@@ -153,6 +153,9 @@ public sealed class RendererSeamTests
         instance.SetObjectName(0x10, ObjectType.Device, 0x20, "device");
         instance.BeginCommandBufferLabel(0x10, 0x30, "clear");
         instance.EndCommandBufferLabel(0x10, 0x30);
+        nint cachedLabel = instance.CreateDebugLabel("Bork2d clear pass");
+        instance.BeginCachedCommandBufferLabel(0x10, 0x30, cachedLabel);
+        instance.DestroyDebugLabel(cachedLabel);
         instance.DestroySurface(0x40);
         instance.Destroy();
         instance.Destroy();
@@ -161,6 +164,12 @@ public sealed class RendererSeamTests
         Assert.Equal(2, instance.CommandBufferLabels.Count);
         Assert.Equal((nint)0x30, instance.CommandBufferLabels[0].CommandBuffer);
         Assert.Null(instance.CommandBufferLabels[1].Label);
+        Assert.NotEqual(0, cachedLabel);
+        Assert.Equal(1, instance.CreatedDebugLabelCount);
+        Assert.Equal(1, instance.DestroyedDebugLabelCount);
+        Assert.Equal(
+            ((nint)0x30, cachedLabel),
+            Assert.Single(instance.CachedCommandBufferLabels));
         Assert.Equal((nint)0x40, Assert.Single(instance.DestroyedSurfaces));
         Assert.Equal(1, instance.DestroyCount);
     }

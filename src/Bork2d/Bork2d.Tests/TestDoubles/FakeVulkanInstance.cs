@@ -44,6 +44,15 @@ internal sealed class FakeVulkanInstance : IVulkanInstance
     /// <summary>Gets the destroyed surface handles.</summary>
     internal List<nint> DestroyedSurfaces { get; } = [];
 
+    /// <summary>Gets the pre-encoded labels opened on command buffers.</summary>
+    internal List<(nint CommandBuffer, nint Label)> CachedCommandBufferLabels { get; } = [];
+
+    /// <summary>Gets the number of debug labels allocated.</summary>
+    internal int CreatedDebugLabelCount { get; private set; }
+
+    /// <summary>Gets the number of debug labels destroyed.</summary>
+    internal int DestroyedDebugLabelCount { get; private set; }
+
     /// <summary>Gets the number of destroy calls.</summary>
     internal int DestroyCount => Volatile.Read(ref _destroyCount);
 
@@ -73,4 +82,31 @@ internal sealed class FakeVulkanInstance : IVulkanInstance
     /// <inheritdoc/>
     public void EndCommandBufferLabel(nint device, nint commandBuffer)
         => CommandBufferLabels.Add((commandBuffer, null));
+
+    /// <inheritdoc/>
+    public nint CreateDebugLabel(string label)
+    {
+        if (!DebugUtilsEnabled || string.IsNullOrEmpty(label))
+        {
+            return 0;
+        }
+
+        CreatedDebugLabelCount++;
+        return 0x7000 + CreatedDebugLabelCount;
+    }
+
+    /// <inheritdoc/>
+    public void DestroyDebugLabel(nint label)
+    {
+        if (label == 0)
+        {
+            return;
+        }
+
+        DestroyedDebugLabelCount++;
+    }
+
+    /// <inheritdoc/>
+    public void BeginCachedCommandBufferLabel(nint device, nint commandBuffer, nint label)
+        => CachedCommandBufferLabels.Add((commandBuffer, label));
 }

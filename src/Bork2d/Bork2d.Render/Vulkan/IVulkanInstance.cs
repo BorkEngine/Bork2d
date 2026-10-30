@@ -61,4 +61,25 @@ internal interface IVulkanInstance : IDisposable
     /// <param name="device">The opaque logical-device handle used for the call.</param>
     /// <param name="commandBuffer">The opaque command-buffer handle.</param>
     void EndCommandBufferLabel(nint device, nint commandBuffer);
+
+    /// <summary>
+    /// Allocates a native UTF-8 debug label once so a per-frame label emits no managed or native
+    /// allocation.
+    /// </summary>
+    /// <param name="label">The label text.</param>
+    /// <returns>The opaque native label, or <c>0</c> when debug labels are unavailable.</returns>
+    /// <remarks>The caller owns the label and destroys it with <see cref="DestroyDebugLabel"/>.</remarks>
+    nint CreateDebugLabel(string label);
+
+    /// <summary>Frees a label created by <see cref="CreateDebugLabel"/>; <c>0</c> is ignored.</summary>
+    /// <param name="label">The opaque native label.</param>
+    void DestroyDebugLabel(nint label);
+
+    /// <summary>
+    /// Opens a debug label on a command buffer using a pre-encoded label, without allocating.
+    /// </summary>
+    /// <param name="device">The opaque logical-device handle used for the call.</param>
+    /// <param name="commandBuffer">The opaque command-buffer handle.</param>
+    /// <param name="label">The label created by <see cref="CreateDebugLabel"/>.</param>
+    void BeginCachedCommandBufferLabel(nint device, nint commandBuffer, nint label);
 }
