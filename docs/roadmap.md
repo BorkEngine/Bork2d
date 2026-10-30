@@ -208,6 +208,8 @@ the M6–M10 sequence. See [asset processors](architecture/asset-processors.md) 
 
 ### M6 — Vulkan bring-up (windowed + offscreen)
 
+**Status:** In progress (started 2026-10-30; WP-1–WP-5 per the [spec](specs/m6-vulkan-bringup.md)).
+
 Goal: a Vulkan 1.3 render thread that clears the window or an offscreen target.
 
 - Add `Silk.NET.Vulkan`; choose allocator (minimal vs VMA).
@@ -340,9 +342,6 @@ approvals; only unresolved choices are listed here.
 
 | Decision | Needed by | Default if unresolved |
 | --- | --- | --- |
-| Frame count in flight / ring depth | M6/M7 | 2 GPU frames, 3 snapshot slots. |
-| Allocator: minimal suballocator vs VMA | M6 | Minimal first; VMA if profiling demands. |
-| sRGB fallback when no sRGB format exists | M6 | Fail startup; require sRGB. |
 | Headless timer accuracy / fractional rates | M7 | Integer `ticksPerSecond`; `0` uncapped. |
 | Bindless page capacity and overflow policy | M8 | 4096 pages; hard failure on overflow. |
 | Shader compiler/build integration | M8 | `glslangValidator` build target; embedded SPIR-V. |
@@ -350,6 +349,8 @@ approvals; only unresolved choices are listed here.
 | Validation warning policy | M8 | Errors fail; warnings are reviewed. |
 | Multi-GPU / device override | M10 | First suitable device; no override in 0.1. |
 | Packaging: project references vs NuGet | M9 | Project references in the template; NuGet later. |
+
+The M6 allocator, sRGB, and frame-count choices are resolved in D-M6-03, D-M6-04, and D-M6-11.
 
 ## 10. Progress log
 
@@ -364,7 +365,7 @@ approvals; only unresolved choices are listed here.
 | Post-M4 asset processors | Merged into `develop` (2026-10-27, PR #8, merge `a98e0ab`; CI green on `39563f9`) | D-036/D-037/D-038/D-039/D-040 as-built: public `Bork2d.Bake`, build-time `MyGame.Assets`/`Bork2d.BakeFixture.Assets`, explicit `RegisterAsset<T>()` + defaults, processor extension point with PPM/Unit acceptance processors, no descriptor/generated host/`Bake.Cli`, schema-3 incremental manifest and build targets, and the AOT fixture flow (8 main / 9 merged entries, no tooling assemblies in publish). D-040 makes the `TextureDescriptor` sampler fields the non-null `TextureFormat`/`TextureFilter`/`TextureWrap` enums. 946 deterministic + 12 conditional tests (958 total); Debug/Release, format, docs, and AOT gates pass locally. Design: [asset processors](architecture/asset-processors.md); spec: [file processors](specs/file-processors.md). |
 | Project consolidation | Merged (2026-10-28, PR #9; D-041/D-042) | Five-project engine solution: `Bork2d.Engine` = Api+Common+Assets with `Bork2d.Engine.*` namespaces; `Bork2d.Bake` = Bake+Builder with the public `Bork2d.Bake` namespace; smoke/fixture in `examples/Bork2d.Examples.slnx`; Tests decoupled from the smoke; dependency tests and the Q-20 metadata guard. 942 deterministic + 12 conditional tests (954); Debug/Release zero warnings; both format gates; docs check; AOT headless and `--windowed --ticks 120` exit 0; PR CI run 40563643324 succeeded. [Spec](specs/refactor-projects.md). |
 | Pong example | Merged into `develop` (2026-10-29, PR #10, merge `0273f58`) | Replaces the exploratory examples with `examples/pong` (`Pong.Common`, `Pong.Assets`, `Pong.Desktop`, `Pong.Tests`) and makes `Pong.Desktop` the NativeAOT gate. 20 Pong tests; engine suite 907 passed + 12 skipped (919) after WP-2; Debug/Release, tests, and both format gates zero-warning; AOT publish zero warnings with a 7-entry `assets.pck`, `Pong.Desktop.exe`, `SDL2.dll`, and no `Pong.Assets`/`Bork2d.Bake`/Tomlyn/StbImageSharp assembly; headless and `--windowed --ticks 120` exit 0; docs link check and `git diff --check` clean. [Spec](specs/pong-example.md#12-as-built-evidence). |
-| M6 Vulkan bring-up | Not started | — |
+| M6 Vulkan bring-up | In progress (2026-10-30) | D-M6-01…D-M6-27 recorded in the [decision log](decisions.md#m6-vulkan-bring-up-decisions-approved-2026-10-29); WP-1–WP-5 plan approved ([spec](specs/m6-vulkan-bringup.md)). No implementation or exit criterion is claimed yet. |
 | M7 Frame handoff/pacing | Not started | — |
 | M8 Sprite renderer | Not started | — |
 | M9 Template/samples | Partially started (Pong sample merged) | `examples/pong` is the first sample; the solution template, packaging, and the remaining samples are pending. |
