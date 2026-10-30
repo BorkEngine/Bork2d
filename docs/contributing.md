@@ -1,13 +1,14 @@
 # Contributing
 
 > **Status:** current through M4, the merged D-036/D-037/D-038 asset-processor task
-> (2026-10-27, PR #8), and the Pong example (D-043/D-044; merged 2026-10-29, PR #10). M6 WP-3 adds
-> the windowed Vulkan renderer and the opt-in windowed GPU test; the Runtime host that starts the
-> renderer is WP-4 and the windowed/offscreen AOT proof is WP-5.
-> The warning/style/format/AOT gates and the docs link check are
-> active. CI runs the docs link check, build, tests, and format verification on PRs to `develop` and
-> pushes to `develop`; the NativeAOT publish/run gate (`Pong.Desktop --headless` loading the baked
-> Pong pack, and `--windowed --ticks 120`) is a required local gate.
+> (2026-10-27, PR #8), the Pong example (D-043/D-044; merged 2026-10-29, PR #10), and M6 WP-4
+> (Vulkan renderer host wiring; M6 is in progress). M6 WP-2 adds the Render foundation, WP-3 the
+> windowed renderer and opt-in windowed GPU test, and WP-4 the offscreen renderer, Runtime host
+> wiring, and opt-in offscreen GPU tests. **The windowed/offscreen AOT proof is WP-5**, not WP-4.
+> The warning/style/format/AOT gates and the docs link check are active. CI runs the docs link
+> check, build, tests, and format verification on PRs to `develop` and pushes to `develop`; the
+> NativeAOT publish/run gate (`Pong.Desktop --headless` loading the baked Pong pack) is a required
+> local gate.
 >
 > The docs and gates cover `Bork2d.Bake`, the build-time `MyGame.Assets`/`Pong.Assets` executables,
 > explicit `RegisterAsset<T>()` registrations, Pong's `CircleProcessor`, and the schema-3 incremental
@@ -31,7 +32,9 @@
   `SDL2.dll` next to the executable. Deployment is therefore a normal `dotnet publish -r win-x64`;
   a clean machine needs the Windows desktop session and whatever runtime the SDL2 build requires
   (full clean-machine validation remains M10).
-- Vulkan 1.3 GPU/driver for windowed/offscreen checks from M6 (not needed before M6).
+- Vulkan 1.3 GPU/driver for windowed/offscreen runs and the GPU tests; the Khronos validation
+  layer (Vulkan SDK) for validation evidence (its absence skips the strict GPU assertions with a
+  warning, D-M6-20). Headless builds/tests need neither.
 - NativeAOT toolchain (MSVC) for the local publish gate.
 
 ## 2. Build, test, and local gates
@@ -53,17 +56,19 @@ A `Pong.slnx` Release build still builds the external engine project references 
 `.slnx` has no configuration mapping outside `examples/pong`); the direct AOT publish is the Release
 proof.
 
-The engine suite is **1014 tests**: 1000 deterministic tests run in CI; 14 opt-in/conditional tests
+The engine suite is **1044 tests**: 1028 deterministic tests run in CI; 16 opt-in/conditional tests
 are skipped unless the environment variable or capability is present (9 `[WindowFact]` real-window
-tests, 3 reparse-point capability tests, and 2 `[GpuFact]` real-GPU tests). The deterministic set
+tests, 3 reparse-point capability tests, and 4 `[GpuFact]` real-GPU tests). The deterministic set
 includes the pack-format/writer tests, the path/VFS/browse/contract tests, the loader/threading and
 error-contract tests, generic pack-time reference validation, the public asset-reference/pack-build
 contracts, the runtime asset lifecycle/error-matrix tests, the builder/no-descriptor/no-host tests,
 explicit/default `RegisterAsset<T>()` tests, processor registration/override and sidecar policies,
-the shape-driven TOML binder, the processor/bake suites, schema-3 incremental tests, the M6 WP-2
-renderer seam/policy tests, and the M6 WP-3 SDL Vulkan seam, SPSC control-channel, and windowed
-renderer start-info/lifecycle tests. They build packs in memory or in temp files, generate their own
-test images, and use **no committed binary test/pack fixtures**.
+the shape-driven TOML binder, the processor/bake suites, schema-3 incremental tests, the M6
+renderer seam/policy tests, the SDL Vulkan seam, the SPSC control-channel, windowed start-info/
+lifecycle tests, the renderer host lifecycle matrix (Setup-before-readiness, first-tick gate,
+offscreen `Exit`/`ITime`, headless no renderer), the platform Vulkan start/posts/surface-replacement
+tests, and the offscreen factory validation tests. They build packs in memory or in temp files,
+generate their own test images, and use **no committed binary test/pack fixtures**.
 `Pong.Tests` adds 20 game tests (simulation/AI/title, bake/load integration, and the headless game).
 The committed game sources (`examples/pong/Pong.Assets/Assets/art/paddle.png`,
 `Assets/textures/ball.circle`, and the TOMLs) are **source assets** that the Pong executable bakes;
@@ -100,8 +105,12 @@ The `[GpuFact]` tests are skipped by default and are not a CI job (D-M6-05). One
 validation-enabled instance and selects an offscreen device; the windowed one creates a real SDL
 window, instance, and surface on the test thread, presents at least 30 frames, exercises
 resize/fullscreen/minimize, stops under frame load with a bounded join, and asserts zero validation
-errors/warnings. They skip at runtime when the loader, desktop session, a suitable device, or the
-validation layer is unavailable. Run them locally before a renderer PR.
+errors/warnings. The offscreen renderer test creates a 320×240 sRGB target without a surface or
+swapchain, discards 30+ frames, and stops cleanly; the offscreen app test drives
+`WithOffscreen(320, 240)` + `WithValidation(true)` until `Exit` through the internal factory hook
+and asserts `Setup`/`Tick`/`Teardown`, advanced `ITime`, discarded frames, a joined renderer, and
+zero validation messages. They skip at runtime when the loader, desktop session, a suitable device,
+or the validation layer is unavailable. Run them locally before a renderer PR.
 
 NativeAOT publish/run is required for runtime-affecting changes (both runs are local, never CI):
 
@@ -112,9 +121,12 @@ $pong = 'examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Des
 & $pong --windowed --ticks 120            # windowed gate: exit 0 after exactly 120 ticks
 ```
 
-The publish must report zero AOT/trim warnings and contain `assets.pck` and `SDL2.dll`. The
-windowed Vulkan renderer implemented in M6 WP-3 is not started by the Runtime host until WP-4, so
-this gate still exercises the SDL/tick path only; the windowed/offscreen AOT proof is WP-5.
+The publish must report zero AOT/trim warnings and contain `assets.pck` and `SDL2.dll`. M6 WP-4
+wires the windowed/offscreen renderer into the Runtime host, so the AOT publish graph now compiles
+the Vulkan bindings; the published `--headless` run still never loads Vulkan, and the published
+windowed (`--windowed --ticks 120`) / offscreen (`--offscreen --ticks 120`) runs are the **WP-5**
+AOT gate on a GPU machine and are not claimed by WP-4. Any `IL3000`/`IL3002` warning is reported to
+WP-5 rather than suppressed here.
 `Pong.Desktop` imports `build/Bork2d.Assets.Copy.targets` and sets `Bork2dAssetsProjectFile`, so its
 build restores and builds the build-only `Pong.Assets` executable out of process; that executable
 owns the `Assets/` root, the `GameSettings` registration, `CircleProcessor`, and the builder
@@ -128,8 +140,8 @@ and exits `0` only when the scene, the `GameSettings` struct root, the `sprites/
 `CircleProcessor` `textures/ball` descriptor and exact 16384-byte raw payload, the red/blue tints, the
 7-entry browse, and the detached world all pass. The `--windowed --ticks 120` run loads the same pack
 and asserts one `Setup`, exactly `N` ticks, and one `Teardown`. The interactive `--windowed` run is
-the manual visibility/input check (the window stays black: the M6 WP-3 windowed renderer is not
-host-wired until WP-4 and sprites arrive in M8; the title carries the score/state). Inspect the
+the manual visibility/input check (the window shows the M6 black clear; sprites arrive in M8; the
+title carries the score/state). Inspect the
 publish directory: it is a NativeAOT single-file output plus PDBs, so the
 managed assemblies are linked in. It must contain `Pong.Desktop.exe`, `assets.pck`, `SDL2.dll`, and
 the engine/runtime/`Pong.Common` PDBs (`Pong.Common.pdb` is the on-disk proof that the game assembly

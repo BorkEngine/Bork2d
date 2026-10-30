@@ -14,15 +14,29 @@ internal sealed class FakeRenderer : IRenderer
 {
     private readonly ManualResetEventSlim _ready = new(initialState: false);
     private readonly ManualResetEventSlim _stopped = new(initialState: false);
+    private readonly ManualResetEventSlim _posted = new(initialState: false);
     private Exception? _fatalException;
     private int _status = (int)RendererStatus.NotStarted;
     private int _stopReason = (int)RendererStopReason.None;
     private bool _isReady;
     private int _stopRequested;
     private int _joined;
+    private int _waitForReadyCount;
 
     /// <summary>Gets or sets a value indicating whether <see cref="Start"/> becomes ready.</summary>
     internal bool AutoReady { get; set; }
+
+    /// <summary>Gets or sets the exception <see cref="Start"/> throws synchronously.</summary>
+    internal Exception? StartFailure { get; set; }
+
+    /// <summary>
+    /// Gets or sets a callback invoked when the host starts waiting for readiness, before the wait
+    /// blocks. Tests use it to assert the host ordering and to signal readiness deterministically.
+    /// </summary>
+    internal Action? OnWaitForReady { get; set; }
+
+    /// <summary>Gets the number of times the host waited for readiness.</summary>
+    internal int WaitForReadyCount => Volatile.Read(ref _waitForReadyCount);
 
     /// <summary>Gets or sets a value indicating whether <see cref="RequestStop"/> completes.</summary>
     internal bool StopOnRequest { get; set; } = true;
@@ -82,6 +96,16 @@ internal sealed class FakeRenderer : IRenderer
 
         Started = true;
         SetStatus(RendererStatus.Starting);
+        if (StartFailure is not null)
+        {
+            Volatile.Write(ref _fatalException, StartFailure);
+            SetStatus(RendererStatus.Faulted);
+            Volatile.Write(ref _stopReason, (int)RendererStopReason.Fatal);
+            _ready.Set();
+            CompleteStop();
+            throw StartFailure;
+        }
+
         if (AutoReady)
         {
             SetReady();
@@ -124,16 +148,27 @@ internal sealed class FakeRenderer : IRenderer
     }
 
     /// <inheritdoc/>
-    public void WaitForReady() => _ready.Wait();
+    public void WaitForReady()
+    {
+        Interlocked.Increment(ref _waitForReadyCount);
+        OnWaitForReady?.Invoke();
+        _ready.Wait();
+    }
 
     /// <inheritdoc/>
-    public bool WaitForReady(TimeSpan timeout) => _ready.Wait(timeout);
+    public bool WaitForReady(TimeSpan timeout)
+    {
+        Interlocked.Increment(ref _waitForReadyCount);
+        OnWaitForReady?.Invoke();
+        return _ready.Wait(timeout);
+    }
 
     /// <inheritdoc/>
     public void PostWindowExtent(WindowExtent extent)
     {
         ExtentPostCount++;
         LastExtent = extent;
+        _posted.Set();
     }
 
     /// <inheritdoc/>
@@ -141,6 +176,7 @@ internal sealed class FakeRenderer : IRenderer
     {
         FullscreenPostCount++;
         LastFullscreen = fullscreen;
+        _posted.Set();
     }
 
     /// <inheritdoc/>
@@ -148,6 +184,44 @@ internal sealed class FakeRenderer : IRenderer
     {
         MinimizedPostCount++;
         LastMinimized = minimized;
+        _posted.Set();
+    }
+
+    /// <summary>
+    /// Waits at most <paramref name="timeout"/> for a control post to satisfy a predicate
+    /// (tests only; event-based, no polling or sleeps).
+    /// </summary>
+    /// <param name="predicate">The post condition to observe.</param>
+    /// <param name="timeout">The bounded wait.</param>
+    /// <returns><see langword="true"/> when the predicate held; <see langword="false"/> on timeout.</returns>
+    internal bool WaitForPosts(Func<bool> predicate, TimeSpan timeout)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        while (true)
+        {
+            if (predicate())
+            {
+                return true;
+            }
+
+            _posted.Reset();
+            if (predicate())
+            {
+                return true;
+            }
+
+            TimeSpan remaining = timeout - stopwatch.Elapsed;
+            if (remaining <= TimeSpan.Zero)
+            {
+                return false;
+            }
+
+            if (!_posted.Wait(remaining))
+            {
+                return predicate();
+            }
+        }
     }
 
     /// <inheritdoc/>
@@ -173,6 +247,12 @@ internal sealed class FakeRenderer : IRenderer
     /// <inheritdoc/>
     public void Join()
     {
+        if (!Started)
+        {
+            Volatile.Write(ref _joined, 1);
+            return;
+        }
+
         _stopped.Wait();
         Volatile.Write(ref _joined, 1);
     }
@@ -180,6 +260,12 @@ internal sealed class FakeRenderer : IRenderer
     /// <inheritdoc/>
     public bool Join(TimeSpan timeout)
     {
+        if (!Started)
+        {
+            Volatile.Write(ref _joined, 1);
+            return true;
+        }
+
         if (!_stopped.Wait(timeout))
         {
             return false;

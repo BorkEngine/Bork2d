@@ -3,16 +3,19 @@ using Bork2d.Runtime.Hosting;
 namespace Bork2d.Runtime;
 
 /// <summary>
-/// A built Bork2d host. It runs the configured windowed loop or the one-tick sequence and owns
-/// app-level cleanup.
+/// A built Bork2d host. It runs the configured windowed/offscreen loop or the headless one-tick
+/// sequence and owns app-level cleanup.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A windowed app runs <c>IGame.Setup</c>, an uncapped sequence of <c>IGame.Tick</c> calls, and one
-/// <c>IGame.Teardown</c> until <c>IEngine.Exit()</c>, the window close button, or a fatal platform
-/// error. Headless and offscreen apps keep the one-tick M1 sequence. The base asset pack (or the
-/// <c>WithoutAssets()</c> empty filesystem) opens before the window and <c>Setup</c> and closes
-/// after <c>Teardown</c>; there is no GPU work or render thread yet.
+/// A windowed app starts the Vulkan renderer thread, runs <c>IGame.Setup</c>, an uncapped sequence
+/// of <c>IGame.Tick</c> calls, and one <c>IGame.Teardown</c> until <c>IEngine.Exit()</c>, the
+/// window close button, a renderer fatal, or a fatal platform error. An offscreen app runs the same
+/// loop without a window or input against a fixed Vulkan target until <c>IEngine.Exit()</c> (or a
+/// renderer fatal) and advances <c>ITime</c> per tick; headless keeps the one-tick M1 sequence with
+/// no GPU, SDL, or renderer. The base asset pack (or the <c>WithoutAssets()</c> empty filesystem)
+/// opens before the window and <c>Setup</c> and closes after <c>Teardown</c>. The renderer thread is
+/// stopped and joined before <see cref="Run"/> returns or throws.
 /// </para>
 /// <para>
 /// No member requires the process main thread. <see cref="Run"/> may be called once from any
@@ -36,13 +39,15 @@ public sealed class Bork2dApp : IDisposable
     }
 
     /// <summary>
-    /// Runs the app: the windowed loop, or the one-tick sequence in headless/offscreen mode.
+    /// Runs the app: the windowed/offscreen loop, or the headless one-tick sequence.
     /// </summary>
     /// <remarks>
     /// May be called from any thread. May be called only once; a failed run still counts as the
-    /// one call. Game exceptions propagate to the caller after cleanup. In windowed mode the loop
-    /// stops on <c>IEngine.Exit()</c>, the window close button, or a fatal platform error; the
-    /// window is destroyed and the OS thread joined before this method returns or throws.
+    /// one call. Game exceptions propagate to the caller after cleanup. The windowed loop stops on
+    /// <c>IEngine.Exit()</c>, the window close button, a renderer fatal, or a fatal platform error;
+    /// the offscreen loop stops on <c>IEngine.Exit()</c> or a renderer fatal. The window is destroyed,
+    /// the OS thread joined, and the renderer thread stopped/joined before this method returns or
+    /// throws. Headless never creates a platform or renderer and runs exactly one tick.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The app has already been disposed.</exception>
     /// <exception cref="InvalidOperationException">The app has already been run.</exception>
@@ -97,7 +102,7 @@ public sealed class Bork2dApp : IDisposable
     /// service without opening a pack or starting its loader thread (D-M3-14).
     /// </remarks>
     /// <exception cref="InvalidOperationException">
-    /// A windowed run is active; stop it with <c>IEngine.Exit()</c> or the window close button.
+    /// A run is active; stop it with <c>IEngine.Exit()</c> or the window close button.
     /// </exception>
     public void Dispose()
     {

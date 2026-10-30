@@ -19,9 +19,8 @@ public sealed class WindowPlatformLoggingTests
     public void StartupLogsModeVersionDriverSizesScaleAndOptions()
     {
         using var factory = CreateFactory(out var provider);
-        var logger = factory.CreateLogger(Bork2dLogging.RuntimeCategory);
         var sdl = new FakeSdlApi();
-        using var platform = WindowTestSupport.Start(sdl, logger: logger);
+        using var platform = WindowTestSupport.Start(sdl, loggerFactory: factory);
 
         var entry = Assert.Single(
             provider.Entries,
@@ -44,9 +43,8 @@ public sealed class WindowPlatformLoggingTests
     public void CommandsFocusMinimizeFullscreenIgnoreAndStopAreLogged()
     {
         using var factory = CreateFactory(out var provider);
-        var logger = factory.CreateLogger(Bork2dLogging.RuntimeCategory);
         var sdl = new FakeSdlApi();
-        var platform = WindowTestSupport.Start(sdl, logger: logger);
+        var platform = WindowTestSupport.Start(sdl, loggerFactory: factory);
         var proxy = WindowTestSupport.Attach(platform);
         var window = Assert.Single(sdl.Windows);
 
@@ -107,13 +105,16 @@ public sealed class WindowPlatformLoggingTests
     public void StartupFailureLogsTheSdlError()
     {
         using var factory = CreateFactory(out var provider);
-        var logger = factory.CreateLogger(Bork2dLogging.RuntimeCategory);
         var sdl = new FakeSdlApi
         {
             ErrorText = "cannot open display",
             InitializeFailure = "SDL_Init(SDL_INIT_VIDEO) failed: cannot open display",
         };
-        var platform = new SdlWindowPlatform(WindowTestSupport.Options(), () => sdl, logger);
+        var platform = new SdlWindowPlatform(
+            WindowTestSupport.Options(),
+            () => sdl,
+            new FakeVulkanInstanceFactory(),
+            factory);
 
         Assert.Throws<Bork2d.Engine.Bork2dException>(platform.Start);
         platform.Dispose();

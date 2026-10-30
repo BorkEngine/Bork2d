@@ -163,10 +163,8 @@ public sealed class WindowedInputTimeTests
         Assert.InRange(secondDelta!.Value, 0d, 0.25d);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void OneTickModesNeverAdvanceTheClock(bool offscreen)
+    [Fact]
+    public void HeadlessModeNeverAdvancesTheClock()
     {
         double? time = null;
         double? delta = null;
@@ -178,22 +176,56 @@ public sealed class WindowedInputTimeTests
             delta = engine.Time.DeltaTime;
         };
 
-        var builder = new Bork2dAppBuilder<GameLayer>().WithGame(game).WithoutAssets();
-        if (offscreen)
-        {
-            builder.WithOffscreen(320, 200);
-        }
-        else
-        {
-            builder.WithHeadless();
-        }
-
-        using var app = builder.Build();
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithoutAssets()
+            .WithHeadless()
+            .WithFakeGraphics()
+            .Build();
         app.Run();
 
         Assert.Equal(0d, time);
         Assert.Equal(0d, delta);
         Assert.Equal(1, game.TickCount);
         Assert.Equal(1, game.TeardownCount);
+    }
+
+    [Fact]
+    public void OffscreenLoopAdvancesTheClockUntilExit()
+    {
+        double? firstTime = null;
+        double? secondTime = null;
+        var game = new ScriptedGame<GameLayer>();
+        game.OnTick = () =>
+        {
+            var engine = game.Engine!;
+            if (game.TickCount == 1)
+            {
+                firstTime = engine.Time.Time;
+            }
+            else
+            {
+                secondTime = engine.Time.Time;
+            }
+
+            if (game.TickCount == 3)
+            {
+                engine.Exit();
+            }
+        };
+
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithoutAssets()
+            .WithOffscreen(320, 200)
+            .WithFakeGraphics()
+            .Build();
+        app.Run();
+
+        Assert.Equal(3, game.TickCount);
+        Assert.Equal(1, game.SetupCount);
+        Assert.Equal(1, game.TeardownCount);
+        Assert.Equal(0d, firstTime);
+        Assert.True(secondTime!.Value > firstTime!.Value, "Offscreen ITime must advance per tick.");
     }
 }

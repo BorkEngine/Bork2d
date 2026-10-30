@@ -308,11 +308,13 @@ public sealed class Bork2dAppTests
     public void OneTickModesNeverCreateTheSdlPlatform()
     {
         var invoked = false;
+        var rendererFactory = new FakeRendererFactory();
         var game = new TestGame<GameLayer>();
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
             .WithoutAssets()
+            .WithRendererFactory(rendererFactory)
             .WithSdlApiFactory(() =>
             {
                 invoked = true;
@@ -323,9 +325,48 @@ public sealed class Bork2dAppTests
         app.Run();
 
         Assert.False(invoked);
+        Assert.Equal(0, rendererFactory.CreateCount);
         Assert.Equal(1, game.SetupCount);
         Assert.Equal(1, game.TickCount);
         Assert.Equal(1, game.TeardownCount);
+    }
+
+    [Fact]
+    public void HeadlessIgnoresExitKeepsTheClockStillAndCreatesNoRenderer()
+    {
+        var rendererFactory = new FakeRendererFactory();
+        var instanceFactory = new FakeVulkanInstanceFactory();
+        double? time = null;
+        double? delta = null;
+        var game = new ScriptedGame<GameLayer>
+        {
+            OnSetup = engine => engine.Exit(),
+        };
+        game.OnTick = () =>
+        {
+            var engine = game.Engine!;
+            time = engine.Time.Time;
+            delta = engine.Time.DeltaTime;
+            engine.Exit();
+        };
+
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .WithoutAssets()
+            .WithRendererFactory(rendererFactory)
+            .WithVulkanInstanceFactory(instanceFactory)
+            .Build();
+
+        app.Run();
+
+        Assert.Equal(0, rendererFactory.CreateCount);
+        Assert.Equal(0, instanceFactory.CreateCount);
+        Assert.Equal(1, game.SetupCount);
+        Assert.Equal(1, game.TickCount);
+        Assert.Equal(1, game.TeardownCount);
+        Assert.Equal(0d, time);
+        Assert.Equal(0d, delta);
     }
 
     [Fact]

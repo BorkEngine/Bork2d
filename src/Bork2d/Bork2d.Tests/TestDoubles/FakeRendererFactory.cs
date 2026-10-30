@@ -23,12 +23,20 @@ internal sealed class FakeRendererFactory : IRendererFactory
     /// <summary>Gets the number of create calls.</summary>
     internal int CreateCount { get; private set; }
 
+    /// <summary>Gets or sets the exception <see cref="Create"/> throws instead of returning.</summary>
+    internal Exception? CreateException { get; set; }
+
     /// <inheritdoc/>
     public IRenderer Create(RendererStartInfo startInfo)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
         CreateCount++;
         StartInfo = startInfo;
+        if (CreateException is not null)
+        {
+            throw CreateException;
+        }
+
         return Renderer;
     }
 }

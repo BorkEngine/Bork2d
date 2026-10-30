@@ -1,12 +1,14 @@
 # Architecture Overview
 
 > **Status:** M1–M4 are merged into `develop`; **D-036/D-037/D-038 are merged (2026-10-27, PR #8)**
-> and the Pong example (D-043/D-044) is merged into `develop` (2026-10-29, PR #10).
-> The builder, validation, windowed SDL host
-> (window/input/time/loop), one-tick headless/offscreen host, scene graph, logging, asset pipeline,
-> builder-configured bake, and AOT baseline are `Current`; the editor (M5), Vulkan and frame handoff
-> (M6/M7), and the sprite renderer (M8) are `Planned`. Status detail is in
-> [the roadmap](../roadmap.md).
+> and the Pong example (D-043/D-044) is merged into `develop` (2026-10-29, PR #10). M6 (Vulkan
+> bring-up) is in progress: WP-1–WP-4 are delivered, so the builder, windowed/offscreen Vulkan
+> hosts, headless one-tick host, scene graph, logging, asset pipeline, builder-configured bake, and
+> AOT baseline are `Current`. Windowed and offscreen now run a real render thread that clears an
+> opaque-black sRGB target (windowed presents; offscreen discards and loops until `Exit`); frame
+> handoff/pacing (M7) and the sprite renderer (M8) are `Planned`. WP-5 owns the windowed/offscreen
+> AOT/Pong gate. Status detail is in [the roadmap](../roadmap.md). The engine suite is 1044 tests
+> (1028 deterministic + 16 opt-in/conditional).
 >
 > Source file types are registered asset processors with `[GenerateShape]` sidecars when settings are
 > required; the built-in texture importer is one processor. Data types are registered explicitly with
@@ -65,9 +67,10 @@ there is no descriptor and no generated host. See [asset processors](asset-proce
   runtime; entities have no IDs. The
   pack writer is the public tooling exception in `Bork2d.Engine`; it validates references at pack
   build.
-- **Headless and offscreen modes.** Servers run with no window, GPU, or render thread; headless is
-  one tick today and becomes timer-paced at a configured rate in M7. Offscreen rendering is
-  M6/M8.
+- **Headless and offscreen modes.** Servers run with no window, GPU, renderer, or Vulkan loader;
+  headless is one tick today and becomes timer-paced at a configured rate in M7. Offscreen runs a
+  real Vulkan render thread against a fixed sRGB target, discards frames, and loops until `Exit`
+  (M6); pacing/handoff and readback are M7/M8/M10.
 - **Diagnostics and quality.** Microsoft.Extensions.Logging/ZLogger, `IEngine.LoggerFactory`;
   warnings and style violations are build errors.
 - **A short, composable startup API** through a builder in `Bork2d.Runtime`.
@@ -111,24 +114,27 @@ Game code never references an engine project directly. Exact rules: [Projects](p
 ## 5. Runtime topology
 
 The engine invokes game callbacks on its tick thread, which may be any host thread; there is no
-process-main-thread affinity. Windowed mode owns one OS/window thread (SDL, window commands, event
-pump) and runs the game loop on the caller's tick thread; it creates no render thread and no Vulkan
-object. Every mode owns one app-scoped asset loader thread. Headless/offscreen still run `Setup`,
-one `Tick`, and `Teardown` on the calling thread. The render thread (M6/M7) is `Planned`; the
-threads never touch each other's domain (SDL, Vulkan, or game objects).
+process-main-thread affinity. Windowed mode owns one OS/window thread (SDL, Vulkan instance/surface,
+window commands, event pump) and one render thread (device, swapchain, clear, present) started by the
+host; the game loop runs on the caller's tick thread. Offscreen mode owns the same render thread but
+no OS/window thread; headless owns neither. Every mode owns one app-scoped asset loader thread.
+The host starts the renderer without waiting for readiness, runs `Setup` immediately, and waits for
+readiness only before the first tick (D-M6-06). Windowed/offscreen render frames are continuous and
+decoupled from ticks (D-M6-01); the snapshot ring and handoff are M7. No thread touches another
+thread's domain (SDL, Vulkan, or game objects).
 
 | Mode | Tick | OS/window thread | Render thread | SDL | Vulkan | Pacing (current) |
 | --- | :-: | :-: | :-: | :-: | :-: | --- |
-| Windowed | yes | yes | no (M6/M7) | yes | no (M6) | uncapped until M7 |
-| Offscreen | yes | no | no (M6/M7) | no | no (M6) | one tick (paced loop M7) |
+| Windowed | yes | yes | yes | yes | yes | uncapped ticks; continuous present (M7 handoff) |
+| Offscreen | yes | no | yes | no | yes | uncapped ticks; GPU-fence-paced discard (M7 handoff) |
 | Headless | yes | no | no | no | no | one tick (timer-paced M7) |
 
-All three modes are selected and validated by the builder. Only windowed mode currently runs a real
-loop; the window is visible from `Run()` start and destroyed before `Run()` returns. Offscreen and
-headless keep the one-tick M1 sequence until M7. In the target design the tick publishes an
-immutable snapshot into a three-slot ring that the render thread consumes, and the tick may wait
-only when the ring is full; headless has no ring and is timer-paced. The state machine is in
-[Threading and frame handoff](threading.md).
+All three modes are selected and validated by the builder. Windowed and offscreen run the real
+renderer and the tick loop until `Exit`/close/fatal; the window is visible from `Run()` start and
+destroyed before `Run()` returns. Headless keeps the one-tick M1 sequence. In the target design the
+tick publishes an immutable snapshot into a three-slot ring that the render thread consumes, and the
+tick may wait only when the ring is full; headless has no ring and is timer-paced. The state machine
+is in [Threading and frame handoff](threading.md).
 
 ## 6. Invariants
 
@@ -146,7 +152,7 @@ bug, not a style preference.
 7. **Layers are single bits, culling masks combinations**: layer `0` or a multi-bit layer is invalid and skipped with a debug diagnostic.
 8. **World units are abstract and Y-up; rotation is CCW degrees normalized to `[0, 360)`**: `Camera.Size` is half the visible height, and sprite assets carry UVs, a pivot, a topology, optional indices, and a pixels-per-unit scale.
 9. **There is no depth buffer in v1**: draw order is layer then `ZIndex`, ties are unspecified with no entity-ID tie-breaker (D-026), and `ClearKind.Depth` is reserved.
-10. **At most one window and one app process in v1**: modes are windowed, offscreen, or headless; headless has no window or GPU and stores its tick rate (default 60, `0` = uncapped; pacing arrives in M7).
+10. **At most one window and one app process in v1**: modes are windowed, offscreen, or headless; headless has no window, GPU, renderer, or Vulkan loader and stores its tick rate (default 60, `0` = uncapped; pacing arrives in M7).
 11. **No steady-state per-frame allocations** in the tick snapshot builder or renderer hot path.
 12. **The runtime is NativeAOT- and trim-safe**: no runtime reflection, assembly scanning, runtime TOML, or dynamic code; MessagePack shapes are source-generated.
 13. **Packs are the runtime asset source**: TOML and source images live in the game-owned
@@ -158,6 +164,10 @@ Source file types are registered processors (D-036).
 15. **Warnings and C# style violations are build errors**, with a format gate in CI.
 16. **Pre-1.0 breaking changes are allowed**, but every public change updates the API guide, reference, and decision log in the same change.
 17. **Scene objects are root-owned**: `IEngine.Root` strongly owns its tree, `Root.DetachAll()` detaches direct children, `ISceneRoot` is read-only, and there is no entity `Dispose`/`IsAlive` (detach with `Parent = null`, re-attach later). See [Scene ownership](scene-ownership.md).
+18. **Headless never calls SDL or the Vulkan loader**, creates no instance/device/platform/renderer, and remains one-tick.
+19. **Windowed and offscreen require Vulkan 1.3**: the OS/window thread owns the windowed instance/surface; the render thread owns the device, swapchain, offscreen targets, frames, and recording. No renderer thread outlives `Run()`.
+20. **`Setup` runs before renderer readiness and is never skipped because the renderer failed**; no `Tick` runs before readiness (D-M6-06/D-M6-14).
+21. **Every frame starts with an opaque-black clear and has no depth**; M6 has no snapshot, camera, draw, pacing, or readback.
 
 ## 7. Read next
 

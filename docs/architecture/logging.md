@@ -1,19 +1,21 @@
 # Logging
 
-> **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4). The builder creates an
-> app-owned Microsoft.Extensions.Logging factory, installs a plain-text ZLogger console provider by
-> default, logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`.
-> The windowed platform logs startup/stop/commands/failures, the runtime host logs the loop stop
-> with ticks and elapsed time, and the asset service logs start/overlay/error/stop events; there is
-> no per-frame or per-asset-per-tick logging. Configuration is identical in all modes, and the
-> default path runs in the AOT gate (`Pong.Desktop`, headless with the baked pack and `--windowed`)
-> with zero trim/AOT warnings. The suite is 1014 tests (1000 deterministic plus 14
-> opt-in/conditional). The project-consolidation refactor (D-041/D-042) renamed the engine categories
-> to `Bork2d.Engine` and `Bork2d.Engine.Assets`; `Bork2d.Runtime` and `Bork2d.Render` are unchanged.
-> M6 WP-2 makes the `Bork2d.Render` category current for instance, validation, and device-selection
-> events (§5.3); M6 WP-3 adds the swapchain-created, swapchain-recreated, minimized, and renderer
-> start/stop counter lines. Offscreen target diagnostics remain WP-4. The Pong example (D-043/D-044)
-> owns the game-side title/logging behavior.
+> **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4) and M6 WP-4 (M6 in
+> progress; WP-5 owns the AOT/Pong gate). The builder creates an app-owned
+> Microsoft.Extensions.Logging factory, installs a plain-text ZLogger console provider by default,
+> logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`. The
+> windowed platform logs startup/stop/commands/failures, the runtime host logs the windowed and
+> offscreen loop stops with ticks and elapsed time, the renderer logs instance/device/swapchain/
+> offscreen target and start/stop counters from `Bork2d.Render`, and the asset service logs
+> start/overlay/error/stop events; there is no per-frame or per-asset-per-tick logging.
+> Configuration is identical in all modes, and the default path runs in the AOT gate
+> (`Pong.Desktop`, headless with the baked pack). The suite is 1044 tests (1028 deterministic plus
+> 16 opt-in/conditional). The project-consolidation refactor (D-041/D-042) renamed the engine
+> categories to `Bork2d.Engine` and `Bork2d.Engine.Assets`; `Bork2d.Runtime` and `Bork2d.Render` are
+> unchanged. M6 WP-2 makes the `Bork2d.Render` category current for instance, validation, and
+> device-selection events (§5.3); WP-3 adds the windowed swapchain/clear/present and start/stop
+> counter lines; WP-4 adds the offscreen target/start/stop lines and the offscreen loop-stop line.
+> The Pong example (D-043/D-044) owns the game-side title/logging behavior.
 
 ## 1. Surface
 
@@ -110,7 +112,7 @@ game code creates its own categories.
 | `Bork2d.Runtime` | builder, modes, lifecycle, windowing |
 | `Bork2d.Engine` | reserved for scene/time/snapshot diagnostics; no current log sites |
 | `Bork2d.Engine.Assets` | pack parsing, decompression, loading |
-| `Bork2d.Render` | Vulkan instance/validation/device selection (M6 WP-2); windowed swapchain create/recreate/minimize and renderer start/stop counters (M6 WP-3); offscreen target diagnostics are WP-4 |
+| `Bork2d.Render` | Vulkan instance/validation/device selection (M6 WP-2); windowed swapchain create/recreate/minimize and renderer start/stop counters (WP-3); offscreen target/start/stop counters (WP-4) |
 | game-defined | `CreateLogger("MyGame")` or `CreateLogger<T>()` |
 Startup logs use `Bork2d.Runtime` and one structured message after validation:
 
@@ -130,12 +132,14 @@ per-key, or per-mouse-move logging.
 
 | Event | Level | Fields |
 | --- | --- | --- |
-| Windowed platform started | Information | `mode=Windowed`, `sdlVersion` (the `SDL_GetVersion` the loaded binary reports), `videoDriver`, `windowPoints`, `framebufferPixels`, `scale`, `fullscreen`, `resizable`, `vsync` (stored builder value, not applied in M2). |
+| Windowed platform started | Information | `mode=Windowed`, `sdlVersion` (the `SDL_GetVersion` the loaded binary reports), `videoDriver`, `windowPoints`, `framebufferPixels`, `scale`, `fullscreen`, `resizable`, `vsync`, `vulkanValidation` (`on`/`off`), `vulkanSurface` (opaque handle). |
 | Window command applied | Debug | `command` (`Title`/`Size`/`Fullscreen`/`CursorVisible`), `confirmed` value. |
 | Focus gained/lost, minimized/restored/maximized, DPI scale changed | Debug | the new state, plus points/framebuffer for a scale change. |
 | `IWindow.Size` ignored while fullscreen, or deferred while minimized | Debug | the requested framebuffer size. |
 | SDL failure (startup or after startup) | Error | the SDL operation and the `SDL_GetError` text; the exception also carries the failure. |
+| Vulkan surface replaced after surface loss | Warning | old/new surface handle and the new extent (D-M6-16). |
 | Windowed loop stopped (runtime host) | Information | `reason` (`Exit`/`Close`/`Error`), `ticks` (completed ticks), `elapsedSeconds` (Setup through Teardown, rounded to milliseconds), `finalFramebuffer` (pixels). |
+| Offscreen loop stopped (runtime host) | Information | `reason` (`Exit`/`Error`/`Stop`), `ticks`, `elapsedSeconds`. |
 | Windowed platform stopped | Information | `reason` (`Exit`/`Close`/`Error`), `finalFramebuffer` pixels. |
 
 The startup and loop-stop lines at 150% display scaling look like:
@@ -197,18 +201,19 @@ There is no per-frame, per-draw, or per-image logging. The offscreen target/fram
 | Swapchain created | Information | format, color space, requested/actual present mode, extent, image count |
 | Swapchain recreated | Debug | reason (`Resize`/`Fullscreen`/`OutOfDate`/`Suboptimal`/`SurfaceLost`), old/new extent, format, present mode, image count |
 | Minimized / zero extent | Debug | skipped acquire/present and the last extent |
-| Renderer started | Information | mode, extent, format, color space, present mode, image count, frames in flight, validation on/off |
+| Offscreen target created (renderer start line) | Information | extent, format, image count, frames in flight, total memory bytes, validation on/off, counters |
+| Renderer started | Information | mode, extent, format, color space/present mode (windowed), image count, frames in flight, validation on/off, counters |
 | Surface lost and recovered | Warning | `VkResult`, attempt number, new extent, present mode |
-| Renderer stopped | Information | mode, reason, frames presented, swapchain recreations, validation errors/warnings, last frame number, last present result |
+| Renderer stopped | Information | mode, reason, frames presented, frames discarded, swapchain recreations, validation errors/warnings, last frame number, last present result |
 | Fatal renderer failure | Error | the exception (Vulkan operation/result or validation detail); the host rethrows it after teardown |
 | Validation message | Warning/Error (Info/Verbose at Debug) | severity, type, message id/name, objects, message; errors are fatal only with validation enabled (D-M6-21) |
 | Surface destruction or debug-messenger/device cleanup failure | Error/Warning | the operation and result; normal shutdown keeps its existing outcome (D-M6-27) |
 
 A validation-enabled startup ends with the loader/instance/device lines followed by one selected
-device line, the swapchain-created line, and the renderer-started line. The `[GpuFact]` windowed
-test asserts zero validation errors/warnings at clean shutdown and records the counters. The renderer
-logs frame-presented/recreation/validation counters once at stop; the offscreen discarded-frame
-counter is WP-4. No line is emitted from the acquire/record/present hot path.
+device line, the swapchain-created (windowed) or target line (offscreen), and the renderer-started
+line. The `[GpuFact]` windowed and offscreen tests assert zero validation errors/warnings at clean
+shutdown and record the counters. The renderer logs frame-presented/discarded/recreation/validation
+counters once at stop. No line is emitted from the acquire/record/present hot path.
 
 ## 6. NativeAOT
 

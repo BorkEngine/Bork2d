@@ -1,5 +1,8 @@
 using System.Numerics;
 using Bork2d.Engine;
+using Bork2d.Render;
+using Bork2d.Render.Vulkan;
+using Bork2d.Runtime.Hosting;
 using Bork2d.Runtime.Input;
 using Bork2d.Runtime.Sdl;
 using Microsoft.Extensions.Logging;
@@ -39,9 +42,12 @@ internal sealed class SdlWindowPlatform : IDisposable
 {
     private const string ThreadName = "Bork2d.Window";
     private const float ScaleTolerance = 0.001f;
+    private static readonly TimeSpan _surfaceRecoveryTimeout = TimeSpan.FromSeconds(10);
 
     private readonly WindowPlatformOptions _options;
     private readonly Func<ISdlApi> _sdlApiFactory;
+    private readonly IVulkanInstanceFactory _instanceFactory;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger _logger;
     private readonly WindowCommandQueue _commands;
     private readonly InputAccumulator _input = new();
@@ -56,6 +62,10 @@ internal sealed class SdlWindowPlatform : IDisposable
     private bool _textInputActive;
     private Thread? _thread;
     private ISdlApi? _sdl;
+    private ISdlWindow? _window;
+    private IVulkanInstance? _instance;
+    private VulkanWindowSnapshot? _vulkan;
+    private nint _surfaceHandle;
     private int _userEventType = -1;
     private int _stopReason;
     private int _shutdownState;
@@ -65,6 +75,13 @@ internal sealed class SdlWindowPlatform : IDisposable
     private volatile bool _stop;
     private bool _exitRequested;
     private volatile bool _startedSuccessfully;
+    private IRenderer? _renderer;
+    private int _forceControlPost;
+    private WindowExtent? _lastDrawableExtent;
+    private WindowExtent? _lastPostedExtent;
+    private bool? _lastPostedFullscreen;
+    private bool? _lastPostedMinimized;
+    private SurfaceRequest? _surfaceRequest;
 
     /// <summary>Initializes a new instance of the <see cref="SdlWindowPlatform"/> class.</summary>
     /// <param name="options">The builder-derived window options.</param>
@@ -72,19 +89,26 @@ internal sealed class SdlWindowPlatform : IDisposable
     /// Creates the SDL seam on the OS thread. Tests supply a fake; production supplies
     /// <see cref="SilkSdlApi"/>.
     /// </param>
-    /// <param name="logger">The <c>Bork2d.Runtime</c> logger.</param>
+    /// <param name="instanceFactory">
+    /// Creates the Vulkan instance on the OS thread. Tests supply a fake so no loader is loaded.
+    /// </param>
+    /// <param name="loggerFactory">The factory used for the <c>Bork2d.Runtime</c> category.</param>
     internal SdlWindowPlatform(
         WindowPlatformOptions options,
         Func<ISdlApi> sdlApiFactory,
-        ILogger logger)
+        IVulkanInstanceFactory instanceFactory,
+        ILoggerFactory loggerFactory)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(sdlApiFactory);
-        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(instanceFactory);
+        ArgumentNullException.ThrowIfNull(loggerFactory);
 
         _options = options;
         _sdlApiFactory = sdlApiFactory;
-        _logger = logger;
+        _instanceFactory = instanceFactory;
+        _loggerFactory = loggerFactory;
+        _logger = loggerFactory.CreateLogger(Bork2dLogging.RuntimeCategory);
         _commands = new WindowCommandQueue(
             options.Title,
             options.Width,
@@ -133,10 +157,18 @@ internal sealed class SdlWindowPlatform : IDisposable
     /// <summary>Gets the <c>Bork2d.Runtime</c> logger used by the platform and its window proxy.</summary>
     internal ILogger Logger => _logger;
 
-    /// <summary>Starts the OS thread and blocks until the window is created or startup failed.</summary>
+    /// <summary>
+    /// Gets the published Vulkan window snapshot (owned instance, surface handle, drawable size),
+    /// or <see langword="null"/> before startup or after shutdown.
+    /// </summary>
+    internal VulkanWindowSnapshot? VulkanWindow => Volatile.Read(ref _vulkan);
+
+    /// <summary>Starts the OS thread and blocks until the window, Vulkan instance, and surface exist or startup failed.</summary>
     /// <exception cref="Bork2dException">
-    /// SDL initialization or window creation failed. The message contains the SDL error text; the
-    /// OS thread is joined and SDL is cleaned up before the exception is thrown.
+    /// SDL initialization/window creation, Vulkan loader/instance creation, or surface creation
+    /// failed. The message contains the SDL/Vulkan error text; the OS thread is joined, the partial
+    /// surface/instance are destroyed, the window is destroyed, and SDL/loader are released before
+    /// the exception is thrown.
     /// </exception>
     internal void Start()
     {
@@ -282,6 +314,57 @@ internal sealed class SdlWindowPlatform : IDisposable
     /// </remarks>
     internal bool WaitForExitRequest(TimeSpan timeout) => _exitRequestedSignal.Wait(timeout);
 
+    /// <summary>
+    /// Attaches the renderer that receives the platform's confirmed window state (M6).
+    /// </summary>
+    /// <param name="renderer">The started renderer.</param>
+    /// <remarks>
+    /// The OS/window thread is the single control producer: the attachment schedules an immediate
+    /// post of the current confirmed state (extent, fullscreen, minimized), and later posts happen
+    /// only when one of those properties changes. Title, focus, cursor, and visibility changes never
+    /// produce a post. The platform never blocks on the renderer.
+    /// </remarks>
+    internal void AttachRenderer(IRenderer renderer)
+    {
+        ArgumentNullException.ThrowIfNull(renderer);
+        Volatile.Write(ref _renderer, renderer);
+        Volatile.Write(ref _forceControlPost, 1);
+        Wake();
+    }
+
+    /// <summary>
+    /// Creates a replacement surface on the OS/window thread for the single D-M6-16 recovery.
+    /// </summary>
+    /// <returns>The new opaque surface handle, or <c>0</c> when the replacement failed.</returns>
+    /// <remarks>
+    /// Called from the render thread after it dropped the swapchain. The request wakes the pump and
+    /// waits a bounded interval, so a stopped or dead pump fails the recovery instead of hanging; a
+    /// failure returns <c>0</c> and the renderer treats it as fatal. The OS thread never waits on the
+    /// renderer.
+    /// </remarks>
+    internal nint CreateReplacementSurface()
+    {
+        if (!_startedSuccessfully || _stop || _surfaceHandle == 0)
+        {
+            return 0;
+        }
+
+        var request = new SurfaceRequest();
+        if (Interlocked.CompareExchange(ref _surfaceRequest, request, null) is not null)
+        {
+            return 0;
+        }
+
+        Wake();
+        if (!request.Completion.Task.Wait(_surfaceRecoveryTimeout))
+        {
+            Interlocked.CompareExchange(ref _surfaceRequest, null, request);
+            return 0;
+        }
+
+        return request.Completion.Task.Result;
+    }
+
     /// <summary>Signals stop, wakes the event wait, and joins the OS thread.</summary>
     /// <remarks>
     /// Idempotent. The OS thread destroys the window before quitting and disposing SDL; this method
@@ -404,6 +487,8 @@ internal sealed class SdlWindowPlatform : IDisposable
             Volatile.Write(ref _userEventType, userEventType);
 
             ApplyInitialFramebufferSize(window);
+            Volatile.Write(ref _window, window);
+            InitializeVulkan(sdl, window);
             var flags = window.Flags;
             var focused = (flags & SdlWindowFlags.InputFocus) != 0;
             _input.SetFocused(focused);
@@ -443,6 +528,192 @@ internal sealed class SdlWindowPlatform : IDisposable
         }
     }
 
+    private void InitializeVulkan(ISdlApi sdl, ISdlWindow window)
+    {
+        sdl.VulkanLoadLibrary();
+        IReadOnlyList<string> extensions = window.GetVulkanInstanceExtensions();
+        _instance = _instanceFactory.Create(
+            new VulkanInstanceRequest
+            {
+                RequiredExtensions = extensions,
+                ValidationRequested = _options.Validation,
+                ApplicationName = _options.Title,
+                EngineName = "Bork2d",
+                LoggerFactory = _loggerFactory,
+            });
+        if (_instance.Handle == 0)
+        {
+            throw new Bork2dException(
+                "The Vulkan instance factory returned a zero Vulkan instance handle.");
+        }
+
+        _surfaceHandle = window.CreateVulkanSurface(_instance.Handle);
+        if (_surfaceHandle == 0)
+        {
+            throw new Bork2dException(
+                "SDL_Vulkan_CreateSurface returned a zero Vulkan surface handle.");
+        }
+
+        SdlWindowSize drawable = window.GetVulkanDrawableSize();
+        var extent = new WindowExtent(drawable.Width, drawable.Height);
+        if (!extent.IsZeroOrMinimized)
+        {
+            _lastDrawableExtent = extent;
+        }
+
+        Volatile.Write(ref _vulkan, new VulkanWindowSnapshot(_instance, _surfaceHandle, extent));
+    }
+
+    private void DestroyVulkan(ISdlApi? sdl)
+    {
+        IVulkanInstance? instance = _instance;
+        nint surface = _surfaceHandle;
+        if (instance is not null)
+        {
+            if (surface != 0)
+            {
+                try
+                {
+                    instance.DestroySurface(surface);
+                }
+                catch (Exception exception)
+                {
+                    _logger.LogError(exception, "Vulkan surface destruction failed.");
+                }
+            }
+
+            try
+            {
+                instance.Destroy();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "Vulkan instance destruction failed.");
+            }
+        }
+
+        _instance = null;
+        _surfaceHandle = 0;
+        Volatile.Write(ref _vulkan, null);
+
+        try
+        {
+            sdl?.VulkanUnloadLibrary();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Vulkan loader unload failed.");
+        }
+    }
+
+    private void ApplyRendererRequests(ISdlWindow window)
+    {
+        SurfaceRequest? request = Interlocked.Exchange(ref _surfaceRequest, null);
+        if (request is null)
+        {
+            return;
+        }
+
+        IVulkanInstance? instance = _instance;
+        if (instance is null || _surfaceHandle == 0 || !State.Alive)
+        {
+            request.Complete(0);
+            return;
+        }
+
+        try
+        {
+            nint replacement = window.CreateVulkanSurface(instance.Handle);
+            if (replacement == 0)
+            {
+                request.Complete(0);
+                return;
+            }
+
+            nint replaced = _surfaceHandle;
+            _surfaceHandle = replacement;
+            if (replaced != 0)
+            {
+                instance.DestroySurface(replaced);
+            }
+
+            SdlWindowSize drawable = window.GetVulkanDrawableSize();
+            var extent = drawable.IsEmpty
+                ? _lastDrawableExtent ?? default
+                : new WindowExtent(drawable.Width, drawable.Height);
+            if (!extent.IsZeroOrMinimized)
+            {
+                _lastDrawableExtent = extent;
+            }
+
+            Volatile.Write(
+                ref _vulkan,
+                new VulkanWindowSnapshot(instance, replacement, extent));
+            _logger.LogWarning(
+                "Vulkan surface replaced after surface loss: oldSurface=0x{OldSurface:X}, "
+                    + "newSurface=0x{NewSurface:X}, extent={Width}x{Height}.",
+                (ulong)replaced,
+                (ulong)replacement,
+                extent.Width,
+                extent.Height);
+            request.Complete(replacement);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Vulkan surface replacement failed.");
+            request.Complete(0);
+        }
+    }
+
+    private void PostRendererState()
+    {
+        IRenderer? renderer = Volatile.Read(ref _renderer);
+        if (renderer is null || !State.Alive)
+        {
+            return;
+        }
+
+        WindowState state = State;
+        ISdlWindow? window = Volatile.Read(ref _window);
+        WindowExtent? extent = _lastDrawableExtent;
+        if (window is not null && !state.Minimized)
+        {
+            try
+            {
+                SdlWindowSize drawable = window.GetVulkanDrawableSize();
+                if (!drawable.IsEmpty)
+                {
+                    extent = new WindowExtent(drawable.Width, drawable.Height);
+                    _lastDrawableExtent = extent;
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+        }
+
+        var force = Interlocked.Exchange(ref _forceControlPost, 0) != 0;
+        if (extent is { } postedExtent
+            && (force || _lastPostedExtent != postedExtent))
+        {
+            renderer.PostWindowExtent(postedExtent);
+            _lastPostedExtent = postedExtent;
+        }
+
+        if (force || _lastPostedFullscreen != state.Fullscreen)
+        {
+            renderer.PostFullscreen(state.Fullscreen);
+            _lastPostedFullscreen = state.Fullscreen;
+        }
+
+        if (force || _lastPostedMinimized != state.Minimized)
+        {
+            renderer.PostMinimized(state.Minimized);
+            _lastPostedMinimized = state.Minimized;
+        }
+    }
+
     private void Pump(ISdlApi sdl, ISdlWindow window)
     {
         while (!_stop)
@@ -463,6 +734,14 @@ internal sealed class SdlWindowPlatform : IDisposable
             {
                 break;
             }
+
+            ApplyRendererRequests(window);
+            if (_stop)
+            {
+                break;
+            }
+
+            PostRendererState();
 
             if (!sdl.TryWaitEvent(out var waitedEvent))
             {
@@ -977,6 +1256,13 @@ internal sealed class SdlWindowPlatform : IDisposable
         }
 
         var finalState = State;
+
+        // D-M6-09: the renderer has joined before this runs, so the OS thread destroys the surface,
+        // then the instance, then the window. A pending replacement request fails instead of hanging.
+        SurfaceRequest? pendingRequest = Interlocked.Exchange(ref _surfaceRequest, null);
+        pendingRequest?.Complete(0);
+        DestroyVulkan(sdl);
+
         try
         {
             window?.Dispose();
@@ -987,6 +1273,10 @@ internal sealed class SdlWindowPlatform : IDisposable
                 exception,
                 "SDL failure while destroying the window: {SdlError}",
                 TryGetSdlError());
+        }
+        finally
+        {
+            Volatile.Write(ref _window, null);
         }
 
         if (finalState.Alive)
@@ -1025,8 +1315,9 @@ internal sealed class SdlWindowPlatform : IDisposable
 
     private void LogStarted(ISdlApi sdl, WindowState state)
     {
+        VulkanWindowSnapshot? vulkan = Volatile.Read(ref _vulkan);
         _logger.LogInformation(
-            "Bork2d windowed platform started: mode={Mode}, sdlVersion={SdlVersion}, videoDriver={VideoDriver}, windowPoints={WindowWidth}x{WindowHeight}, framebufferPixels={FramebufferWidth}x{FramebufferHeight}, scale={Scale}, fullscreen={Fullscreen}, resizable={Resizable}, vsync={VSync}",
+            "Bork2d windowed platform started: mode={Mode}, sdlVersion={SdlVersion}, videoDriver={VideoDriver}, windowPoints={WindowWidth}x{WindowHeight}, framebufferPixels={FramebufferWidth}x{FramebufferHeight}, scale={Scale}, fullscreen={Fullscreen}, resizable={Resizable}, vsync={VSync}, vulkanValidation={Validation}, vulkanSurface=0x{Surface:X}",
             "Windowed",
             sdl.Version.ToString(),
             sdl.VideoDriver,
@@ -1037,7 +1328,9 @@ internal sealed class SdlWindowPlatform : IDisposable
             state.Scale,
             state.Fullscreen,
             _options.Resizable,
-            _options.VSync);
+            _options.VSync,
+            vulkan?.Instance.ValidationEnabled == true ? "on" : "off",
+            (ulong)(vulkan?.SurfaceHandle ?? 0));
     }
 
     private void LogStartFailure(Exception exception)
@@ -1123,5 +1416,14 @@ internal sealed class SdlWindowPlatform : IDisposable
         }
 
         return Math.Max(1, (int)MathF.Round(points));
+    }
+
+    /// <summary>One render-thread surface-replacement request completed by the OS thread.</summary>
+    private sealed class SurfaceRequest
+    {
+        internal TaskCompletionSource<nint> Completion { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal void Complete(nint surface) => Completion.TrySetResult(surface);
     }
 }
