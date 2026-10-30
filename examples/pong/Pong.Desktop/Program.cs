@@ -6,20 +6,22 @@ using Pong.Common;
 namespace Pong.Desktop;
 
 /// <summary>
-/// The Pong desktop host: the one-tick headless acceptance smoke or the windowed example.
+/// The Pong desktop host: the headless and offscreen acceptance smokes or the windowed example.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The imported <c>build/Bork2d.Assets.Copy.targets</c> build the <c>Pong.Assets</c> executable out
-/// of process, bake <c>assets.pck</c>, and copy it next to this app, so both modes mount
+/// of process, bake <c>assets.pck</c>, and copy it next to this app, so all three modes mount
 /// <c>AppContext.BaseDirectory/assets.pck</c>.
 /// </para>
 /// <para>
 /// Headless mode loads the pack, runs <see cref="PongGame"/> through the one-tick host, asserts the
 /// full baked asset chain, and exits 0; a failed assertion prints the diagnostic and returns 1.
 /// Windowed mode runs the interactive game, or exits after exactly <c>N</c> ticks when
-/// <c>--ticks N</c> is supplied. The project is published with <c>PublishAot</c> and a narrow
-/// Silk.NET <c>IL3000;IL3002</c> suppression, and is the engine's NativeAOT gate.
+/// <c>--ticks N</c> is supplied. Offscreen mode runs the non-interactive game through the offscreen
+/// Vulkan host and exits after exactly <c>N</c> ticks; its renderer clears and discards frames. The
+/// project is published with <c>PublishAot</c> and a narrow Silk.NET <c>IL3000;IL3002</c>
+/// suppression, and is the engine's NativeAOT gate.
 /// </para>
 /// </remarks>
 internal static class Program
@@ -49,16 +51,24 @@ internal static class Program
             return 2;
         }
 
-        return arguments.Headless ? RunHeadless() : RunWindowed(arguments);
+        return arguments.Headless
+            ? RunHeadless()
+            : arguments.Offscreen
+                ? RunOffscreen(arguments)
+                : RunWindowed(arguments);
     }
 
     private static void WriteUsage(TextWriter writer)
     {
-        writer.WriteLine("usage: Pong.Desktop [--headless | --windowed [--ticks N]]");
+        writer.WriteLine(
+            "usage: Pong.Desktop [--headless | --windowed [--ticks N] | --offscreen --ticks N]");
         writer.WriteLine("  (no arguments)  run the interactive windowed Pong example (1280x720, resizable)");
         writer.WriteLine("  --windowed      run the interactive windowed Pong example");
-        writer.WriteLine("  --ticks N       with --windowed: exit after exactly N completed ticks (N >= 1)");
+        writer.WriteLine(
+            "  --ticks N       with --windowed or --offscreen: exit after exactly N completed ticks (N >= 1)");
         writer.WriteLine("  --headless      run the one-tick headless acceptance smoke and exit 0");
+        writer.WriteLine(
+            "  --offscreen     run the non-interactive offscreen acceptance run; requires --ticks N");
     }
 
     private static int RunHeadless()
@@ -163,6 +173,50 @@ internal static class Program
         catch (Exception exception)
         {
             Console.Error.WriteLine($"Pong headless smoke failed: {exception.Message}");
+            return 1;
+        }
+    }
+
+    private static int RunOffscreen(PongArguments arguments)
+    {
+        string packPath = Path.Combine(AppContext.BaseDirectory, PackFileName);
+
+        try
+        {
+            Require(File.Exists(packPath), $"the baked pack must exist at '{packPath}'.");
+
+            int tickLimit = arguments.TickLimit
+                ?? throw new InvalidOperationException("--offscreen requires --ticks N.");
+
+            var game = new PongGame(interactive: false, tickLimit);
+            using (var app = new Bork2dAppBuilder<GameLayer>()
+                .WithGame(game)
+                .WithOffscreen(WindowWidth, WindowHeight)
+                .WithAssetsPack(packPath)
+                .Build())
+            {
+                app.Run();
+
+                Require(game.SetupCount == 1, "Setup must run exactly once.");
+                Require(
+                    game.TickCount == tickLimit,
+                    $"--ticks {tickLimit} must run exactly {tickLimit} completed ticks; ran "
+                        + $"{game.TickCount}.");
+                Require(game.TeardownCount == 1, "Teardown must run exactly once.");
+            }
+
+            Require(
+                game.World is { } world && world.Parent is null,
+                "Teardown must detach the world from the root.");
+
+            Console.WriteLine(
+                $"Pong offscreen run completed: setup/tick/teardown={game.SetupCount}/{game.TickCount}/"
+                    + $"{game.TeardownCount}, tickLimit={tickLimit}, exit 0.");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"Pong offscreen run failed: {exception.Message}");
             return 1;
         }
     }

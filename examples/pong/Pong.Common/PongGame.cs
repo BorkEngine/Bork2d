@@ -14,11 +14,12 @@ namespace Pong.Common;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The game works in the headless one-tick host and in the windowed host. Headless mode never reads
-/// <c>IInput</c> or <c>IWindow</c> and advances the simulation with a fixed 1/60 s step; windowed
-/// mode reads the player input and the frame delta, updates the window title when the state changes,
-/// and recomputes the court aspect from the framebuffer so a resize keeps the court proportional.
-/// The right paddle is always driven by <see cref="PongAi"/>.
+/// The game works in the headless one-tick host, the windowed host, and the non-interactive
+/// offscreen host. Headless and offscreen modes never read <c>IInput</c> or <c>IWindow</c> and
+/// advance the simulation with a fixed 1/60 s step; windowed mode reads the player input and the
+/// frame delta, updates the window title when the state changes, and recomputes the court aspect
+/// from the framebuffer so a resize keeps the court proportional. The right paddle is always driven
+/// by <see cref="PongAi"/>.
 /// </para>
 /// <para>
 /// Scores, pause/resume/reset transitions, and the final teardown are logged at Information. The
@@ -58,11 +59,11 @@ public sealed class PongGame : IGame<GameLayer>
     /// </summary>
     /// <param name="interactive">
     /// <see langword="true"/> for the windowed host, which reads the frame delta, the input, and the
-    /// framebuffer size; <see langword="false"/> for the headless host, which uses a fixed step and a
-    /// 16:9 court.
+    /// framebuffer size; <see langword="false"/> for the headless and offscreen hosts, which use a
+    /// fixed step and a 16:9 court.
     /// </param>
     /// <param name="tickLimit">
-    /// The number of completed windowed ticks after which the game calls
+    /// The number of completed windowed or offscreen ticks after which the game calls
     /// <see cref="IEngine{TLayer}.Exit"/>, or <see langword="null"/> for an interactive run.
     /// </param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="tickLimit"/> is less than 1.</exception>
