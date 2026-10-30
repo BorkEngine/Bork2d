@@ -16,14 +16,16 @@ internal sealed class WindowPlatformOptions
     /// <param name="height">The requested framebuffer height in physical pixels.</param>
     /// <param name="resizable">Whether the user may resize the window.</param>
     /// <param name="fullscreen">Whether the window starts in borderless desktop fullscreen.</param>
-    /// <param name="vsync">The stored vertical-sync preference, logged but not applied in M2.</param>
+    /// <param name="vsync">The vertical-sync preference passed to the renderer (M6).</param>
+    /// <param name="validation">Whether Vulkan validation layers are requested (M6).</param>
     internal WindowPlatformOptions(
         string title,
         int width,
         int height,
         bool resizable,
         bool fullscreen,
-        bool vsync)
+        bool vsync,
+        bool validation = false)
     {
         ArgumentNullException.ThrowIfNull(title);
         if (width <= 0)
@@ -42,6 +44,7 @@ internal sealed class WindowPlatformOptions
         Resizable = resizable;
         Fullscreen = fullscreen;
         VSync = vsync;
+        Validation = validation;
     }
 
     /// <summary>Gets the initial window title.</summary>
@@ -59,6 +62,9 @@ internal sealed class WindowPlatformOptions
     /// <summary>Gets a value indicating whether the window starts in borderless desktop fullscreen.</summary>
     internal bool Fullscreen { get; }
 
-    /// <summary>Gets the stored vertical-sync preference; it has no effect in M2.</summary>
+    /// <summary>Gets the stored vertical-sync preference; the renderer applies it in M6.</summary>
     internal bool VSync { get; }
+
+    /// <summary>Gets a value indicating whether Vulkan validation layers are requested.</summary>
+    internal bool Validation { get; }
 }

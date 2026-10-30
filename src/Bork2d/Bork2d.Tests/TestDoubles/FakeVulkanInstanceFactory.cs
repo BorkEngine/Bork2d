@@ -16,12 +16,20 @@ internal sealed class FakeVulkanInstanceFactory : IVulkanInstanceFactory
     /// <summary>Gets the number of create calls.</summary>
     internal int CreateCount { get; private set; }
 
+    /// <summary>Gets or sets the exception <see cref="Create"/> throws instead of returning.</summary>
+    internal Exception? CreateException { get; set; }
+
     /// <inheritdoc/>
     public IVulkanInstance Create(VulkanInstanceRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         CreateCount++;
         LastRequest = request;
+        if (CreateException is not null)
+        {
+            throw CreateException;
+        }
+
         return Instance;
     }
 }

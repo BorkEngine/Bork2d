@@ -3,26 +3,48 @@ using Bork2d.Engine;
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// Creates the production windowed Vulkan renderer; the host or tests inject the factory.
+/// Creates the production Vulkan renderer (windowed or offscreen); the host or tests inject the
+/// factory.
 /// </summary>
 /// <remarks>
-/// The factory validates the windowed start request synchronously so a missing instance or surface
-/// fails before a thread exists. It never starts the renderer and never touches the instance.
-/// Offscreen starts are WP-4 and are rejected here for now.
+/// The factory validates the start request synchronously so a missing windowed instance/surface or
+/// an invalid offscreen extent fails before a thread exists. It never starts the renderer and never
+/// touches the instance. A supplied instance factory creates the offscreen instance; when omitted,
+/// the production <see cref="VulkanInstanceFactory"/> is created only for an offscreen start.
 /// </remarks>
 internal sealed class VulkanRendererFactory : IRendererFactory
 {
+    private readonly IVulkanInstanceFactory? _instanceFactory;
+
+    /// <summary>Initializes a new instance of the <see cref="VulkanRendererFactory"/> class.</summary>
+    internal VulkanRendererFactory()
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="VulkanRendererFactory"/> class.</summary>
+    /// <param name="instanceFactory">Creates an offscreen renderer's owned instance.</param>
+    internal VulkanRendererFactory(IVulkanInstanceFactory instanceFactory)
+    {
+        ArgumentNullException.ThrowIfNull(instanceFactory);
+        _instanceFactory = instanceFactory;
+    }
+
     /// <inheritdoc/>
     public IRenderer Create(RendererStartInfo startInfo)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
 
-        if (startInfo.Mode != RendererMode.Windowed)
+        return startInfo.Mode switch
         {
-            throw new Bork2dException(
-                "Offscreen Vulkan rendering is not available in this build.");
-        }
+            RendererMode.Windowed => CreateWindowed(startInfo),
+            RendererMode.Offscreen => CreateOffscreen(startInfo),
+            _ => throw new Bork2dException(
+                $"The Vulkan renderer does not support mode {startInfo.Mode}."),
+        };
+    }
 
+    private static VulkanRenderer CreateWindowed(RendererStartInfo startInfo)
+    {
         if (startInfo.Instance is null)
         {
             throw new Bork2dException(
@@ -42,5 +64,19 @@ internal sealed class VulkanRendererFactory : IRendererFactory
         }
 
         return new VulkanRenderer(startInfo);
+    }
+
+    private VulkanOffscreenRenderer CreateOffscreen(RendererStartInfo startInfo)
+    {
+        if (startInfo.Width <= 0 || startInfo.Height <= 0)
+        {
+            throw new Bork2dException(
+                "Offscreen Vulkan rendering requires a positive target extent; got "
+                    + $"{startInfo.Width}x{startInfo.Height}.");
+        }
+
+        return new VulkanOffscreenRenderer(
+            startInfo,
+            _instanceFactory ?? new VulkanInstanceFactory());
     }
 }

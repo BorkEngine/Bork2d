@@ -111,6 +111,9 @@ internal sealed class FakeSdlApi : ISdlApi
     /// <summary>Gets or sets the message <see cref="CreateWindow"/> fails with.</summary>
     internal string? CreateWindowFailure { get; set; }
 
+    /// <summary>Gets or sets a callback that configures each created window before it is returned.</summary>
+    internal Action<FakeSdlWindow>? OnWindowCreated { get; set; }
+
     /// <summary>Gets or sets the message <see cref="VulkanLoadLibrary"/> fails with.</summary>
     internal string? VulkanLoadFailure { get; set; }
 
@@ -198,6 +201,7 @@ internal sealed class FakeSdlApi : ISdlApi
             initialFlags,
             RecordCall,
             () => _vulkanLoaded);
+        OnWindowCreated?.Invoke(window);
         Windows.Add(window);
         return window;
     }

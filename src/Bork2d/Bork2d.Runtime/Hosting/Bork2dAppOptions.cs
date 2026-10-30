@@ -1,5 +1,7 @@
 using System.Reflection;
 using Bork2d.Engine;
+using Bork2d.Render;
+using Bork2d.Render.Vulkan;
 using Bork2d.Runtime.Sdl;
 using Microsoft.Extensions.Logging;
 
@@ -103,6 +105,28 @@ internal sealed class Bork2dAppOptions<TLayer> where TLayer : struct, Enum
     /// builder surface.
     /// </remarks>
     internal Func<ISdlApi>? SdlApiFactory { get; set; }
+
+    /// <summary>
+    /// Gets or sets the internal test seam for the renderer factory.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="null"/> means production: a windowed/offscreen <c>Run</c> creates a
+    /// <see cref="VulkanRendererFactory"/>. Headless never constructs or invokes it. Tests
+    /// inject a fake so the host lifecycle runs without a GPU. This member is internal and not part
+    /// of the public builder surface.
+    /// </remarks>
+    internal IRendererFactory? RendererFactory { get; set; }
+
+    /// <summary>
+    /// Gets or sets the internal test seam for the Vulkan instance factory.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="null"/> means production: windowed and offscreen runs create a
+    /// <see cref="VulkanInstanceFactory"/> lazily. Headless never constructs it and never loads
+    /// Vulkan. Tests inject a fake instance. This member is internal and not part of the public
+    /// builder surface.
+    /// </remarks>
+    internal IVulkanInstanceFactory? VulkanInstanceFactory { get; set; }
 
     /// <summary>Gets or sets the window-only options that were explicitly set.</summary>
     internal Bork2dWindowOptionFlags WindowOptionsSet { get; set; }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Bork2d.Render.Vulkan;
 using Bork2d.Runtime.Input;
 using Bork2d.Runtime.Window;
 using Bork2d.Tests.TestDoubles;
@@ -26,18 +27,21 @@ internal static class WindowTestSupport
         int height = 720,
         bool resizable = true,
         bool fullscreen = false,
-        bool vsync = true)
-        => new(title, width, height, resizable, fullscreen, vsync);
+        bool vsync = true,
+        bool validation = false)
+        => new(title, width, height, resizable, fullscreen, vsync, validation);
 
     internal static SdlWindowPlatform Start(
         FakeSdlApi sdl,
         WindowPlatformOptions? options = null,
-        ILogger? logger = null)
+        ILoggerFactory? loggerFactory = null,
+        IVulkanInstanceFactory? instanceFactory = null)
     {
         var platform = new SdlWindowPlatform(
             options ?? Options(),
             () => sdl,
-            logger ?? NullLogger.Instance);
+            instanceFactory ?? new FakeVulkanInstanceFactory(),
+            loggerFactory ?? NullLoggerFactory.Instance);
         platform.Start();
         return platform;
     }

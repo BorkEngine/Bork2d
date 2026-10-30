@@ -1,4 +1,5 @@
 using System.Numerics;
+using Bork2d.Engine;
 using Bork2d.Runtime;
 using Bork2d.Tests.TestDoubles;
 using Bork2d.Tests.TestSupport;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Silk.NET.SDL;
 using Xunit;
 using Xunit.Abstractions;
+using Xunit.Sdk;
 
 namespace Bork2d.Tests.Platform.Sdl;
 
@@ -62,10 +64,18 @@ public sealed class SdlWindowRunTests
             .WithSize(640, 360)
             .WithResizable(false)
             .WithLogging(logging => logging.AddProvider(provider))
+            .WithRendererFactory(new FakeRendererFactory(new FakeRenderer { AutoReady = true }))
             .WithoutAssets()
             .Build();
 
-        AppTestSupport.RunToCompletion(app);
+        var failure = AppTestSupport.RunCaptured(app);
+        if (failure is Bork2dException unavailable && IsVulkanUnavailable(unavailable))
+        {
+            throw SkipException.ForSkip(
+                $"A Vulkan 1.3 loader/instance is not available: {unavailable.Message}");
+        }
+
+        Assert.Null(failure);
 
         _output.WriteLine($"framebuffer: {framebuffer}");
 
@@ -101,6 +111,7 @@ public sealed class SdlWindowRunTests
             .WithSize(640, 360)
             .WithResizable(false)
             .WithLogging(logging => logging.AddProvider(provider))
+            .WithRendererFactory(new FakeRendererFactory(new FakeRenderer { AutoReady = true }))
             .WithoutAssets()
             .Build();
 
@@ -147,6 +158,12 @@ public sealed class SdlWindowRunTests
             }
         }
 
+        if (failure is Bork2dException unavailable && IsVulkanUnavailable(unavailable))
+        {
+            throw SkipException.ForSkip(
+                $"A Vulkan 1.3 loader/instance is not available: {unavailable.Message}");
+        }
+
         Assert.Null(failure);
         Assert.Equal(1, game.SetupCount);
         Assert.Equal(1, game.TeardownCount);
@@ -159,5 +176,15 @@ public sealed class SdlWindowRunTests
             provider.Entries,
             entry => entry.Message.Contains("windowed loop stopped", StringComparison.Ordinal));
         Assert.Contains("reason=Close", stopLine.Message, StringComparison.Ordinal);
+    }
+
+    private static bool IsVulkanUnavailable(Bork2dException exception)
+    {
+        string message = exception.Message;
+        return message.Contains("could not be loaded", StringComparison.Ordinal)
+            || message.Contains("requires Vulkan 1.3.0", StringComparison.Ordinal)
+            || message.Contains("below the required 1.3.0", StringComparison.Ordinal)
+            || message.Contains("vkCreateInstance failed", StringComparison.Ordinal)
+            || message.Contains("is not available", StringComparison.Ordinal);
     }
 }

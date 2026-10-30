@@ -48,15 +48,41 @@ public sealed class WindowedRendererSeamTests
     }
 
     [Fact]
-    public void FactoryRejectsOffscreenUntilTheOffscreenWorkPackage()
+    public void FactoryAcceptsOffscreenAndCreatesTheOffscreenRenderer()
     {
         var factory = new VulkanRendererFactory();
         var startInfo = new RendererStartInfo
         {
             Mode = RendererMode.Offscreen,
             InstanceHandle = 0,
-            Width = 640,
-            Height = 480,
+            Width = 320,
+            Height = 240,
+            LoggerFactory = NullLoggerFactory.Instance,
+        };
+
+        IRenderer renderer = factory.Create(startInfo);
+
+        Assert.IsType<VulkanOffscreenRenderer>(renderer);
+        Assert.Equal(RendererStatus.NotStarted, renderer.Status);
+        Assert.False(renderer.IsReady);
+        Assert.Equal(RendererCounters.Empty, renderer.Counters);
+        Assert.True(renderer.Join(TimeSpan.Zero));
+    }
+
+    [Theory]
+    [InlineData(0, 240)]
+    [InlineData(320, 0)]
+    [InlineData(-1, 240)]
+    [InlineData(320, -1)]
+    public void FactoryRejectsNonPositiveOffscreenExtents(int width, int height)
+    {
+        var factory = new VulkanRendererFactory();
+        var startInfo = new RendererStartInfo
+        {
+            Mode = RendererMode.Offscreen,
+            InstanceHandle = 0,
+            Width = width,
+            Height = height,
             LoggerFactory = NullLoggerFactory.Instance,
         };
 

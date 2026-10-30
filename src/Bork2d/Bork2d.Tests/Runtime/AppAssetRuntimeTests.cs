@@ -465,6 +465,7 @@ public sealed class AppAssetRuntimeTests
             .WithTitle("Setup failure")
             .WithAssetsPack(basePath)
             .WithSdlApiFactory(() => sdl)
+            .WithFakeGraphics()
             .Build();
 
         Exception? failure = AppTestSupport.RunCaptured(app);
@@ -500,6 +501,7 @@ public sealed class AppAssetRuntimeTests
             .WithTitle("Tick and teardown failure")
             .WithAssetsPack(basePath)
             .WithSdlApiFactory(() => sdl)
+            .WithFakeGraphics()
             .Build();
 
         Exception? failure = AppTestSupport.RunCaptured(app);
@@ -671,7 +673,8 @@ public sealed class AppAssetRuntimeTests
     {
         var builder = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
-            .WithSdlApiFactory(sdlFactory);
+            .WithSdlApiFactory(sdlFactory)
+            .WithFakeGraphics();
 
         return ParseMode(mode) switch
         {
@@ -684,7 +687,8 @@ public sealed class AppAssetRuntimeTests
 
     private static void ExitOnFirstTick(string mode, ScriptedGame<GameLayer> game)
     {
-        if (IsWindowed(mode))
+        // Offscreen now runs the windowed-shaped loop until Exit (D-M6-07).
+        if (!IsHeadless(mode))
         {
             game.OnTick = () => game.Engine?.Exit();
         }
@@ -697,6 +701,8 @@ public sealed class AppAssetRuntimeTests
     }
 
     private static bool IsWindowed(string mode) => ParseMode(mode) == Bork2dAppMode.Windowed;
+
+    private static bool IsHeadless(string mode) => ParseMode(mode) == Bork2dAppMode.Headless;
 
     private static Bork2dAppMode ParseMode(string mode) => mode switch
     {

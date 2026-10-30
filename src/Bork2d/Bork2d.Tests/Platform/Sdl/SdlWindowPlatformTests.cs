@@ -104,7 +104,8 @@ public sealed class SdlWindowPlatformTests
         var platform = new SdlWindowPlatform(
             WindowTestSupport.Options(),
             () => sdl,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+            new FakeVulkanInstanceFactory(),
+            Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
 
         var thrown = Assert.Throws<Bork2dException>(platform.Start);
 
@@ -128,7 +129,8 @@ public sealed class SdlWindowPlatformTests
         var platform = new SdlWindowPlatform(
             WindowTestSupport.Options(),
             () => sdl,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+            new FakeVulkanInstanceFactory(),
+            Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
 
         var thrown = Assert.Throws<Bork2dException>(platform.Start);
 

@@ -124,6 +124,9 @@ internal sealed class FakeSdlWindow : ISdlWindow
     /// <summary>Gets the last instance handle passed to <see cref="CreateVulkanSurface"/>.</summary>
     internal nint LastVulkanSurfaceInstanceHandle { get; private set; }
 
+    /// <summary>Gets the managed thread id that last called <see cref="CreateVulkanSurface"/>.</summary>
+    internal int CreateVulkanSurfaceThreadId { get; private set; }
+
     /// <inheritdoc/>
     public IReadOnlyList<string> GetVulkanInstanceExtensions()
     {
@@ -149,6 +152,7 @@ internal sealed class FakeSdlWindow : ISdlWindow
     {
         ThrowIfDisposed();
         CreateVulkanSurfaceCallCount++;
+        CreateVulkanSurfaceThreadId = Environment.CurrentManagedThreadId;
         LastVulkanSurfaceInstanceHandle = instanceHandle;
         _record?.Invoke($"CreateVulkanSurface(0x{instanceHandle:X})");
 

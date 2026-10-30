@@ -56,8 +56,19 @@ internal sealed class FakeVulkanInstance : IVulkanInstance
     /// <summary>Gets the number of destroy calls.</summary>
     internal int DestroyCount => Volatile.Read(ref _destroyCount);
 
+    /// <summary>Gets or sets a callback used to record surface/instance calls in a shared log.</summary>
+    internal Action<string>? RecordCall { get; set; }
+
     /// <inheritdoc/>
-    public void Destroy() => Interlocked.Exchange(ref _destroyCount, 1);
+    public void Destroy()
+    {
+        if (Interlocked.Exchange(ref _destroyCount, 1) != 0)
+        {
+            return;
+        }
+
+        RecordCall?.Invoke("DestroyInstance");
+    }
 
     /// <inheritdoc/>
     public void Dispose() => Destroy();
@@ -68,6 +79,7 @@ internal sealed class FakeVulkanInstance : IVulkanInstance
         if (surface != 0)
         {
             DestroyedSurfaces.Add(surface);
+            RecordCall?.Invoke($"DestroySurface(0x{surface:X})");
         }
     }
 

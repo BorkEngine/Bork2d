@@ -1,4 +1,6 @@
 using System.Numerics;
+using Bork2d.Engine;
+using Bork2d.Render.Vulkan;
 using Bork2d.Runtime.Sdl;
 using Bork2d.Runtime.Window;
 using Bork2d.Tests.TestDoubles;
@@ -6,6 +8,7 @@ using Bork2d.Tests.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 using Xunit.Abstractions;
+using Xunit.Sdk;
 
 namespace Bork2d.Tests.Platform.Window;
 
@@ -38,11 +41,12 @@ public sealed class WindowPlatformWindowTests
         var platform = new SdlWindowPlatform(
             WindowTestSupport.Options(title: "Bork2d WP2 real window"),
             () => sdl,
-            NullLogger.Instance);
+            new VulkanInstanceFactory(),
+            NullLoggerFactory.Instance);
 
         try
         {
-            platform.Start();
+            StartOrSkip(platform);
             var state = platform.State;
 
             _output.WriteLine($"SDL version: {sdl.Version}");
@@ -83,12 +87,13 @@ public sealed class WindowPlatformWindowTests
         var platform = new SdlWindowPlatform(
             WindowTestSupport.Options(title: "Bork2d WP2 controls"),
             () => sdl,
-            NullLogger.Instance);
+            new VulkanInstanceFactory(),
+            NullLoggerFactory.Instance);
         var proxy = new WindowProxy();
 
         try
         {
-            platform.Start();
+            StartOrSkip(platform);
             proxy.Attach(platform);
 
             var windowedSize = proxy.Size;
@@ -139,11 +144,12 @@ public sealed class WindowPlatformWindowTests
         var platform = new SdlWindowPlatform(
             WindowTestSupport.Options(title: "Bork2d WP2 DPI hints"),
             () => recording,
-            NullLogger.Instance);
+            new VulkanInstanceFactory(),
+            NullLoggerFactory.Instance);
 
         try
         {
-            platform.Start();
+            StartOrSkip(platform);
 
             var calls = recording.Calls;
             foreach (var call in calls)
@@ -169,5 +175,29 @@ public sealed class WindowPlatformWindowTests
         {
             platform.Dispose();
         }
+    }
+
+    private static void StartOrSkip(SdlWindowPlatform platform)
+    {
+        try
+        {
+            platform.Start();
+        }
+        catch (Bork2dException exception) when (IsVulkanUnavailable(exception))
+        {
+            throw SkipException.ForSkip(
+                $"Windowed mode requires a Vulkan 1.3 loader/instance on this machine: "
+                    + exception.Message);
+        }
+    }
+
+    private static bool IsVulkanUnavailable(Bork2dException exception)
+    {
+        string message = exception.Message;
+        return message.Contains("could not be loaded", StringComparison.Ordinal)
+            || message.Contains("requires Vulkan 1.3.0", StringComparison.Ordinal)
+            || message.Contains("below the required 1.3.0", StringComparison.Ordinal)
+            || message.Contains("vkCreateInstance failed", StringComparison.Ordinal)
+            || message.Contains("is not available", StringComparison.Ordinal);
     }
 }
