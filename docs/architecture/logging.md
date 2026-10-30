@@ -7,7 +7,7 @@
 > with ticks and elapsed time, and the asset service logs start/overlay/error/stop events; there is
 > no per-frame or per-asset-per-tick logging. Configuration is identical in all modes, and the
 > default path runs in the AOT gate (`Pong.Desktop`, headless with the baked pack and `--windowed`)
-> with zero trim/AOT warnings. The suite is 984 tests (971 deterministic plus 13 opt-in/conditional).
+> with zero trim/AOT warnings. The suite is 986 tests (973 deterministic plus 13 opt-in/conditional).
 > The project-consolidation refactor (D-041/D-042) renamed the engine categories to `Bork2d.Engine` and
 > `Bork2d.Engine.Assets`; `Bork2d.Runtime` and `Bork2d.Render` are unchanged. M6 WP-2 makes the
 > `Bork2d.Render` category current for instance, validation, and device-selection events (§5.3); the

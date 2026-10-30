@@ -51,7 +51,7 @@ A `Pong.slnx` Release build still builds the external engine project references 
 `.slnx` has no configuration mapping outside `examples/pong`); the direct AOT publish is the Release
 proof.
 
-The engine suite is **984 tests**: 971 deterministic tests run in CI; 13 opt-in/conditional tests are
+The engine suite is **986 tests**: 973 deterministic tests run in CI; 13 opt-in/conditional tests are
 skipped unless the environment variable or capability is present (9 `[WindowFact]` real-window tests,
 3 reparse-point capability tests, and 1 `[GpuFact]` real-GPU test). The deterministic set includes the
 pack-format/writer tests, the path/VFS/browse/contract tests, the loader/threading and error-contract

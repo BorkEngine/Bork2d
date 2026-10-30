@@ -183,10 +183,34 @@ public sealed class SwapchainPolicyTests
     }
 
     [Fact]
+    public void DecideFrameRecreatesAndRetriesOnOutOfDateEvenWhenTheExtentChanged()
+    {
+        SwapchainAction action = SwapchainPolicy.DecideFrame(
+            new Extent2D { Width = 1600, Height = 900 },
+            _swapchainExtent,
+            Result.ErrorOutOfDateKhr,
+            surfaceRecoveryAttempted: false);
+
+        Assert.Equal(SwapchainAction.RecreateAndRetry, action);
+    }
+
+    [Fact]
     public void DecideFramePresentsThenRecreatesOnSuboptimal()
     {
         SwapchainAction action = SwapchainPolicy.DecideFrame(
             _swapchainExtent,
+            _swapchainExtent,
+            Result.SuboptimalKhr,
+            surfaceRecoveryAttempted: false);
+
+        Assert.Equal(SwapchainAction.PresentThenRecreate, action);
+    }
+
+    [Fact]
+    public void DecideFramePresentsThenRecreatesWhenSuboptimalAlsoChangedTheExtent()
+    {
+        SwapchainAction action = SwapchainPolicy.DecideFrame(
+            new Extent2D { Width = 1600, Height = 900 },
             _swapchainExtent,
             Result.SuboptimalKhr,
             surfaceRecoveryAttempted: false);

@@ -96,15 +96,18 @@ internal static class SwapchainPolicy
             return SwapchainAction.RecreateAndRetry;
         }
 
+        // SUBOPTIMAL presents the current frame first and recreates on the next iteration
+        // (D-M6-15), even when the requested extent already changed; the next iteration then
+        // recreates on the extent difference.
+        if (lastFrameResult == Result.SuboptimalKhr)
+        {
+            return SwapchainAction.PresentThenRecreate;
+        }
+
         if (requestedExtent.Width != swapchainExtent.Width
             || requestedExtent.Height != swapchainExtent.Height)
         {
             return SwapchainAction.RecreateAndRetry;
-        }
-
-        if (lastFrameResult == Result.SuboptimalKhr)
-        {
-            return SwapchainAction.PresentThenRecreate;
         }
 
         return lastFrameResult == Result.Success ? SwapchainAction.Present : SwapchainAction.Fatal;
