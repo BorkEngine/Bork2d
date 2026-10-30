@@ -14,9 +14,9 @@ Bork2d game: `Pong.Common`, `Pong.Assets`, `Pong.Desktop`, plus `Pong.Tests`.
 Pong is now the engine's living example and its NativeAOT gate. It should exercise the existing
 public contract end to end: pack load, TOML data, `AssetRef` chains, baked textures, a custom bake
 processor, sprites, camera, layers, tint, transforms, time, keyboard input, window title, logging,
-and AOT/headless startup. There is no renderer yet (M8), so the window is intentionally black; the
-game is still playable as a simulation and observable through the title, logs, and headless
-assertions.
+and AOT/headless startup. There is no sprite renderer yet (M8), so the window is intentionally
+black; the game is still playable as a simulation and observable through the title, logs, and
+headless assertions. M6 adds the Vulkan clear and the three-mode AOT gate.
 
 ## 2. Non-goals
 
@@ -57,6 +57,7 @@ examples/pong/
     PongArguments.cs
   Pong.Tests/                   -> Pong.Common, Pong.Assets, Bork2d.Bake, Bork2d.Runtime; xUnit
     Pong.Tests.csproj
+    PongArgumentsTests.cs       -> links Pong.Desktop/PongArguments.cs
     ...
 ```
 
@@ -243,12 +244,19 @@ reads `IInput` or `IWindow`. `Teardown` logs the final score and detaches the ro
 - no arguments or `--windowed`: interactive `1280x720`, resizable, max delta 0.25, pack from
   `AppContext.BaseDirectory/assets.pck`.
 - `--windowed --ticks N`: automated windowed acceptance; exits 0 after exactly `N` ticks.
+- `--offscreen --ticks N`: automated, non-interactive offscreen acceptance (M6); loads the same
+  pack, runs `PongGame(interactive: false, tickLimit: N)` through `WithOffscreen(1280, 720)`, and
+  exits 0 after exactly `N` ticks. The offscreen renderer clears a fixed sRGB target and discards
+  continuous frames; the frame count is not asserted (D-M6-13).
 - `--headless`: one-tick headless smoke; loads the pack, constructs the game, steps once, asserts
   setup/tick/teardown, 7 pack entries, settings, sprites, texture dimensions (16×96 and 64×64),
   raw byte counts (16×96×4 and 64×64×4), tint values, and detached root, then exits 0.
-- `--ticks` is windowed-only; invalid/duplicate arguments print usage and return 2.
+- `--ticks` requires `--windowed` or `--offscreen`, and is invalid with `--headless`; the three
+  modes are mutually exclusive. Invalid/duplicate/unknown/malformed arguments print usage and
+  return 2.
 - `PublishAot=true`, `InvariantGlobalization=true`, and the existing narrow
-  `IL3000;IL3002` Silk.NET suppression.
+  `IL3000;IL3002` Silk.NET suppression (SDL and Vulkan resolve through the same Silk.NET default
+  resolver).
 
 ## 7. Removal and test migration
 
@@ -278,7 +286,13 @@ keep the builder/processor/pipeline/CLI/incremental/texture tests. This is the o
   headless `Bork2dAppBuilder` probe, and assert settings, 7 entries, sprite texture refs,
   descriptor dimensions, raw payload lengths, and circle alpha (center opaque, corner transparent);
 - the full `PongGame` headless run (setup/tick/teardown, loaded assets, detached world);
-- invalid `.circle` input returns a bake failure with a `BK7xxx` diagnostic.
+- invalid `.circle` input returns a bake failure with a `BK7xxx` diagnostic;
+- command-line parsing (`PongArgumentsTests`, linked from `Pong.Desktop/PongArguments.cs` so the
+  test project does not reference the AOT host): default/windowed/headless/offscreen valid cases,
+  the required offscreen tick limit, headless/windowed/offscreen mutual exclusion, malformed
+  `--ticks` values, and duplicate/unknown arguments.
+
+The suite is **41 tests** after M6 (the 20 original Pong tests plus 21 arguments cases).
 
 ## 9. Work packages
 
@@ -306,8 +320,9 @@ Sequential; each branch starts from the latest `origin/task/pong-example/common`
   and prompt/state; no per-frame logging.
 - AOT publish contains `Pong.Desktop.exe`, `assets.pck`, and `SDL2.dll`, includes the `Pong.Common`
   game assembly (NativeAOT single-file links it; `Pong.Common.pdb` is the on-disk proof), and
-  contains no `Pong.Assets`, `Bork2d.Bake`, Tomlyn, or StbImageSharp assembly; headless and
-  `--windowed --ticks 120` exit 0.
+  contains no `Pong.Assets`, `Bork2d.Bake`, Tomlyn, or StbImageSharp assembly, and no
+  `vulkan-1.dll`; `--headless`, `--windowed --ticks 120`, and `--offscreen --ticks 120` exit 0
+  (M6 adds the offscreen mode).
 - `scripts/check-docs.ps1`, `git diff --check`, and the dependency/public-surface tests pass.
 - `AGENTS.md` (already updated on `develop`) points the AOT gate and examples policy at
   `examples/pong/Pong.Desktop` and `examples/pong/Pong.slnx`.
@@ -377,3 +392,29 @@ dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-
   projects outside `examples/pong`). The direct `dotnet publish … -c Release -r win-x64` above is the
   Release proof for the engine/desktop graph; the examples solution build is a shape/test gate.
 - `docs/decisions.md` D-043/D-044 status is unchanged; the final merge status is left to the PR.
+
+### 12.4 M6 extension: offscreen mode and the three-mode AOT gate (2026-10-30)
+
+M6 (Vulkan bring-up; implemented 2026-10-30, final PR pending human review) adds D-M6-13:
+`Pong.Desktop` gains `--offscreen --ticks N`, runs the non-interactive `PongGame` through
+`WithOffscreen(1280, 720)`, and exits 0 after exactly `N` ticks. The offscreen renderer clears a
+fixed 1280×720 `R8G8B8A8Srgb` target with two images and discards continuous frames; the frame
+count is not asserted. `PongArguments` now selects windowed/headless/offscreen exclusively;
+`--ticks N` is required for offscreen and allowed for windowed, and `Pong.Tests` links
+`PongArguments.cs` to test the parser (41 Pong tests total: 20 original + 21 argument cases).
+
+AOT evidence (`dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release
+-r win-x64 --nologo`, zero warnings; run from the publish directory):
+
+```powershell
+& .\Pong.Desktop.exe --headless                 # exit 0: 7-entry pack, 1/1/1, detached world
+& .\Pong.Desktop.exe --windowed --ticks 120     # exit 0: 1/120/1, black clear, window destroyed
+& .\Pong.Desktop.exe --offscreen --ticks 120    # exit 0: 1/120/1, sRGB target, renderer joined
+```
+
+The windowed run creates the SDL window, instance, surface, device, and swapchain on a Vulkan 1.3
+device and presents a black clear; the offscreen run creates no surface/swapchain and discards
+frames. The publish contains `Pong.Desktop.exe`, `assets.pck`, `SDL2.dll`, and the
+engine/runtime/game PDBs, with no `vulkan-1.dll`, `Pong.Assets`, `Bork2d.Bake`, Tomlyn, or
+StbImageSharp assembly. Full machine/GPU/driver/SDK details and the deviations are in the
+[M6 as-built evidence](m6-vulkan-bringup.md#18-as-built-evidence-2026-10-30).

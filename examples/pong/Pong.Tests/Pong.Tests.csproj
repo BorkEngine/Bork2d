@@ -22,4 +22,12 @@
         <ProjectReference Include="..\..\..\src\Bork2d\Bork2d.Runtime\Bork2d.Runtime.csproj" />
     </ItemGroup>
 
+    <!--
+        Pong.Tests must not reference Pong.Desktop (it is the AOT host), so the argument parser is
+        linked into the test assembly to keep its coverage next to the tests.
+    -->
+    <ItemGroup>
+        <Compile Include="..\Pong.Desktop\PongArguments.cs" Link="PongArguments.cs" />
+    </ItemGroup>
+
 </Project>

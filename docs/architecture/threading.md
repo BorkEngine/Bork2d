@@ -1,6 +1,7 @@
 # Threading and Frame Handoff
 
-> **Status:** implemented through M6 WP-4 (M6 in progress; WP-5 owns the AOT/Pong gate). The M1
+> **Status:** implemented through M6 (2026-10-30; M6 is implemented and awaits the final
+> human-reviewed PR). The M1
 > scene graph implements the structural and per-object `System.Threading.Lock` rules in §2 and the
 > public API has no thread affinity. The M2 windowed platform's OS/window thread, command queue,
 > confirmed-state snapshot, event pump, input freeze, and the runtime tick loops that drive them are
