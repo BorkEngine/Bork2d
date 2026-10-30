@@ -1,3 +1,4 @@
+using Bork2d.Render.Vulkan;
 using Microsoft.Extensions.Logging;
 
 namespace Bork2d.Render;
@@ -21,6 +22,18 @@ internal sealed class RendererStartInfo
     /// <summary>Gets the opaque <c>VkInstance</c> handle, or <c>0</c> when the renderer owns it.</summary>
     internal required nint InstanceHandle { get; init; }
 
+    /// <summary>
+    /// Gets the platform/test-owned Vulkan instance used for device selection, debug labels, and
+    /// validation observation, or <see langword="null"/> when the renderer creates its own
+    /// (offscreen, WP-4).
+    /// </summary>
+    /// <remarks>
+    /// Windowed starts must pass the instance that owns <see cref="SurfaceHandle"/>; the renderer
+    /// never destroys it and never destroys <see cref="InstanceHandle"/>. <see cref="InstanceHandle"/>
+    /// remains the opaque handle for callers that do not expose an instance object.
+    /// </remarks>
+    internal IVulkanInstance? Instance { get; init; }
+
     /// <summary>Gets the opaque <c>VkSurfaceKHR</c> handle, or <c>0</c> offscreen.</summary>
     internal nint SurfaceHandle { get; init; }
 
@@ -43,5 +56,9 @@ internal sealed class RendererStartInfo
     /// Gets the host callback that creates the replacement surface for the single D-M6-16
     /// recovery, or <see langword="null"/> when recovery is unavailable.
     /// </summary>
+    /// <remarks>
+    /// The callback runs on the render thread after the swapchain is gone; the host creates the new
+    /// surface on the OS thread and destroys the old one. It returns <c>0</c> on failure.
+    /// </remarks>
     internal Func<nint>? CreateReplacementSurface { get; init; }
 }

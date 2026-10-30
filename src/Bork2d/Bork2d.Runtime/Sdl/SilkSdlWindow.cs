@@ -1,3 +1,6 @@
+using System.Runtime.InteropServices;
+using Bork2d.Engine;
+using Silk.NET.Core.Native;
 using Silk.NET.SDL;
 using SilkNet = Silk.NET.SDL;
 
@@ -91,6 +94,72 @@ internal sealed unsafe class SilkSdlWindow : ISdlWindow
         {
             throw SdlError.Create(_sdl, "SDL_SetWindowFullscreen");
         }
+    }
+
+    /// <inheritdoc/>
+    public IReadOnlyList<string> GetVulkanInstanceExtensions()
+    {
+        ThrowIfDisposed();
+
+        uint count = 0;
+        if (_sdl.VulkanGetInstanceExtensions(_window, &count, (byte**)null) != SdlBool.True)
+        {
+            throw SdlError.Create(_sdl, "SDL_Vulkan_GetInstanceExtensions");
+        }
+
+        if (count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var pointers = new nint[count];
+        fixed (nint* pointer = pointers)
+        {
+            if (_sdl.VulkanGetInstanceExtensions(_window, &count, (byte**)pointer) != SdlBool.True)
+            {
+                throw SdlError.Create(_sdl, "SDL_Vulkan_GetInstanceExtensions");
+            }
+        }
+
+        int nameCount = (int)Math.Min(count, (uint)pointers.Length);
+        var names = new string[nameCount];
+        for (var index = 0; index < names.Length; index++)
+        {
+            names[index] = Marshal.PtrToStringUTF8(pointers[index]) ?? string.Empty;
+        }
+
+        return names;
+    }
+
+    /// <inheritdoc/>
+    public nint CreateVulkanSurface(nint instanceHandle)
+    {
+        ThrowIfDisposed();
+        if (instanceHandle == 0)
+        {
+            throw new Bork2dException(
+                "SDL_Vulkan_CreateSurface requires a non-zero VkInstance handle.");
+        }
+
+        VkNonDispatchableHandle surface = default;
+        if (_sdl.VulkanCreateSurface(_window, new VkHandle(instanceHandle), &surface)
+            != SdlBool.True)
+        {
+            throw SdlError.Create(_sdl, "SDL_Vulkan_CreateSurface");
+        }
+
+        return unchecked((nint)surface.Handle);
+    }
+
+    /// <inheritdoc/>
+    public SdlWindowSize GetVulkanDrawableSize()
+    {
+        ThrowIfDisposed();
+
+        int width;
+        int height;
+        _sdl.VulkanGetDrawableSize(_window, &width, &height);
+        return new SdlWindowSize(width, height);
     }
 
     /// <summary>Destroys the native window. Idempotent.</summary>

@@ -16,7 +16,9 @@ namespace Bork2d.Tests.TestDoubles;
 internal sealed class FakeSdlWindow : ISdlWindow
 {
     private readonly Action<string>? _record;
+    private readonly Func<bool>? _vulkanLoaderLoaded;
     private float _scale;
+    private SdlWindowSize? _vulkanDrawableSizeOverride;
     private bool _disposed;
 
     internal FakeSdlWindow(
@@ -25,7 +27,8 @@ internal sealed class FakeSdlWindow : ISdlWindow
         SdlWindowSize size,
         float scale,
         SdlWindowFlags flags,
-        Action<string>? record = null)
+        Action<string>? record = null,
+        Func<bool>? vulkanLoaderLoaded = null)
     {
         Id = id;
         Title = title;
@@ -34,6 +37,8 @@ internal sealed class FakeSdlWindow : ISdlWindow
         SizeInPixels = Scale(size, scale);
         Flags = flags;
         _record = record;
+        _vulkanLoaderLoaded = vulkanLoaderLoaded;
+        VulkanSurfaceHandle = 0x5000_0000_0000_0000UL + id;
     }
 
     /// <summary>Gets the confirmed window title.</summary>
@@ -99,6 +104,83 @@ internal sealed class FakeSdlWindow : ISdlWindow
             : Flags & ~SdlWindowFlags.FullscreenDesktop;
         _record?.Invoke($"SetWindowFullscreen({fullscreen})");
     }
+
+    /// <summary>Gets or sets the Vulkan instance extensions returned by the seam.</summary>
+    internal IReadOnlyList<string> VulkanInstanceExtensions { get; set; } =
+        ["VK_KHR_surface", "VK_KHR_win32_surface"];
+
+    /// <summary>Gets or sets the message the Vulkan extension query fails with.</summary>
+    internal string? VulkanExtensionsFailure { get; set; }
+
+    /// <summary>Gets or sets the opaque surface handle returned by the seam.</summary>
+    internal ulong VulkanSurfaceHandle { get; set; }
+
+    /// <summary>Gets or sets the message <see cref="CreateVulkanSurface"/> fails with.</summary>
+    internal string? VulkanSurfaceFailure { get; set; }
+
+    /// <summary>Gets the number of <see cref="CreateVulkanSurface"/> calls.</summary>
+    internal int CreateVulkanSurfaceCallCount { get; private set; }
+
+    /// <summary>Gets the last instance handle passed to <see cref="CreateVulkanSurface"/>.</summary>
+    internal nint LastVulkanSurfaceInstanceHandle { get; private set; }
+
+    /// <inheritdoc/>
+    public IReadOnlyList<string> GetVulkanInstanceExtensions()
+    {
+        ThrowIfDisposed();
+        _record?.Invoke("GetVulkanInstanceExtensions");
+
+        if (VulkanExtensionsFailure is not null)
+        {
+            throw new Bork2dException(VulkanExtensionsFailure);
+        }
+
+        if (_vulkanLoaderLoaded is not null && !_vulkanLoaderLoaded())
+        {
+            throw new Bork2dException(
+                "SDL_Vulkan_GetInstanceExtensions requires SDL_Vulkan_LoadLibrary first.");
+        }
+
+        return VulkanInstanceExtensions;
+    }
+
+    /// <inheritdoc/>
+    public nint CreateVulkanSurface(nint instanceHandle)
+    {
+        ThrowIfDisposed();
+        CreateVulkanSurfaceCallCount++;
+        LastVulkanSurfaceInstanceHandle = instanceHandle;
+        _record?.Invoke($"CreateVulkanSurface(0x{instanceHandle:X})");
+
+        if (VulkanSurfaceFailure is not null)
+        {
+            throw new Bork2dException(VulkanSurfaceFailure);
+        }
+
+        if (instanceHandle == 0)
+        {
+            throw new Bork2dException(
+                "SDL_Vulkan_CreateSurface requires a non-zero VkInstance handle.");
+        }
+
+        return unchecked((nint)VulkanSurfaceHandle);
+    }
+
+    /// <inheritdoc/>
+    public SdlWindowSize GetVulkanDrawableSize()
+    {
+        ThrowIfDisposed();
+        return _vulkanDrawableSizeOverride ?? SizeInPixels;
+    }
+
+    /// <summary>Overrides the drawable size returned by the seam.</summary>
+    /// <param name="width">The drawable width in pixels.</param>
+    /// <param name="height">The drawable height in pixels.</param>
+    internal void SetVulkanDrawableSize(int width, int height)
+        => _vulkanDrawableSizeOverride = new SdlWindowSize(width, height);
+
+    /// <summary>Clears a drawable-size override so the size follows the window framebuffer.</summary>
+    internal void ClearVulkanDrawableSizeOverride() => _vulkanDrawableSizeOverride = null;
 
     /// <inheritdoc/>
     public void Dispose()

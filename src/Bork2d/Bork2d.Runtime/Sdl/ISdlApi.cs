@@ -98,4 +98,22 @@ internal interface ISdlApi : IDisposable
     /// <summary>Reads the SDL global mouse state.</summary>
     /// <returns>The position in window points and the pressed-button mask.</returns>
     SdlMouseState GetMouseState();
+
+    /// <summary>
+    /// Loads the Vulkan loader through SDL (<c>SDL_Vulkan_LoadLibrary(NULL)</c>); idempotent.
+    /// </summary>
+    /// <remarks>
+    /// Windowed startup calls this before querying <see cref="ISdlWindow.GetVulkanInstanceExtensions"/>
+    /// because SDL requires the loader to be loaded first. <see cref="VulkanUnloadLibrary"/> must run
+    /// after the surface and instance have been destroyed.
+    /// </remarks>
+    /// <exception cref="Bork2d.Engine.Bork2dException">SDL could not load the Vulkan loader.</exception>
+    /// <exception cref="ObjectDisposedException">The adapter was already disposed.</exception>
+    void VulkanLoadLibrary();
+
+    /// <summary>
+    /// Unloads the Vulkan loader (<c>SDL_Vulkan_UnloadLibrary</c>); idempotent and safe after
+    /// disposal.
+    /// </summary>
+    void VulkanUnloadLibrary();
 }
