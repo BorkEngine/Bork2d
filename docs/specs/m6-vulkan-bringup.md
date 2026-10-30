@@ -1,15 +1,14 @@
 # M6 — Vulkan Bring-Up (spec)
 
-> **Status:** **spec only; no implementation.** This file defines the scope, semantics, evidence,
-> work packages, and decision register for M6 (Vulkan bring-up). It does not start M6 and does not
-> authorize code: the roadmap progress log stays "Not started" until implementation begins.
+> **Status:** **Implementation in progress (started 2026-10-30; WP-1 records the decisions).** This
+> file defines the scope, semantics, evidence, work packages, and decision register for M6 (Vulkan
+> bring-up); the roadmap progress log tracks implementation.
 >
 > Twenty-seven owner decisions (the original five gating questions plus nine follow-ups and thirteen
-> final answers, all on 2026-10-29) are recorded in §3. They are approved decisions and must be
-> entered verbatim in the [decision log](../decisions.md) by the first implementation work package
-> (WP-1); this spec-only change deliberately does not edit `decisions.md`. **No owner decision is
-> open**: §16 is kept as the answered decision register for traceability, and implementation details
-> are left to the work packages. Do not treat a "proposed" note as a decision.
+> final answers, all on 2026-10-29) are recorded in §3. They are approved decisions and are recorded
+> verbatim in the [decision log](../decisions.md) by WP-1. **No owner decision is open**: §16 is kept
+> as the answered decision register for traceability, and implementation details are left to the work
+> packages. Do not treat a "proposed" note as a decision.
 >
 > M6 is roadmap [M6 — Vulkan bring-up](../roadmap.md#5-milestone-detail): a Vulkan 1.3 render thread
 > that clears a window or an offscreen target. Frame handoff and pacing are M7; sprites and texture
