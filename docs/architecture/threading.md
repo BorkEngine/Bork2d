@@ -8,9 +8,11 @@
 > cancellation/join, and deserialize-only load path are `Current` (§6). The M6 render thread is
 > `Current` for windowed and offscreen: the host starts it before `Setup`, waits for readiness only
 > before the first tick, and joins it before the surface/instance/window are destroyed; offscreen
-> loops until `Exit` and advances `ITime` (D-M6-07). The snapshot ring, frame handoff, and pacing
-> remain `Planned` (M7). The engine has no debug-only tick-active, structural, or slot-state checks.
-> The suite is 1044 tests: 1028 deterministic plus 16 opt-in/conditional.
+> loops until `Exit` and advances `ITime` (D-M6-07). The internal frame snapshot model, the
+> capture pass, and the three-slot ring state machine are `Current` (M7 WP-2); renderer
+> consumption and slot lifetime, the host acquire/publish wiring, and pacing remain `Planned`
+> (M7 WP-3/WP-4). The engine has no debug-only tick-active, structural, or slot-state checks.
+> The suite is 1094 tests: 1078 deterministic plus 16 opt-in/conditional.
 
 ## 1. Threads by mode
 
@@ -39,8 +41,8 @@ after the renderer drops its swapchain.
 
 "Scene state" means creating, attaching, detaching, and clearing cameras and sprite renderables;
 changing transform local values or parents; changing camera/sprite properties (`Size`, `Viewport`,
-`CullingMask`, `Clear`, `ClearColor`, `ZIndex`, `SpriteAsset? Sprite`, `Layer`, `Tint`, planned flip flags);
-and changing `IWindow` state (windowed only, marshaled).
+`CullingMask`, `Clear`, `ClearColor`, `ZIndex`, `SpriteAsset? Sprite`, `Layer`, `Tint`,
+`FlipX`/`FlipY`); and changing `IWindow` state (windowed only, marshaled).
 
 The guarantees are deliberately precise:
 
@@ -61,38 +63,65 @@ The guarantees are deliberately precise:
   request assets, mutate entities they own, read `ITime` snapshots, and hand data back through
   game-owned queues; they must join before `Tick` returns.
 - **The tick is the quiescence boundary.** The snapshot is built after `Tick` returns; a worker
-  still running then violates the contract (`Planned`, M7). Composite multi-property updates
+  still running then violates the contract (the internal capture pass is `Current`, M7 WP-2).
+  Composite multi-property updates
   that must be atomic are the game's responsibility: the engine cannot detect a non-atomic
   update spanning multiple locked operations and performs no debug-only boundary checks.
 
 ## 3. Frame snapshot
 
-`Planned` for M7; camera ordering is M8. A snapshot is the renderer's complete input for one
-tick: immutable after publication, free of live entity references, and internal (never
-`Bork2d.Engine`). It is built by an unordered traversal of the rooted tree with workers joined.
-`FrameSnapshot` holds sequence/time/delta plus camera and sprite arrays; `CameraSnapshot` holds
-`ZIndex`, world matrix, size, viewport, culling mask, and clear kind/color; `SpriteSnapshot`
-holds a loaded `SpriteAsset?` reference, world matrix, tint, layer, `ZIndex`, and flip flags.
+`Current` (internal, M7 WP-2): the value-only model and the capture pass live in
+`Bork2d.Engine.Rendering` and are never part of the public `Bork2d.Engine` contract. Camera
+ordering, sprite sorting, and every draw remain M8. A snapshot is the renderer's complete input
+for one tick: immutable after publication, free of live entity references except the loaded
+`SpriteAsset?`, and built by an unordered traversal of the rooted tree with game workers joined.
 
+| Type | Exact fields (Q5=E1, Q2=B1) | Notes |
+| --- | --- | --- |
+| `FrameSnapshot` | `Sequence` (`long`), `Time` (`double`), `DeltaTime` (`double`), camera array/count, sprite array/count | One per completed windowed/offscreen tick; the host starts `Sequence` at `1` by convention. |
+| `CameraSnapshot` | `ZIndex` (`int`), `WorldMatrix` (`Matrix3x2`), `Size` (`float`), `Viewport` (`Vector4`), `CullingMask` (`uint`), `Clear` (`ClearKind`), `ClearColor` (`Color`) | The world matrix is the camera's world transform; M8 derives view/projection from it. |
+| `SpriteSnapshot` | `Sprite` (`SpriteAsset?`), `WorldMatrix` (`Matrix3x2`), `Tint` (`Color`), `Layer` (`uint`), `ZIndex` (`int`), `FlipX`/`FlipY` (`bool`) | `Sprite == null` is captured and skipped at draw time; `Layer` is the flattened single bit. |
+
+- **Capture point.** The host calls the internal `GameEngine<TLayer>.CaptureSnapshot(snapshot,
+  sequence)` on the tick thread after `IGame.Tick` returns, with every game worker joined, after
+  the first tick, and before `Teardown` starts; the quiescent boundary is the host's contract
+  because the engine does not know the loop. A node detached during `Tick` is absent from that
+  tick's snapshot; a node created and attached during `Tick` is present.
 - **Value-only, no entity IDs.** Structs contain only copied values; no `Transform`/`Camera`/
-  `SpriteRender` reference crosses the boundary.
+  `SpriteRender` reference crosses the boundary. The loaded `SpriteAsset` reference is the only
+  object reference.
+- **World transforms on the tick thread.** Capture holds the engine structural lock for the walk
+  and evaluates `Matrix3x2` through the internal `ISceneNode.WorldMatrixCore` contract, which
+  already assumes the structural lock is held; it never re-enters the structural lock through
+  `Transform.WorldMatrix()`. Per-object properties are read under their per-object locks in the
+  existing structural-then-per-object order; no new lock ordering is added and no lock is held
+  across a wait (D-024).
+- **Layer erased, invalid values preserved.** `TLayer` (Int32-backed flags) is flattened to a
+  `uint` mask and bit 31 survives; a renderable should carry exactly one bit, and invalid values
+  (`0`, multi-bit) are captured as-is (Q3=C2) and skipped by the M8 renderer with the diagnostic.
 - **Built after `Tick`, asset-agnostic.** Capture runs with all workers joined; workers must not
   write scene state after `Tick` returns. A snapshot never contains textures, vertices, or derived
   sprite metadata; the renderer resolves the loaded `SpriteAsset.Texture` reference at draw time.
-- **World transforms only, layer erased.** The tick thread evaluates the parent hierarchy and
-  writes the final world matrix; `TLayer` becomes a `uint` mask/bit so the renderer is
-  non-generic.
-- **Unordered capture, renderer sorting.** Capture walks `IEngine.Root` in no specified order.
-  Sprites sort by `(Layer, ZIndex)` ascending and cameras apply in ascending `ZIndex`; ties are
-  unspecified. The renderer filters sprites per camera.
+  Flips are captured values (Q2=B1); M7 never draws.
+- **Unordered capture, renderer sorting.** Capture walks `IEngine.Root` in no specified order
+  through an internal-only visitor; the tree still exposes no child enumeration, traversal helper,
+  entity identity, or stable order in the public API. M8 sorts sprites by `(Layer, ZIndex)`
+  ascending and applies cameras in ascending `ZIndex`; ties are unspecified, and the renderer
+  filters sprites per camera.
 - **Detached, not-ready, or headless.** A renderable detached during `Tick` is absent from that
   tick's snapshot; a sprite whose asset is not ready is still captured and skipped at draw time,
   avoiding a race with late readiness. Headless captures nothing because it has no renderer.
-- **Pooled capacity.** Each slot owns its arrays and steady state must not allocate.
+- **Pooled capacity.** Each slot owns its arrays: they start empty, grow to the high-water mark,
+  and never shrink (Q6=Z1); capture uses no LINQ, boxing, or per-node allocation, and a warm
+  fixed-count scene captures without allocating (M7 allocation test).
 
 ## 4. Triple-buffer handoff
 
-There are exactly **three snapshot slots**. A slot is held until the GPU frame that consumed it
+`Current` (internal state machine, M7 WP-2) in `Bork2d.Render.Handoff`: the slots, `latest`,
+publish/take/release, waits, and counters exist and are covered by deterministic tests. Renderer
+consumption (taking a slot per frame, holding it to the GPU fence), the host acquire/publish
+wiring, and pacing are `Planned` (M7 WP-3/WP-4); the protocol below is the target contract. There
+are exactly **three snapshot slots**. A slot is held until the GPU frame that consumed it
 signals its fence, which bounds run-ahead without growing an unbounded queue.
 
 ```mermaid
@@ -350,6 +379,8 @@ Thread-specific rules:
 
 1. **Slot state machine.** Fake producer/consumer/fence with random delays: bounded run-ahead,
    no lost newest, no slot leak, no read of `Writing`, no free of `Rendering`, monotonic sequence.
+   The internal ring state machine and a deterministic 10,000-snapshot stress are `Current`
+   (M7 WP-2).
 2. **Pacing.** Fake renderer at varying frame durations: tick never faster than the ring, waits
    only when full, never sleeps, drops superseded snapshots.
 3. **Concurrency.** N workers create/mutate distinct entities, then join; all appear exactly once
@@ -364,9 +395,15 @@ joins, no sleeps), the M3 asset loader (one thread, FIFO order, asynchronous com
 cancellation/join, enqueue ordering), the M6 SPSC control channel (ordering, latest-value
 coalescing, stop wake, one-shot fatal), the renderer host ordering (Setup before readiness, the
 first-tick gate, renderer fatal at a tick boundary, tick/teardown aggregation, offscreen `Exit` and
-`ITime`, headless no renderer), and the platform's confirmed-state posts/surface replacement; 1, 2,
-4, and renderer pacing come with M7. The suite is 1044 tests: 1028 deterministic tests in CI plus
-16 opt-in/conditional tests (9 real-window, 3 reparse-point, 4 real-GPU).
+`ITime`, headless no renderer), and the platform's confirmed-state posts/surface replacement. M7
+WP-2 adds the ring state-machine/backpressure/wake tests, the newest-wins supersession and
+`latest`-clearing checks, the scripted and concurrent 10,000-snapshot stress with fake
+frames/fences, the unordered capture tests (world matrices, detach/attach, invalid layers
+including bit 31, null assets, flips), the pooled high-water capacity tests, and the zero-allocation
+capture + publish + take + release test. Renderer pacing (2), renderer shutdown with frames in
+flight (4), and the host-level handoff come with WP-3/WP-4. The suite is 1094 tests: 1078
+deterministic tests in CI plus 16 opt-in/conditional tests (9 real-window, 3 reparse-point, 4
+real-GPU).
 
 ## 10. Related documents
 

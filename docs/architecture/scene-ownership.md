@@ -59,7 +59,8 @@ callers treat `Root` as `ISceneRoot`/`ITransform` and must not assume a concrete
   `360`/`720` → `0`). A non-finite rotation throws `ArgumentOutOfRangeException`; matrix math
   uses radians.
 - The tree is **unordered**: no entity IDs, no ordered discovery, no public child enumeration or
-  traversal helper. Snapshot capture and render order are M7/M8 (D-026).
+  traversal helper. The internal capture pass walks it in no specified order (M7), and render
+  order is M8 (D-026).
 
 ## 3. Lifetime cases
 
@@ -83,8 +84,9 @@ explicit release; `Root.DetachAll()` bounds the whole scene.
 The renderer never walks the live tree. After `Tick` (workers joined) the engine traverses the
 rooted tree in no specified order and builds internal **value-only** `CameraSnapshot` /
 `SpriteSnapshot` structs; no `Transform`/`Camera`/`SpriteRender` reference crosses the boundary.
-The structs are internal, not part of `Bork2d.Engine`, and not implemented in M1: capture is M7 and
-camera ordering is M8. Details are in [Threading](threading.md#3-frame-snapshot).
+The structs are internal, not part of the public `Bork2d.Engine` contract: the capture pass is
+`Current` (M7 WP-2, unordered and under the structural lock), and camera ordering/sprite sorting
+is M8. Details are in [Threading](threading.md#3-frame-snapshot).
 
 - Cameras are applied in ascending `ZIndex`; higher draws later, default `0`, ties unspecified.
 - Sprites are sorted by `(Layer, ZIndex)`; ties unspecified.
@@ -97,10 +99,11 @@ camera ordering is M8. Details are in [Threading](threading.md#3-frame-snapshot)
 
 - Parent add/remove: amortized O(1) with a child list and swap-back removal under the structural
   lock.
-- Snapshot traversal (`Planned`, M7): O(n) over live rooted nodes, with no weak-reference checks
-  and no finalizers.
+- Snapshot traversal (`Current`, M7 WP-2): O(n) over live rooted nodes plus the parent-chain
+  composition per captured renderable, with no weak-reference checks and no finalizers.
 - Root detach: O(n) over direct children, with no object destruction.
-- Allocation-free traversal once child lists reach capacity (`Planned`).
+- Allocation-free traversal once the capture's pooled arrays reach the high-water mark
+  (`Current`, M7 WP-2).
 - World matrices are evaluated on demand by composing the local matrix through the parent chain;
   caching unchanged subtrees behind dirty flags is a planned optimization.
 

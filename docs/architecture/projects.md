@@ -180,7 +180,7 @@ Folder names are PascalCase and match the namespace segment exactly; a file in
 | `Pong.Common` (examples) | — (game library) | `GameLayer`, `GameSettings`, `PongSide`, `PongSimulation`, `PongAi`, `PongTitle`, `PongGame` |
 | `Pong.Assets` (examples) | `Processors/`; `Assets/` (TOML data/sprites/settings, the paddle PNG, and the `.circle` source) | `Program` (top-level statements) |
 | `Pong.Desktop` (examples) | — | `Program`, `PongArguments` |
-| `Bork2d.Render` | `Vulkan/` → `.Vulkan` (instance, validation, device selection, pure policies, windowed renderer/factory, swapchain, frames, offscreen target/renderer); `Diagnostics/` → `.Diagnostics` (renderer status/counters/log category) | `IRenderer`, `IRendererFactory`, `RendererStartInfo`, `RendererMode`, `WindowExtent`, `RendererControlChannel`, `RendererControlMessage`, `AssemblyReferenceAnchor` |
+| `Bork2d.Render` | `Vulkan/` → `.Vulkan` (instance, validation, device selection, pure policies, windowed renderer/factory, swapchain, frames, offscreen target/renderer); `Handoff/` → `.Handoff` (internal three-slot snapshot ring, slot state, counters); `Diagnostics/` → `.Diagnostics` (renderer status/counters/log category) | `IRenderer`, `IRendererFactory`, `RendererStartInfo`, `RendererMode`, `WindowExtent`, `RendererControlChannel`, `RendererControlMessage`, `AssemblyReferenceAnchor` |
 
 `Bork2d.Engine` keeps `IEngine`, `IGame`, and `Bork2dException` in the root namespace. The rest of
 the public contract is grouped by area:
@@ -202,8 +202,11 @@ update this section, the API guide/reference, and the decision log in the same c
 Internal implementation namespaces: `Bork2d.Engine.Time` (frame clock),
 `Bork2d.Engine.Assets.Vfs` (pack stack and canonical paths),
 `Bork2d.Engine.Assets.Loading` (asset service/loader), `Bork2d.Engine.Assets.Pack` (reader/writer),
-and the internal scene types inside `Bork2d.Engine.Scene` (`Transform`, `SceneRoot`, `GameEngine`,
-`Camera`, `SpriteRender`, `ISceneNode`, `LayerValidation`).
+the internal scene types inside `Bork2d.Engine.Scene` (`Transform`, `SceneRoot`, `GameEngine`,
+`Camera`, `SpriteRender`, `ISceneNode`, `LayerValidation`), the internal snapshot model and capture
+in `Bork2d.Engine.Rendering` (`FrameSnapshot`, `CameraSnapshot`, `SpriteSnapshot`,
+`SnapshotCapture<TLayer>`), and the internal handoff ring in `Bork2d.Render.Handoff`
+(`SnapshotRing`, `SnapshotSlot`, `SnapshotSlotState`, `SnapshotRingCounters`).
 
 ## 5. Game solution layout
 

@@ -2,6 +2,7 @@ using Bork2d.Engine;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Input;
 using Bork2d.Engine.Platform;
+using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -36,6 +37,7 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
 
     private readonly Lock _structuralLock = new();
     private readonly SceneRoot _root;
+    private readonly SnapshotCapture<TLayer> _capture;
     private readonly IInput? _input;
     private readonly ILoggerFactory _loggerFactory;
     private int _exitState;
@@ -54,6 +56,7 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
         LayerValidation.Validate<TLayer>();
 
         _root = new SceneRoot(_structuralLock);
+        _capture = new SnapshotCapture<TLayer>(_structuralLock, _root);
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _input = input;
         Time = time;
@@ -124,6 +127,30 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     /// </summary>
     /// <remarks>Idempotent; called by the app runtime when a run completes or the app is disposed.</remarks>
     internal void MarkStopped() => Interlocked.Exchange(ref _exitState, ExitStopped);
+
+    /// <summary>
+    /// Resets and fills a slot-owned snapshot from the current rooted scene and stamps the tick's
+    /// sequence, <see cref="ITime.Time"/>, and <see cref="ITime.DeltaTime"/> (M7 WP-2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The host calls this on the tick thread after <c>IGame.Tick</c> returns, with every game
+    /// worker joined, after the first tick, and before <c>Teardown</c> starts; the host owns that
+    /// quiescence contract. The caller owns <paramref name="snapshot"/> in the <c>Writing</c> slot
+    /// state and publishes or abandons the slot afterwards.
+    /// </para>
+    /// <para>
+    /// The engine reuses one internal capture object, so a warm capture allocates nothing. The
+    /// traversal is unordered, holds the structural lock, reads per-object properties under their
+    /// own locks, and evaluates world matrices on the calling (tick) thread.
+    /// </para>
+    /// </remarks>
+    /// <param name="snapshot">The slot-owned snapshot to reset and fill.</param>
+    /// <param name="sequence">The monotonic snapshot sequence; the host starts it at <c>1</c>.</param>
+    internal void CaptureSnapshot(FrameSnapshot snapshot, long sequence)
+    {
+        _capture.Capture(snapshot, sequence, Time.Time, Time.DeltaTime);
+    }
 
     private static ISceneNode RequireEngineNode(ITransform parent)
     {

@@ -41,4 +41,26 @@ public interface ISpriteRender<TLayer> : ITransform where TLayer : struct, Enum
     /// Gets or sets the sort order within a layer; higher draws later.
     /// </summary>
     int ZIndex { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the sprite is mirrored horizontally.
+    /// </summary>
+    /// <remarks>
+    /// The flag mirrors the quad around the sprite's pivot when it is drawn, without changing the
+    /// transform or its world matrix. The default is <see langword="false"/>. M7 stores the value
+    /// and captures it into the frame snapshot; the M8 renderer applies it, so it has no visible
+    /// effect yet.
+    /// </remarks>
+    bool FlipX { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the sprite is mirrored vertically.
+    /// </summary>
+    /// <remarks>
+    /// The flag mirrors the quad around the sprite's pivot when it is drawn, without changing the
+    /// transform or its world matrix. The default is <see langword="false"/>. M7 stores the value
+    /// and captures it into the frame snapshot; the M8 renderer applies it, so it has no visible
+    /// effect yet.
+    /// </remarks>
+    bool FlipY { get; set; }
 }
