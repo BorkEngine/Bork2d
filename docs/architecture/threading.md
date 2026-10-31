@@ -10,9 +10,11 @@
 > before the first tick, and joins it before the surface/instance/window are destroyed; offscreen
 > loops until `Exit` and advances `ITime` (D-M6-07). The internal frame snapshot model, the
 > capture pass, and the three-slot ring state machine are `Current` (M7 WP-2); renderer
-> consumption and slot lifetime, the host acquire/publish wiring, and pacing remain `Planned`
-> (M7 WP-3/WP-4). The engine has no debug-only tick-active, structural, or slot-state checks.
-> The suite is 1094 tests: 1078 deterministic plus 16 opt-in/conditional.
+> consumption, the fence-held slot lifetime, the combined snapshot/control wait, and the suspended
+> minimized drain are `Current` (M7 WP-3). The host acquire/capture/publish wiring and the pacing
+> loops remain `Planned` (M7 WP-4), so until WP-4 lands a windowed/offscreen run has no snapshot to
+> consume and records no frames. The engine has no debug-only tick-active, structural, or
+> slot-state checks. The suite is 1121 tests: 1105 deterministic plus 16 opt-in/conditional.
 
 ## 1. Threads by mode
 
@@ -20,7 +22,7 @@
 | --- | :-: | :-: | :-: | --- |
 | **Tick** | yes | yes | yes | Windowed loop, time, `IGame.Setup/Tick/Teardown`, input freeze/text dispatch, tick scope, scene/asset requests, snapshot capture (M7), shutdown. May be any host thread. |
 | **OS/window** | yes | no | no | SDL video/events and window operations; public `IWindow` calls are marshaled here. |
-| **Render** | yes | yes | no | Vulkan device, swapchain (windowed) or offscreen targets, frames/fences, dynamic-rendering clear, present/discard. Started by the host before `Setup`; no `Tick` runs until it is ready. Uploads, sprite resolution, sorting, draws, and the snapshot handoff are M7/M8. |
+| **Render** | yes | yes | no | Vulkan device, swapchain (windowed) or offscreen targets, frames/fences, the snapshot ring and consumer, dynamic-rendering clear, present/discard. Started by the host before `Setup`; no `Tick` runs until it is ready. Uploads, sprite resolution, sorting, draws, and instance filling are M8. |
 | **Asset loader** | yes | yes | yes | One per app: pack reads, decompression, and MessagePack deserialization. It caches no resolved assets and never touches SDL, Vulkan, or game entities. |
 | **Game workers** | yes | yes | yes | Game-spawned threads on distinct entities; the game joins them before `Tick` returns. |
 
@@ -117,12 +119,15 @@ for one tick: immutable after publication, free of live entity references except
 
 ## 4. Triple-buffer handoff
 
-`Current` (internal state machine, M7 WP-2) in `Bork2d.Render.Handoff`: the slots, `latest`,
-publish/take/release, waits, and counters exist and are covered by deterministic tests. Renderer
-consumption (taking a slot per frame, holding it to the GPU fence), the host acquire/publish
-wiring, and pacing are `Planned` (M7 WP-3/WP-4); the protocol below is the target contract. There
-are exactly **three snapshot slots**. A slot is held until the GPU frame that consumed it
-signals its fence, which bounds run-ahead without growing an unbounded queue.
+`Current` (internal, M7 WP-2/WP-3) in `Bork2d.Render.Handoff`: the slots, `latest`,
+publish/take/release, waits, and counters (WP-2), and the renderer-side `SnapshotConsumer` plus the
+combined `SnapshotControlWait` (WP-3) exist and are covered by deterministic tests. The renderer
+takes the newest `Ready` snapshot only for a free GPU frame, holds it until that frame's fence is
+observed, and releases it when the frame index is next reused or in the stop/fatal/idle drain. The
+host acquire/publish wiring and the pacing loops are `Planned` (M7 WP-4), so the current tree has
+no producer publishing snapshots yet. There are exactly **three snapshot slots**. A slot is held
+until the GPU frame that consumed it signals its fence, which bounds run-ahead without growing an
+unbounded queue.
 
 ```mermaid
 stateDiagram-v2
@@ -135,50 +140,59 @@ stateDiagram-v2
 ```
 
 A `Ready` slot is unread. A `Rendering` slot has a submitted GPU frame whose instances were
-copied from it and is held until its fence. A `Writing` slot belongs to the tick thread.
+copied from it and is held until its fence. A `Writing` slot belongs to the tick thread. The
+suspended path is the only `Ready → Free` transition that is not a supersede: while minimized or
+at zero extent the consumer frees the newest snapshot immediately, the slot never enters
+`Rendering`, and no fence is involved (Q8=H1).
 
 ### Producer (tick thread)
 
 ```
 loop:
-  slot = AcquireFreeSlot()          // blocks when all three slots are occupied
-  time.NewFrame()
-  game.Tick()                       // joins game workers before returning
-  Fill(slot)                        // cameras, sprites, flatten layers
-  slot.State = Ready                // release
-  old = Interlocked.Exchange(latest, slot.Index) // release
-  if old != -1: TryCas(old, Ready -> Free) // drop an undisplayed snapshot
+  slot = renderer.AcquireSnapshotSlot()   // blocks when all three slots are occupied
+  input.Freeze(); time.NewFrame(); input.DispatchText(); game.Tick()
+  engine.CaptureSnapshot(slot)            // after Tick, workers joined (WP-4 wiring)
+  renderer.PublishSnapshot(slot)          // Ready (release); newest wins; previous Ready dropped
+  // on a Tick/capture failure: renderer.AbandonSnapshotSlot(slot); nothing is published
 ```
 
-`AcquireFreeSlot` blocks only when all slots are `Ready`/`Rendering`; that wait is frame
-backpressure, not an artificial delay. Publish order is `Ready` before `latest`; a superseded
-`Ready` slot is freed, and a `Rendering` slot is never freed by the producer.
+`AcquireSnapshotSlot` blocks only when all slots are `Ready`/`Rendering`; that wait is frame
+backpressure, not an artificial delay, and it returns `null` on stop/exit/fatal. Publish order is
+`Ready` before `latest`; a superseded `Ready` slot is freed, and a `Rendering` slot is never freed
+by the producer. `WakeSnapshotWait` (called from `IEngine.Exit()` in WP-4) wakes a blocked acquire
+without stopping consumption, so the Exit tick can still publish (Q4=D1, Q9=I1).
 
 ### Consumer (render thread)
 
 ```
 loop:
-  ProcessControlMessages()          // windowed: resize/close; offscreen: stop/errors
-  WaitForSnapshotOrControl()        // blocked, not spinning
-  if not HasReadySnapshot(): continue
-  frame = WaitForFreeGpuFrameSlot() // fence-protected GPU frame slot
-  slot = TakeLatestReady()          // CAS Ready -> Rendering; clears latest
-  if slot is null: continue
-  BuildGpuFrame(slot, frame)        // resolve assets, sort, copy instances
-  Submit(frame)                     // GPU reads the frame's instance buffer
-  OnFence(frame): Release(slot)     // Rendering -> Free; wake a waiting tick
+  DrainControlMessages()                 // extent/fullscreen/minimize/stop/fatal
+  if minimized or zero extent:
+      drain the newest Ready without GPU work (Ready -> Free, no Rendering, no fence)
+      wait for snapshot/control/stop; continue
+  if no Ready: wait for snapshot/control/stop   // no timed polling, no repeat
+  wait this GPU frame's fence             // the frame is free
+  release the snapshot that frame held     // Rendering -> Free
+  slot = TakeLatestReady()                // CAS Ready -> Rendering; clears latest
+  if slot is null: wait; continue
+  acquire image; record clear; submit      // an out-of-date acquire frees the slot, no frame
+  attach slot to the frame; present        // released when this frame index is next reused
 ```
 
 `TakeLatestReady` clears `latest` when it still points at the taken slot, so a released slot
 does not leave a dangling pointer; a newer snapshot published concurrently wins the
-compare-exchange and remains latest. The renderer takes a frame slot before taking a snapshot so
-it never holds a snapshot while blocked on the GPU.
+compare-exchange and remains latest. The renderer takes a frame slot (waits its fence) before
+taking a snapshot so it never holds a snapshot while blocked on the GPU.
 
 Two pools bound the pipeline: **snapshot slots (3)** are held until the consuming GPU frame's
-fence, and **GPU frame slots (2, provisional)** bundle command buffer, instance buffer,
-semaphores, and fence, reused only after their fence. A slot is never overwritten while the
-renderer is reading it or a GPU frame still references it. The tick fills slots, then waits;
-older `Ready` snapshots are dropped and the newest is shown.
+fence, and **GPU frame slots (2)** bundle command buffer, fence/semaphore, instance buffer, and
+the empty instance resources, reused only after their fence. A slot is never overwritten while the
+renderer is reading it or a GPU frame still references it. The tick fills slots, then waits; older
+`Ready` snapshots are dropped and the newest is shown. Resize/fullscreen/surface-loss recovery and
+shutdown wait `vkDeviceWaitIdle`, then release every held slot before recreating or destroying
+anything; `Join` drains every non-`Writing` slot so all slots end `Free`, even when a fatal let a
+producer publish after the renderer's cleanup. Exactly one GPU frame is recorded per consumed
+snapshot (Q7=G1); with no `Ready` snapshot the renderer waits and never repeats the previous one.
 
 ### Slot invariants
 
@@ -291,9 +305,11 @@ thread never invokes a game callback.
   (**before** the platform destroys the surface/instance/window), the platform is shut down (surface,
   instance, loader, window, SDL, OS thread), and only afterwards are the proxies detached, so
   retained references throw `ObjectDisposedException`.
-- **No pacing.** The loops have no target rate, deadline, `Thread.Sleep`, `SpinWait`, or yield; they
-  consume a core in M6 until M7 supplies frame backpressure, while offscreen render frames are
-  GPU-fence-paced (D-M6-12). No lock is held across a game callback, an SDL call, or the event wait.
+- **No pacing.** The loops have no target rate, deadline, `Thread.Sleep`, `SpinWait`, or yield.
+  Renderer frames are one per consumed snapshot (M7 WP-3); the host acquire/capture/publish wiring
+  that couples the tick to the ring and backpressures it is WP-4, so until then the windowed/
+  offscreen tick loops still run uncapped and the renderer has no snapshot to consume. No lock is
+  held across a game callback, an SDL call, or the event wait.
 - **Errors.** A game or text-handler failure stops the loop, is captured, and is rethrown after
   teardown, renderer join, and platform shutdown; a fatal OS-thread or renderer error is stored, read
   after teardown, and rethrown (aggregated with a teardown failure). A renderer failure around
@@ -348,17 +364,23 @@ See [Assets and tooling](assets-and-tooling.md).
 Shutdown sequencing and error precedence are in [Runtime lifecycle](runtime-lifecycle.md).
 Thread-specific rules:
 
-- The render thread never waits on the tick thread; today it waits on its own fences/wake event,
-  signalled by control messages and stop (snapshot publication is M7). It never outlives the
-  Vulkan instance/surface (windowed) or the owned instance/device (offscreen): the host stops and
-  joins it before `platform.Shutdown()` destroys the surface/instance/window and before the assets
-  stop. The asset loader thread is cancellable and joinable; queued and in-flight load tasks are
-  canceled and the loader is joined at shutdown (M3).
+- The render thread never waits on the tick thread; it waits on its own frame fences and on the
+  combined snapshot/control wake (snapshot publication, control posts, stop, fatal). It never
+  outlives the Vulkan instance/surface (windowed) or the owned instance/device (offscreen): the
+  host stops and joins it before `platform.Shutdown()` destroys the surface/instance/window and
+  before the assets stop. The asset loader thread is cancellable and joinable; queued and
+  in-flight load tasks are canceled and the loader is joined at shutdown (M3).
+- **Shutdown with frames in flight.** `RequestStop` stops the ring (waking a blocked producer) and
+  the control channel (waking a blocked consumer); a renderer fatal does the same before the host
+  observes it at the next boundary (Q9=I1). The render thread waits its frame fences and
+  `vkDeviceWaitIdle`, then releases every snapshot slot it holds; `Join` then drains every
+  non-`Writing` slot, because a producer may publish the fatal tick's snapshot after the renderer
+  cleanup. All slots end `Free`; no GPU frame references snapshot memory after the fences.
 - The windowed OS thread is stopped and joined before `Run()` returns or throws; the renderer has
   already joined, then the OS thread destroys the surface, instance, and window and unloads the
   Vulkan loader before SDL quits. Background errors are stored and rethrown on the `Run()` caller
-  after cleanup (the M2 platform fatal path and the M6 render-thread fatal path are `Current`; the
-  host observes the renderer fatal at tick boundaries). The tick is a transaction and is not
+  after cleanup (the M2 platform fatal path and the M6/M7 render-thread fatal path are `Current`;
+  the host observes the renderer fatal at tick boundaries). The tick is a transaction and is not
   aborted mid-way for a render error. No `Thread.Abort`, no finalizer-based shutdown, no blocking
   join inside a render callback.
 
@@ -369,9 +391,9 @@ Thread-specific rules:
   access: `System.Threading.Lock`, not `lock (object)`, short critical sections, no lock across
   an await or blocking wait, structural lock before per-object lock.
 - Snapshot arrays are slot-private: the tick writes only the slot it owns; the renderer reads
-  only a slot in `Rendering`. The renderer copies snapshot data into per-frame instance buffers;
-  the GPU reads those buffers, not snapshot memory, and a buffer is rewritten only after its
-  fence. Uploads use persistently mapped memory.
+  only a slot in `Rendering`. M8 copies snapshot data into per-frame instance buffers (M7 allocates
+  those buffers empty and writes nothing); the GPU reads those buffers, not snapshot memory, and a
+  buffer is rewritten only after its fence. Uploads use persistently mapped memory.
 - Release builds keep the per-object locks; composite multi-property updates are neither atomic
   nor detected by the engine.
 
@@ -381,12 +403,17 @@ Thread-specific rules:
    no lost newest, no slot leak, no read of `Writing`, no free of `Rendering`, monotonic sequence.
    The internal ring state machine and a deterministic 10,000-snapshot stress are `Current`
    (M7 WP-2).
-2. **Pacing.** Fake renderer at varying frame durations: tick never faster than the ring, waits
-   only when full, never sleeps, drops superseded snapshots.
+2. **Render consumption.** `SnapshotConsumer`: one snapshot per GPU frame, the slot held
+   `Rendering` until its frame index is reused, release-on-reuse, the suspended drain
+   (`Ready → Free`, counted, never `Rendering`), and release-all after idle. The combined
+   `SnapshotControlWait` wakes on a snapshot, a control post, a stop, or a fatal without polling.
+   Both are `Current` (M7 WP-3). Host pacing (the tick never faster than the ring, waiting only
+   when full) is `Planned` (M7 WP-4).
 3. **Concurrency.** N workers create/mutate distinct entities, then join; all appear exactly once
    with distinct references, detach/re-attach is safe, no entity-ID or order assertions.
-4. **Shutdown.** Stop during publish, take, or simulated GPU work; all threads exit within a
-   timeout and every slot ends `Free`.
+4. **Shutdown.** Renderer-level stop during submit/fence and the idle drain are `Current` (M7
+   WP-3): held slots are released, `Join` drains the ring, all threads exit within a timeout, and
+   every slot ends `Free`. Host-level stop during publish/take comes with WP-4.
 5. **Modes and allocation.** Headless has no SDL/render thread and no clock advance; offscreen has
    no surface/swapchain; fixed entity counts allocate nothing.
 
@@ -400,10 +427,13 @@ WP-2 adds the ring state-machine/backpressure/wake tests, the newest-wins supers
 `latest`-clearing checks, the scripted and concurrent 10,000-snapshot stress with fake
 frames/fences, the unordered capture tests (world matrices, detach/attach, invalid layers
 including bit 31, null assets, flips), the pooled high-water capacity tests, and the zero-allocation
-capture + publish + take + release test. Renderer pacing (2), renderer shutdown with frames in
-flight (4), and the host-level handoff come with WP-3/WP-4. The suite is 1094 tests: 1078
-deterministic tests in CI plus 16 opt-in/conditional tests (9 real-window, 3 reparse-point, 4
-real-GPU).
+capture + publish + take + release test. M7 WP-3 adds the deterministic consumer tests (one frame
+per consumed snapshot, held-to-reuse, suspended drain, release-all, counters), the combined-wait
+wake tests, ring `DiscardLatest` tests, the fake-renderer slot API/backpressure tests, and the
+rewritten opt-in GPU tests that publish snapshots one at a time and assert frame/consumed
+relationships, zero validation messages, and all slots `Free` after `Join`. Host pacing and the
+host-level handoff come with WP-4. The suite is 1121 tests: 1105 deterministic tests in CI plus 16
+opt-in/conditional tests (9 real-window, 3 reparse-point, 4 real-GPU).
 
 ## 10. Related documents
 
