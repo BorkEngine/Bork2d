@@ -11,12 +11,14 @@
 > presented/discarded frame per consumed snapshot with the slot held to its fence; the
 > tick is backpressured by the ring and the only timer is the minimized-only 30 Hz tick cap. Headless
 > runs the K1 paced loop with the L2 synthesized clock, the M4/F1 strict grid, and unbounded catch-up
-> (Q11–Q13, F5–F8). The sprite renderer (M8) is at WP-4 (WP-2 pipeline/camera helpers/instance
-> planning, WP-3 texture pages/`RenderStats`, and WP-4 per-camera draws/stats/capture are in place;
-> the benchmark/final Pong gate is WP-5). The
+> (Q11–Q13, F5–F8). The sprite renderer (M8) is implementation-complete through WP-5; the milestone
+> PR is open for review and is not merged (WP-2 pipeline/camera helpers/instance planning, WP-3
+> texture pages/`RenderStats`, WP-4 per-camera draws/stats/capture, and WP-5 benchmark and
+> short-vs-long Pong gate are in place). The
 > windowed/offscreen AOT/Pong gate is
 > proven through M6 and re-proven for M7 with the 120-tick headless default and `--headless --ticks
-> N` (Q15=O2/F3), `--windowed --ticks 120`, and `--offscreen --ticks 120`. Status detail is in
+> N` (Q15=O2/F3), `--windowed --ticks 120`, and `--offscreen --ticks 120`; M8 adds the long
+> `--ticks 20000` draw/statistics runs. Status detail is in
 > [the roadmap](../roadmap.md). The
 > engine suite is 1310 tests (1293 deterministic + 17 opt-in/conditional).
 >

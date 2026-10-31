@@ -20,15 +20,21 @@
 > `--headless` gate defaults to 120 ticks (`--headless --ticks N` overrides). The spec decisions are recorded (all 23 questions and F5–F8, in the
 > [decision log](decisions.md#m7-frame-handoff-and-pacing-decisions-approved-2026-10-31) as
 > `D-M7-01…D-M7-27`); as-built evidence is in [M7 spec §18](specs/m7-frame-handoff.md#18-as-built-evidence-2026-10-31).
-> **M8 (sprite renderer) is at WP-4:** the owner-approved
-> [M8 spec](specs/m8-sprite-renderer.md) (2026-10-31) is the M8 contract. WP-1 reconciled the owning
-> docs; WP-2 added the build-only shader compiler + generated SPIR-V, the internal sprite
-> pipeline/layout/sampler cache, the shared camera projection, and the public
-> `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` members; WP-3 added the internal texture
-> pages/placeholder/bindless resources and the public `RenderStats`/`IEngine.RenderStats`; WP-4 added
-> the shared frame planner, per-camera passes/draws, growable mapped instance buffers, per-frame
-> stats publication, and the public `IEngine.CaptureFrameAsync` (all `Current`). The 50,000-sprite
-> benchmark and the final Pong presentation gate remain WP-5.
+> **M8 (sprite renderer) is implementation-complete through WP-5; the milestone PR is open for
+> review and is not merged.** The owner-approved [M8 spec](specs/m8-sprite-renderer.md)
+> (2026-10-31) is the M8 contract. WP-1 reconciled the owning docs; WP-2 added the build-only shader
+> compiler + generated SPIR-V, the internal sprite pipeline/layout/sampler cache, the shared camera
+> projection, and the public `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` members; WP-3 added
+> the internal texture pages/placeholder/bindless resources and the public
+> `RenderStats`/`IEngine.RenderStats`; WP-4 added the shared frame planner, per-camera passes/draws,
+> growable mapped instance buffers, per-frame stats publication, and the public
+> `IEngine.CaptureFrameAsync` (all `Current`). WP-5 added the explicit short-vs-long Pong/AOT
+> presentation gate (`PongAcceptanceGate.LongRunTickThreshold = 1000`; the 120-tick runs assert
+> lifecycle/content/validation, the 20,000-tick runs assert the draw/statistics relationships), the
+> opt-in Release 50,000-sprite benchmark (median **177.3 FPS**, p50 5.640 ms, p95 6.562 ms, zero
+> measured allocations, validation 0/0), the manual `CaptureFrameAsync` visual artifact, and the
+> final as-built docs. The milestone PR is not merged; the 165 FPS target and all other gates were
+> kept.
 > Check status markers before treating an API as implemented.
 >
 > The [file-processors spec](specs/file-processors.md) owns implementation scope/acceptance; the
@@ -39,10 +45,12 @@
 > [spec](specs/pong-example.md)) is merged into `develop` (2026-10-29, PR #10) and replaces the exploratory smoke/fixture projects with
 > `examples/pong` and is the AOT gate: `Pong.Desktop` publishes with no tooling assembly in the
 > output, loads the 7-entry Pong pack headless, and runs `--headless` (120 ticks by default, or
-> `--headless --ticks N`), `--windowed --ticks 120`, and `--offscreen --ticks 120`. Verification is
-> the local gate set: Debug/Release zero-warning builds, 1334 deterministic plus 26
-> opt-in/conditional tests (1360 total) for the engine and the Pong tests, `dotnet format` for both
-> solutions, the docs link check, `git diff --check`, and the local AOT publish/run. CI runs on pull
+> `--headless --ticks N`), the short `--windowed --ticks 120`/`--offscreen --ticks 120` gate, and
+> the long `--offscreen --ticks 20000`/`--windowed --ticks 20000` presentation gate. Verification is
+> the local gate set: Debug/Release zero-warning builds, 1335 deterministic plus 27
+> opt-in/conditional tests (1362 total) for the engine, 58 Pong tests, `dotnet format` for both
+> solutions, the docs link check, `git diff --check`, the 50,000-sprite Release benchmark, and the
+> local AOT publish/run. CI runs on pull
 > requests to `develop` and pushes to `develop`; it does not build the Pong solution.
 
 Bork2d is a focused 2D game engine for .NET: **Vulkan 1.3** rendering, **SDL2** windowing through
