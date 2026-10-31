@@ -11,11 +11,12 @@
 > offscreen loop until `Exit`, both with the snapshot handoff and ring backpressure; headless runs a
 > paced no-GPU loop until `Exit` with a fully synthesized clock. The base pack (or the
 > `WithoutAssets()` empty filesystem) opens before the window and `Setup`. Sprites are the approved
-> M8 target and **M8 is in progress**: WP-1 reconciled the docs and WP-2 added the shader
+> M8 target and **M8 is in progress**: WP-1 reconciled the docs, WP-2 added the shader
 > tool/pipeline, the shared camera projection, and the public
-> `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` members (all three are `Current`); the renderer
-> still shows a black clear until the draw integration lands (WP-4). `IEngine.RenderStats` and
-> `IEngine.CaptureFrameAsync` remain `Planned` (WP-3/WP-4). See the
+> `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` members, and WP-3 added the internal texture
+> pages (placeholder, bindless descriptors, dynamic capacity) and the public `RenderStats` /
+> `IEngine.RenderStats` (all `Current`); the renderer still shows a black clear until the draw
+> integration lands (WP-4). `IEngine.CaptureFrameAsync` remains `Planned` (WP-4). See the
 > [API reference](reference.md#12-runtime-surface).
 >
 > Assets/processors are configured in a build-time `MyGame.Assets` executable with
@@ -80,8 +81,8 @@ app.Run();
   `Teardown` loop until `IEngine.Exit()` with a fully synthesized clock. Windowed and offscreen
   require Vulkan 1.3; headless needs no GPU and never loads Vulkan/SDL. The base pack is opened by
   `Run()` (M3). The windowed/offscreen loop has no target rate or frame limiter — it is
-  backpressured by the snapshot ring — except the minimized-only 30 Hz tick cap; M7 shows a black
-  clear and the approved M8 target draws the scene (in progress).
+  backpressured by the snapshot ring — except the minimized-only 30 Hz tick cap; the WP-3 page
+  resources and placeholder upload exist at startup, and the WP-4 draw path renders the scene.
 - `using`/`Dispose()` detaches the root's direct children and the window/input proxies and disposes
   the app-owned logger factory. It never calls `Teardown` again. `Dispose()` while `Run()` is active
   throws `InvalidOperationException`; call `IEngine.Exit()` or close the window first.
@@ -92,8 +93,8 @@ app.Run();
 
 | Mode | Selection | M7 behavior | Target |
 | --- | --- | --- | --- |
-| Windowed (default) | `WithTitle`/`WithSize`/`WithVSync` | Visible SDL window, Vulkan instance/surface, input, time, a ring-backpressured loop until exit/close, one snapshot published/presented per tick, and a black clear. Ticks are capped at 30 Hz only while minimized. | Sprite renderer plus `RenderStats`/`CaptureFrameAsync` (M8, in progress). |
-| Offscreen | `WithOffscreen(width, height)` | Vulkan renderer with a fixed sRGB target; `Setup` → `Tick`… → `Teardown` until `Exit`, `ITime` advances, ring-backpressured ticks with one discarded frame per snapshot; no window, input, SDL, surface, or readback. | Sprite renderer; `CaptureFrameAsync` readback on request (M8, in progress; no screenshot files). |
+| Windowed (default) | `WithTitle`/`WithSize`/`WithVSync` | Visible SDL window, Vulkan instance/surface, input, time, a ring-backpressured loop until exit/close, one snapshot published/presented per tick, and a black clear. Ticks are capped at 30 Hz only while minimized. | Sprite renderer plus `RenderStats` (`Current`) and `CaptureFrameAsync` (WP-4). |
+| Offscreen | `WithOffscreen(width, height)` | Vulkan renderer with a fixed sRGB target; `Setup` → `Tick`… → `Teardown` until `Exit`, `ITime` advances, ring-backpressured ticks with one discarded frame per snapshot; no window, input, SDL, surface, or readback. | Sprite renderer; `CaptureFrameAsync` readback on request (WP-4; no screenshot files). |
 | Headless | `WithHeadless(ticksPerSecond = 60)` | Paced loop until `Exit`; the rate must be positive (`WithHeadless(0)` is a `Build()` error); fully synthesized `ITime` (tick 0 = 0/0, then `N/rate` and `1/rate`, no clamp); strict grid, pure `Thread.Sleep`, unbounded catch-up; no window, input, SDL, Vulkan, renderer, or ring. | Pong gate: 120 ticks by default, `--headless --ticks N` (Q15=O2/F3). |
 
 The modes are mutually exclusive, and window-only options are rejected in headless/offscreen.
@@ -146,9 +147,9 @@ $pong = 'examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Des
   (`Pong - 3 : 2 - Serving...`, `Pong - 3 : 2 - Paused - Space to resume`,
   `Pong - 11 : 7 - Left wins - R to restart, Esc to quit`); scores, pause, match end, and setup are
   logged at Information, never per frame.
-- **Rendering (M8, in progress):** M7 deliberately draws a black clear. Sprites, camera, and layers
-  are wired, so the example becomes visibly rendered when the sprite renderer lands; the approved
-  gate then asserts the `RenderStats` relationships and a manual visual check, with offscreen frames
+- **Rendering (M8, in progress):** the renderer still draws a black clear; the WP-3 texture pages
+  and placeholder exist, and the WP-4 draw path will render the three sprites. The approved gate
+  then asserts the `RenderStats` relationships and a manual visual check, with offscreen frames
   discarded unless `CaptureFrameAsync` is requested.
 
 ## 3. Write a game
@@ -218,8 +219,8 @@ public sealed class MyGame : IGame<GameLayer>
 ```
 
 Target label: `LoadAsset<SpriteAsset>` is real (the sprite asset is a normal public MessagePack
-asset), and drawing is the approved M8 target (in progress), so nothing draws in M7 yet. The
-camera/transform code is `Current`;
+asset), the WP-3 page cache resolves `SpriteAsset.Texture` lazily, and drawing is the WP-4 work, so
+nothing draws yet. The camera/transform code is `Current`;
 time is `Current` in every mode (real in windowed/offscreen, fully synthesized in headless).
 `Setup` is synchronous,
 so the example starts the load and assigns the asset in `Tick` when it completes; blocking startup on
@@ -235,7 +236,7 @@ _player.Layer       = GameLayer.World;
 ```
 
 - `0` is `None`, not a layer. A renderable with layer `0` or more than one bit is skipped by the
-  M8 renderer (approved target, in progress; no effect in M7).
+  renderer at draw time (WP-4; no effect yet).
 - Up to 32 named single-bit flags; the enum must be `int`-backed. The builder validates it and
   rejects composites.
 - A camera mask may combine bits; `0` sees nothing. `CreateCamera(parent)` requires a parent; use
@@ -259,7 +260,7 @@ camera.ZIndex = 0;                         // ascending order; higher applies la
 - `Viewport` is normalized `(x, y, width, height)`, top-left origin, rounded half-up and clamped to
   the framebuffer. `ZIndex` orders cameras ascending, higher later, default `0`; ties are
   unspecified. Split screen uses two cameras with viewports `(0, 0, 0.5, 1)` and `(0.5, 0, 0.5, 1)`.
-- **Approved M8 draw semantics (in progress):** each camera is its own dynamic-rendering pass over
+- **Approved M8 draw semantics (WP-4):** each camera is its own dynamic-rendering pass over
   its pixel rect with no frame-level safety clear. `Clear.Color` clears only that rect
   (`loadOp=CLEAR`), `Clear.None` preserves earlier output (`LOAD`), and `Clear.Depth` logs once and
   behaves like `None`. A later `Clear.Color` wipes only its viewport, while `Clear.None` overlays.
@@ -327,12 +328,16 @@ sprite.LocalScale = new Vector2(2, 2);
 - **Skipped content (approved M8).** Null sprites, layer `0`/multi-bit layers, non-`Quad` topology
   (once per asset, never approximated as a quad), and pending pages are skipped with a diagnostic.
   UVs outside `[0,1]` are allowed and use the descriptor's wrap mode.
+- **Placeholder sizing (approved M8, WP-3).** A sprite whose texture is absent or failed draws the
+  generated 8×8 magenta/black checkerboard. Its quad keeps the descriptor's declared
+  `Width`/`Height` when the descriptor loaded and those dimensions are valid (even if the payload
+  failed); otherwise it uses the placeholder's 8×8 extent. Failed paths are not retried for the run.
 - Parenting preserves the world transform: assigning `Parent` later keeps the child in place,
   cycles and setting the root's own parent throw `InvalidOperationException`, and a non-engine or
   foreign-engine parent throws `Bork2dException`. `ITransform.DetachAll()` detaches direct children
   without destroying them. See [Scene ownership](../architecture/scene-ownership.md).
 
-### Render stats and frame capture (M8, Planned)
+### Render stats and frame capture (M8; stats `Current` in WP-3, capture `Planned` in WP-4)
 
 The approved M8 public API lets a game observe what the renderer did without reaching into
 `Bork2d.Render`:
@@ -340,13 +345,19 @@ The approved M8 public API lets a game observe what the renderer did without rea
 ```csharp
 RenderStats stats = _engine.RenderStats;   // last completed frame; defaults/zero before the first
 // stats.DrawCalls == stats.NonEmptyCameras; stats.TexturePages includes the placeholder.
-byte[] rgba = await _engine.CaptureFrameAsync(cancellationToken); // latest completed frame
+byte[] rgba = await _engine.CaptureFrameAsync(cancellationToken); // latest completed frame (WP-4)
 ```
 
 - `RenderStats` describes the **last completed frame** (validation counts are cumulative for the
-  run) and is safe to read from any thread. Before the first frame, in headless, and after
-  `Build()`/`Dispose()` it returns defaults/zero; it never throws and never blocks.
-- `CaptureFrameAsync` returns RGBA8, row-major, top-left origin, exactly
+  run) and is safe to read from any thread. Before the first frame, in headless, and before the host
+  installs its source it returns defaults/zero; after shutdown it may keep the last values; it never
+  throws and never blocks on the GPU. WP-3 declares the type/property and installs the source; the
+  per-frame values are published in WP-4, so a WP-3 run observes `default`.
+- `TexturePages` counts the resident pages plus the placeholder and `TexturePageCapacity` is the
+  current bindless capacity in entries (initially 256, growing by doubling to the effective device
+  limit). A missing/failed texture keeps its declared dimensions for the placeholder quad when the
+  descriptor loaded and they are valid, and otherwise uses the 8×8 placeholder.
+- `CaptureFrameAsync` (WP-4, `Planned`) returns RGBA8, row-major, top-left origin, exactly
   `FramebufferWidth * FramebufferHeight * 4` bytes, including all camera clears/draws and excluding
   OS chrome. The copy is recorded after the last camera pass and before present/discard, so it does
   not stall the tick. Windowed BGRA is swizzled to RGBA; offscreen RGBA is copied directly.
@@ -825,7 +836,8 @@ builder.Write("assets.pck"); // overwrites; relative paths resolve against the c
 - The runtime libraries are `IsAotCompatible`; AOT publish/run is a required local gate.
   `Pong.Desktop --headless` (120 ticks by default), `--headless --ticks N`, `--windowed --ticks
   120`, and `--offscreen --ticks 120` load the baked 7-entry pack and exit 0; the windowed/offscreen
-  runs need a GPU, and M7 shows a black clear (the approved M8 target draws the three sprites). See
+  runs need a GPU, wait for the startup placeholder upload, and still show a black clear (the WP-4
+  draw path renders the three sprites). See
   [Start the engine](#2-start-the-engine).
 
 See [NativeAOT](../architecture/nativeaot.md).

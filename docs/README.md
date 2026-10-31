@@ -24,8 +24,9 @@
 > [M8 spec](specs/m8-sprite-renderer.md) (2026-10-31) is the M8 contract. WP-1 reconciled the owning
 > docs; WP-2 added the build-only shader compiler + generated SPIR-V, the internal sprite
 > pipeline/layout/sampler cache, the shared camera projection, and the public
-> `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` members (all `Current`). `RenderStats`/
-> `IEngine.RenderStats` and `IEngine.CaptureFrameAsync` remain `Planned` (WP-3/WP-4), and the
+> `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` members; WP-3 added the internal texture
+> pages/placeholder/bindless resources and the public `RenderStats`/`IEngine.RenderStats` (all
+> `Current`). `IEngine.CaptureFrameAsync` remains `Planned` (WP-4), and the
 > renderer still draws a black clear until the draw integration lands.
 > Check status markers before treating an API as implemented.
 >

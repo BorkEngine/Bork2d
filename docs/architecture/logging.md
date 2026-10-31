@@ -21,9 +21,9 @@
 > loop-stop line. M7 adds the handoff fields/counters to the same one-shot renderer start/stop
 > lines (§5.3) and the handoff counters to the windowed/offscreen loop-stop lines and the
 > headless loop-stop line (§5.1). The Pong example (D-043/D-044) owns the game-side title/logging
-> behavior. **M8 (sprite renderer) is in progress** (WP-1 docs reconciliation and WP-2
-> pipeline/camera/planning code are complete): the remaining target adds one-shot page/instance
-> startup fields, richer renderer stop counters, and throttled draw/content diagnostics (§5.4) — and
+> behavior. **M8 (sprite renderer) is in progress** (WP-1 docs reconciliation, WP-2
+> pipeline/camera/planning code, and WP-3 page/start-stop fields are complete): the remaining target
+> adds the draw counters/statistics publication and throttled draw/content diagnostics (§5.4) — and
 > still no per-frame, per-sprite, or per-draw logging.
 
 ## 1. Surface
@@ -121,7 +121,7 @@ game code creates its own categories.
 | `Bork2d.Runtime` | builder, modes, lifecycle, windowing |
 | `Bork2d.Engine` | reserved for scene/time/snapshot diagnostics; no current log sites |
 | `Bork2d.Engine.Assets` | pack parsing, decompression, loading |
-| `Bork2d.Render` | Vulkan instance/validation/device selection (M6 WP-2); windowed swapchain create/recreate/minimize and renderer start/stop counters (WP-3); offscreen target/start/stop counters (WP-4); M8 adds the shader/pipeline/page/instance startup fields, draw/page counters, and throttled draw diagnostics (§5.4) |
+| `Bork2d.Render` | Vulkan instance/validation/device selection (M6 WP-2); windowed swapchain create/recreate/minimize and renderer start/stop counters (WP-3); offscreen target/start/stop counters (WP-4); M8 WP-2 adds the shader/pipeline startup identity, WP-3 adds the page/instance startup fields, page capacity/stop counters, and the once-per-failed-path warning, and WP-4 adds the draw counters and throttled draw diagnostics (§5.4) |
 | game-defined | `CreateLogger("MyGame")` or `CreateLogger<T>()` |
 Startup logs use `Bork2d.Runtime` and one structured message after validation:
 
@@ -237,21 +237,23 @@ shutdown and record the counters and frame/consumed relationships. The renderer 
 frame-presented/discarded, handoff, and validation counters once at stop. No line is emitted from
 the acquire/record/present hot path.
 
-### 5.4 Sprite renderer, pages, and stats (M8; WP-2 pipeline exists, page/draw/stats fields WP-3/WP-4)
+### 5.4 Sprite renderer, pages, and stats (M8; WP-2 pipeline and WP-3 page/start-stop fields exist; draw counters/statistics publication WP-4)
 
 M8 adds no new category; it extends the `Bork2d.Render` one-shot lines and adds **throttled**
-diagnostics. WP-2 creates the pipeline/layout/samplers with static debug labels and no new log line
-yet; the page/instance startup fields, stop counters, and draw diagnostics below land with WP-3/WP-4.
-There is still no per-frame, per-sprite, per-draw, per-camera, or per-image logging, and
-`RenderStats`/`CaptureFrameAsync` never log per call.
+diagnostics. WP-2 creates the pipeline/layout/samplers with static debug labels. WP-3 extends both
+start lines with the instance capacity, texture page count/capacity, bindless limit, and placeholder
+state, adds the page/growth/failed counters to both stop lines, logs one warning per failed path, and
+logs one information line per capacity growth. The draw/skip/clear diagnostics and per-frame
+`RenderStats` publication land with WP-4. There is still no per-frame, per-sprite, per-draw,
+per-camera, or per-image logging, and `RenderStats`/`CaptureFrameAsync` never log per call.
 
 | Event | Level | Fields |
 | --- | --- | --- |
-| Sprite renderer started (start line extension) | Information | mode, pipeline/shader identity (build-time SPIR-V), page initial capacity, instance initial capacity, bindless limit (`maxPerStageDescriptorUpdateAfterBindSampledImages`), placeholder on/off, validation on/off |
-| Page capacity grown | Information (Debug for the per-page detail) | old/new capacity, resident pages; once per capacity change |
-| Instance buffer grown | Debug | frame index, old/new capacity (instances), once per capacity change |
-| Placeholder used for a path | Warning | canonical asset path and the content failure kind; **once per failed path** for the run |
-| Texture/page content failure | Warning | path/kind and reason; throttled once per unique path/kind |
+| Sprite renderer started (start line extension) | Information | mode, pipeline/shader identity (build-time SPIR-V), page initial capacity, instance capacity (1024), bindless limit (effective `maxPerStage`/`maxDescriptorSet` update-after-bind sampled images), placeholder on/off, validation on/off — `Current` (WP-3) |
+| Page capacity grown | Information | old/new capacity, limit; once per capacity change — `Current` (WP-3) |
+| Instance buffer grown | Debug | frame index, old/new capacity (instances), once per capacity change — WP-4 |
+| Placeholder used for a path | Warning | canonical asset path and the content failure kind; **once per failed path** for the run — `Current` (WP-3; the draw use is WP-4) |
+| Texture/page content failure | Warning | path/kind and reason; throttled once per unique path/kind — `Current` (WP-3: one warning per failed path) |
 | Invalid sprite/layer/non-Quad/pending skip | Debug | once per asset path/kind where one exists, otherwise once per renderer; totals live in counters |
 | Invalid camera skipped | Debug | once per renderer (not per camera per frame) |
 | `Clear.Depth` requested | Debug | once per renderer; it behaves like `Clear.None` and never touches depth |

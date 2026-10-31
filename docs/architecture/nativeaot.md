@@ -23,19 +23,22 @@
 > Pong desktop app builds the assets executable out of process through
 > `build/Bork2d.Assets.Copy.targets`; see [asset processors](asset-processors.md).
 >
-> **M8 (sprite renderer) is in progress** (WP-1 docs reconciliation and WP-2 shader
-> pipeline/camera math/instance planning are complete; WP-3–WP-5 remain). The approved target adds a
+> **M8 (sprite renderer) is in progress** (WP-1 docs reconciliation, WP-2 shader
+> pipeline/camera math/instance planning, and WP-3 texture pages/`RenderStats` are complete;
+> WP-4–WP-5 remain). The approved target adds a
 > second build-time-only tool, `Bork2d.ShaderCompiler`
 > (Silk.NET.Shaderc/Silk.NET.Shaderc.Native 2.23.0), which compiles checked-in GLSL to SPIR-V and
 > emits generated C# linked into `Bork2d.Render`. The tool and its packages never enter the runtime
-> or AOT publish graph; there is no runtime shader I/O, compiler, or Vulkan SDK requirement.
+> or AOT publish graph; there is no runtime shader I/O, compiler, or Vulkan SDK requirement. WP-3
+> added no package and no runtime project reference (the page subsystem is internal to
+> `Bork2d.Render`).
 
 ## 1. Scope
 
 | Component | NativeAOT required? | Why |
 | --- | --- | --- |
 | `Bork2d.Engine` | Yes | Public contract plus the runtime scene, transforms, time, snapshot policy, generated shapes, pack parsing, decompression, MessagePack decoding, and pack-time reference validation. |
-| `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. M6 adds the instance/validation/device-selection foundation, the windowed swapchain/clear/present renderer, and the offscreen target/renderer with the Runtime host wiring. M8 WP-2 adds the generated-SPIR-V sprite pipeline/layout/samplers and the camera-projection bridge; texture pages/uploader and per-camera draws remain WP-3/WP-4. The renderer is never constructed on the headless path. |
+| `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. M6 adds the instance/validation/device-selection foundation, the windowed swapchain/clear/present renderer, and the offscreen target/renderer with the Runtime host wiring. M8 WP-2 adds the generated-SPIR-V sprite pipeline/layout/samplers and the camera-projection bridge; WP-3 adds the internal texture-page subsystem (async `IAssets` prefetch, pooled images/staging, upload fences, bindless descriptors, dynamic capacity) and the per-frame binding 0/1 resources. Per-camera draws and per-frame stats publication remain WP-4. The renderer is never constructed on the headless path. |
 | `Bork2d.Runtime` | Yes | Builder, host, and app-owned logging. |
 | `Pong.Desktop` | Yes | The AOT desktop example and the local gate, published with `PublishAot`. It references `Bork2d.Engine`/`Bork2d.Runtime` plus the game-side `Pong.Common` and loads the baked 7-entry Pong pack for `--headless` (120 ticks by default; `--headless --ticks N` overrides) or runs the same pack windowed (`--windowed [--ticks N]`) or offscreen (`--offscreen --ticks N`). |
 | `Pong.Common` | Yes | Game-side runtime library: `GameSettings` (a `[GenerateShape]` struct root with sprite references), `PongGame`, `PongSimulation`, `PongAi`, and `PongTitle`; it references `Bork2d.Engine` only. |
@@ -234,7 +237,8 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    There is no generated host and no host build step. The publish output must contain no
    `Pong.Assets`, `Bork2d.Bake`, Tomlyn, or StbImageSharp assembly (`Pong.Common` is the expected
    game-side assembly), must contain `assets.pck` and `SDL2.dll`, and must not contain
-   `vulkan-1.dll` (the system loader). M8 (verified in WP-2) additionally requires no
+   `vulkan-1.dll` (the system loader). M8 (verified in WP-2; unchanged by WP-3) additionally
+   requires no
    `Bork2d.ShaderCompiler`/`Silk.NET.Shaderc` assembly and no loose `.spv` in the publish: the
    generated SPIR-V C# is compiled into the app. The NativeAOT output is a single-file executable
    plus PDBs, so the managed assemblies are linked in; `Pong.Common.pdb` is the remaining on-disk
@@ -252,7 +256,9 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    frame per snapshot in M7 (the short run consumes the first and supersedes the rest), and joining
    the renderer; `Pong.Desktop.exe --offscreen --ticks 120` must exit `0` after exactly 120 ticks
    with one `Setup`/`Teardown`, a 1280×720 sRGB offscreen target, and a joined renderer (frame count
-   not asserted, D-M6-13/Q22=V1). Once WP-4 lands, the M8 target draws the three sprites with their
+   not asserted, D-M6-13/Q22=V1). Since WP-3 each windowed/offscreen run creates and uploads the
+   placeholder page at startup (`texturePages=1`, `texturePageCapacity=256`, `bindlessLimit` logged)
+   with no extra publish content. Once WP-4 lands, the renderer draws the three sprites with their
    tints and asserts the approved `RenderStats` relationships (`Cameras >= 1`, `NonEmptyCameras >= 1`,
    `DrawCalls >= 1`, `Instances >= 3`, `TexturePages >= 3`; manual visual check, no pixel
    assertion). The interactive `--windowed` run reads W/S/Space/R/Escape, and exits on
