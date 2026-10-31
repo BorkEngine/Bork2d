@@ -111,9 +111,9 @@ the `ILoggingBuilder`, owns provider configuration, and the app disposes the fac
 
 ### Pong example (AOT host)
 
-`Pong.Desktop` is the reference game host and the NativeAOT gate. `--headless` runs the acceptance
-smoke against the baked 7-entry pack; the windowed/offscreen runs are the playable and automated
-examples:
+`Pong.Desktop` is the reference game host and the NativeAOT gate. The windowed/offscreen runs are
+the playable and automated examples; the headless smoke terminates only once WP-5 adds its tick
+limit:
 
 ```powershell
 dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-x64 --nologo
