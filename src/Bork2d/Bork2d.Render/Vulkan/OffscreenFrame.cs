@@ -5,7 +5,8 @@ using Silk.NET.Vulkan;
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// One offscreen GPU frame's command pool, command buffer, and fence (D-M6-11).
+/// One offscreen GPU frame's command pool, command buffer, fence, and the empty instance resources
+/// (instance SSBO and frame descriptor set, Q10=J1) (D-M6-11).
 /// </summary>
 /// <remarks>
 /// The render thread owns the frame. The fence is created signaled so the first wait succeeds
@@ -26,7 +27,8 @@ internal sealed unsafe class OffscreenFrame : IDisposable
         ILogger logger,
         CommandPool pool,
         CommandBuffer commandBuffer,
-        Fence fence)
+        Fence fence,
+        FrameInstanceResources instanceResources)
     {
         _vk = vk;
         _device = device;
@@ -34,6 +36,7 @@ internal sealed unsafe class OffscreenFrame : IDisposable
         Pool = pool;
         CommandBuffer = commandBuffer;
         Fence = fence;
+        InstanceResources = instanceResources;
     }
 
     /// <summary>Gets the frame's command pool.</summary>
@@ -45,17 +48,26 @@ internal sealed unsafe class OffscreenFrame : IDisposable
     /// <summary>Gets the in-flight fence.</summary>
     internal Fence Fence { get; }
 
+    /// <summary>Gets the empty instance buffer and frame descriptor set (Q10=J1).</summary>
+    internal FrameInstanceResources InstanceResources { get; }
+
     /// <summary>Creates one offscreen frame's Vulkan objects.</summary>
     /// <param name="vk">The Vulkan API object.</param>
     /// <param name="device">The logical device.</param>
+    /// <param name="physicalDevice">The physical device used to select instance-buffer memory.</param>
+    /// <param name="frameIndex">The GPU frame index, used for debug names.</param>
     /// <param name="queueFamilyIndex">The graphics queue family.</param>
+    /// <param name="instance">The instance seam used for debug labels; may be <see langword="null"/>.</param>
     /// <param name="logger">The <c>Bork2d.Render</c> logger.</param>
     /// <returns>The created frame.</returns>
     /// <exception cref="Bork2dException">A Vulkan object could not be created.</exception>
     internal static OffscreenFrame Create(
         Vk vk,
         Device device,
+        PhysicalDevice physicalDevice,
+        int frameIndex,
         uint queueFamilyIndex,
+        IVulkanInstance? instance,
         ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(logger);
@@ -63,6 +75,7 @@ internal sealed unsafe class OffscreenFrame : IDisposable
         var pool = default(CommandPool);
         var commandBuffer = default(CommandBuffer);
         var fence = default(Fence);
+        FrameInstanceResources? instanceResources = null;
         try
         {
             var poolInfo = new CommandPoolCreateInfo
@@ -102,10 +115,26 @@ internal sealed unsafe class OffscreenFrame : IDisposable
                 throw new Bork2dException($"vkCreateFence failed with VkResult {result}.");
             }
 
-            return new OffscreenFrame(vk, device, logger, pool, commandBuffer, fence);
+            instanceResources = FrameInstanceResources.Create(
+                vk,
+                device,
+                physicalDevice,
+                frameIndex,
+                instance,
+                logger);
+
+            return new OffscreenFrame(
+                vk,
+                device,
+                logger,
+                pool,
+                commandBuffer,
+                fence,
+                instanceResources);
         }
         catch
         {
+            instanceResources?.Destroy();
             DestroyBestEffort(vk, device, logger, pool, fence);
             throw;
         }
@@ -122,6 +151,7 @@ internal sealed unsafe class OffscreenFrame : IDisposable
             return;
         }
 
+        InstanceResources.Destroy();
         DestroyBestEffort(_vk, _device, _logger, Pool, Fence);
     }
 

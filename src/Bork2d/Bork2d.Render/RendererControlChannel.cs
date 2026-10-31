@@ -43,6 +43,16 @@ internal sealed class RendererControlChannel : IDisposable
     /// <summary>Gets the one-shot fatal error, or <see langword="null"/> when none was published.</summary>
     internal Exception? FatalException => Volatile.Read(ref _fatal);
 
+    /// <summary>
+    /// Gets the event the channel sets on every post, stop request, and fatal publication.
+    /// </summary>
+    /// <remarks>
+    /// Exposed so the renderer can combine the control wake with the snapshot-ring wake in one
+    /// event-based wait (M7 WP-3). The channel owns the event; callers may reset it and wait on its
+    /// handle but never dispose it.
+    /// </remarks>
+    internal ManualResetEventSlim WakeEvent => _wake;
+
     /// <summary>Gets a value indicating whether a control message is pending.</summary>
     internal bool HasPendingWork
     {

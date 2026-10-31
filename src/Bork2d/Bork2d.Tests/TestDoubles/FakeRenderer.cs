@@ -1,5 +1,6 @@
 using Bork2d.Render;
 using Bork2d.Render.Diagnostics;
+using Bork2d.Render.Handoff;
 
 namespace Bork2d.Tests.TestDoubles;
 
@@ -7,14 +8,27 @@ namespace Bork2d.Tests.TestDoubles;
 /// A deterministic <see cref="IRenderer"/> used by host tests instead of Vulkan.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Readiness, readiness failure, and a post-start fatal are explicit calls, so tests never sleep
 /// or poll. Waits are bounded overloads; every stop path signals the join event.
+/// </para>
+/// <para>
+/// The fake owns a real <see cref="SnapshotRing"/>, so the M7 WP-4 host tests exercise the real
+/// acquire/publish/abandon/wake contract. <see cref="AutoConsume"/> (the default) takes and
+/// releases each published snapshot immediately, which models a renderer that keeps up and leaves
+/// existing host tests unblocked; clearing it models a renderer that holds its snapshots to the GPU
+/// fence, so two stay <c>Rendering</c>, the third stays <c>Ready</c>, and the next acquire blocks.
+/// </para>
 /// </remarks>
 internal sealed class FakeRenderer : IRenderer
 {
+    private const int RendererFramesInFlight = 2;
+
     private readonly ManualResetEventSlim _ready = new(initialState: false);
     private readonly ManualResetEventSlim _stopped = new(initialState: false);
     private readonly ManualResetEventSlim _posted = new(initialState: false);
+    private readonly SnapshotRing _ring = new();
+    private readonly List<SnapshotSlot> _heldSlots = [];
     private Exception? _fatalException;
     private int _status = (int)RendererStatus.NotStarted;
     private int _stopReason = (int)RendererStopReason.None;
@@ -22,6 +36,7 @@ internal sealed class FakeRenderer : IRenderer
     private int _stopRequested;
     private int _joined;
     private int _waitForReadyCount;
+    private long _suspendedConsumptions;
 
     /// <summary>Gets or sets a value indicating whether <see cref="Start"/> becomes ready.</summary>
     internal bool AutoReady { get; set; }
@@ -47,6 +62,85 @@ internal sealed class FakeRenderer : IRenderer
     /// <summary>Gets a value indicating whether a stop was requested.</summary>
     internal bool StopRequested => Volatile.Read(ref _stopRequested) != 0;
 
+    /// <inheritdoc/>
+    public SnapshotRingCounters SnapshotCounters => _ring.Counters;
+
+    /// <inheritdoc/>
+    public long SuspendedConsumptions => Interlocked.Read(ref _suspendedConsumptions);
+
+    /// <inheritdoc/>
+    public SnapshotSlot? AcquireSnapshotSlot() => _ring.Acquire();
+
+    /// <inheritdoc/>
+    public void PublishSnapshot(SnapshotSlot slot)
+    {
+        ArgumentNullException.ThrowIfNull(slot);
+        _ring.Publish(slot);
+        if (AutoConsume)
+        {
+            SnapshotSlot? taken = _ring.TakeLatest();
+            if (taken is not null)
+            {
+                _ring.Release(taken);
+            }
+
+            return;
+        }
+
+        // Hold mode: model two GPU frames in flight that keep their snapshot slot until released.
+        if (_heldSlots.Count < RendererFramesInFlight)
+        {
+            SnapshotSlot? taken = _ring.TakeLatest();
+            if (taken is not null)
+            {
+                _heldSlots.Add(taken);
+            }
+        }
+    }
+
+    /// <inheritdoc/>
+    public void AbandonSnapshotSlot(SnapshotSlot slot)
+    {
+        ArgumentNullException.ThrowIfNull(slot);
+        _ring.Abandon(slot);
+    }
+
+    /// <inheritdoc/>
+    public void WakeSnapshotWait() => _ring.SignalExit();
+
+    /// <summary>Gets the number of snapshots the hold mode currently keeps <c>Rendering</c>.</summary>
+    internal int HeldSnapshotCount => _heldSlots.Count;
+
+    /// <summary>Releases the snapshots the hold mode kept <c>Rendering</c> (a simulated fence).</summary>
+    internal void ReleaseHeldSnapshots()
+    {
+        foreach (SnapshotSlot slot in _heldSlots)
+        {
+            if (slot.State == SnapshotSlotState.Rendering)
+            {
+                _ring.Release(slot);
+            }
+        }
+
+        _heldSlots.Clear();
+    }
+
+    /// <summary>
+    /// Drains the newest <c>Ready</c> snapshot without a GPU frame, modelling the suspended
+    /// (minimized) path for host tests.
+    /// </summary>
+    /// <returns><see langword="true"/> when a snapshot was dropped.</returns>
+    internal bool DrainSuspendedSnapshot()
+    {
+        if (!_ring.DiscardLatest())
+        {
+            return false;
+        }
+
+        Interlocked.Increment(ref _suspendedConsumptions);
+        return true;
+    }
+
     /// <summary>Gets a value indicating whether the renderer was joined.</summary>
     internal bool Joined => Volatile.Read(ref _joined) != 0;
 
@@ -70,6 +164,22 @@ internal sealed class FakeRenderer : IRenderer
 
     /// <summary>Gets or sets the counters reported to the host.</summary>
     internal RendererCounters Counters { get; set; } = RendererCounters.Empty;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether publishing auto-consumes the snapshot (default
+    /// <see langword="true"/>).
+    /// </summary>
+    /// <remarks>
+    /// With auto-consume on, each publish is taken and released immediately, so the producer never
+    /// blocks. With it off, the fake models a renderer that holds its snapshots to the GPU fence:
+    /// up to two published snapshots stay <c>Rendering</c>, a third stays <c>Ready</c>, and the
+    /// next acquire blocks until a stop or <see cref="ReleaseHeldSnapshots"/> (WP-4 backpressure
+    /// tests).
+    /// </remarks>
+    internal bool AutoConsume { get; set; } = true;
+
+    /// <summary>Gets the ring the fake exposes to tests.</summary>
+    internal SnapshotRing SnapshotRing => _ring;
 
     /// <inheritdoc/>
     public bool IsReady => _isReady;
@@ -98,6 +208,7 @@ internal sealed class FakeRenderer : IRenderer
         SetStatus(RendererStatus.Starting);
         if (StartFailure is not null)
         {
+            _ring.Stop();
             Volatile.Write(ref _fatalException, StartFailure);
             SetStatus(RendererStatus.Faulted);
             Volatile.Write(ref _stopReason, (int)RendererStopReason.Fatal);
@@ -128,6 +239,7 @@ internal sealed class FakeRenderer : IRenderer
     /// <param name="exception">The failure the host observes.</param>
     internal void PublishFatal(Exception exception)
     {
+        _ring.Stop();
         Volatile.Write(ref _fatalException, exception);
         _isReady = false;
         SetStatus(RendererStatus.Faulted);
@@ -227,6 +339,7 @@ internal sealed class FakeRenderer : IRenderer
     /// <inheritdoc/>
     public void RequestStop()
     {
+        _ring.Stop();
         if (Interlocked.Exchange(ref _stopRequested, 1) != 0)
         {
             return;
@@ -247,32 +360,32 @@ internal sealed class FakeRenderer : IRenderer
     /// <inheritdoc/>
     public void Join()
     {
-        if (!Started)
+        if (Started)
         {
-            Volatile.Write(ref _joined, 1);
-            return;
+            _stopped.Wait();
         }
 
-        _stopped.Wait();
+        DrainSnapshotsAfterJoin();
         Volatile.Write(ref _joined, 1);
     }
 
     /// <inheritdoc/>
     public bool Join(TimeSpan timeout)
     {
-        if (!Started)
-        {
-            Volatile.Write(ref _joined, 1);
-            return true;
-        }
-
-        if (!_stopped.Wait(timeout))
+        if (Started && !_stopped.Wait(timeout))
         {
             return false;
         }
 
+        DrainSnapshotsAfterJoin();
         Volatile.Write(ref _joined, 1);
         return true;
+    }
+
+    private void DrainSnapshotsAfterJoin()
+    {
+        ReleaseHeldSnapshots();
+        _ring.DrainAfterRenderThreadJoined();
     }
 
     private void SetStatus(RendererStatus status) => Volatile.Write(ref _status, (int)status);

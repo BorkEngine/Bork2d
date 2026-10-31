@@ -158,6 +158,42 @@ public sealed class SnapshotRingTests
     }
 
     [Fact]
+    public void DiscardLatestFreesTheNewestReadyWithoutConsumingIt()
+    {
+        using var ring = new SnapshotRing();
+        var slot = Acquire(ring);
+        ring.Publish(slot);
+
+        Assert.True(ring.DiscardLatest());
+
+        Assert.Equal(SnapshotSlotState.Free, slot.State);
+        Assert.Equal(-1, ring.LatestIndex);
+        Assert.Equal(0, ring.Counters.Consumed);
+        Assert.Equal(0, SnapshotRingAssertions.LiveCount(ring));
+        Assert.False(ring.DiscardLatest());
+        SnapshotRingAssertions.AssertQuiescent(ring);
+    }
+
+    [Fact]
+    public void DiscardLatestNeverFreesARenderingOrWritingSlot()
+    {
+        using var ring = new SnapshotRing();
+        var published = Acquire(ring);
+        ring.Publish(published);
+        var rendering = Take(ring);
+
+        Assert.False(ring.DiscardLatest());
+        Assert.Equal(SnapshotSlotState.Rendering, rendering.State);
+
+        var writing = Acquire(ring);
+        Assert.False(ring.DiscardLatest());
+        Assert.Equal(SnapshotSlotState.Writing, writing.State);
+        ring.Abandon(writing);
+        ring.Release(rendering);
+        SnapshotRingAssertions.AssertQuiescent(ring);
+    }
+
+    [Fact]
     public void ReleaseMovesRenderingToFree()
     {
         using var ring = new SnapshotRing();

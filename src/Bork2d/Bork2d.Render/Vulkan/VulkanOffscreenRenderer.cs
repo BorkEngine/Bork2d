@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Bork2d.Engine;
 using Bork2d.Render.Diagnostics;
+using Bork2d.Render.Handoff;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
 
@@ -8,8 +9,9 @@ namespace Bork2d.Render.Vulkan;
 
 /// <summary>
 /// The production offscreen Vulkan renderer: one render thread owns the instance (when the host did
-/// not supply one), the device, two permanent sRGB targets, and the dynamic-rendering clear, and
-/// discards every frame until the host stops it (D-M6-01, D-M6-07, D-M6-11).
+/// not supply one), the device, two permanent sRGB targets, the snapshot ring, and the
+/// dynamic-rendering clear, and records exactly one discarded frame per consumed snapshot until the
+/// host stops it (Q7=G1, D-M6-07, D-M6-11).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -17,13 +19,19 @@ namespace Bork2d.Render.Vulkan;
 /// creates or adopts the instance, selects a device without surface/present requirements, chooses an
 /// sRGB format, allocates two color images, transitions them once, creates two frames in flight, and
 /// marks the renderer ready. The host observes readiness, status, counters, and the one-shot fatal
-/// error through <see cref="IRenderer"/>.
+/// error through <see cref="IRenderer"/>; it drives the snapshot handoff through the slot API in
+/// M7 WP-4.
 /// </para>
 /// <para>
-/// There is no surface, swapchain, present, acquire, semaphore, or readback in this path
-/// (D-M6-23): frames are paced only by their GPU fences (D-M6-12). Steady-state frames allocate
-/// nothing, log nothing, and never call <c>vkDeviceWaitIdle</c>; shutdown is the only place it is
-/// used. The renderer never calls SDL.
+/// With no <c>Ready</c> snapshot the render thread blocks on the combined snapshot/control wait and
+/// never records a frame; a snapshot slot is held until the consuming GPU frame's fence is observed
+/// and released when that frame is reused or during the stop/fatal/idle drain. There is no minimized
+/// path in offscreen mode. There is no surface, swapchain, present, acquire, semaphore, or readback
+/// (D-M6-23).
+/// </para>
+/// <para>
+/// Steady-state frames allocate nothing, log nothing, and never call <c>vkDeviceWaitIdle</c>;
+/// shutdown is the only place it is used. The renderer never calls SDL.
 /// </para>
 /// </remarks>
 internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
@@ -38,6 +46,8 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
     private readonly IVulkanInstanceFactory _instanceFactory;
     private readonly ILogger _logger;
     private readonly RendererControlChannel _control = new();
+    private readonly SnapshotConsumer _consumer = new(new SnapshotRing(), FramesInFlight);
+    private readonly SnapshotControlWait _wait;
     private readonly ManualResetEventSlim _ready = new(initialState: false);
     private readonly ManualResetEventSlim _progress = new(initialState: false);
 
@@ -71,6 +81,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
         _startInfo = startInfo;
         _instanceFactory = instanceFactory;
         _logger = startInfo.LoggerFactory.CreateLogger(RenderLog.Category);
+        _wait = new SnapshotControlWait(_consumer.Ring, _control);
     }
 
     /// <inheritdoc/>
@@ -94,6 +105,49 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
 
     /// <inheritdoc/>
     public Exception? FatalException => _control.FatalException;
+
+    /// <inheritdoc/>
+    public SnapshotRingCounters SnapshotCounters => _consumer.Counters;
+
+    /// <inheritdoc/>
+    public long SuspendedConsumptions => _consumer.SuspendedConsumptions;
+
+    /// <summary>Gets the renderer's snapshot ring (GPU tests observe slot state through it).</summary>
+    internal SnapshotRing SnapshotRing => _consumer.Ring;
+
+    /// <summary>Gets a value indicating whether every GPU frame owns its empty instance resources.</summary>
+    internal bool HasInstanceResources
+    {
+        get
+        {
+            if (_frames.Length != FramesInFlight)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < FramesInFlight; index++)
+            {
+                if (_frames[index]?.InstanceResources is null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
+
+    /// <inheritdoc/>
+    public SnapshotSlot? AcquireSnapshotSlot() => _consumer.Ring.Acquire();
+
+    /// <inheritdoc/>
+    public void PublishSnapshot(SnapshotSlot slot) => _consumer.Ring.Publish(slot);
+
+    /// <inheritdoc/>
+    public void AbandonSnapshotSlot(SnapshotSlot slot) => _consumer.Ring.Abandon(slot);
+
+    /// <inheritdoc/>
+    public void WakeSnapshotWait() => _consumer.Ring.SignalExit();
 
     /// <summary>Gets the number of discarded frames (diagnostic alias for the counter).</summary>
     internal long FramesDiscarded => Volatile.Read(ref _framesDiscarded);
@@ -156,6 +210,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
     public void RequestStop()
     {
         Volatile.Write(ref _readyFlag, 0);
+        _consumer.Ring.Stop();
         _control.RequestStop();
         if (Volatile.Read(ref _stopReason) != (int)RendererStopReason.Fatal)
         {
@@ -172,36 +227,52 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
     }
 
     /// <inheritdoc/>
-    public void Join() => _thread?.Join();
+    public void Join()
+    {
+        _thread?.Join();
+        DrainSnapshotsAfterJoin();
+    }
 
     /// <inheritdoc/>
     public bool Join(TimeSpan timeout)
     {
         Thread? thread = _thread;
-        return thread is null || thread.Join(timeout);
+        if (thread is null)
+        {
+            DrainSnapshotsAfterJoin();
+            return true;
+        }
+
+        if (!thread.Join(timeout))
+        {
+            return false;
+        }
+
+        DrainSnapshotsAfterJoin();
+        return true;
     }
 
     /// <summary>
-    /// Waits at most <paramref name="timeout"/> for the counters to satisfy a predicate
-    /// (GPU tests only; event-based, no polling or sleeps).
+    /// Waits at most <paramref name="timeout"/> for a renderer predicate (GPU tests only;
+    /// event-based, no polling or sleeps).
     /// </summary>
-    /// <param name="predicate">The counter condition to observe.</param>
+    /// <param name="predicate">The condition to observe.</param>
     /// <param name="timeout">The bounded wait.</param>
     /// <returns><see langword="true"/> when the predicate held; <see langword="false"/> on timeout.</returns>
-    internal bool WaitForProgress(Func<RendererCounters, bool> predicate, TimeSpan timeout)
+    internal bool WaitForProgress(Func<bool> predicate, TimeSpan timeout)
     {
         ArgumentNullException.ThrowIfNull(predicate);
 
         var stopwatch = Stopwatch.StartNew();
         while (true)
         {
-            if (predicate(Counters))
+            if (predicate())
             {
                 return true;
             }
 
             _progress.Reset();
-            if (predicate(Counters))
+            if (predicate())
             {
                 return true;
             }
@@ -214,8 +285,38 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
 
             if (!_progress.Wait(remaining))
             {
-                return predicate(Counters);
+                return predicate();
             }
+        }
+    }
+
+    /// <summary>
+    /// Waits at most <paramref name="timeout"/> for the counters to satisfy a predicate
+    /// (GPU tests only; event-based, no polling or sleeps).
+    /// </summary>
+    /// <param name="predicate">The counter condition to observe.</param>
+    /// <param name="timeout">The bounded wait.</param>
+    /// <returns><see langword="true"/> when the predicate held; <see langword="false"/> on timeout.</returns>
+    internal bool WaitForProgress(Func<RendererCounters, bool> predicate, TimeSpan timeout)
+        => WaitForProgress(() => predicate(Counters), timeout);
+
+    /// <summary>
+    /// Frees every non-<c>Writing</c> slot once the render thread has joined (Q9=I1).
+    /// </summary>
+    /// <remarks>
+    /// A fatal mid-tick may publish after the renderer's cleanup, so the ring cannot be fully
+    /// drained until the render thread is gone. A slot still <c>Writing</c> belongs to a producer
+    /// and is never touched.
+    /// </remarks>
+    private void DrainSnapshotsAfterJoin()
+    {
+        try
+        {
+            _consumer.Ring.DrainAfterRenderThreadJoined();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Vulkan snapshot-ring drain after join failed.");
         }
     }
 
@@ -324,12 +425,23 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
     private void RunFrames()
     {
         VulkanDevice device = _device!;
-        while (!_control.IsStopRequested)
+        while (true)
         {
             ObserveValidation();
-            if (_control.IsStopRequested)
+            if (IsStopping())
             {
-                break;
+                return;
+            }
+
+            // Q7=G1: one GPU frame per consumed snapshot; with none, wait without repeating.
+            if (!_consumer.HasReadySnapshot)
+            {
+                if (_wait.Wait() == SnapshotWaitOutcome.Stopped)
+                {
+                    return;
+                }
+
+                continue;
             }
 
             OffscreenFrame frame = _frames[_frameIndex]!;
@@ -345,9 +457,17 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 throw new Bork2dException($"vkWaitForFences failed with VkResult {wait}.");
             }
 
-            if (_control.IsStopRequested)
+            if (IsStopping())
             {
-                break;
+                return;
+            }
+
+            // The frame fence has signaled: the slot it held is retired, then the newest Ready is
+            // taken for this frame. A null result means another consumer took it; no frame.
+            SnapshotSlot? slot = _consumer.TakeForFreeFrame(_frameIndex);
+            if (slot is null)
+            {
+                continue;
             }
 
             Result resetFences = device.Api.ResetFences(device.Device, 1, &fence);
@@ -368,12 +488,15 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
 
             RecordClear(frame, _frameIndex);
             Submit(frame);
+            _consumer.AttachToFrame(_frameIndex, slot);
             Interlocked.Increment(ref _lastFrameNumber);
             Interlocked.Increment(ref _framesDiscarded);
             SignalProgress();
             _frameIndex = (_frameIndex + 1) % FramesInFlight;
         }
     }
+
+    private bool IsStopping() => _control.IsStopRequested || _consumer.IsStopped;
 
     private void RecordClear(OffscreenFrame frame, int imageIndex)
     {
@@ -470,7 +593,10 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             OffscreenFrame frame = OffscreenFrame.Create(
                 device.Api,
                 device.Device,
+                device.PhysicalDevice,
+                index,
                 device.QueueFamilyIndex,
+                _instance,
                 _logger);
             _frames[index] = frame;
             _instance!.SetObjectName(
@@ -592,6 +718,9 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             ?? new Bork2dException(
                 "The Vulkan offscreen renderer failed: " + exception.Message,
                 exception);
+
+        // A renderer fatal wakes a blocked producer and stops further acquisition (Q9=I1).
+        _consumer.Ring.Stop();
         _control.PublishFatal(fatal);
         SetStopReason(RendererStopReason.Fatal);
         SetStatus(RendererStatus.Faulted);
@@ -638,6 +767,10 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 _clearLabel = 0;
             }
         }
+
+        // Every frame fence was observed and the device is idle: every held snapshot slot returns
+        // to Free before the device is destroyed.
+        ReleaseHeldSnapshots();
 
         _target?.Dispose();
         _target = null;
@@ -694,6 +827,18 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
         }
     }
 
+    private void ReleaseHeldSnapshots()
+    {
+        try
+        {
+            _consumer.ReleaseAll();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Vulkan snapshot-slot release failed during shutdown.");
+        }
+    }
+
     private void LogStarted()
     {
         OffscreenTarget? target = _target;
@@ -704,10 +849,11 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
 
         _logger.LogInformation(
             "Vulkan renderer started: mode={Mode}, extent={Width}x{Height}, format={Format}, "
-                + "images={ImageCount}, framesInFlight={FramesInFlight}, "
-                + "memoryBytes={MemoryBytes}, validation={Validation}, "
-                + "framesPresented={FramesPresented}, framesDiscarded={FramesDiscarded}, "
-                + "swapchainRecreations={SwapchainRecreations}, "
+                + "images={ImageCount}, framesInFlight={FramesInFlight}, memoryBytes={MemoryBytes}, "
+                + "handoff={Handoff}, ringDepth={RingDepth}, "
+                + "oneFramePerSnapshot={OneFramePerSnapshot}, instanceResources={InstanceResources}, "
+                + "validation={Validation}, framesPresented={FramesPresented}, "
+                + "framesDiscarded={FramesDiscarded}, swapchainRecreations={SwapchainRecreations}, "
                 + "validationErrors={ValidationErrors}, validationWarnings={ValidationWarnings}, "
                 + "stopReason={StopReason}.",
             nameof(RendererMode.Offscreen),
@@ -717,6 +863,10 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             target.ImageCount,
             FramesInFlight,
             target.MemoryBytes,
+            "on",
+            SnapshotRing.SlotCapacity,
+            "on",
+            HasInstanceResources ? "on" : "off",
             _instance?.ValidationEnabled == true ? "on" : "off",
             0,
             Volatile.Read(ref _framesDiscarded),
@@ -728,14 +878,25 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
 
     private void LogStopped()
     {
+        SnapshotRingCounters snapshots = _consumer.Counters;
         _logger.LogInformation(
             "Vulkan renderer stopped: mode={Mode}, reason={Reason}, "
+                + "snapshotsPublished={SnapshotsPublished}, snapshotsConsumed={SnapshotsConsumed}, "
+                + "snapshotsSuperseded={SnapshotsSuperseded}, "
+                + "backpressureWaits={BackpressureWaits}, maxLiveSnapshots={MaxLiveSnapshots}, "
+                + "suspendedConsumptions={SuspendedConsumptions}, "
                 + "framesPresented={FramesPresented}, framesDiscarded={FramesDiscarded}, "
                 + "swapchainRecreations={SwapchainRecreations}, "
                 + "validationErrors={ValidationErrors}, validationWarnings={ValidationWarnings}, "
                 + "lastFrameNumber={LastFrameNumber}, lastPresentResult={LastPresentResult}.",
             nameof(RendererMode.Offscreen),
             StopReason,
+            snapshots.Published,
+            snapshots.Consumed,
+            snapshots.Superseded,
+            snapshots.BackpressureWaits,
+            snapshots.MaxLive,
+            _consumer.SuspendedConsumptions,
             0,
             Volatile.Read(ref _framesDiscarded),
             0,

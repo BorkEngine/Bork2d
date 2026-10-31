@@ -1,6 +1,7 @@
 using Bork2d.Engine;
 using Bork2d.Render;
 using Bork2d.Render.Diagnostics;
+using Bork2d.Render.Handoff;
 using Bork2d.Tests.TestDoubles;
 using Microsoft.Extensions.Logging.Abstractions;
 using Silk.NET.Vulkan;
@@ -172,6 +173,134 @@ public sealed class RendererSeamTests
             Assert.Single(instance.CachedCommandBufferLabels));
         Assert.Equal((nint)0x40, Assert.Single(instance.DestroyedSurfaces));
         Assert.Equal(1, instance.DestroyCount);
+    }
+
+    [Fact]
+    public void FakeRendererDrivesTheSnapshotSlotHandoff()
+    {
+        var renderer = new FakeRenderer();
+        renderer.Start();
+        renderer.SetReady();
+
+        SnapshotSlot? slot = renderer.AcquireSnapshotSlot();
+        Assert.NotNull(slot);
+        slot!.Snapshot.Reset();
+        slot.Snapshot.Sequence = 7;
+        renderer.PublishSnapshot(slot);
+
+        // AutoConsume models a renderer that keeps up: the published snapshot is consumed and the
+        // slot is free again, so the producer never blocks.
+        Assert.Equal(1, renderer.SnapshotCounters.Published);
+        Assert.Equal(1, renderer.SnapshotCounters.Consumed);
+        Assert.Equal(SnapshotSlotState.Free, slot.State);
+        Assert.Equal(-1, renderer.SnapshotRing.LatestIndex);
+        Assert.NotNull(renderer.AcquireSnapshotSlot());
+    }
+
+    [Fact]
+    public void FakeRendererHoldModeExposesBackpressureUntilStop()
+    {
+        var renderer = new FakeRenderer { AutoConsume = false };
+        renderer.Start();
+        renderer.SetReady();
+
+        for (var index = 0; index < SnapshotRing.SlotCapacity; index++)
+        {
+            SnapshotSlot slot = Assert.IsType<SnapshotSlot>(renderer.AcquireSnapshotSlot());
+            renderer.PublishSnapshot(slot);
+        }
+
+        Assert.Equal(SnapshotRing.SlotCapacity, renderer.SnapshotCounters.Published);
+        Assert.Equal(2, renderer.HeldSnapshotCount);
+        Assert.Equal(2, renderer.SnapshotCounters.Consumed);
+        Assert.True(renderer.SnapshotRing.HasReadySnapshot);
+
+        using var started = new ManualResetEventSlim();
+        using var completed = new ManualResetEventSlim();
+        var result = new SnapshotSlot?[1];
+        var producer = new Thread(() =>
+        {
+            started.Set();
+            result[0] = renderer.AcquireSnapshotSlot();
+            completed.Set();
+        })
+        {
+            IsBackground = true,
+        };
+
+        producer.Start();
+        Assert.True(started.Wait(TimeSpan.FromSeconds(30)));
+        Assert.False(completed.Wait(TimeSpan.FromMilliseconds(250)));
+
+        renderer.RequestStop();
+
+        Assert.True(completed.Wait(TimeSpan.FromSeconds(30)));
+        Assert.True(producer.Join(TimeSpan.FromSeconds(30)));
+        Assert.Null(result[0]);
+        Assert.True(renderer.SnapshotRing.IsStopped);
+
+        // Join is the quiescent point: held and pending slots are released.
+        Assert.True(renderer.Join(TimeSpan.FromSeconds(30)));
+        foreach (var slot in renderer.SnapshotRing.Slots)
+        {
+            Assert.Equal(SnapshotSlotState.Free, slot.State);
+        }
+    }
+
+    [Fact]
+    public void FakeRendererWakeExitAndAbandonKeepTheRingConsistent()
+    {
+        var renderer = new FakeRenderer { AutoConsume = false };
+        renderer.Start();
+        renderer.SetReady();
+
+        SnapshotSlot slot = Assert.IsType<SnapshotSlot>(renderer.AcquireSnapshotSlot());
+        renderer.AbandonSnapshotSlot(slot);
+        Assert.Equal(SnapshotSlotState.Free, slot.State);
+
+        renderer.WakeSnapshotWait();
+        Assert.True(renderer.SnapshotRing.IsExitSignalled);
+        Assert.Null(renderer.AcquireSnapshotSlot());
+        Assert.True(renderer.SnapshotCounters.ExitWakes >= 1);
+    }
+
+    [Fact]
+    public void FakeRendererSuspendedDrainCountsWithoutConsuming()
+    {
+        var renderer = new FakeRenderer { AutoConsume = false };
+        renderer.Start();
+        renderer.SetReady();
+
+        SnapshotSlot latest = null!;
+        for (var index = 0; index < SnapshotRing.SlotCapacity; index++)
+        {
+            SnapshotSlot slot = Assert.IsType<SnapshotSlot>(renderer.AcquireSnapshotSlot());
+            renderer.PublishSnapshot(slot);
+            latest = slot;
+        }
+
+        // Two snapshots are held Rendering (frames in flight); the newest is still Ready.
+        Assert.Equal(2, renderer.HeldSnapshotCount);
+        Assert.Equal(2, renderer.SnapshotCounters.Consumed);
+
+        Assert.True(renderer.DrainSuspendedSnapshot());
+        Assert.Equal(SnapshotSlotState.Free, latest.State);
+        Assert.Equal(1, renderer.SuspendedConsumptions);
+        Assert.Equal(2, renderer.SnapshotCounters.Consumed);
+        Assert.False(renderer.DrainSuspendedSnapshot());
+    }
+
+    [Fact]
+    public void FakeRendererFatalStopsTheRing()
+    {
+        var renderer = new FakeRenderer();
+        renderer.Start();
+        renderer.SetReady();
+
+        renderer.PublishFatal(new Bork2dException("device lost"));
+
+        Assert.True(renderer.SnapshotRing.IsStopped);
+        Assert.Null(renderer.AcquireSnapshotSlot());
     }
 
     private static RendererStartInfo StartInfo(nint instanceHandle, nint surfaceHandle)
