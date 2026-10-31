@@ -21,7 +21,10 @@ namespace Pong.Desktop;
 /// assertion prints the diagnostic and returns 1. Windowed mode runs the interactive game, or exits
 /// after exactly <c>N</c> ticks when <c>--ticks N</c> is supplied. Offscreen mode runs the
 /// non-interactive game through the offscreen Vulkan host and exits after exactly <c>N</c> ticks;
-/// its renderer clears and discards frames. The project is published with <c>PublishAot</c> and a
+/// its renderer records the per-camera sprite passes and discards frames. The render-stats gate is
+/// split by <see cref="PongAcceptanceGate.LongRunTickThreshold"/>: short runs assert the lifecycle,
+/// tick count, validation, and loaded content, while long runs (for example 20,000 ticks) assert the
+/// draw/statistics relationships. The project is published with <c>PublishAot</c> and a
 /// narrow Silk.NET <c>IL3000;IL3002</c> suppression, and is the engine's NativeAOT gate.
 /// </para>
 /// </remarks>
@@ -73,6 +76,9 @@ internal static class Program
                 + "with --headless: override the default 120 (N >= 1)");
         writer.WriteLine(
             "  --offscreen     run the non-interactive offscreen acceptance run; requires --ticks N");
+        writer.WriteLine(
+            "  --ticks 20000   the documented long presentation gate (draw/statistics relationships; "
+                + "the 120-tick runs assert lifecycle/content only)");
     }
 
     private static int RunHeadless(PongArguments arguments)
@@ -101,69 +107,7 @@ internal static class Program
                     $"--headless must run exactly {tickLimit} completed ticks; ran "
                         + $"{game.TickCount}.");
                 Require(game.TeardownCount == 1, "Teardown must run exactly once.");
-                Require(
-                    game.PackEntryCount == ExpectedPackEntryCount,
-                    $"the baked pack must contain exactly {ExpectedPackEntryCount} entries; got "
-                        + $"{game.PackEntryCount}.");
-
-                GameSettings settings = game.Settings;
-                Require(
-                    settings.Paddle.Path == PaddleSpritePath,
-                    $"the baked paddle reference must be '{PaddleSpritePath}'; got "
-                        + $"'{settings.Paddle.Path}'.");
-                Require(
-                    settings.Ball.Path == BallSpritePath,
-                    $"the baked ball reference must be '{BallSpritePath}'; got '{settings.Ball.Path}'.");
-
-                SpriteAsset paddleSprite = game.PaddleSprite
-                    ?? throw new InvalidOperationException("Setup must load the paddle sprite.");
-                SpriteAsset ballSprite = game.BallSprite
-                    ?? throw new InvalidOperationException("Setup must load the ball sprite.");
-                Require(
-                    paddleSprite.Texture.Path == PaddleTexturePath,
-                    $"the paddle sprite's texture reference must be '{PaddleTexturePath}'; got "
-                        + $"'{paddleSprite.Texture.Path}'.");
-                Require(
-                    ballSprite.Texture.Path == BallTexturePath,
-                    $"the ball sprite's texture reference must be '{BallTexturePath}'; got "
-                        + $"'{ballSprite.Texture.Path}'.");
-
-                TextureDescriptor paddleTexture = game.PaddleTexture
-                    ?? throw new InvalidOperationException("Setup must load the paddle descriptor.");
-                TextureDescriptor ballTexture = game.BallTexture
-                    ?? throw new InvalidOperationException("Setup must load the ball descriptor.");
-                Require(
-                    paddleTexture.Width == ExpectedPaddleWidth
-                        && paddleTexture.Height == ExpectedPaddleHeight,
-                    $"the paddle texture must be {ExpectedPaddleWidth}x{ExpectedPaddleHeight}; got "
-                        + $"{paddleTexture.Width}x{paddleTexture.Height}.");
-                Require(
-                    ballTexture.Width == ExpectedBallWidth
-                        && ballTexture.Height == ExpectedBallHeight,
-                    $"the ball texture must be {ExpectedBallWidth}x{ExpectedBallHeight}; got "
-                        + $"{ballTexture.Width}x{ballTexture.Height}.");
-
-                int expectedPaddleBytes = ExpectedPaddleWidth * ExpectedPaddleHeight * 4;
-                int expectedBallBytes = ExpectedBallWidth * ExpectedBallHeight * 4;
-                Require(
-                    game.PaddlePixelCount == expectedPaddleBytes,
-                    $"the paddle payload must be {expectedPaddleBytes} bytes; got "
-                        + $"{game.PaddlePixelCount}.");
-                Require(
-                    game.BallPixelCount == expectedBallBytes,
-                    $"the ball payload must be {expectedBallBytes} bytes; got "
-                        + $"{game.BallPixelCount}.");
-
-                ISpriteRender<GameLayer> left = game.LeftPaddle
-                    ?? throw new InvalidOperationException("Setup must create the left paddle.");
-                ISpriteRender<GameLayer> right = game.RightPaddle
-                    ?? throw new InvalidOperationException("Setup must create the right paddle.");
-                Require(
-                    left.Tint == settings.LeftPaddleTint,
-                    "the left paddle tint must match the baked settings.");
-                Require(
-                    right.Tint == settings.RightPaddleTint,
-                    "the right paddle tint must match the baked settings.");
+                RequireContent(game);
             }
 
             Require(
@@ -218,6 +162,7 @@ internal static class Program
             Require(
                 game.World is { } world && world.Parent is null,
                 "Teardown must detach the world from the root.");
+            RequireContent(game);
 
             string statsLine = RequireRenderStats(game, "offscreen");
 
@@ -267,6 +212,7 @@ internal static class Program
             Require(
                 game.World is { } world && world.Parent is null,
                 "Teardown must detach the world from the root.");
+            RequireContent(game);
 
             string statsLine = arguments.TickLimit is null
                 ? string.Empty
@@ -286,9 +232,92 @@ internal static class Program
     }
 
     /// <summary>
-    /// Re-reads and validates the completed run's render stats relationships (M8 §10): at least one
-    /// camera drew the three Pong sprites from the placeholder plus the two baked texture pages.
+    /// Asserts the loaded pack/content chain shared by every mode (M8 §10): the seven-entry pack,
+    /// the settings sprite references, the two sprites/descriptors, their raw payload sizes, and the
+    /// paddle tints.
     /// </summary>
+    /// <param name="game">The completed game.</param>
+    private static void RequireContent(PongGame game)
+    {
+        Require(
+            game.PackEntryCount == ExpectedPackEntryCount,
+            $"the baked pack must contain exactly {ExpectedPackEntryCount} entries; got "
+                + $"{game.PackEntryCount}.");
+
+        GameSettings settings = game.Settings;
+        Require(
+            settings.Paddle.Path == PaddleSpritePath,
+            $"the baked paddle reference must be '{PaddleSpritePath}'; got "
+                + $"'{settings.Paddle.Path}'.");
+        Require(
+            settings.Ball.Path == BallSpritePath,
+            $"the baked ball reference must be '{BallSpritePath}'; got '{settings.Ball.Path}'.");
+
+        SpriteAsset paddleSprite = game.PaddleSprite
+            ?? throw new InvalidOperationException("Setup must load the paddle sprite.");
+        SpriteAsset ballSprite = game.BallSprite
+            ?? throw new InvalidOperationException("Setup must load the ball sprite.");
+        Require(
+            paddleSprite.Texture.Path == PaddleTexturePath,
+            $"the paddle sprite's texture reference must be '{PaddleTexturePath}'; got "
+                + $"'{paddleSprite.Texture.Path}'.");
+        Require(
+            ballSprite.Texture.Path == BallTexturePath,
+            $"the ball sprite's texture reference must be '{BallTexturePath}'; got "
+                + $"'{ballSprite.Texture.Path}'.");
+
+        TextureDescriptor paddleTexture = game.PaddleTexture
+            ?? throw new InvalidOperationException("Setup must load the paddle descriptor.");
+        TextureDescriptor ballTexture = game.BallTexture
+            ?? throw new InvalidOperationException("Setup must load the ball descriptor.");
+        Require(
+            paddleTexture.Width == ExpectedPaddleWidth
+                && paddleTexture.Height == ExpectedPaddleHeight,
+            $"the paddle texture must be {ExpectedPaddleWidth}x{ExpectedPaddleHeight}; got "
+                + $"{paddleTexture.Width}x{paddleTexture.Height}.");
+        Require(
+            ballTexture.Width == ExpectedBallWidth
+                && ballTexture.Height == ExpectedBallHeight,
+            $"the ball texture must be {ExpectedBallWidth}x{ExpectedBallHeight}; got "
+                + $"{ballTexture.Width}x{ballTexture.Height}.");
+
+        int expectedPaddleBytes = ExpectedPaddleWidth * ExpectedPaddleHeight * 4;
+        int expectedBallBytes = ExpectedBallWidth * ExpectedBallHeight * 4;
+        Require(
+            game.PaddlePixelCount == expectedPaddleBytes,
+            $"the paddle payload must be {expectedPaddleBytes} bytes; got "
+                + $"{game.PaddlePixelCount}.");
+        Require(
+            game.BallPixelCount == expectedBallBytes,
+            $"the ball payload must be {expectedBallBytes} bytes; got "
+                + $"{game.BallPixelCount}.");
+
+        ISpriteRender<GameLayer> left = game.LeftPaddle
+            ?? throw new InvalidOperationException("Setup must create the left paddle.");
+        ISpriteRender<GameLayer> right = game.RightPaddle
+            ?? throw new InvalidOperationException("Setup must create the right paddle.");
+        _ = game.Ball
+            ?? throw new InvalidOperationException("Setup must create the ball.");
+        Require(
+            left.Tint == settings.LeftPaddleTint,
+            "the left paddle tint must match the baked settings.");
+        Require(
+            right.Tint == settings.RightPaddleTint,
+            "the right paddle tint must match the baked settings.");
+    }
+
+    /// <summary>
+    /// Re-reads and validates the completed run's render stats according to the approved short-vs-long
+    /// gate (M8 §10/§13).
+    /// </summary>
+    /// <remarks>
+    /// Short runs (fewer than <see cref="PongAcceptanceGate.LongRunTickThreshold"/> completed ticks)
+    /// assert only the cumulative validation counters and print the observed stats: the unpaced M7
+    /// loop can finish 120 ticks before the asynchronous texture pages are drawable, so the run never
+    /// had the draw/statistics relationships to assert. Long runs (the documented 20,000-tick
+    /// evidence run) assert every relationship unconditionally. No pacing, sleep, or host-loop change
+    /// is involved.
+    /// </remarks>
     /// <param name="game">The completed game.</param>
     /// <param name="mode">The host mode for diagnostics.</param>
     /// <returns>A one-line stats summary for the exit message.</returns>
@@ -303,30 +332,23 @@ internal static class Program
             + $"skippedSprites:{stats.SkippedSprites}, "
             + $"validation:{stats.ValidationErrors}/{stats.ValidationWarnings}";
 
-        if (stats.FrameSequence == 0 || stats.TexturePages < 3)
+        IReadOnlyList<string> failures = PongAcceptanceGate.Validate(stats, game.TickCount);
+        if (failures.Count > 0)
         {
-            // The M7 windowed/offscreen tick loop is unpaced: the automated 120-tick run can finish
-            // before the renderer has consumed the three frames the asynchronous texture upload
-            // needs. This short run is not the presentation gate (WP-5 owns it); record the observed
-            // limitation instead of asserting relationships the run never had time to reach.
-            Console.Error.WriteLine(
-                $"Pong {mode} note: the automated run ended before the two texture pages were "
-                    + $"drawable; draw/instance relationships are not asserted for this short run "
-                    + $"({line}). A longer run (for example --ticks 20000) demonstrates the M8 "
-                    + "draw/statistics contract; WP-5 owns the final presentation gate.");
-            return line;
+            throw new InvalidOperationException(
+                $"{mode}: " + string.Join(" ", failures) + $" ({line})");
         }
 
-        Require(stats.Cameras >= 1, $"{mode}: at least one camera must be captured.");
-        Require(stats.NonEmptyCameras >= 1, $"{mode}: at least one camera must draw.");
-        Require(stats.DrawCalls >= 1, $"{mode}: the frame must record at least one draw.");
-        Require(stats.Instances >= 3, $"{mode}: the three Pong sprites must be instanced.");
-        Require(
-            stats.TexturePages >= 3,
-            $"{mode}: the placeholder and the two Pong texture pages must be resident.");
-        Require(
-            stats.DrawCalls == stats.NonEmptyCameras && stats.DrawCalls <= stats.Cameras,
-            $"{mode}: DrawCalls must equal NonEmptyCameras and never exceed Cameras.");
+        if (!PongAcceptanceGate.IsLongRun(game.TickCount))
+        {
+            Console.Error.WriteLine(
+                $"Pong {mode} note: {game.TickCount} completed ticks is below the "
+                    + $"{PongAcceptanceGate.LongRunTickThreshold}-tick presentation threshold; "
+                    + "draw/instance relationships are not asserted for this short run "
+                    + $"({line}). The documented long run (for example --ticks 20000) asserts every "
+                    + "M8 draw/statistics relationship.");
+        }
+
         return line;
     }
 
