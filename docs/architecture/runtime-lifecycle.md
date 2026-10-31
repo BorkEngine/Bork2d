@@ -1,12 +1,13 @@
 # Runtime Lifecycle
 
-> **Status:** implemented through M7 WP-4 (2026-10-31; the milestone is in progress and WP-5 owns the
-> final status and the Pong/AOT gate). The builder, its validation, the windowed/offscreen hosts with
+> **Status:** implemented through M7 (2026-10-31; M7 is implemented on `m-7/common` with the
+> ready-for-review PR open/awaiting human review; it is not merged). The builder, its validation,
+> the windowed/offscreen hosts with
 > the Vulkan renderer thread and the snapshot handoff, the paced headless loop, app `Dispose()`, the
 > internal windowed platform (SDL window, Vulkan instance/surface, input/time handoff), and the
 > app-scoped asset service are `Current`. Windowed and offscreen acquire one snapshot slot per tick,
 > capture after `Tick`, and publish it; the renderer consumes one snapshot per frame, so the tick is
-> backpressured by the ring (M7 WP-3/WP-4). Headless runs `Setup` → `Tick`… → `Teardown` until
+> backpressured by the ring (M7). Headless runs `Setup` → `Tick`… → `Teardown` until
 > `IEngine.Exit()` with a **fully synthesized** clock, a strict absolute deadline grid, a pure
 > `Thread.Sleep` wait, unbounded catch-up, and no SDL, Vulkan, renderer, ring, or capture (Q11=K1,
 > Q12=L2, Q13=M4/F1, F5–F8). `Setup` runs before renderer readiness and the first `Tick` waits for it
@@ -90,7 +91,7 @@ app.Run();
 | --- | --- | --- | --- |
 | **Windowed** (default) | normal options | Visible SDL window on an OS/window thread; Vulkan 1.3 instance/surface created there; render thread owns device/swapchain, consumes one snapshot per frame, and presents an opaque-black clear; real `IWindow`/`IInput`, advanced `ITime`, ring-backpressured loop until exit/close/fatal; base pack + overlays + loads work | Sprites (M8) |
 | **Offscreen** | `WithOffscreen(w, h)` | Vulkan 1.3 render thread with a fixed sRGB target and two frames in flight; `Setup` → `Tick`… → `Teardown` until `IEngine.Exit()`, ring-backpressured ticks, `ITime` advanced, one discarded frame per consumed snapshot; no SDL, window, input, surface, swapchain, or readback | Sprites/readback (M8/M10) |
-| **Headless** | `WithHeadless(ticksPerSecond = 60)` | Paced `Setup` → `Tick`… → `Teardown` loop until `IEngine.Exit()`; the rate must be positive; fully synthesized `ITime` (tick 0 = 0/0, then `N/rate` and `1/rate`, no clamp); strict absolute grid with pure `Thread.Sleep` and unbounded catch-up; no SDL, window, input, renderer, ring, capture, or Vulkan loader | Pong gate tick count (M7 WP-5) |
+| **Headless** | `WithHeadless(ticksPerSecond = 60)` | Paced `Setup` → `Tick`… → `Teardown` loop until `IEngine.Exit()`; the rate must be positive; fully synthesized `ITime` (tick 0 = 0/0, then `N/rate` and `1/rate`, no clamp); strict absolute grid with pure `Thread.Sleep` and unbounded catch-up; no SDL, window, input, renderer, ring, capture, or Vulkan loader | Pong gate: 120 ticks by default, `--headless --ticks N` overrides (Q15=O2/F3) |
 | **`WithoutAssets()`** | modifier in any mode | Empty VFS; no base pack required; `LoadPack` may mount overlays; one loader thread still starts | Unchanged |
 
 - **Windowed** is the normal game. **Offscreen** is for tests, benchmarks, and visual

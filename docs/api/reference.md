@@ -1,8 +1,9 @@
 # API Reference
 
 > **Status:** the implemented M2/M3/M4 contract plus M6 (Vulkan bring-up; merged 2026-10-31, PR #11)
-> and M7 host/headless (WP-4; the milestone is in progress and WP-5 owns the final status and the
-> Pong/AOT gate) on top of the asset-processor task merged into `develop`
+> and M7 (frame handoff and pacing; implemented on `m-7/common`, the ready-for-review PR is
+> open/awaiting human review and is not merged) on top of the asset-processor task merged into
+> `develop`
 > (2026-10-27, PR #8). M1
 > (foundation), M2 (SDL windowed host), M3 (pack, VFS,
 > runtime integration), and M4 (serialization/bake) are implemented and merged into `develop`.
@@ -49,7 +50,8 @@ scene state afterwards.
 Mode behavior in M7: **windowed** (the default) creates one visible SDL window and the Vulkan
 instance/surface on an engine-owned OS/window thread, starts the renderer before `Setup`, runs a
 ring-backpressured `Tick` loop until `Exit()`/close/fatal error (one snapshot published per completed
-tick), makes `IWindow`/`IInput` real, advances `ITime`, and presents a black clear. **Offscreen**
+tick), makes `IWindow`/`IInput` real, advances `ITime`, and presents a black clear per consumed
+snapshot. **Offscreen**
 runs the Vulkan renderer against a fixed target with no SDL/window/input/surface, loops `Setup` →
 `Tick`… → `Teardown` until `Exit()` with ring backpressure, advances `ITime`, and discards one frame
 per snapshot. **Headless** creates no renderer, SDL, ring, or Vulkan, runs a paced `Setup` → `Tick`…
@@ -629,9 +631,10 @@ do not serialize them; an undefined value is a safe query that returns `false`. 
 
 ## 12. Runtime surface
 
-`Status: Current (M2/M3, M6, M7).` The builder, windowed/offscreen Vulkan hosts with the snapshot
-handoff, the paced headless loop, validation, app-owned logging, window/input proxies, time, and the
-asset-service lifecycle are implemented. Windowed and offscreen require Vulkan 1.3; the renderer is
+`Status: Current (M2/M3, M6, M7; M7 is implemented on `m-7/common` with the ready-for-review PR
+open/awaiting human review and is not merged).` The builder, windowed/offscreen Vulkan hosts with
+the snapshot handoff, the paced headless loop, validation, app-owned logging, window/input proxies,
+time, and the asset-service lifecycle are implemented. Windowed and offscreen require Vulkan 1.3; the renderer is
 composed internally and adds no public member (D-M6-24). Sprites remain M8.
 
 ### `Bork2dAppBuilder<TLayer>`

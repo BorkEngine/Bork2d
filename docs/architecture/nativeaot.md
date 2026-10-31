@@ -1,8 +1,9 @@
 # NativeAOT
 
 > **Status:** `Current` through M4, the merged asset-processor task (D-036/D-037/D-038, 2026-10-27,
-> PR #8), the Pong example (D-043/D-044; merged 2026-10-29, PR #10), and M6 (Vulkan bring-up;
-> merged 2026-10-31, PR #11).
+> PR #8), the Pong example (D-043/D-044; merged 2026-10-29, PR #10), M6 (Vulkan bring-up;
+> merged 2026-10-31, PR #11), and M7 (frame handoff and pacing; implemented on `m-7/common`, the
+> ready-for-review PR is open/awaiting human review and is not merged).
 > The project-consolidation refactor (D-041/D-042, merged 2026-10-28, PR #9) merged Api/Common/Assets
 > into `Bork2d.Engine` and Bake.Builder into `Bork2d.Bake`; `Bork2d.Engine`, `Bork2d.Render`,
 > `Bork2d.Runtime`, and `Pong.Common` compile with `IsAotCompatible` plus the trim and AOT analyzers,
@@ -10,9 +11,10 @@
 > the **baked Pong pack** produced by the build-only `Pong.Assets` executable: the
 > `Pong.Common.GameSettings` struct root with its `AssetRef<SpriteAsset>` links, the paddle and ball
 > sprites, the paddle PNG and `CircleProcessor` ball descriptors with their exact raw payloads, and
-> the 7-entry browse; it runs one headless tick and exits 0. The windowed `--windowed [--ticks N]`
-> run and the offscreen `--offscreen --ticks N` run use the same pack, run the real Vulkan renderer,
-> and keep the default logging path. All three are the AOT gate. The editor and build tools stay
+> the 7-entry browse; it runs **120 headless ticks by default** (`--headless --ticks N` overrides)
+> and exits 0. The windowed `--windowed [--ticks N]` run and the offscreen `--offscreen --ticks N`
+> run use the same pack, run the real Vulkan renderer, and keep the default logging path. All three
+> are the AOT gate. The editor and build tools stay
 > JIT; M6 pins the Vulkan bindings and wires the windowed/offscreen renderer into the Runtime host,
 > so the publish graph reaches the Vulkan bindings while the headless path never loads Vulkan.
 >
@@ -28,7 +30,7 @@
 | `Bork2d.Engine` | Yes | Public contract plus the runtime scene, transforms, time, snapshot policy, generated shapes, pack parsing, decompression, MessagePack decoding, and pack-time reference validation. |
 | `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. M6 adds the instance/validation/device-selection foundation, the windowed swapchain/clear/present renderer, and the offscreen target/renderer with the Runtime host wiring. Sprites/uploads are M8. The renderer is never constructed on the headless path. |
 | `Bork2d.Runtime` | Yes | Builder, host, and app-owned logging. |
-| `Pong.Desktop` | Yes | The AOT desktop example and the local gate, published with `PublishAot`. It references `Bork2d.Engine`/`Bork2d.Runtime` plus the game-side `Pong.Common` and loads the baked 7-entry Pong pack for `--headless` or runs the same pack windowed (`--windowed [--ticks N]`) or offscreen (`--offscreen --ticks N`). |
+| `Pong.Desktop` | Yes | The AOT desktop example and the local gate, published with `PublishAot`. It references `Bork2d.Engine`/`Bork2d.Runtime` plus the game-side `Pong.Common` and loads the baked 7-entry Pong pack for `--headless` (120 ticks by default; `--headless --ticks N` overrides) or runs the same pack windowed (`--windowed [--ticks N]`) or offscreen (`--offscreen --ticks N`). |
 | `Pong.Common` | Yes | Game-side runtime library: `GameSettings` (a `[GenerateShape]` struct root with sprite references), `PongGame`, `PongSimulation`, `PongAi`, and `PongTitle`; it references `Bork2d.Engine` only. |
 | `Bork2d.Editor` | No (JIT) | Avalonia desktop tool; may reflect over the game model. M5. |
 | Asset baker / pack tool (`Bork2d.Bake`) | No (JIT) | Build-time tools; use explicit `RegisterAsset<T>()` registrations and TOML. No generated host, no reflection, and no `Bork2d.Bake.Cli` or `generate-host`. |
@@ -187,8 +189,9 @@ determinism and a possible future AOT editor, not a current AOT requirement.
   needed by the headless AOT gate. `Bork2d.Render` exposes no public types. M6 wires the
   production windowed/offscreen factory into `Bork2d.Runtime`, so the `Pong.Desktop` compile and
   publish graph reaches the Silk.NET Vulkan bindings even though the headless run never loads the
-  loader. The WP-5 gate proves the zero-warning publish and the published `--headless`,
-  `--windowed --ticks 120`, and `--offscreen --ticks 120` runs; the existing two-code suppression
+  loader. The M7 gate proves the zero-warning publish and the published `--headless` (120
+  ticks by default), `--headless --ticks N`, `--windowed --ticks 120`, and `--offscreen --ticks
+  120` runs; the existing two-code suppression
   covers the shared resolver and no custom resolver or broader suppression was needed.
 - No runtime shader compilation: SPIR-V is built offline.
 - The headless server must not initialize SDL or Vulkan; `WithHeadless(...)` must not load or
@@ -212,24 +215,28 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    `vulkan-1.dll` (the system loader). The NativeAOT output is a single-file executable plus PDBs,
    so the managed assemblies are linked in; `Pong.Common.pdb` is the remaining on-disk proof that
    the game assembly was in the publish graph.
-4. Run the AOT-published headless example locally (no GPU): default logging, one
-   `Setup`/`Tick`/`Teardown`, the **baked 7-entry pack** (the `GameSettings` struct root with its
+4. Run the AOT-published headless example locally (no GPU): default logging, one `Setup`, **120
+   `Tick`s by default** (`--headless --ticks N` runs exactly `N`), one `Teardown`, the **baked
+   7-entry pack** (the `GameSettings` struct root with its
    `AssetRef<SpriteAsset>` links, the `sprites/paddle` and `sprites/ball` sprites, the `art/paddle`
    descriptor and exact raw payload, the `CircleProcessor` `textures/ball` descriptor and exact raw
-   payload, the red/blue tints), detached root, exit `0`.
+   payload, the red/blue tints), detached root, exit `0`. The success line reports the tick count
+   and `tickLimit`.
 5. Run the AOT-published windowed and offscreen examples locally on a desktop session with a
    Vulkan 1.3 device: `Pong.Desktop.exe --windowed --ticks 120` must exit `0` after exactly 120
-   ticks with one `Setup` and one `Teardown`, loading the same pack, presenting a black clear, and
-   joining the renderer; `Pong.Desktop.exe --offscreen --ticks 120` must exit `0` after exactly 120
-   ticks with one `Setup`/`Teardown`, a 1280×720 sRGB offscreen target, and a joined renderer
-   (frame count not asserted, D-M6-13). The interactive `--windowed` run observes the visible
-   black-cleared window, reads W/S/Space/R/Escape, and exits on Escape/close (sprites arrive in M8;
+   ticks with one `Setup` and one `Teardown`, loading the same pack, consuming one black-clear
+   frame per snapshot (the short run consumes the first and supersedes the rest), and joining the
+   renderer; `Pong.Desktop.exe --offscreen --ticks 120` must exit `0` after exactly 120 ticks with
+   one `Setup`/`Teardown`, a 1280×720 sRGB offscreen target, and a joined renderer (frame count not
+   asserted, D-M6-13/Q22=V1). The interactive `--windowed` run observes the visible black-cleared
+   window, reads W/S/Space/R/Escape, and exits on Escape/close (sprites arrive in M8;
    the title/logs carry the score and state).
-6. The **three-mode AOT gate** runs the AOT-published app on a GPU machine: `--headless` stays
-   GPU-free, `--windowed --ticks 120` creates the SDL window/instance/surface and presents a black
-   clear, and `--offscreen --ticks 120` runs the offscreen renderer until `Exit` (D-M6-13). All
-   three exit 0; the publish is zero-warning; and the published app runs with the narrow two-code
-   Silk.NET suppression.
+6. The **three-mode AOT gate** runs the AOT-published app on a GPU machine: `--headless` (120 ticks
+   by default, or `--headless --ticks N`) stays GPU-free, `--windowed --ticks 120` creates the SDL
+   window/instance/surface and presents a black clear per consumed snapshot, and `--offscreen
+   --ticks 120` runs the offscreen renderer until `Exit` (D-M6-13). All four runs exit 0; the
+   publish is zero-warning; and the published app runs with the narrow two-code Silk.NET
+   suppression.
 7. `Pong.Desktop` loads the baked pack produced by the same tooling a game uses; the constrained
    `IShapeable<T>` contract makes a missing shape a compile-time error. `GameSettings` is a
    `readonly record struct` root with `AssetRef<SpriteAsset>` members, so it proves the D-M4-11

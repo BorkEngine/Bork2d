@@ -14,11 +14,14 @@
 > `5de725c`)**. The Render foundation, the windowed renderer, the offscreen
 > renderer, and the Runtime host wiring are complete, and the AOT/Pong gate proves the published
 > `--headless`, `--windowed --ticks 120`, and `--offscreen --ticks 120` runs with a zero-warning
-> publish. **M7 (frame handoff and pacing) has a [spec](specs/m7-frame-handoff.md); the spec decisions
-> are recorded (all 23 questions and F5–F8, in the
+> publish. **M7 (frame handoff and pacing) is implemented on `m-7/common`; the ready-for-review PR
+> is open/awaiting human review and is not merged.** WP-1–WP-5 landed sequentially: the snapshot
+> ring/capture, renderer consumption, host backpressure, and the paced headless loop are
+> implementation-complete, and the Pong `--headless` gate defaults to 120 ticks (`--headless
+> --ticks N` overrides). The spec decisions are recorded (all 23 questions and F5–F8, in the
 > [decision log](decisions.md#m7-frame-handoff-and-pacing-decisions-approved-2026-10-31) as
-> `D-M7-01…D-M7-27`) and implementation is in progress.** Check status markers before treating an API
-> as implemented.
+> `D-M7-01…D-M7-27`); as-built evidence is in [M7 spec §18](specs/m7-frame-handoff.md#18-as-built-evidence-2026-10-31).
+> Check status markers before treating an API as implemented.
 >
 > The [file-processors spec](specs/file-processors.md) owns implementation scope/acceptance; the
 > [asset processors](architecture/asset-processors.md) doc owns the architecture. The
@@ -27,17 +30,17 @@
 > engine solution to five projects. The Pong example (D-043/D-044,
 > [spec](specs/pong-example.md)) is merged into `develop` (2026-10-29, PR #10) and replaces the exploratory smoke/fixture projects with
 > `examples/pong` and is the AOT gate: `Pong.Desktop` publishes with no tooling assembly in the
-> output, loads the 7-entry Pong pack headless, runs `--windowed --ticks 120` and
-> `--offscreen --ticks 120`. Verification is
-> the local gate set: Debug/Release zero-warning builds, 1028 deterministic plus 16
-> opt-in/conditional tests (1044 total) for the engine and 41 Pong tests, `dotnet format` for both
+> output, loads the 7-entry Pong pack headless, and runs `--headless` (120 ticks by default, or
+> `--headless --ticks N`), `--windowed --ticks 120`, and `--offscreen --ticks 120`. Verification is
+> the local gate set: Debug/Release zero-warning builds, 1141 deterministic plus 17
+> opt-in/conditional tests (1158 total) for the engine and 46 Pong tests, `dotnet format` for both
 > solutions, the docs link check, `git diff --check`, and the local AOT publish/run. CI runs on pull
 > requests to `develop` and pushes to `develop`; it does not build the Pong solution.
 
 Bork2d is a focused 2D game engine for .NET: **Vulkan 1.3** rendering, **SDL2** windowing through
 **Silk.NET**, a NativeAOT runtime, and **`assets.pck`** assets addressed by canonical paths.
 Gameplay ticks on the tick thread; rendering consumes immutable snapshots on a separate thread.
-Windowed, offscreen, and headless are the target modes.
+Windowed, offscreen, and headless are the three modes.
 
 Game code consumes exactly two assemblies:
 

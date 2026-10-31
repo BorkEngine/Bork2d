@@ -1,8 +1,9 @@
 # Logging
 
 > **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4), M6 (Vulkan
-> bring-up; merged 2026-10-31, PR #11), and M7 WP-1–WP-4 (the milestone is in progress; WP-5 owns the
-> final status). The builder creates an app-owned
+> bring-up; merged 2026-10-31, PR #11), and M7 (frame handoff and pacing; implemented on
+> `m-7/common`, the ready-for-review PR is open/awaiting human review and is not merged). The
+> builder creates an app-owned
 > Microsoft.Extensions.Logging factory, installs a plain-text ZLogger console provider by default,
 > logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`. The
 > windowed platform logs startup/stop/commands/failures, the runtime host logs the windowed,
@@ -10,14 +11,15 @@
 > renderer logs instance/device/swapchain/offscreen target and start/stop counters from
 > `Bork2d.Render`, and the asset service logs start/overlay/error/stop events; there is no per-frame
 > or per-asset-per-tick logging. Configuration is identical in all modes, and the default path runs in
-> the AOT gate (`Pong.Desktop`, headless with the baked pack). The suite is 1158 tests (1141
+> the AOT gate (`Pong.Desktop`, headless with the baked pack for 120 ticks by default or
+> `--headless --ticks N`). The suite is 1158 tests (1141
 > deterministic plus 17 opt-in/conditional). The project-consolidation refactor (D-041/D-042) renamed
 > the engine categories to `Bork2d.Engine` and `Bork2d.Engine.Assets`; `Bork2d.Runtime` and
-> `Bork2d.Render` are unchanged. M6 WP-2 makes the `Bork2d.Render` category current for instance,
-> validation, and device-selection events (§5.3); WP-3 adds the windowed swapchain/clear/present and
-> start/stop counter lines; WP-4 adds the offscreen target/start/stop lines and the offscreen
-> loop-stop line. M7 WP-3 adds the handoff fields/counters to the same one-shot renderer start/stop
-> lines (§5.3); WP-4 adds the handoff counters to the windowed/offscreen loop-stop lines and the
+> `Bork2d.Render` are unchanged. M6 makes the `Bork2d.Render` category current for instance,
+> validation, and device-selection events (§5.3), the windowed swapchain/clear/present and
+> start/stop counter lines, and the offscreen target/start/stop lines and the offscreen
+> loop-stop line. M7 adds the handoff fields/counters to the same one-shot renderer start/stop
+> lines (§5.3) and the handoff counters to the windowed/offscreen loop-stop lines and the
 > headless loop-stop line (§5.1). The Pong example (D-043/D-044) owns the game-side title/logging
 > behavior.
 
