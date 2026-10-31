@@ -1,5 +1,8 @@
+using System.Numerics;
 using System.Runtime.InteropServices;
 using Bork2d.Engine;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Rendering;
 using Bork2d.Render;
 using Bork2d.Render.Diagnostics;
 using Bork2d.Render.Handoff;
@@ -44,7 +47,7 @@ public sealed class WindowedRendererGpuTests
     }
 
     [GpuFact]
-    public void WindowedRendererConsumesOneSnapshotPerFrameAndStopsCleanly()
+    public async Task WindowedRendererConsumesOneSnapshotPerFrameAndStopsCleanly()
     {
         if (!NativeLibrary.TryLoad("vulkan-1.dll", out nint loaderHandle))
         {
@@ -145,6 +148,23 @@ public sealed class WindowedRendererGpuTests
 
             _output.WriteLine($"window={window.Size}, drawable={drawable}, validation=on");
 
+            var assets = new GeneratedTextureAssets();
+            assets.AddTexture("tex/windowed");
+            var windowedSprite = new SpriteAsset
+            {
+                Texture = "tex/windowed",
+                Uvs =
+                [
+                    new Vector2(0f, 0f),
+                    new Vector2(1f, 0f),
+                    new Vector2(1f, 1f),
+                    new Vector2(0f, 1f),
+                ],
+                Scale = 8f,
+                Pivot = new Vector2(0.5f, 0.5f),
+                Topology = SpriteTopology.Quad,
+            };
+
             var startInfo = new RendererStartInfo
             {
                 Mode = RendererMode.Windowed,
@@ -156,7 +176,7 @@ public sealed class WindowedRendererGpuTests
                 VSync = true,
                 ValidationRequested = true,
                 LoggerFactory = loggerFactory,
-                Assets = new FakeAssets(),
+                Assets = assets,
                 CreateReplacementSurface = () => window.CreateVulkanSurface(instance.Handle),
             };
 
@@ -197,7 +217,7 @@ public sealed class WindowedRendererGpuTests
                     + $"capacity={pages.TexturePageCapacityInEntries}, "
                     + $"placeholder={pages.IsPlaceholderReady}");
 
-            var producer = new TestSnapshotProducer(renderer);
+            var producer = new TestSnapshotProducer(renderer, windowedSprite);
             const int initialSnapshots = 5;
             for (var index = 0; index < initialSnapshots; index++)
             {
@@ -208,6 +228,15 @@ public sealed class WindowedRendererGpuTests
                     "A published snapshot did not present its frame",
                     _timeout);
             }
+
+            Assert.Equal(1, renderer.RenderStats.Cameras);
+            Assert.Equal(1, renderer.RenderStats.NonEmptyCameras);
+            Assert.Equal(1, renderer.RenderStats.DrawCalls);
+            Assert.Equal(1, renderer.RenderStats.Instances);
+            Assert.True(
+                renderer.RenderStats.TexturePages >= 2,
+                "The windowed scene's texture page did not become resident.");
+            Assert.Equal(0, renderer.RenderStats.ValidationErrors);
 
             Assert.Equal((long)initialSnapshots, renderer.SnapshotCounters.Published);
             Assert.Equal((long)initialSnapshots, renderer.SnapshotCounters.Consumed);
@@ -227,6 +256,29 @@ public sealed class WindowedRendererGpuTests
             _output.WriteLine(
                 $"after {initialSnapshots} snapshots: {Describe(renderer.Counters)}; "
                     + $"ring={DescribeRing(renderer)}");
+
+            // Capture contract: one RGBA8 array for the frame that recorded the copy. The copy is
+            // recorded on the next frame and completes at a later frame-fence reuse.
+            Task<byte[]> captureTask = renderer.CaptureFrameAsync();
+            for (var frame = 0; frame < 4 && !captureTask.IsCompleted; frame++)
+            {
+                producer.PublishOne();
+                WaitFor(
+                    renderer,
+                    () => renderer.Counters.FramesPresented >= producer.Published,
+                    "A capture frame was not presented",
+                    _timeout);
+            }
+
+            byte[] captured = await captureTask.WaitAsync(_timeout);
+            RenderStats captureStats = renderer.RenderStats;
+            Assert.Equal(
+                captureStats.FramebufferWidth * captureStats.FramebufferHeight * 4,
+                captured.Length);
+            Assert.Equal(1, captureStats.DrawCalls);
+            _output.WriteLine(
+                $"capture: bytes={captured.Length}, extent={captureStats.FramebufferWidth}x"
+                    + $"{captureStats.FramebufferHeight}");
 
             Resize(window, renderer, producer);
             Fullscreen(window, renderer);
@@ -583,7 +635,8 @@ public sealed class WindowedRendererGpuTests
             || message.Contains("vkCreateInstance failed", StringComparison.Ordinal)
             || message.Contains(
                 "maxPerStageDescriptorUpdateAfterBindSampledImages=0",
-                StringComparison.Ordinal);
+                StringComparison.Ordinal)
+            || message.Contains("No sRGB", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -592,9 +645,14 @@ public sealed class WindowedRendererGpuTests
     private sealed class TestSnapshotProducer
     {
         private readonly VulkanRenderer _renderer;
+        private readonly SpriteAsset _sprite;
         private long _published;
 
-        internal TestSnapshotProducer(VulkanRenderer renderer) => _renderer = renderer;
+        internal TestSnapshotProducer(VulkanRenderer renderer, SpriteAsset sprite)
+        {
+            _renderer = renderer;
+            _sprite = sprite;
+        }
 
         internal long Published => _published;
 
@@ -611,6 +669,24 @@ public sealed class WindowedRendererGpuTests
             slot.Snapshot.Sequence = ++_published;
             slot.Snapshot.Time = _published * 0.016;
             slot.Snapshot.DeltaTime = 0.016;
+            slot.Snapshot.AddCamera(
+                new CameraSnapshot(
+                    ZIndex: 0,
+                    WorldMatrix: Matrix3x2.Identity,
+                    Size: 8f,
+                    Viewport: new Vector4(0f, 0f, 1f, 1f),
+                    CullingMask: 1u,
+                    Clear: ClearKind.Color,
+                    ClearColor: new Color(0.05f, 0.1f, 0.2f, 1f)));
+            slot.Snapshot.AddSprite(
+                new SpriteSnapshot(
+                    _sprite,
+                    Matrix3x2.Identity,
+                    Color.White,
+                    Layer: 1u,
+                    ZIndex: 0,
+                    FlipX: false,
+                    FlipY: false));
             _renderer.PublishSnapshot(slot);
         }
     }

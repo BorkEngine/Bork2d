@@ -1,0 +1,625 @@
+using System.Numerics;
+using Bork2d.Engine;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Rendering;
+using Bork2d.Render;
+using Bork2d.Render.Diagnostics;
+using Bork2d.Render.Textures;
+using Bork2d.Render.Vulkan;
+using Bork2d.Tests.TestDoubles;
+using Bork2d.Tests.TestSupport;
+using Microsoft.Extensions.Logging;
+using Xunit;
+using Xunit.Sdk;
+
+namespace Bork2d.Tests.Render.Vulkan;
+
+/// <summary>
+/// Opt-in real-GPU proof for the M8 sprite draw integration (WP-4): per-camera passes and one
+/// instanced draw per non-empty camera, split-screen and clear modes, zero-camera/no-safety-pass
+/// behavior, the placeholder, fatal malformed sprites, instance-buffer growth, texture-page growth,
+/// and the <c>CaptureFrameAsync</c> contract. No pixel/golden assertions.
+/// </summary>
+/// <remarks>
+/// The tests use an internal <see cref="GeneratedTextureAssets"/> so a valid RGBA8 page path exists
+/// without a baked pack. They skip when the Vulkan loader/device/validation layer is unavailable
+/// (D-M6-05, D-M6-20) and assert relationships and counters only.
+/// </remarks>
+[Collection(RealGpuCollection.Name)]
+[Trait("Category", "Gpu")]
+public sealed class SpriteRenderGpuTests
+{
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _joinTimeout = TimeSpan.FromSeconds(20);
+
+    private static readonly Vector2[] _fullUvs =
+    [
+        new(0f, 0f),
+        new(1f, 0f),
+        new(1f, 1f),
+        new(0f, 1f),
+    ];
+
+    [GpuFact]
+    public void OffscreenDrawsOneInstancedDrawPerNonEmptyCameraAndPublishesStats()
+    {
+        var assets = new GeneratedTextureAssets();
+        assets.AddTexture("tex/a");
+        assets.AddTexture("tex/b");
+        SpriteAsset spriteA = MakeSprite("tex/a");
+        SpriteAsset spriteB = MakeSprite("tex/b");
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out CapturingLoggerProvider provider);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, 320, 240, loggerFactory);
+            var producer = new Producer(renderer);
+
+            for (var attempt = 0; attempt < 40; attempt++)
+            {
+                PublishFrame(
+                    renderer,
+                    producer,
+                    snapshot =>
+                    {
+                        AddCamera(
+                            snapshot,
+                            zIndex: 0,
+                            mask: 0b11u,
+                            clear: ClearKind.Color,
+                            viewport: new Vector4(0f, 0f, 0.5f, 1f));
+                        AddCamera(
+                            snapshot,
+                            zIndex: 1,
+                            mask: 0b01u,
+                            clear: ClearKind.None,
+                            viewport: new Vector4(0.5f, 0f, 0.5f, 1f));
+                        AddSprite(snapshot, spriteA, layer: 1u, zIndex: 0, x: -1f);
+                        AddSprite(snapshot, spriteA, layer: 1u, zIndex: 1, x: 0f);
+                        AddSprite(snapshot, spriteB, layer: 2u, zIndex: 0, x: 1f);
+                    });
+
+                if (renderer.RenderStats.TexturePages >= 3
+                    && renderer.RenderStats.Instances == 5)
+                {
+                    break;
+                }
+            }
+
+            RenderStats stats = renderer.RenderStats;
+            Assert.Equal(2, stats.Cameras);
+            Assert.Equal(2, stats.NonEmptyCameras);
+            Assert.Equal(2, stats.DrawCalls);
+            Assert.Equal(5, stats.Instances);
+            Assert.Equal(3, stats.TexturePages);
+            Assert.Equal(TexturePageCapacity.Initial, stats.TexturePageCapacity);
+            Assert.Equal(0, stats.SkippedSprites);
+            Assert.Equal(0, stats.ValidationErrors);
+            Assert.Equal(0, stats.ValidationWarnings);
+            Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+            Assert.Equal(0, renderer.Counters.ValidationWarningCount);
+            Assert.Null(renderer.FatalException);
+            StopAndAssertClean(renderer);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    [GpuFact]
+    public void ZeroCamerasAndClearModesRecordNoSafetyPassAndStayValidationClean()
+    {
+        var assets = new GeneratedTextureAssets();
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out CapturingLoggerProvider provider);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, 64, 64, loggerFactory);
+            var producer = new Producer(renderer);
+
+            PublishFrame(renderer, producer, snapshot => { });
+            RenderStats zero = renderer.RenderStats;
+            Assert.Equal(0, zero.Cameras);
+            Assert.Equal(0, zero.NonEmptyCameras);
+            Assert.Equal(0, zero.DrawCalls);
+            Assert.Equal(0, zero.Instances);
+            Assert.Equal(1, zero.TexturePages);
+
+            PublishFrame(
+                renderer,
+                producer,
+                snapshot => AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.None));
+            RenderStats preserve = renderer.RenderStats;
+            Assert.Equal(1, preserve.Cameras);
+            Assert.Equal(0, preserve.NonEmptyCameras);
+            Assert.Equal(0, preserve.DrawCalls);
+
+            PublishFrame(
+                renderer,
+                producer,
+                snapshot => AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Depth));
+            RenderStats depth = renderer.RenderStats;
+            Assert.Equal(0, depth.DrawCalls);
+            Assert.Contains(
+                provider.Entries,
+                entry => entry.Message.Contains("ClearKind.Depth", StringComparison.Ordinal));
+
+            PublishFrame(
+                renderer,
+                producer,
+                snapshot => AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color));
+            Assert.Equal(0, renderer.RenderStats.DrawCalls);
+
+            SpriteAsset placeholder = MakeSprite(texture: null, scale: 8f);
+            PublishFrame(
+                renderer,
+                producer,
+                snapshot =>
+                {
+                    AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
+                    AddSprite(snapshot, placeholder, layer: 1u);
+                });
+            RenderStats drawn = renderer.RenderStats;
+            Assert.Equal(1, drawn.DrawCalls);
+            Assert.Equal(1, drawn.NonEmptyCameras);
+            Assert.Equal(0, drawn.SkippedSprites);
+            Assert.Equal(0, drawn.ValidationErrors);
+            Assert.Equal(0, drawn.ValidationWarnings);
+            Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+            Assert.Equal(0, renderer.Counters.ValidationWarningCount);
+            Assert.Null(renderer.FatalException);
+            StopAndAssertClean(renderer);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    [GpuFact]
+    public void MissingTextureDrawsThePlaceholderAndTheAppContinues()
+    {
+        var assets = new GeneratedTextureAssets();
+        SpriteAsset sprite = MakeSprite("tex/missing");
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out CapturingLoggerProvider provider);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, 64, 64, loggerFactory);
+            var producer = new Producer(renderer);
+
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                PublishFrame(
+                    renderer,
+                    producer,
+                    snapshot =>
+                    {
+                        AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
+                        AddSprite(snapshot, sprite, layer: 1u);
+                    });
+
+                if (renderer.PageStore?.FailedPathCount > 0
+                    && renderer.RenderStats.Instances == 1)
+                {
+                    break;
+                }
+            }
+
+            TexturePageStore pages = Assert.IsType<TexturePageStore>(renderer.PageStore);
+            Assert.True(pages.FailedPathCount >= 1, "The missing texture path was not failed.");
+            RenderStats stats = renderer.RenderStats;
+            Assert.Equal(1, stats.DrawCalls);
+            Assert.Equal(1, stats.Instances);
+            Assert.Equal(1, stats.TexturePages);
+            Assert.Equal(0, stats.SkippedSprites);
+            Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+            Assert.Equal(0, renderer.Counters.ValidationWarningCount);
+            Assert.Null(renderer.FatalException);
+            Assert.Contains(
+                provider.Entries,
+                entry => entry.Message.Contains("failed", StringComparison.Ordinal));
+            StopAndAssertClean(renderer);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    [GpuFact]
+    public void FatalMalformedSpriteFailsTheRendererAndJoinsCleanly()
+    {
+        var assets = new GeneratedTextureAssets();
+        SpriteAsset malformed = MakeSprite(texture: null, scale: 0f);
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out CapturingLoggerProvider provider);
+        VulkanOffscreenRenderer? renderer = null;
+        var joined = false;
+        try
+        {
+            renderer = StartOffscreen(assets, 64, 64, loggerFactory);
+            var producer = new Producer(renderer);
+            producer.Publish(snapshot =>
+            {
+                AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
+                AddSprite(snapshot, malformed, layer: 1u);
+            });
+
+            Assert.True(
+                renderer.WaitForProgress(() => renderer.FatalException is not null, _timeout),
+                "The renderer did not observe the malformed sprite fatal.");
+            Bork2dException fatal = Assert.IsType<Bork2dException>(renderer.FatalException);
+            Assert.Contains("Scale", fatal.Message, StringComparison.Ordinal);
+
+            renderer.RequestStop();
+            joined = renderer.Join(_joinTimeout);
+            Assert.True(joined, "The faulted renderer did not join.");
+            Assert.Equal(RendererStatus.Faulted, renderer.Status);
+            Assert.Equal(RendererStopReason.Fatal, renderer.StopReason);
+            foreach (var slot in renderer.SnapshotRing.Slots)
+            {
+                Assert.Equal(Bork2d.Render.Handoff.SnapshotSlotState.Free, slot.State);
+            }
+        }
+        finally
+        {
+            if (!joined && renderer is not null)
+            {
+                renderer.RequestStop();
+                _ = renderer.Join(_joinTimeout);
+            }
+
+        }
+    }
+
+    [GpuFact]
+    public void InstanceBufferGrowsToAPowerOfTwoWhenTheFrameExceedsInitialCapacity()
+    {
+        const int spriteCount = 1500;
+        var assets = new GeneratedTextureAssets();
+        assets.AddTexture("tex/a");
+        SpriteAsset sprite = MakeSprite("tex/a");
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out CapturingLoggerProvider provider);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, 320, 240, loggerFactory);
+            var producer = new Producer(renderer);
+
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                PublishFrame(renderer, producer, snapshot =>
+                {
+                    AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
+                    for (var index = 0; index < spriteCount; index++)
+                    {
+                        AddSprite(snapshot, sprite, layer: 1u, zIndex: index, x: index * 0.01f);
+                    }
+                });
+
+                if (renderer.RenderStats.Instances == spriteCount)
+                {
+                    break;
+                }
+            }
+
+            RenderStats stats = renderer.RenderStats;
+            Assert.Equal(spriteCount, stats.Instances);
+            Assert.Equal(1, stats.DrawCalls);
+            Assert.Equal(0, stats.SkippedSprites);
+            Assert.True(renderer.InstanceCapacityHighWater >= 2048);
+            Assert.True(
+                (renderer.InstanceCapacityHighWater & (renderer.InstanceCapacityHighWater - 1)) == 0,
+                "The grown instance capacity must be a power of two.");
+            Assert.True(renderer.InstanceGrowthCount > 0, "No instance-buffer growth was recorded.");
+            Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+            Assert.Equal(0, renderer.Counters.ValidationWarningCount);
+            Assert.Null(renderer.FatalException);
+            StopAndAssertClean(renderer);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    [GpuFact]
+    public void TexturePageGrowthBeyondInitialCapacityRewritesDescriptorsAndStaysValidationClean()
+    {
+        const int textureCount = 300;
+        var assets = new GeneratedTextureAssets();
+        var sprites = new SpriteAsset[textureCount];
+        for (var index = 0; index < textureCount; index++)
+        {
+            string path = assets.AddTexture($"tex/{index}");
+            sprites[index] = MakeSprite(path);
+        }
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out CapturingLoggerProvider provider);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, 320, 240, loggerFactory);
+            var producer = new Producer(renderer);
+
+            for (var attempt = 0; attempt < 40; attempt++)
+            {
+                PublishFrame(renderer, producer, snapshot =>
+                {
+                    AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
+                    for (var index = 0; index < textureCount; index++)
+                    {
+                        AddSprite(snapshot, sprites[index], layer: 1u, zIndex: index, x: index);
+                    }
+                });
+
+                if (renderer.RenderStats.Instances == textureCount)
+                {
+                    break;
+                }
+            }
+
+            TexturePageStore pages = Assert.IsType<TexturePageStore>(renderer.PageStore);
+            Assert.True(pages.GrowthCount >= 1, "The page table never grew past its initial capacity.");
+            Assert.True(pages.TexturePageCapacityInEntries >= 512);
+            Assert.Equal(textureCount + 1, pages.TexturePageCount);
+            RenderStats stats = renderer.RenderStats;
+            Assert.Equal(textureCount, stats.Instances);
+            Assert.Equal(1, stats.DrawCalls);
+            Assert.Equal(textureCount + 1, stats.TexturePages);
+            Assert.True(stats.TexturePageCapacity >= 512);
+            Assert.Equal(0, stats.ValidationErrors);
+            Assert.Equal(0, stats.ValidationWarnings);
+            Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+            Assert.Equal(0, renderer.Counters.ValidationWarningCount);
+            Assert.Null(renderer.FatalException);
+            StopAndAssertClean(renderer);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    [GpuFact]
+    public async Task CaptureFrameAsyncReturnsOneRgbaArrayPerRequestAndFaultsAfterStop()
+    {
+        const int width = 32;
+        const int height = 16;
+        var assets = new GeneratedTextureAssets();
+        assets.AddTexture("tex/a");
+        SpriteAsset sprite = MakeSprite("tex/a");
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out CapturingLoggerProvider provider);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, width, height, loggerFactory);
+            var producer = new Producer(renderer);
+
+            Task<byte[]> first = renderer.CaptureFrameAsync();
+            Task<byte[]> second = renderer.CaptureFrameAsync();
+
+            // The copy is recorded on the next frame; the requests complete when that GPU frame's
+            // fence is observed at a later reuse (or shutdown). Pump a few frames.
+            for (var frame = 0; frame < 4 && !(first.IsCompleted && second.IsCompleted); frame++)
+            {
+                PublishFrame(renderer, producer, snapshot =>
+                {
+                    AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
+                    AddSprite(snapshot, sprite, layer: 1u);
+                });
+            }
+
+            byte[] firstBytes = await first.WaitAsync(_timeout);
+            byte[] secondBytes = await second.WaitAsync(_timeout);
+            Assert.Equal(width * height * 4, firstBytes.Length);
+            Assert.Equal(width * height * 4, secondBytes.Length);
+            Assert.NotSame(firstBytes, secondBytes);
+
+            using var cancellation = new CancellationTokenSource();
+            Task<byte[]> cancelled = renderer.CaptureFrameAsync(cancellation.Token);
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+
+            renderer.RequestStop();
+            Assert.True(renderer.Join(_joinTimeout), "The renderer did not join.");
+            Task<byte[]> afterStop = renderer.CaptureFrameAsync();
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => afterStop);
+            Assert.Null(renderer.FatalException);
+            Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+            Assert.Equal(0, renderer.Counters.ValidationWarningCount);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    private static ILoggerFactory CreateLoggerFactory(out CapturingLoggerProvider provider)
+    {
+        var created = new CapturingLoggerProvider();
+        provider = created;
+        return LoggerFactory.Create(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Debug);
+            builder.AddProvider(created);
+        });
+    }
+
+    private static VulkanOffscreenRenderer StartOffscreen(
+        GeneratedTextureAssets assets,
+        int width,
+        int height,
+        ILoggerFactory loggerFactory)
+    {
+        var startInfo = new RendererStartInfo
+        {
+            Mode = RendererMode.Offscreen,
+            InstanceHandle = 0,
+            Width = width,
+            Height = height,
+            ValidationRequested = true,
+            LoggerFactory = loggerFactory,
+            Assets = assets,
+        };
+
+        var renderer = Assert.IsType<VulkanOffscreenRenderer>(
+            new VulkanRendererFactory().Create(startInfo));
+        renderer.Start();
+        if (!renderer.WaitForReady(_timeout))
+        {
+            throw new TimeoutException("The offscreen renderer did not become ready.");
+        }
+
+        if (renderer.FatalException is { } fatal)
+        {
+            if (IsUnavailable(fatal))
+            {
+                throw SkipException.ForSkip(
+                    $"No suitable Vulkan 1.3 offscreen device is available: {fatal.Message}");
+            }
+
+            throw new InvalidOperationException("The offscreen renderer faulted during startup.", fatal);
+        }
+
+        if (!renderer.ValidationEnabled)
+        {
+            throw SkipException.ForSkip(
+                $"{VulkanNames.ValidationLayer} is not available; validation evidence cannot be "
+                    + "gathered on this machine.");
+        }
+
+        return renderer;
+    }
+
+    private static void PublishFrame(
+        VulkanOffscreenRenderer renderer,
+        Producer producer,
+        Action<FrameSnapshot> fill)
+    {
+        long sequence = renderer.RenderStats.FrameSequence;
+        producer.Publish(fill);
+        if (!renderer.WaitForProgress(
+            () => renderer.RenderStats.FrameSequence > sequence,
+            _timeout))
+        {
+            throw new TimeoutException(
+                $"The frame was not published within {_timeout.TotalSeconds:0} s. "
+                    + Describe(renderer.RenderStats));
+        }
+    }
+
+    private static void StopAndAssertClean(VulkanOffscreenRenderer renderer)
+    {
+        renderer.RequestStop();
+        Assert.True(renderer.Join(_joinTimeout), "The renderer did not join.");
+        Assert.Equal(RendererStatus.Stopped, renderer.Status);
+        Assert.Equal(RendererStopReason.Requested, renderer.StopReason);
+        Assert.Null(renderer.FatalException);
+        Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+        Assert.Equal(0, renderer.Counters.ValidationWarningCount);
+        foreach (var slot in renderer.SnapshotRing.Slots)
+        {
+            Assert.Equal(Bork2d.Render.Handoff.SnapshotSlotState.Free, slot.State);
+        }
+    }
+
+    private static void Finish(VulkanOffscreenRenderer? renderer)
+    {
+        if (renderer is not null)
+        {
+            renderer.RequestStop();
+            _ = renderer.Join(_joinTimeout);
+        }
+    }
+
+    private static string Describe(RenderStats stats)
+        => $"frame={stats.FrameSequence}, cameras={stats.Cameras}, "
+            + $"nonEmpty={stats.NonEmptyCameras}, draws={stats.DrawCalls}, "
+            + $"instances={stats.Instances}, pages={stats.TexturePages}/"
+            + $"{stats.TexturePageCapacity}, skipped={stats.SkippedSprites}, "
+            + $"validation={stats.ValidationErrors}/{stats.ValidationWarnings}";
+
+    private static SpriteAsset MakeSprite(string? texture, float scale = 8f) => new()
+    {
+        Texture = texture,
+        Uvs = _fullUvs,
+        Scale = scale,
+        Pivot = new Vector2(0.5f, 0.5f),
+        Topology = SpriteTopology.Quad,
+    };
+
+    private static void AddCamera(
+        FrameSnapshot snapshot,
+        int zIndex,
+        uint mask,
+        ClearKind clear,
+        Vector4? viewport = null)
+        => snapshot.AddCamera(
+            new CameraSnapshot(
+                zIndex,
+                Matrix3x2.Identity,
+                10f,
+                viewport ?? new Vector4(0f, 0f, 1f, 1f),
+                mask,
+                clear,
+                new Color(0.05f, 0.1f, 0.2f, 1f)));
+
+    private static void AddSprite(
+        FrameSnapshot snapshot,
+        SpriteAsset asset,
+        uint layer,
+        int zIndex = 0,
+        float x = 0f)
+        => snapshot.AddSprite(
+            new SpriteSnapshot(
+                asset,
+                Matrix3x2.CreateTranslation(x, 0f),
+                Color.White,
+                layer,
+                zIndex,
+                FlipX: false,
+                FlipY: false));
+
+    private static bool IsUnavailable(Exception exception)
+    {
+        string message = exception.Message;
+        return message.Contains("could not be loaded", StringComparison.Ordinal)
+            || message.Contains("No Vulkan physical devices", StringComparison.Ordinal)
+            || message.Contains("No suitable Vulkan 1.3 device", StringComparison.Ordinal)
+            || message.Contains("below the required 1.3.0", StringComparison.Ordinal)
+            || message.Contains("requires Vulkan 1.3.0", StringComparison.Ordinal)
+            || message.Contains("vkCreateInstance failed", StringComparison.Ordinal)
+            || message.Contains(
+                "maxPerStageDescriptorUpdateAfterBindSampledImages=0",
+                StringComparison.Ordinal)
+            || message.Contains("No sRGB offscreen color format", StringComparison.Ordinal);
+    }
+
+    private sealed class Producer
+    {
+        private readonly VulkanOffscreenRenderer _renderer;
+        private long _published;
+
+        internal Producer(VulkanOffscreenRenderer renderer) => _renderer = renderer;
+
+        internal void Publish(Action<FrameSnapshot> fill)
+        {
+            var slot = _renderer.AcquireSnapshotSlot()
+                ?? throw new InvalidOperationException(
+                    "The renderer stopped consuming; the test producer cannot publish.");
+            slot.Snapshot.Reset();
+            slot.Snapshot.Sequence = ++_published;
+            slot.Snapshot.Time = _published * 0.016;
+            slot.Snapshot.DeltaTime = 0.016;
+            fill(slot.Snapshot);
+            _renderer.PublishSnapshot(slot);
+        }
+    }
+}
