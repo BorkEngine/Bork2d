@@ -21,7 +21,10 @@
 > loop-stop line. M7 adds the handoff fields/counters to the same one-shot renderer start/stop
 > lines (§5.3) and the handoff counters to the windowed/offscreen loop-stop lines and the
 > headless loop-stop line (§5.1). The Pong example (D-043/D-044) owns the game-side title/logging
-> behavior.
+> behavior. **M8 (sprite renderer) is in progress** (WP-1 is documentation reconciliation; no M8
+> code is written yet): the approved target adds one-shot pipeline/page/instance startup fields,
+> richer renderer stop counters, and throttled draw/content diagnostics (§5.4) — and still no
+> per-frame, per-sprite, or per-draw logging.
 
 ## 1. Surface
 
@@ -118,7 +121,7 @@ game code creates its own categories.
 | `Bork2d.Runtime` | builder, modes, lifecycle, windowing |
 | `Bork2d.Engine` | reserved for scene/time/snapshot diagnostics; no current log sites |
 | `Bork2d.Engine.Assets` | pack parsing, decompression, loading |
-| `Bork2d.Render` | Vulkan instance/validation/device selection (M6 WP-2); windowed swapchain create/recreate/minimize and renderer start/stop counters (WP-3); offscreen target/start/stop counters (WP-4) |
+| `Bork2d.Render` | Vulkan instance/validation/device selection (M6 WP-2); windowed swapchain create/recreate/minimize and renderer start/stop counters (WP-3); offscreen target/start/stop counters (WP-4); M8 adds the shader/pipeline/page/instance startup fields, draw/page counters, and throttled draw diagnostics (§5.4) |
 | game-defined | `CreateLogger("MyGame")` or `CreateLogger<T>()` |
 Startup logs use `Bork2d.Runtime` and one structured message after validation:
 
@@ -233,6 +236,31 @@ line. The `[GpuFact]` windowed and offscreen tests assert zero validation errors
 shutdown and record the counters and frame/consumed relationships. The renderer logs
 frame-presented/discarded, handoff, and validation counters once at stop. No line is emitted from
 the acquire/record/present hot path.
+
+### 5.4 Sprite renderer, pages, and stats (M8 target, in progress)
+
+M8 adds no new category; it extends the `Bork2d.Render` one-shot lines and adds **throttled**
+diagnostics. There is still no per-frame, per-sprite, per-draw, per-camera, or per-image logging, and
+`RenderStats`/`CaptureFrameAsync` never log per call.
+
+| Event | Level | Fields |
+| --- | --- | --- |
+| Sprite renderer started (start line extension) | Information | mode, pipeline/shader identity (build-time SPIR-V), page initial capacity, instance initial capacity, bindless limit (`maxPerStageDescriptorUpdateAfterBindSampledImages`), placeholder on/off, validation on/off |
+| Page capacity grown | Information (Debug for the per-page detail) | old/new capacity, resident pages; once per capacity change |
+| Instance buffer grown | Debug | frame index, old/new capacity (instances), once per capacity change |
+| Placeholder used for a path | Warning | canonical asset path and the content failure kind; **once per failed path** for the run |
+| Texture/page content failure | Warning | path/kind and reason; throttled once per unique path/kind |
+| Invalid sprite/layer/non-Quad/pending skip | Debug | once per asset path/kind where one exists, otherwise once per renderer; totals live in counters |
+| Invalid camera skipped | Debug | once per renderer (not per camera per frame) |
+| `Clear.Depth` requested | Debug | once per renderer; it behaves like `Clear.None` and never touches depth |
+| Draw/content diagnostic totals | Information | repeated skips are counted and reported on the renderer stop line, not logged per occurrence |
+| Renderer stopped (stop line extension) | Information | frames, draws/instances, cameras/non-empty, pages/capacity/growths, page uploads/failures/placeholder uses, skipped sprites, instance capacity/overflow, validation errors/warnings, stop reason |
+| Page/instance capacity at the device limit, malformed sprite, shader/pipeline failure | Error | the exception naming the field/limit; the renderer-fatal path stops the ring and the host rethrows after teardown |
+
+The renderer also logs its final counters once at stop (the values are the same ones published in
+`IEngine.RenderStats`); the public stats/capture API is otherwise silent. Throttling means once per
+unique asset path/kind (or once per renderer for camera/invalid-layer/`Clear.Depth` kinds), with
+totals in counters; a failure must never produce a line per frame.
 
 ## 6. NativeAOT
 

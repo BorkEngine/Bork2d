@@ -9,7 +9,10 @@
 > the snapshot ring/capture, renderer consumption, host
 > backpressure, the paced headless loop, and the Pong `--headless` 120-tick gate
 > (`--headless --ticks N` overrides). The
-> warning/style/format/AOT gates and the docs link check are active. CI runs the docs link
+> warning/style/format/AOT gates and the docs link check are active. **M8 (sprite renderer) is in
+> progress** (WP-1 is documentation reconciliation; no M8 code is written yet): it adds the
+> build-time `Bork2d.ShaderCompiler` tool, sprite GPU tests, and the 50,000-sprite benchmark
+> (§2.1/§6). CI runs the docs link
 > check, build, tests, and format verification on PRs to `develop` and pushes to `develop`; the
 > NativeAOT publish/run gate (`Pong.Desktop` headless, windowed, and offscreen) is a required
 > local gate.
@@ -38,7 +41,10 @@
   (full clean-machine validation remains M10).
 - Vulkan 1.3 GPU/driver for windowed/offscreen runs and the GPU tests; the Khronos validation
   layer (Vulkan SDK) for validation evidence (its absence skips the strict GPU assertions with a
-  warning, D-M6-20). Headless builds/tests need neither.
+  warning, D-M6-20). Headless builds/tests need neither. **The Vulkan SDK is not required to
+  build or run the shader pipeline:** the checked-in GLSL is compiled at build time by the
+  build-only `Bork2d.ShaderCompiler` tool (Silk.NET.Shaderc 2.23.0); `glslangValidator`, `glslc`,
+  and `spirv-val` are optional local tools and are not invoked by the build.
 - NativeAOT toolchain (MSVC) for the local publish gate.
 
 ## 2. Build, test, and local gates
@@ -167,6 +173,44 @@ assembly.
 `dotnet clean src/Bork2d/Bork2d.slnx` and `dotnet clean examples/pong/Pong.slnx` remove the packs and
 the incremental state under the assets project's `obj/bork2d/bake`.
 
+### 2.1 Shader compiler, packages, and M8 gates
+
+The M8 sprite renderer compiles shaders at **build time**, not at runtime:
+
+- The build-only JIT tool `build/Bork2d.ShaderCompiler` pins `Silk.NET.Shaderc` **2.23.0** and
+  `Silk.NET.Shaderc.Native` **2.23.0** (build-only; they never enter the runtime or AOT publish
+  graph). No runtime project references them.
+- An MSBuild target builds the tool, compiles the checked-in GLSL
+  (`src/Bork2d/Bork2d.Render/Shaders/sprite.vert`, `sprite.frag`) to SPIR-V (Vulkan 1.3 target;
+  debug info in Debug, optimization in Release), and emits a generated C# file with the SPIR-V byte
+  arrays into `Bork2d.Render`'s compilation. The generated code is linked into the app; the publish
+  contains no loose `.spv` and no shaderc assembly.
+- **No Vulkan SDK is required.** `glslangValidator`, `glslc`, and `spirv-val` are not build
+  dependencies; installing the SDK is still useful for the validation-layer GPU evidence.
+- Do not add runtime shader compilation, shader file I/O, or a runtime shaderc dependency.
+
+M8 gates (in addition to the Debug/Release build, tests, format, docs link check, and AOT gate):
+
+```powershell
+pwsh scripts/check-docs.ps1
+git diff --check
+$env:BORK2D_RUN_GPU_TESTS = '1'
+dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "Category=Gpu"
+Remove-Item Env:BORK2D_RUN_GPU_TESTS
+```
+
+- **GPU tests stay local-only** (`[GpuFact]`, serialized `RealGpu` collection, skipped without
+  `BORK2D_RUN_GPU_TESTS=1`); CI is unchanged and has no GPU runner. M8 GPU tests assert
+  counters/passes/validation/lifecycle/placeholder/paging and the `CaptureFrameAsync` **contract**;
+  there are **no golden/pixel tests**. Visual acceptance is a manual windowed `Pong` check recorded
+  in the milestone PR.
+- **Benchmark (local-only, opt-in `[GpuFact]`):** offscreen 1920×1080, one camera, 50,000 generated
+  sprites, a 10-second measurement window after warm-up, vsync off, no artificial cap or sleep.
+  Record p50/p95/max frame time, FPS, render-thread CPU, allocations, and the
+  machine/GPU/driver/SDK; zero steady-state allocations in the measured path. Pass criterion:
+  **median ≥165 FPS** (p50 ≤ ~6.06 ms). If the target cannot be met, stop and report; do not lower
+  it.
+
 ## 3. Build, style, and warnings
 
 - `TreatWarningsAsErrors=true`, `EnforceCodeStyleInBuild=true`, Microsoft/.NET-standard
@@ -218,7 +262,8 @@ documented. The rule applies to every new public API; do not remove it.
 ## 6. Tests and CI
 
 - Add unit tests with behavior changes; pack/format tests for asset changes; threading tests for
-  handoff changes; GPU/visual tests for renderer changes. Asset/pack tests build packs in memory or
+  handoff changes; GPU tests for renderer changes (structural/counter/lifecycle/API-contract
+  assertions — **no pixel/golden tests**). Asset/pack tests build packs in memory or
   in temp files (`PackBuilder`/`TempPackDirectory`) and never commit binary **test/pack** fixtures;
   the bake tests generate their own source trees and textures in temp directories, and the Pong AOT
   gate loads the game-baked pack. The committed game sources are
@@ -229,6 +274,10 @@ documented. The rule applies to every new public API; do not remove it.
   Asset-loader tests are deterministic: they use a narrow
   internal hook plus bounded signals/joins (no sleeps, retries, or timing assertions) to prove FIFO
   order, asynchronous completion, and shutdown cancellation.
+- **M8 renderer changes** add deterministic plan/math/page/instance-layout/public-API tests, the
+  fake-`IAssets` page-state tests, and zero-allocation tests, plus opt-in GPU rendering,
+  placeholder/paging, and `CaptureFrameAsync` contract tests. The 50,000-sprite benchmark and the
+  manual windowed visual check are local evidence, not CI; there are no pixel/golden assertions.
 - Real-window tests use `[WindowFact]`, are skipped without `BORK2D_RUN_WINDOW_TESTS=1`, share the
   serialized `RealSdlWindow` collection, and may use only signals/bounded waits (no sleeps). Run
   them locally before a window/runtime PR. Real-GPU tests use `[GpuFact]`, are skipped without
@@ -269,6 +318,10 @@ documented. The rule applies to every new public API; do not remove it.
       window/renderer changes.
 - [ ] Pack format/version updated if assets changed.
 - [ ] Owning docs/API/decision log updated; status markers honest.
+- [ ] Shader changes compile through the build-time `Bork2d.ShaderCompiler` tool; no runtime shader
+      I/O, no new runtime package, and the publish has no shaderc assembly or loose `.spv`.
+- [ ] Renderer changes run the opt-in GPU tests locally; M8 renderer PRs record the
+      benchmark/manual visual check when they apply. No pixel/golden tests are added.
 - [ ] No unjustified suppressions.
 
 ## 9. Related documents
