@@ -1,23 +1,25 @@
 # Logging
 
-> **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4) and M6 (Vulkan
-> bring-up; merged 2026-10-31, PR #11). The builder creates an app-owned
+> **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4), M6 (Vulkan
+> bring-up; merged 2026-10-31, PR #11), and M7 WP-1–WP-4 (the milestone is in progress; WP-5 owns the
+> final status). The builder creates an app-owned
 > Microsoft.Extensions.Logging factory, installs a plain-text ZLogger console provider by default,
 > logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`. The
-> windowed platform logs startup/stop/commands/failures, the runtime host logs the windowed and
-> offscreen loop stops with ticks and elapsed time, the renderer logs instance/device/swapchain/
-> offscreen target and start/stop counters from `Bork2d.Render`, and the asset service logs
-> start/overlay/error/stop events; there is no per-frame or per-asset-per-tick logging.
-> Configuration is identical in all modes, and the default path runs in the AOT gate
-> (`Pong.Desktop`, headless with the baked pack). The suite is 1121 tests (1105 deterministic plus
-> 16 opt-in/conditional). The project-consolidation refactor (D-041/D-042) renamed the engine
-> categories to `Bork2d.Engine` and `Bork2d.Engine.Assets`; `Bork2d.Runtime` and `Bork2d.Render` are
-> unchanged. M6 WP-2 makes the `Bork2d.Render` category current for instance, validation, and
-> device-selection events (§5.3); WP-3 adds the windowed swapchain/clear/present and start/stop
-> counter lines; WP-4 adds the offscreen target/start/stop lines and the offscreen loop-stop line.
-> M7 WP-3 adds the handoff fields/counters to the same one-shot renderer start/stop lines (§5.3);
-> the host loop-stop lines and the headless stop line are M7 WP-4. The Pong example (D-043/D-044)
-> owns the game-side title/logging behavior.
+> windowed platform logs startup/stop/commands/failures, the runtime host logs the windowed,
+> offscreen, and headless loop stops with ticks and elapsed time (plus the M7 handoff counters), the
+> renderer logs instance/device/swapchain/offscreen target and start/stop counters from
+> `Bork2d.Render`, and the asset service logs start/overlay/error/stop events; there is no per-frame
+> or per-asset-per-tick logging. Configuration is identical in all modes, and the default path runs in
+> the AOT gate (`Pong.Desktop`, headless with the baked pack). The suite is 1158 tests (1141
+> deterministic plus 17 opt-in/conditional). The project-consolidation refactor (D-041/D-042) renamed
+> the engine categories to `Bork2d.Engine` and `Bork2d.Engine.Assets`; `Bork2d.Runtime` and
+> `Bork2d.Render` are unchanged. M6 WP-2 makes the `Bork2d.Render` category current for instance,
+> validation, and device-selection events (§5.3); WP-3 adds the windowed swapchain/clear/present and
+> start/stop counter lines; WP-4 adds the offscreen target/start/stop lines and the offscreen
+> loop-stop line. M7 WP-3 adds the handoff fields/counters to the same one-shot renderer start/stop
+> lines (§5.3); WP-4 adds the handoff counters to the windowed/offscreen loop-stop lines and the
+> headless loop-stop line (§5.1). The Pong example (D-043/D-044) owns the game-side title/logging
+> behavior.
 
 ## 1. Surface
 
@@ -128,7 +130,8 @@ message uses parameters, not interpolation; never log per sprite or per frame in
 ### 5.1 Windowed platform (M2)
 
 The internal windowed platform logs from `Bork2d.Runtime`. One startup line and one stop line are
-emitted per window, and the runtime host emits one loop-stop line with the tick count; window
+emitted per window, and the runtime host emits one loop-stop line with the tick count for windowed,
+offscreen, and headless runs; window
 commands and state transitions are Debug, and SDL failures are Error. There is no per-frame,
 per-key, or per-mouse-move logging.
 
@@ -140,15 +143,22 @@ per-key, or per-mouse-move logging.
 | `IWindow.Size` ignored while fullscreen, or deferred while minimized | Debug | the requested framebuffer size. |
 | SDL failure (startup or after startup) | Error | the SDL operation and the `SDL_GetError` text; the exception also carries the failure. |
 | Vulkan surface replaced after surface loss | Warning | old/new surface handle and the new extent (D-M6-16). |
-| Windowed loop stopped (runtime host) | Information | `reason` (`Exit`/`Close`/`Error`), `ticks` (completed ticks), `elapsedSeconds` (Setup through Teardown, rounded to milliseconds), `finalFramebuffer` (pixels). |
-| Offscreen loop stopped (runtime host) | Information | `reason` (`Exit`/`Error`/`Stop`), `ticks`, `elapsedSeconds`. |
+| Windowed loop stopped (runtime host) | Information | `reason` (`Exit`/`Close`/`Error`), `ticks` (completed ticks), `elapsedSeconds` (Setup through Teardown, rounded to milliseconds), `backpressureWaits`, `maxLiveSnapshots` (≤ 3), `suspendedConsumptions` (M7), `finalFramebuffer` (pixels). |
+| Offscreen loop stopped (runtime host) | Information | `reason` (`Exit`/`Error`/`Stop`), `ticks`, `elapsedSeconds`, `backpressureWaits`, `maxLiveSnapshots`, `suspendedConsumptions` (M7). |
+| Headless loop stopped (runtime host) | Information | `reason` (`Exit`/`Stop`/`Error`), `ticks` (completed ticks), `elapsedSeconds`, `ticksPerSecond` (the configured positive rate). |
 | Windowed platform stopped | Information | `reason` (`Exit`/`Close`/`Error`), `finalFramebuffer` pixels. |
 
 The startup and loop-stop lines at 150% display scaling look like:
 
 ```text
 2026-10-26 01:40:39.981 [Information] Bork2d.Runtime: Bork2d windowed platform started: mode=Windowed, sdlVersion=2.30.8, videoDriver=windows, windowPoints=853x480, framebufferPixels=1280x720, scale=1.5006, fullscreen=False, resizable=True, vsync=True
-2026-10-26 01:40:47.412 [Information] Bork2d.Runtime: Bork2d windowed loop stopped: reason=Exit, ticks=120, elapsedSeconds=2.031, finalFramebuffer=1280x720
+2026-10-26 01:40:47.412 [Information] Bork2d.Runtime: Bork2d windowed loop stopped: reason=Exit, ticks=120, elapsedSeconds=2.031, backpressureWaits=0, maxLiveSnapshots=3, suspendedConsumptions=0, finalFramebuffer=1280x720
+```
+
+A headless run ends with its own one-shot line instead:
+
+```text
+2026-10-31 05:47:03.490 [Information] Bork2d.Runtime: Bork2d headless loop stopped: reason=Exit, ticks=120, elapsedSeconds=2.011, ticksPerSecond=60
 ```
 
 A normal shutdown therefore ends with the loop-stop line followed by the platform-stop line; both

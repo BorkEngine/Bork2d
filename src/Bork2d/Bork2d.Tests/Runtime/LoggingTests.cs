@@ -97,6 +97,7 @@ public sealed class LoggingTests
         var provider = new CapturingLoggerProvider();
         var game = new ScriptedGame<GameLayer>
         {
+            ExitAfterFirstTick = true,
             OnSetup = engine =>
             {
                 engine.LoggerFactory.CreateLogger(Bork2dLogging.CommonCategory)
@@ -140,6 +141,7 @@ public sealed class LoggingTests
         var enabled = new List<bool>();
         var game = new ScriptedGame<GameLayer>
         {
+            ExitAfterFirstTick = true,
             OnSetup = engine =>
             {
                 foreach (var category in categories)
@@ -173,7 +175,11 @@ public sealed class LoggingTests
     public void EngineExposesTheInjectedFactoryToTheGame()
     {
         IEngine<GameLayer>? captured = null;
-        var game = new ScriptedGame<GameLayer> { OnSetup = engine => captured = engine };
+        var game = new ScriptedGame<GameLayer>
+        {
+            ExitAfterFirstTick = true,
+            OnSetup = engine => captured = engine,
+        };
 
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
@@ -192,6 +198,7 @@ public sealed class LoggingTests
     {
         var game = new ScriptedGame<GameLayer>
         {
+            ExitAfterFirstTick = true,
             OnSetup = engine => engine.LoggerFactory.CreateLogger("MyGame").LogInformation("default setup"),
         };
 
@@ -234,6 +241,7 @@ public sealed class LoggingTests
         bool? enabled = null;
         var game = new ScriptedGame<GameLayer>
         {
+            ExitAfterFirstTick = true,
             OnSetup = engine =>
                 enabled = engine.LoggerFactory.CreateLogger("Probe").IsEnabled(LogLevel.Information),
         };
@@ -255,6 +263,7 @@ public sealed class LoggingTests
         bool? enabled = null;
         var game = new ScriptedGame<GameLayer>
         {
+            ExitAfterFirstTick = true,
             OnSetup = engine =>
                 enabled = engine.LoggerFactory.CreateLogger("Probe").IsEnabled(LogLevel.Information),
         };

@@ -1,26 +1,26 @@
 # Threading and Frame Handoff
 
-> **Status:** implemented through M6 (merged 2026-10-31, PR #11). The M1
-> scene graph implements the structural and per-object `System.Threading.Lock` rules in §2 and the
-> public API has no thread affinity. The M2 windowed platform's OS/window thread, command queue,
-> confirmed-state snapshot, event pump, input freeze, and the runtime tick loops that drive them are
-> `Current` (§5). The M3 asset service's one loader thread, FIFO queue, asynchronous completion,
-> cancellation/join, and deserialize-only load path are `Current` (§6). The M6 render thread is
-> `Current` for windowed and offscreen: the host starts it before `Setup`, waits for readiness only
-> before the first tick, and joins it before the surface/instance/window are destroyed; offscreen
-> loops until `Exit` and advances `ITime` (D-M6-07). The internal frame snapshot model, the
-> capture pass, and the three-slot ring state machine are `Current` (M7 WP-2); renderer
-> consumption, the fence-held slot lifetime, the combined snapshot/control wait, and the suspended
-> minimized drain are `Current` (M7 WP-3). The host acquire/capture/publish wiring and the pacing
-> loops remain `Planned` (M7 WP-4), so until WP-4 lands a windowed/offscreen run has no snapshot to
-> consume and records no frames. The engine has no debug-only tick-active, structural, or
-> slot-state checks. The suite is 1121 tests: 1105 deterministic plus 16 opt-in/conditional.
+> **Status:** implemented through M7 WP-4 (2026-10-31; the milestone is in progress and WP-5 owns the
+> final status). The M1 scene graph implements the structural and per-object
+> `System.Threading.Lock` rules in §2 and the public API has no thread affinity. The M2 windowed
+> platform's OS/window thread, command queue, confirmed-state snapshot, event pump, input freeze, and
+> the runtime tick loops that drive them are `Current` (§5). The M3 asset service's one loader
+> thread, FIFO queue, asynchronous completion, cancellation/join, and deserialize-only load path are
+> `Current` (§6). The M6 render thread is `Current` for windowed and offscreen: the host starts it
+> before `Setup`, waits for readiness only before the first tick, and joins it before the
+> surface/instance/window are destroyed. The internal frame snapshot model, the capture pass, and the
+> three-slot ring state machine are `Current` (M7 WP-2); renderer consumption, the fence-held slot
+> lifetime, the combined snapshot/control wait, and the suspended minimized drain are `Current` (M7
+> WP-3); the host acquire/capture/publish wiring, the blocked-producer wake paths, the minimized
+> 30 Hz tick cap, and the paced headless loop are `Current` (M7 WP-4, §5.3/§7). The engine has no
+> debug-only tick-active, structural, or slot-state checks. The suite is 1158 tests: 1141
+> deterministic plus 17 opt-in/conditional.
 
 ## 1. Threads by mode
 
 | Thread | Windowed | Offscreen | Headless | Responsibilities |
 | --- | :-: | :-: | :-: | --- |
-| **Tick** | yes | yes | yes | Windowed loop, time, `IGame.Setup/Tick/Teardown`, input freeze/text dispatch, tick scope, scene/asset requests, snapshot capture (M7), shutdown. May be any host thread. |
+| **Tick** | yes | yes | yes | Windowed/offscreen loop (slot acquire, time, `IGame.Setup/Tick/Teardown`, input freeze/text dispatch, tick scope, scene/asset requests, snapshot capture, publish, shutdown); headless paced loop with the synthesized clock. May be any host thread. |
 | **OS/window** | yes | no | no | SDL video/events and window operations; public `IWindow` calls are marshaled here. |
 | **Render** | yes | yes | no | Vulkan device, swapchain (windowed) or offscreen targets, frames/fences, the snapshot ring and consumer, dynamic-rendering clear, present/discard. Started by the host before `Setup`; no `Tick` runs until it is ready. Uploads, sprite resolution, sorting, draws, and instance filling are M8. |
 | **Asset loader** | yes | yes | yes | One per app: pack reads, decompression, and MessagePack deserialization. It caches no resolved assets and never touches SDL, Vulkan, or game entities. |
@@ -124,10 +124,10 @@ publish/take/release, waits, and counters (WP-2), and the renderer-side `Snapsho
 combined `SnapshotControlWait` (WP-3) exist and are covered by deterministic tests. The renderer
 takes the newest `Ready` snapshot only for a free GPU frame, holds it until that frame's fence is
 observed, and releases it when the frame index is next reused or in the stop/fatal/idle drain. The
-host acquire/publish wiring and the pacing loops are `Planned` (M7 WP-4), so the current tree has
-no producer publishing snapshots yet. There are exactly **three snapshot slots**. A slot is held
-until the GPU frame that consumed it signals its fence, which bounds run-ahead without growing an
-unbounded queue.
+host acquire/capture/publish wiring and the blocked-producer wake paths are `Current` (M7 WP-4, §5.3
+and §7), so a windowed/offscreen run now publishes and consumes snapshots. There are exactly
+**three snapshot slots**. A slot is held until the GPU frame that consumed it signals its fence,
+which bounds run-ahead without growing an unbounded queue.
 
 ```mermaid
 stateDiagram-v2
@@ -151,7 +151,7 @@ at zero extent the consumer frees the newest snapshot immediately, the slot neve
 loop:
   slot = renderer.AcquireSnapshotSlot()   // blocks when all three slots are occupied
   input.Freeze(); time.NewFrame(); input.DispatchText(); game.Tick()
-  engine.CaptureSnapshot(slot)            // after Tick, workers joined (WP-4 wiring)
+  engine.CaptureSnapshot(slot)            // after Tick, workers joined
   renderer.PublishSnapshot(slot)          // Ready (release); newest wins; previous Ready dropped
   // on a Tick/capture failure: renderer.AbandonSnapshotSlot(slot); nothing is published
 ```
@@ -159,8 +159,9 @@ loop:
 `AcquireSnapshotSlot` blocks only when all slots are `Ready`/`Rendering`; that wait is frame
 backpressure, not an artificial delay, and it returns `null` on stop/exit/fatal. Publish order is
 `Ready` before `latest`; a superseded `Ready` slot is freed, and a `Rendering` slot is never freed
-by the producer. `WakeSnapshotWait` (called from `IEngine.Exit()` in WP-4) wakes a blocked acquire
-without stopping consumption, so the Exit tick can still publish (Q4=D1, Q9=I1).
+by the producer. `WakeSnapshotWait` (installed by the host on `IEngine.Exit()` in WP-4) wakes a
+blocked acquire without stopping consumption, so the Exit tick can still publish (Q4=D1, Q9=I1).
+The producer's control flow is in §5.3.
 
 ### Consumer (render thread)
 
@@ -285,31 +286,46 @@ stable; events applied after the freeze belong to the next one.
 thread never invokes a game callback.
 
 - **Attach and start.** After `SdlWindowPlatform.Start()` succeeds, the runtime creates and starts
-  the renderer thread without waiting for readiness, attaches the window/input proxies, and calls
+  the renderer thread without waiting for readiness, installs the engine's exit wake on the renderer
+  (`renderer.WakeSnapshotWait`, before `Setup`), attaches the window/input proxies, and calls
   `platform.AttachRenderer` before `IGame.Setup`, so `IEngine.Window`/`IEngine.Input` are live in
-  `Setup` and the OS thread posts confirmed state. Offscreen starts the renderer the same way with
-  no platform.
-- **Per tick.** Windowed: `input.Freeze()` publishes the tick-start snapshot, `time.NewFrame()`
-  advances the clock, `input.DispatchText()` raises `OnTextTyped` in order, and `IGame.Tick()` runs.
-  Offscreen: `time.NewFrame()` then `IGame.Tick()`, with no input. Text handlers observe the current
-  tick's `ITime`; events applied during `Tick` land in the next freeze.
+  `Setup` and the OS thread posts confirmed state. Offscreen starts the renderer the same way with no
+  platform; headless installs no callback and creates no renderer.
+- **Per tick.** Windowed: `renderer.AcquireSnapshotSlot()` first (it blocks only when the ring is
+  full, so input/mouse edges that arrive while backpressured belong to the next freeze and
+  `DeltaTime` keeps measuring real tick-start intervals), then `input.Freeze()` publishes the
+  tick-start snapshot, `time.NewFrame()` advances the clock, `input.DispatchText()` raises
+  `OnTextTyped` in order, and `IGame.Tick()` runs. After `Tick` returns (workers joined) the host
+  calls the engine's capture into the acquired slot, stamps the monotonic sequence (starting at 1),
+  and publishes; the previous `Ready` snapshot is dropped. Offscreen does the same without input.
+- **Exit and backpressure.** The engine's exit callback wakes a blocked acquire; no further tick
+  starts, and a tick that already owns a slot (the Exit tick) still publishes (Q4=D1, Q9=I1). A
+  renderer fatal or stop while blocked is observed after the wake: the host records the renderer
+  failure, breaks with zero extra ticks, runs `Teardown` once when `Setup` succeeded, joins the
+  renderer, and rethrows.
+- **Minimized 30 Hz tick cap.** After a completed/published windowed tick, if the confirmed window
+  state is minimized the loop sleeps only the remainder of a one-thirtieth-of-a-second tick-start
+  interval with the scheduler's pure `Thread.Sleep`; the grid starts at minimization, is discarded
+  on restore, and never accumulates a catch-up burst. It is the only target rate in windowed mode.
 - **Readiness gate.** `Setup` never waits for or is interrupted by the renderer (D-M6-06); the wait
   happens after `Setup` and before the first `Tick`. Exit/close during `Setup` skips the wait.
 - **Stop boundary.** The loop re-checks the engine exit token, the windowed platform's close/
-  `SDL_QUIT` request, and the renderer/platform fatal exception at each boundary before the next
-  freeze. `Exit()` during a tick lets that tick complete; `Exit()`/close during `Setup` runs zero
-  ticks.
+  `SDL_QUIT` request, and the renderer/platform fatal exception before each acquire. `Exit()` during
+  a tick lets that tick complete and publish; `Exit()`/close during `Setup` runs zero ticks.
+- **Failure in the tick.** A `Tick`/capture exception abandons the `Writing` slot (nothing is
+  published) and follows the M2/M6 error precedence: `Teardown` once when `Setup` succeeded, the
+  renderer stopped/joined, the platform/assets shut down, and the original exception rethrown.
 - **Teardown.** `Teardown` runs once with the window/input proxies still attached; normal
   exit/close paths have a live window there, but a fatal OS-thread error may already have destroyed
   it, so the game can only attempt best-effort access. The renderer is then stopped/joined
   (**before** the platform destroys the surface/instance/window), the platform is shut down (surface,
   instance, loader, window, SDL, OS thread), and only afterwards are the proxies detached, so
   retained references throw `ObjectDisposedException`.
-- **No pacing.** The loops have no target rate, deadline, `Thread.Sleep`, `SpinWait`, or yield.
-  Renderer frames are one per consumed snapshot (M7 WP-3); the host acquire/capture/publish wiring
-  that couples the tick to the ring and backpressures it is WP-4, so until then the windowed/
-  offscreen tick loops still run uncapped and the renderer has no snapshot to consume. No lock is
-  held across a game callback, an SDL call, or the event wait.
+- **No pacing otherwise.** The normal windowed/offscreen loops have no target rate, deadline,
+  `Thread.Sleep`, `SpinWait`, or yield: the acquire is the only wait, and it is event-based. Headless
+  has no ring and paces with a strict absolute grid and a pure `Thread.Sleep`, catching up unbounded
+  after a stall (Q13=M4/F1/F8); its synthetic `Time`/`DeltaTime` advance one exact step per tick.
+  No lock is held across a game callback, an SDL call, or the event wait.
 - **Errors.** A game or text-handler failure stops the loop, is captured, and is rethrown after
   teardown, renderer join, and platform shutdown; a fatal OS-thread or renderer error is stored, read
   after teardown, and rethrown (aggregated with a teardown failure). A renderer failure around
@@ -318,9 +334,10 @@ thread never invokes a game callback.
   remain attached for best-effort access. One tick + teardown failure becomes an
   `AggregateException`.
 - **Deterministic coverage.** `Bork2d.Tests` drives the real runtime and platform with
-  `FakeSdlApi`/`FakeRenderer`/`FakeVulkanInstance`, synchronizing through an applied window command
-  or the fake readiness callback instead of sleeps; app runs join with a bounded timeout and every
-  test leaves no platform or renderer thread running.
+  `FakeSdlApi`/`FakeRenderer`/`FakeVulkanInstance` and a fake scheduler clock, synchronizing through
+  an applied window command, the fake renderer's event-based counters, or the fake readiness
+  callback instead of sleeps; app runs join with a bounded timeout and every test leaves no platform
+  or renderer thread running.
 
 ## 6. Asset and pack coordination
 
@@ -374,8 +391,14 @@ Thread-specific rules:
   the control channel (waking a blocked consumer); a renderer fatal does the same before the host
   observes it at the next boundary (Q9=I1). The render thread waits its frame fences and
   `vkDeviceWaitIdle`, then releases every snapshot slot it holds; `Join` then drains every
-  non-`Writing` slot, because a producer may publish the fatal tick's snapshot after the renderer
-  cleanup. All slots end `Free`; no GPU frame references snapshot memory after the fences.
+  non-`Writing` slot, because a producer may publish the fatal/exit tick's snapshot after the
+  renderer cleanup. All slots end `Free`; no GPU frame references snapshot memory after the fences.
+  A producer blocked in `AcquireSnapshotSlot` wakes on the stop/exit signal and starts no further
+  tick; the host then runs `Teardown` once (when `Setup` succeeded), joins the renderer, and shuts
+  the platform and assets down.
+- **Headless shutdown.** There is no renderer or ring: `Exit` stops the loop before the next tick,
+  `Teardown` runs once, and the assets stop. A pacing `Thread.Sleep` is not interrupted, so shutdown
+  latency is bounded by one tick period; no thread other than the `Run()` caller is involved.
 - The windowed OS thread is stopped and joined before `Run()` returns or throws; the renderer has
   already joined, then the OS thread destroys the surface, instance, and window and unloads the
   Vulkan loader before SDL quits. Background errors are stored and rethrown on the `Run()` caller
@@ -407,15 +430,21 @@ Thread-specific rules:
    `Rendering` until its frame index is reused, release-on-reuse, the suspended drain
    (`Ready → Free`, counted, never `Rendering`), and release-all after idle. The combined
    `SnapshotControlWait` wakes on a snapshot, a control post, a stop, or a fatal without polling.
-   Both are `Current` (M7 WP-3). Host pacing (the tick never faster than the ring, waiting only
-   when full) is `Planned` (M7 WP-4).
+   Both are `Current` (M7 WP-3). **Host pacing** is `Current` (M7 WP-4): the windowed/offscreen tick
+   publishes one snapshot per completed tick (including the Exit tick), waits only when the ring is
+   full, abandons the slot on a `Tick`/capture failure, and starts no further tick when `Exit` or a
+   renderer fatal wakes a blocked acquire. The minimized 30 Hz tick cap is covered with the fake
+   scheduler; the normal windowed and offscreen loops assert no sleep.
 3. **Concurrency.** N workers create/mutate distinct entities, then join; all appear exactly once
    with distinct references, detach/re-attach is safe, no entity-ID or order assertions.
 4. **Shutdown.** Renderer-level stop during submit/fence and the idle drain are `Current` (M7
    WP-3): held slots are released, `Join` drains the ring, all threads exit within a timeout, and
-   every slot ends `Free`. Host-level stop during publish/take comes with WP-4.
-5. **Modes and allocation.** Headless has no SDL/render thread and no clock advance; offscreen has
-   no surface/swapchain; fixed entity counts allocate nothing.
+   every slot ends `Free`. Host-level stop/exit/fatal during a blocked acquire is `Current` (M7
+   WP-4): the wait wakes, zero extra ticks run, `Teardown` runs once, and the run joins and rethrows
+   the renderer fatal.
+5. **Modes and allocation.** Headless has no SDL/render thread/ring and paces on the caller thread
+   with the synthesized clock; offscreen has no surface/swapchain; fixed entity counts allocate
+   nothing.
 
 `Bork2d.Tests` covers §2's scene rules, the M2 window/input/loop threading (fake SDL seam, bounded
 joins, no sleeps), the M3 asset loader (one thread, FIFO order, asynchronous completion,
@@ -431,9 +460,14 @@ capture + publish + take + release test. M7 WP-3 adds the deterministic consumer
 per consumed snapshot, held-to-reuse, suspended drain, release-all, counters), the combined-wait
 wake tests, ring `DiscardLatest` tests, the fake-renderer slot API/backpressure tests, and the
 rewritten opt-in GPU tests that publish snapshots one at a time and assert frame/consumed
-relationships, zero validation messages, and all slots `Free` after `Join`. Host pacing and the
-host-level handoff come with WP-4. The suite is 1121 tests: 1105 deterministic tests in CI plus 16
-opt-in/conditional tests (9 real-window, 3 reparse-point, 4 real-GPU).
+relationships, zero validation messages, and all slots `Free` after `Join`. M7 WP-4 adds the
+host handoff tests (acquire-before-freeze order, publish after capture, ring backpressure with no
+input-edge loss, `Exit`/fatal/stop while a producer is blocked, slot abandonment on a `Tick`
+failure, the published Exit/close tick, the handoff counters in the stop log), the minimized 30 Hz
+tick-cap tests with a fake scheduler, the headless K1/L2/F5–F8 schedule tests with the fake clock
+plus one small real-time tolerant pacer test, and the host-level windowed/offscreen GPU handoff
+tests (Q19=S3). The suite is 1158 tests: 1141 deterministic tests in CI plus 17 opt-in/conditional
+(9 real-window, 3 reparse-point, 5 real-GPU).
 
 ## 10. Related documents
 

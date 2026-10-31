@@ -2,9 +2,11 @@ using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using Bork2d.Engine;
 using Bork2d.Engine.Assets.Loading;
+using Bork2d.Engine.Platform;
 using Bork2d.Engine.Scene;
 using Bork2d.Engine.Time;
 using Bork2d.Render;
+using Bork2d.Render.Handoff;
 using Bork2d.Render.Vulkan;
 using Bork2d.Runtime.Input;
 using Bork2d.Runtime.Sdl;
@@ -20,21 +22,23 @@ namespace Bork2d.Runtime.Hosting;
 /// <remarks>
 /// <para>
 /// Windowed apps start the renderer thread without waiting for readiness, run <c>Setup</c>
-/// immediately (D-M6-06), wait for readiness before the first tick, then run an uncapped
+/// immediately (D-M6-06), wait for readiness before the first tick, then run a backpressured
 /// <c>Tick</c> loop until <see cref="IEngine{TLayer}.Exit"/>, a window close/<c>SDL_QUIT</c>, a
-/// renderer fatal error, or a fatal platform error. Offscreen apps start the renderer the same way
-/// and run the windowed-shaped loop without a window, input, or SDL until
-/// <see cref="IEngine{TLayer}.Exit"/> (D-M6-07). Headless keeps the M1 one-tick sequence and never
-/// constructs a renderer or platform and never loads Vulkan.
+/// renderer fatal error, or a fatal platform error. Each tick acquires a snapshot slot, freezes
+/// input, advances time, dispatches text, runs <c>IGame.Tick</c>, captures the engine snapshot, and
+/// publishes it (M7 WP-4). Offscreen runs the same shape without a window, input, or SDL. Headless
+/// runs a paced loop until <see cref="IEngine{TLayer}.Exit"/> with a fully synthesized clock and
+/// never constructs a renderer or platform and never loads Vulkan (Q11=K1, Q12=L2).
 /// </para>
 /// <para>
 /// Error precedence follows the M2/M6 rules: a platform start failure happens before <c>Setup</c>;
 /// a renderer factory/start/readiness failure still lets <c>Setup</c> finish, runs zero ticks,
 /// attempts <c>Teardown</c>, joins the renderer, and is rethrown (D-M6-14); a <c>Setup</c> failure
-/// wins over a renderer failure and runs no <c>Teardown</c>; a <c>Tick</c>/text/<c>Teardown</c>
-/// failure keeps the M2 precedence. A renderer fatal after the first tick stops the loop at the next
-/// boundary. Renderer cleanup failures during normal shutdown are logged and do not change the
-/// run's outcome (D-M6-27).
+/// wins over a renderer failure and runs no <c>Teardown</c>; a <c>Tick</c>/capture/text/
+/// <c>Teardown</c> failure keeps the M2 precedence. A renderer fatal after the first tick stops the
+/// loop at the next boundary, and a fatal observed while a tick is blocked waiting for a slot
+/// starts no further tick (Q9=I1). Renderer cleanup failures during normal shutdown are logged and
+/// do not change the run's outcome (D-M6-27).
 /// </para>
 /// <para>
 /// The asset service is app-owned: the constructed service is unstarted until <c>Run</c>, which
@@ -51,9 +55,16 @@ namespace Bork2d.Runtime.Hosting;
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
 internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, Enum
 {
+    /// <summary>The minimized-only windowed tick cap (Q8=F4: at most 30 ticks per second).</summary>
+    private const int MinimizedTickCapPerSecond = 30;
+
+    private static readonly double _minimizedPeriodSeconds = 1d / MinimizedTickCapPerSecond;
+
     private readonly GameEngine<TLayer> _engine;
     private readonly IGame<TLayer> _game;
-    private readonly IFrameTime _time;
+    private readonly IFrameTime? _frameTime;
+    private readonly IHeadlessTime? _headlessTime;
+    private readonly ISchedulerClock _schedulerClock;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger _logger;
     private readonly AssetService _assetService;
@@ -61,17 +72,20 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
     private readonly WindowProxy? _windowProxy;
     private readonly InputProxy? _inputProxy;
     private readonly Func<ISdlApi> _sdlApiFactory;
+    private bool _minimizedCapActive;
+    private double _minimizedTickStart;
     private bool _disposed;
 
     internal AppRuntime(
         GameEngine<TLayer> engine,
         IGame<TLayer> game,
-        IFrameTime time,
+        ITime time,
         ILoggerFactory loggerFactory,
         AssetService assetService,
         Bork2dAppOptions<TLayer> options,
         WindowProxy? windowProxy = null,
-        InputProxy? inputProxy = null)
+        InputProxy? inputProxy = null,
+        ISchedulerClock? schedulerClock = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(game);
@@ -82,7 +96,9 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
 
         _engine = engine;
         _game = game;
-        _time = time;
+        _frameTime = time as IFrameTime;
+        _headlessTime = time as IHeadlessTime;
+        _schedulerClock = schedulerClock ?? new SystemSchedulerClock();
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger(Bork2dLogging.RuntimeCategory);
         _assetService = assetService;
@@ -113,13 +129,14 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
                     break;
 
                 default:
-                    RunOneTick();
+                    RunHeadless();
                     break;
             }
         }
         finally
         {
-            // Post-shutdown Exit() is a no-op (D-M2-17); this also covers a failed run.
+            // Post-shutdown Exit() is a no-op (D-M2-17); this also covers a failed run and clears
+            // the renderer wake callback.
             _engine.MarkStopped();
         }
     }
@@ -160,72 +177,10 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
     private static ISdlApi CreateDefaultSdlApi() => new SilkSdlApi();
 
     /// <summary>
-    /// The M1 one-tick sequence: start assets, <c>Setup</c>, exactly one <c>Tick</c>,
-    /// <c>Teardown</c>, stop assets.
-    /// </summary>
-    /// <remarks>
-    /// The clock is not advanced, <c>Exit</c> is ignored, and no platform or renderer exists.
-    /// <c>Setup</c> is intentionally outside the tick/teardown pair: if it throws there is nothing to
-    /// tear down and the original exception must reach the caller. The asset service is stopped on
-    /// every path after a successful start, including a <c>Setup</c> failure; a failed start has
-    /// already cleaned its own partial state up.
-    /// </remarks>
-    private void RunOneTick()
-    {
-        _assetService.Start();
-        try
-        {
-            _game.Setup(_engine);
-
-            Exception? tickException = null;
-            try
-            {
-                _game.Tick();
-            }
-            catch (Exception exception)
-            {
-                tickException = exception;
-            }
-
-            Exception? teardownException = null;
-            try
-            {
-                _game.Teardown();
-            }
-            catch (Exception exception)
-            {
-                teardownException = exception;
-            }
-
-            if (tickException is not null && teardownException is not null)
-            {
-                throw new AggregateException(
-                    "IGame.Tick and IGame.Teardown both threw; the original exceptions are inner.",
-                    tickException,
-                    teardownException);
-            }
-
-            if (tickException is not null)
-            {
-                ExceptionDispatchInfo.Capture(tickException).Throw();
-            }
-
-            if (teardownException is not null)
-            {
-                ExceptionDispatchInfo.Capture(teardownException).Throw();
-            }
-        }
-        finally
-        {
-            _assetService.Stop();
-        }
-    }
-
-    /// <summary>
     /// The windowed driver: start assets, start the platform (SDL window/instance/surface), start
     /// the renderer without waiting, run <c>Setup</c>, wait for renderer readiness before the first
-    /// tick, run the uncapped loop, tear the game down, then join the renderer before the platform
-    /// destroys the surface/instance/window (D-M6-09).
+    /// tick, run the backpressured loop, tear the game down, then join the renderer before the
+    /// platform destroys the surface/instance/window (D-M6-09).
     /// </summary>
     private void RunWindowed()
     {
@@ -281,6 +236,7 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         Exception? rendererFailure = null;
         var setupSucceeded = false;
         long ticks = 0;
+        long sequence = 0;
         var stopwatch = Stopwatch.StartNew();
 
         try
@@ -295,6 +251,12 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
             catch (Exception exception)
             {
                 rendererFailure = NormalizeRendererFailure(exception);
+            }
+            finally
+            {
+                // Q9=I1: Exit() from any thread wakes a tick blocked in AcquireSnapshotSlot through
+                // the renderer's ring signal. No renderer means no callback.
+                _engine.SetExitCallback(renderer is null ? null : renderer.WakeSnapshotWait);
             }
 
             // Attach before Setup so the game sees the live window/input immediately. The platform
@@ -344,6 +306,9 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
                     && !_engine.ExitRequested
                     && !platform.ExitRequested)
                 {
+                    IFrameTime frameTime = _frameTime
+                        ?? throw new InvalidOperationException(
+                            "A windowed run requires a frame clock.");
                     while (!_engine.ExitRequested && !platform.ExitRequested)
                     {
                         if (renderer!.FatalException is { } fatal)
@@ -352,11 +317,50 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
                             break;
                         }
 
-                        inputProxy.Freeze();
-                        _time.NewFrame();
-                        inputProxy.DispatchText();
-                        _game.Tick();
-                        ticks++;
+                        // Acquire before the tick-start handoff: input/mouse edges that arrive while
+                        // the tick is backpressured accumulate for the next freeze, and DeltaTime
+                        // keeps measuring the real interval between tick starts (D-004).
+                        SnapshotSlot? slot = renderer.AcquireSnapshotSlot();
+                        if (slot is null)
+                        {
+                            // A renderer fatal/stop while blocked starts no further tick (Q9=I1).
+                            if (renderer.FatalException is { } blockedFatal)
+                            {
+                                rendererFailure = NormalizeRendererFailure(blockedFatal);
+                            }
+
+                            break;
+                        }
+
+                        var published = false;
+                        try
+                        {
+                            inputProxy.Freeze();
+                            frameTime.NewFrame();
+                            inputProxy.DispatchText();
+                            _game.Tick();
+                            ticks++;
+                            _engine.CaptureSnapshot(slot.Snapshot, ++sequence);
+                            renderer.PublishSnapshot(slot);
+                            published = true;
+                        }
+                        catch
+                        {
+                            // A Tick/capture failure frees the Writing slot and publishes nothing.
+                            // A publish that already made the slot Ready is left to the join drain.
+                            if (!published && slot.State == SnapshotSlotState.Writing)
+                            {
+                                renderer.AbandonSnapshotSlot(slot);
+                            }
+
+                            throw;
+                        }
+
+                        if (!_engine.ExitRequested && !platform.ExitRequested)
+                        {
+                            // Q8/F4: minimize-only tick cap; no cap sleep when the loop is stopping.
+                            EnforceMinimizedTickCap(windowProxy);
+                        }
                     }
                 }
             }
@@ -401,7 +405,7 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         }
 
         Exception? platformFatal = platform.FatalException;
-        LogLoopStopped(platform, ticks, stopwatch.Elapsed.TotalSeconds);
+        LogWindowedLoopStopped(platform, renderer, ticks, stopwatch.Elapsed.TotalSeconds);
         ThrowWindowedFailures(
             setupFailure,
             loopFailure,
@@ -412,8 +416,8 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
 
     /// <summary>
     /// The offscreen driver: start assets, start the renderer without waiting, run <c>Setup</c>,
-    /// wait for readiness before the first tick, run the windowed-shaped loop without window/input
-    /// until <c>Exit</c> (D-M6-07), tear down, then stop/join the renderer.
+    /// wait for readiness before the first tick, run the windowed-shaped backpressured loop without
+    /// window/input until <c>Exit</c> (D-M6-07), tear down, then stop/join the renderer.
     /// </summary>
     private void RunOffscreen()
     {
@@ -426,6 +430,7 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         Exception? rendererFailure = null;
         var setupSucceeded = false;
         long ticks = 0;
+        long sequence = 0;
         var stopwatch = Stopwatch.StartNew();
 
         try
@@ -438,6 +443,11 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
             catch (Exception exception)
             {
                 rendererFailure = NormalizeRendererFailure(exception);
+            }
+            finally
+            {
+                // Q9=I1: Exit() wakes a tick blocked in the ring wait; headless has no renderer.
+                _engine.SetExitCallback(renderer is null ? null : renderer.WakeSnapshotWait);
             }
 
             // D-M6-06/D-M6-14: Setup runs immediately (even when the renderer already failed) and
@@ -474,6 +484,9 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
             {
                 try
                 {
+                    IFrameTime frameTime = _frameTime
+                        ?? throw new InvalidOperationException(
+                            "An offscreen run requires a frame clock.");
                     while (!_engine.ExitRequested)
                     {
                         if (renderer!.FatalException is { } fatal)
@@ -482,9 +495,36 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
                             break;
                         }
 
-                        _time.NewFrame();
-                        _game.Tick();
-                        ticks++;
+                        SnapshotSlot? slot = renderer.AcquireSnapshotSlot();
+                        if (slot is null)
+                        {
+                            if (renderer.FatalException is { } blockedFatal)
+                            {
+                                rendererFailure = NormalizeRendererFailure(blockedFatal);
+                            }
+
+                            break;
+                        }
+
+                        var published = false;
+                        try
+                        {
+                            frameTime.NewFrame();
+                            _game.Tick();
+                            ticks++;
+                            _engine.CaptureSnapshot(slot.Snapshot, ++sequence);
+                            renderer.PublishSnapshot(slot);
+                            published = true;
+                        }
+                        catch
+                        {
+                            if (!published && slot.State == SnapshotSlotState.Writing)
+                            {
+                                renderer.AbandonSnapshotSlot(slot);
+                            }
+
+                            throw;
+                        }
                     }
                 }
                 catch (Exception exception)
@@ -517,14 +557,150 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
             _assetService.Stop();
         }
 
-        _logger.LogInformation(
-            "Bork2d offscreen loop stopped: reason={Reason}, ticks={Ticks}, "
-                + "elapsedSeconds={ElapsedSeconds:0.###}",
-            _engine.ExitRequested ? "Exit" : rendererFailure is not null ? "Error" : "Stop",
-            ticks,
-            stopwatch.Elapsed.TotalSeconds);
-
+        LogOffscreenLoopStopped(renderer, ticks, stopwatch.Elapsed.TotalSeconds);
         ThrowOffscreenFailures(setupFailure, loopFailure, rendererFailure, teardownFailure);
+    }
+
+    /// <summary>
+    /// The headless driver (Q11=K1, Q12=L2, Q13=M4/F1): start assets, <c>Setup</c>, a paced
+    /// <c>Tick</c> loop until <c>Exit</c>, <c>Teardown</c> once, stop assets, with no platform,
+    /// renderer, ring, capture, SDL, or Vulkan loader.
+    /// </summary>
+    /// <remarks>
+    /// The pacer captures a monotonic start and makes tick <c>N</c> due at
+    /// <c>start + N * period</c>: tick <c>0</c> runs immediately, and before tick <c>N + 1</c> the
+    /// loop sleeps the positive remainder with the scheduler. When the loop is behind it runs every
+    /// missed tick back-to-back with no sleep (F8, unbounded); the synthesized clock advances one
+    /// exact step per tick, so it catches up with the system schedule. A pacing sleep is not
+    /// interrupted, so <c>Exit</c> latency is bounded by one period.
+    /// </remarks>
+    private void RunHeadless()
+    {
+        var ticksPerSecond = _options.HeadlessTicksPerSecond;
+        IHeadlessTime headlessTime = _headlessTime
+            ?? throw new InvalidOperationException("A headless run requires the synthesized clock.");
+
+        _assetService.Start();
+        try
+        {
+            Exception? setupFailure = null;
+            Exception? tickFailure = null;
+            Exception? teardownFailure = null;
+            var setupSucceeded = false;
+            long ticks = 0;
+            var stopwatch = Stopwatch.StartNew();
+
+            try
+            {
+                try
+                {
+                    _game.Setup(_engine);
+                    setupSucceeded = true;
+                }
+                catch (Exception exception)
+                {
+                    setupFailure = exception;
+                }
+
+                if (setupFailure is null && !_engine.ExitRequested)
+                {
+                    var period = 1d / ticksPerSecond;
+                    var start = _schedulerClock.NowSeconds;
+                    while (!_engine.ExitRequested)
+                    {
+                        var due = start + (ticks * period);
+                        var now = _schedulerClock.NowSeconds;
+                        if (due > now)
+                        {
+                            _schedulerClock.Sleep(TimeSpan.FromSeconds(due - now));
+                        }
+
+                        // A sleep is not interrupted (F1): an Exit requested while sleeping stops
+                        // the loop here, before the next tick.
+                        if (_engine.ExitRequested)
+                        {
+                            break;
+                        }
+
+                        try
+                        {
+                            headlessTime.SetTick(ticks, ticksPerSecond);
+                            _game.Tick();
+                            ticks++;
+                        }
+                        catch (Exception exception)
+                        {
+                            tickFailure = exception;
+                            break;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                stopwatch.Stop();
+                if (setupSucceeded)
+                {
+                    try
+                    {
+                        _game.Teardown();
+                    }
+                    catch (Exception exception)
+                    {
+                        teardownFailure = exception;
+                    }
+                }
+            }
+
+            LogHeadlessLoopStopped(
+                setupFailure,
+                tickFailure,
+                teardownFailure,
+                ticks,
+                stopwatch.Elapsed.TotalSeconds,
+                ticksPerSecond);
+
+            ThrowHeadlessFailures(setupFailure, tickFailure, teardownFailure);
+        }
+        finally
+        {
+            _assetService.Stop();
+        }
+    }
+
+    /// <summary>
+    /// Applies the minimized-only 30 Hz windowed tick cap (Q8/F4) after a completed/published tick.
+    /// </summary>
+    /// <remarks>
+    /// The grid starts when the window is first observed minimized and is discarded on restore.
+    /// Every minimized tick start keeps at least one thirtieth of a second from the previous one,
+    /// using the scheduler's pure sleep; a loop that is already behind does not sleep, so the cap
+    /// never becomes a catch-up burst or a general frame limiter.
+    /// </remarks>
+    /// <param name="window">The attached window proxy whose confirmed minimized state gates the cap.</param>
+    private void EnforceMinimizedTickCap(IWindow window)
+    {
+        if (!window.IsMinimized)
+        {
+            _minimizedCapActive = false;
+            return;
+        }
+
+        var now = _schedulerClock.NowSeconds;
+        if (!_minimizedCapActive)
+        {
+            _minimizedCapActive = true;
+            _minimizedTickStart = now;
+            return;
+        }
+
+        var remaining = _minimizedPeriodSeconds - (now - _minimizedTickStart);
+        if (remaining > 0)
+        {
+            _schedulerClock.Sleep(TimeSpan.FromSeconds(remaining));
+        }
+
+        _minimizedTickStart = _schedulerClock.NowSeconds;
     }
 
     private IRenderer CreateRenderer(RendererMode mode, SdlWindowPlatform? platform)
@@ -610,17 +786,65 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
             _options.VSync,
             _options.Validation);
 
-    private void LogLoopStopped(SdlWindowPlatform platform, long ticks, double elapsedSeconds)
+    private void LogWindowedLoopStopped(
+        SdlWindowPlatform platform,
+        IRenderer? renderer,
+        long ticks,
+        double elapsedSeconds)
     {
         var framebuffer = platform.State.FramebufferSize;
+        SnapshotRingCounters counters = renderer?.SnapshotCounters ?? default;
         _logger.LogInformation(
             "Bork2d windowed loop stopped: reason={Reason}, ticks={Ticks}, "
-                + "elapsedSeconds={ElapsedSeconds:0.###}, finalFramebuffer={FramebufferWidth}x{FramebufferHeight}",
+                + "elapsedSeconds={ElapsedSeconds:0.###}, backpressureWaits={BackpressureWaits}, "
+                + "maxLiveSnapshots={MaxLiveSnapshots}, suspendedConsumptions={SuspendedConsumptions}, "
+                + "finalFramebuffer={FramebufferWidth}x{FramebufferHeight}",
             platform.StopReason,
             ticks,
             elapsedSeconds,
+            counters.BackpressureWaits,
+            counters.MaxLive,
+            renderer?.SuspendedConsumptions ?? 0,
             framebuffer.Width,
             framebuffer.Height);
+    }
+
+    private void LogOffscreenLoopStopped(
+        IRenderer? renderer,
+        long ticks,
+        double elapsedSeconds)
+    {
+        SnapshotRingCounters counters = renderer?.SnapshotCounters ?? default;
+        _logger.LogInformation(
+            "Bork2d offscreen loop stopped: reason={Reason}, ticks={Ticks}, "
+                + "elapsedSeconds={ElapsedSeconds:0.###}, backpressureWaits={BackpressureWaits}, "
+                + "maxLiveSnapshots={MaxLiveSnapshots}, suspendedConsumptions={SuspendedConsumptions}",
+            _engine.ExitRequested ? "Exit" : renderer?.FatalException is not null ? "Error" : "Stop",
+            ticks,
+            elapsedSeconds,
+            counters.BackpressureWaits,
+            counters.MaxLive,
+            renderer?.SuspendedConsumptions ?? 0);
+    }
+
+    private void LogHeadlessLoopStopped(
+        Exception? setupFailure,
+        Exception? tickFailure,
+        Exception? teardownFailure,
+        long ticks,
+        double elapsedSeconds,
+        int ticksPerSecond)
+    {
+        var reason = setupFailure is not null || tickFailure is not null || teardownFailure is not null
+            ? "Error"
+            : _engine.ExitRequested ? "Exit" : "Stop";
+        _logger.LogInformation(
+            "Bork2d headless loop stopped: reason={Reason}, ticks={Ticks}, "
+                + "elapsedSeconds={ElapsedSeconds:0.###}, ticksPerSecond={TicksPerSecond}",
+            reason,
+            ticks,
+            elapsedSeconds,
+            ticksPerSecond);
     }
 
     private static Exception NormalizeRendererFailure(Exception exception)
@@ -676,6 +900,23 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         Add(errors, loopFailure);
         Add(errors, teardownFailure);
         Throw(errors, "The offscreen run failed; the original exceptions are inner.");
+    }
+
+    private static void ThrowHeadlessFailures(
+        Exception? setupFailure,
+        Exception? tickFailure,
+        Exception? teardownFailure)
+    {
+        if (setupFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(setupFailure).Throw();
+            return;
+        }
+
+        var errors = new List<Exception>(capacity: 2);
+        Add(errors, tickFailure);
+        Add(errors, teardownFailure);
+        Throw(errors, "The headless run failed; the original exceptions are inner.");
     }
 
     private static void Add(List<Exception> errors, Exception? exception)
