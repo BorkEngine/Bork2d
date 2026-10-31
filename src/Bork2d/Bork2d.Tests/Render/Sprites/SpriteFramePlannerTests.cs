@@ -337,6 +337,38 @@ public sealed class SpriteFramePlannerTests
         Assert.Equal(200 * 8, total);
     }
 
+    [Fact]
+    public void WarmFiftyThousandSpritePlanAllocatesNothing()
+    {
+        const int spriteCount = 50_000;
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 4, 4);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        SpriteAsset asset = Sprite("tex/a", scale: 8f);
+        for (var index = 0; index < spriteCount; index++)
+        {
+            AddSprite(snapshot, asset, layer: 1u, zIndex: index, x: index * 0.01f);
+        }
+
+        SpriteFramePlan warm = fixture.Planner.Plan(snapshot, 1920, 1080, fixture.Instances);
+        Assert.Equal(spriteCount, warm.InstanceCount);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var total = 0;
+        for (var iteration = 0; iteration < 10; iteration++)
+        {
+            total += fixture.Planner.Plan(snapshot, 1920, 1080, fixture.Instances).InstanceCount;
+        }
+
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(0, allocated);
+        Assert.Equal(10 * spriteCount, total);
+        Assert.True(
+            fixture.Instances.InstanceCapacity >= spriteCount,
+            "The warmed instance sink must hold the whole 50,000-sprite frame.");
+    }
+
     private static void AssertFatal(PlanningFixture fixture, SpriteAsset asset, string field)
     {
         var snapshot = new FrameSnapshot { Sequence = 1 };
