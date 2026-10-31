@@ -1,6 +1,7 @@
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Input;
 using Bork2d.Engine.Platform;
+using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
 using Microsoft.Extensions.Logging;
 
@@ -86,6 +87,25 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     /// Gets the read-only root of the strong scene graph.
     /// </summary>
     ISceneRoot Root { get; }
+
+    /// <summary>
+    /// Gets an immutable snapshot of the last completed frame's render counters (M8 §6.9).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The values describe the last completed frame, except <see cref="RenderStats.ValidationErrors"/>
+    /// and <see cref="RenderStats.ValidationWarnings"/>, which are cumulative for the run.
+    /// <see cref="RenderStats.TexturePages"/> and <see cref="RenderStats.TexturePageCapacity"/>
+    /// include the placeholder page at index <c>0</c>.
+    /// </para>
+    /// <para>
+    /// Callable from any thread. The getter returns <see langword="default"/> before the first
+    /// completed frame, in headless mode, and before the host installs its stats source; after
+    /// shutdown it may retain the last published values. It never throws, never blocks on the GPU,
+    /// and allocates nothing.
+    /// </para>
+    /// </remarks>
+    RenderStats RenderStats { get; }
 
     /// <summary>
     /// Creates a transform, optionally attached under <paramref name="parent"/>.

@@ -1,3 +1,4 @@
+using Bork2d.Engine.Rendering;
 using Bork2d.Render.Diagnostics;
 using Bork2d.Render.Handoff;
 using Microsoft.Extensions.Logging;
@@ -47,6 +48,17 @@ internal interface IRenderer
 
     /// <summary>Gets the latest frame/validation counters.</summary>
     RendererCounters Counters { get; }
+
+    /// <summary>
+    /// Gets the last completed frame's public stats snapshot (M8 §6.9), or
+    /// <see langword="default"/> before the first completed frame.
+    /// </summary>
+    /// <remarks>
+    /// The runtime installs this as the engine's stats source, so the tick thread reads it without
+    /// touching Vulkan. The property is thread-safe, allocation-free, and never blocks on the GPU;
+    /// per-frame publishing is the M8 draw work package.
+    /// </remarks>
+    RenderStats RenderStats { get; }
 
     /// <summary>Gets the one-shot fatal error observed by the host at a tick boundary.</summary>
     Exception? FatalException { get; }

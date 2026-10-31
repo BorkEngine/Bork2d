@@ -64,6 +64,9 @@ internal sealed unsafe class WindowedFrame : IDisposable
     /// <param name="physicalDevice">The physical device used to select instance-buffer memory.</param>
     /// <param name="frameIndex">The GPU frame index, used for debug names.</param>
     /// <param name="queueFamilyIndex">The graphics queue family.</param>
+    /// <param name="pipeline">The sprite pipeline that owns the descriptor-set layout.</param>
+    /// <param name="pageCapacity">The initial bindless page capacity, including the placeholder.</param>
+    /// <param name="maxStorageBufferRange">The device's <c>maxStorageBufferRange</c> limit.</param>
     /// <param name="instance">The instance seam used for debug labels; may be <see langword="null"/>.</param>
     /// <param name="logger">The <c>Bork2d.Render</c> logger.</param>
     /// <returns>The created frame.</returns>
@@ -74,6 +77,9 @@ internal sealed unsafe class WindowedFrame : IDisposable
         PhysicalDevice physicalDevice,
         int frameIndex,
         uint queueFamilyIndex,
+        SpritePipeline pipeline,
+        int pageCapacity,
+        uint maxStorageBufferRange,
         IVulkanInstance? instance,
         ILogger logger)
     {
@@ -138,6 +144,9 @@ internal sealed unsafe class WindowedFrame : IDisposable
                 device,
                 physicalDevice,
                 frameIndex,
+                pipeline,
+                pageCapacity,
+                maxStorageBufferRange,
                 instance,
                 logger);
 

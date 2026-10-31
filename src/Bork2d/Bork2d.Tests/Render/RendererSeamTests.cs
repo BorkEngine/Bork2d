@@ -303,6 +303,27 @@ public sealed class RendererSeamTests
         Assert.Null(renderer.AcquireSnapshotSlot());
     }
 
+    [Fact]
+    public void TheStartRequestCarriesTheAppsAssetSeam()
+    {
+        var factory = new FakeRendererFactory();
+        var assets = new FakeAssets();
+        var startInfo = new RendererStartInfo
+        {
+            Mode = RendererMode.Windowed,
+            InstanceHandle = 0x1234,
+            SurfaceHandle = 0x5678,
+            Width = 1280,
+            Height = 720,
+            LoggerFactory = NullLoggerFactory.Instance,
+            Assets = assets,
+        };
+
+        factory.Create(startInfo);
+
+        Assert.Same(assets, factory.StartInfo!.Assets);
+    }
+
     private static RendererStartInfo StartInfo(nint instanceHandle, nint surfaceHandle)
         => new()
         {
@@ -312,5 +333,6 @@ public sealed class RendererSeamTests
             Width = 1280,
             Height = 720,
             LoggerFactory = NullLoggerFactory.Instance,
+            Assets = new FakeAssets(),
         };
 }

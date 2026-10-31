@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using Bork2d.Render;
 using Bork2d.Render.Diagnostics;
 using Bork2d.Render.Handoff;
+using Bork2d.Render.Textures;
 using Bork2d.Render.Vulkan;
 using Bork2d.Tests.TestDoubles;
 using Bork2d.Tests.TestSupport;
@@ -68,6 +69,7 @@ public sealed class OffscreenRendererGpuTests
                 Height = 240,
                 ValidationRequested = true,
                 LoggerFactory = loggerFactory,
+                Assets = new FakeAssets(),
             };
 
             renderer = Assert.IsType<VulkanOffscreenRenderer>(
@@ -107,6 +109,18 @@ public sealed class OffscreenRendererGpuTests
             Assert.True(
                 renderer.HasInstanceResources,
                 "The renderer did not create the per-frame instance SSBO/descriptor set (Q10=J1).");
+            Assert.True(
+                renderer.HasSpritePipeline,
+                "The renderer did not create the sprite pipeline.");
+            TexturePageStore pages = Assert.IsType<TexturePageStore>(renderer.PageStore);
+            Assert.True(pages.IsPlaceholderReady, "The startup placeholder page is not resident.");
+            Assert.Equal(1, pages.TexturePageCount);
+            Assert.Equal(TexturePageCapacity.Initial, pages.TexturePageCapacityInEntries);
+            Assert.Equal(0, pages.FailedPathCount);
+            _output.WriteLine(
+                $"pages: resident={pages.TexturePageCount}, "
+                    + $"capacity={pages.TexturePageCapacityInEntries}, "
+                    + $"placeholder={pages.IsPlaceholderReady}");
             _output.WriteLine($"ready: {Describe(renderer.Counters)}");
 
             var producer = new TestSnapshotProducer(renderer);

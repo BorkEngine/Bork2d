@@ -742,12 +742,20 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
             VSync = _options.VSync,
             ValidationRequested = _options.Validation,
             LoggerFactory = _loggerFactory,
+            Assets = _engine.Assets,
             CreateReplacementSurface = platform is null
                 ? null
                 : platform.CreateReplacementSurface,
         };
 
-        return factory.Create(startInfo);
+        IRenderer renderer = factory.Create(startInfo);
+
+        // The renderer publishes the last completed frame's stats; the engine's getter reads it
+        // without touching Vulkan. Headless never gets here and keeps returning default. The
+        // closure is allocated once at renderer creation, not per read.
+        _engine.SetRenderStatsSource(() => renderer.RenderStats);
+
+        return renderer;
     }
 
     private void StopAndJoinRenderer(IRenderer? renderer)

@@ -1,3 +1,4 @@
+using Bork2d.Engine.Assets;
 using Bork2d.Render.Vulkan;
 using Microsoft.Extensions.Logging;
 
@@ -51,6 +52,17 @@ internal sealed class RendererStartInfo
 
     /// <summary>Gets the logger factory used for the <c>Bork2d.Render</c> category.</summary>
     internal required ILoggerFactory LoggerFactory { get; init; }
+
+    /// <summary>
+    /// Gets the app's asset service, used by the render thread to load texture descriptors and
+    /// payloads asynchronously (M8 §6.5).
+    /// </summary>
+    /// <remarks>
+    /// The host supplies it after <c>AssetService.Start()</c> and before the renderer is created;
+    /// it stays valid until the renderer joins, which happens before the asset service stops. A
+    /// missing value is a renderer-creation failure (M8 §6.12).
+    /// </remarks>
+    internal required IAssets Assets { get; init; }
 
     /// <summary>
     /// Gets the host callback that creates the replacement surface for the single D-M6-16
