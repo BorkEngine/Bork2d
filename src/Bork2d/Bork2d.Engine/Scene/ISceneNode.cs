@@ -15,8 +15,9 @@ namespace Bork2d.Engine.Scene;
 /// <para>
 /// The <c>*Core</c> members run under the engine-owned structural lock; callers must already
 /// hold it. The lock order is structural lock first, per-object lock second. The interface
-/// deliberately exposes no child enumeration or traversal helper and no entity identity: the
-/// tree is unordered and snapshots are not implemented in M1.
+/// deliberately exposes no child enumeration, no child list, and no entity identity: the tree is
+/// unordered, and the only walk is the internal unordered visitor used by snapshot capture
+/// (M7 WP-2).
 /// </para>
 /// </remarks>
 internal interface ISceneNode
@@ -45,4 +46,15 @@ internal interface ISceneNode
     /// Removes <paramref name="child"/> from this node's child list with swap-back removal.
     /// </summary>
     void RemoveChildCore(Transform child);
+
+    /// <summary>
+    /// Visits this node's direct children in no specified order (M7 snapshot capture).
+    /// </summary>
+    /// <remarks>
+    /// The caller must hold the structural lock, must not mutate the tree from the visitor, and
+    /// must not assume any ordering. The visitor recurses by calling this method on the visited
+    /// node, so the whole rooted tree is reachable without exposing the child list.
+    /// </remarks>
+    /// <param name="visitor">The unordered visitor.</param>
+    void VisitChildrenCore(ISceneNodeVisitor visitor);
 }

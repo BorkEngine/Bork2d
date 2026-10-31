@@ -133,6 +133,10 @@ public sealed class DependencyMatrixTests
         AssertInternal(typeof(Bork2d.Engine.Assets.Vfs.ResolvedAsset));
         AssertInternal(typeof(Bork2d.Engine.Assets.Pack.PackArchive));
         AssertInternal(typeof(Bork2d.Engine.Assets.Pack.PackHeader));
+        AssertInternal(typeof(Bork2d.Engine.Rendering.FrameSnapshot));
+        AssertInternal(typeof(Bork2d.Engine.Rendering.CameraSnapshot));
+        AssertInternal(typeof(Bork2d.Engine.Rendering.SpriteSnapshot));
+        AssertInternal(typeof(Bork2d.Engine.Rendering.SnapshotCapture<>));
     }
 
     [Fact]
