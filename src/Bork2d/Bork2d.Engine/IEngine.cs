@@ -28,9 +28,9 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     /// Gets the monotonic time/delta snapshot. Readable from any thread.
     /// </summary>
     /// <remarks>
-    /// A windowed app advances the clock once per tick; the first tick reports <c>0</c> for both
-    /// values. Headless and offscreen apps run one tick and never advance the clock, so both values
-    /// stay <c>0</c>. See <see cref="ITime"/> for the clamp and thread-safety rules.
+    /// Windowed and offscreen apps advance the clock once per tick; the first tick reports <c>0</c>
+    /// for both values. Headless apps run one tick and leave the clock at <c>0</c>. See
+    /// <see cref="ITime"/> for the clamp and thread-safety rules.
     /// </remarks>
     ITime Time { get; }
 
@@ -125,8 +125,10 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     /// <c>Setup</c> skips every tick but still calls <c>Teardown</c> once (D-M2-19).
     /// </para>
     /// <para>
-    /// Headless and offscreen keep the M1 one-tick behavior and ignore the request. After the run has
-    /// finished or the app has been disposed, this call is a no-op.
+    /// Windowed and offscreen modes finish the current tick and stop the loop before the next
+    /// boundary; offscreen has honored this request since D-M6-07. Headless currently runs one tick
+    /// and ignores the request. After the run has finished or the app has been disposed, this call is
+    /// a no-op.
     /// </para>
     /// </remarks>
     void Exit();
