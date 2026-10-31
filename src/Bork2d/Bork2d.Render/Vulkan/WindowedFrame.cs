@@ -31,7 +31,8 @@ internal sealed unsafe class WindowedFrame : IDisposable
         CommandBuffer commandBuffer,
         Fence fence,
         Semaphore imageAvailable,
-        FrameInstanceResources instanceResources)
+        FrameInstanceResources instanceResources,
+        FrameCapture capture)
     {
         _vk = vk;
         _device = device;
@@ -41,6 +42,7 @@ internal sealed unsafe class WindowedFrame : IDisposable
         Fence = fence;
         ImageAvailable = imageAvailable;
         InstanceResources = instanceResources;
+        Capture = capture;
     }
 
     /// <summary>Gets the frame's command pool.</summary>
@@ -58,12 +60,18 @@ internal sealed unsafe class WindowedFrame : IDisposable
     /// <summary>Gets the empty instance buffer and frame descriptor set (Q10=J1).</summary>
     internal FrameInstanceResources InstanceResources { get; }
 
+    /// <summary>Gets the frame's pooled readback staging and pending capture requests (M8 §6.9).</summary>
+    internal FrameCapture Capture { get; }
+
     /// <summary>Creates one frame's Vulkan objects.</summary>
     /// <param name="vk">The Vulkan API object.</param>
     /// <param name="device">The logical device.</param>
     /// <param name="physicalDevice">The physical device used to select instance-buffer memory.</param>
     /// <param name="frameIndex">The GPU frame index, used for debug names.</param>
     /// <param name="queueFamilyIndex">The graphics queue family.</param>
+    /// <param name="pipeline">The sprite pipeline that owns the descriptor-set layout.</param>
+    /// <param name="pageCapacity">The initial bindless page capacity, including the placeholder.</param>
+    /// <param name="maxStorageBufferRange">The device's <c>maxStorageBufferRange</c> limit.</param>
     /// <param name="instance">The instance seam used for debug labels; may be <see langword="null"/>.</param>
     /// <param name="logger">The <c>Bork2d.Render</c> logger.</param>
     /// <returns>The created frame.</returns>
@@ -74,6 +82,9 @@ internal sealed unsafe class WindowedFrame : IDisposable
         PhysicalDevice physicalDevice,
         int frameIndex,
         uint queueFamilyIndex,
+        SpritePipeline pipeline,
+        int pageCapacity,
+        uint maxStorageBufferRange,
         IVulkanInstance? instance,
         ILogger logger)
     {
@@ -138,6 +149,9 @@ internal sealed unsafe class WindowedFrame : IDisposable
                 device,
                 physicalDevice,
                 frameIndex,
+                pipeline,
+                pageCapacity,
+                maxStorageBufferRange,
                 instance,
                 logger);
 
@@ -149,7 +163,8 @@ internal sealed unsafe class WindowedFrame : IDisposable
                 commandBuffer,
                 fence,
                 imageAvailable,
-                instanceResources);
+                instanceResources,
+                new FrameCapture(vk, device, physicalDevice, frameIndex, logger));
         }
         catch
         {
@@ -170,6 +185,7 @@ internal sealed unsafe class WindowedFrame : IDisposable
             return;
         }
 
+        Capture.Destroy();
         InstanceResources.Destroy();
         DestroyBestEffort(
             _vk,

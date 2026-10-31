@@ -1,7 +1,10 @@
 using System.Diagnostics;
 using Bork2d.Engine;
+using Bork2d.Engine.Rendering;
 using Bork2d.Render.Diagnostics;
 using Bork2d.Render.Handoff;
+using Bork2d.Render.Sprites;
+using Bork2d.Render.Textures;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
 
@@ -34,12 +37,12 @@ namespace Bork2d.Render.Vulkan;
 /// shutdown is the only place it is used. The renderer never calls SDL.
 /// </para>
 /// </remarks>
-internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
+internal sealed unsafe class VulkanOffscreenRenderer : IRenderer, IBindlessPageWriter
 {
     private const int FramesInFlight = 2;
     private const int ColorImages = 2;
     private const string ThreadName = "Bork2d.Render";
-    private const string ClearLabelText = "Bork2d offscreen clear pass";
+    private const string PassLabelText = "Bork2d offscreen passes";
     private const ulong CleanupFenceTimeoutNanoseconds = 1_000_000_000;
 
     private readonly RendererStartInfo _startInfo;
@@ -50,14 +53,19 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
     private readonly SnapshotControlWait _wait;
     private readonly ManualResetEventSlim _ready = new(initialState: false);
     private readonly ManualResetEventSlim _progress = new(initialState: false);
+    private readonly RenderStatsBoard _stats = new();
+    private readonly CaptureRequestQueue _captures = new();
 
     private OffscreenFrame?[] _frames = [];
     private OffscreenTarget? _target;
+    private SpritePipeline? _spritePipeline;
+    private TexturePageStore? _pages;
+    private SpriteFramePlanner? _planner;
     private Thread? _thread;
     private VulkanDevice? _device;
     private IVulkanInstance? _instance;
     private bool _ownsInstance;
-    private nint _clearLabel;
+    private nint _passLabel;
     private int _frameIndex;
     private int _started;
     private int _status = (int)RendererStatus.NotStarted;
@@ -67,17 +75,31 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
     private long _lastFrameNumber;
     private int _validationErrorCount;
     private int _validationWarningCount;
+    private int _loggedPageCount;
+    private int _loggedPageCapacity;
+    private int _loggedPageGrowths;
+    private int _loggedFailedPaths;
+    private int _loggedInstanceCapacity;
+    private int _loggedInstanceGrowths;
     private volatile bool _validationEnabled;
 
     /// <summary>Initializes a new instance of the <see cref="VulkanOffscreenRenderer"/> class.</summary>
     /// <param name="startInfo">The validated offscreen start request.</param>
     /// <param name="instanceFactory">Creates the owned instance when the host supplies none.</param>
+    /// <exception cref="Bork2dException">The start request has no asset seam.</exception>
     internal VulkanOffscreenRenderer(
         RendererStartInfo startInfo,
         IVulkanInstanceFactory instanceFactory)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
         ArgumentNullException.ThrowIfNull(instanceFactory);
+        if (startInfo.Assets is null)
+        {
+            throw new Bork2dException(
+                "Offscreen Vulkan rendering requires the app's IAssets seam so the renderer can "
+                    + "prefetch texture descriptors and payloads (M8 §6.5).");
+        }
+
         _startInfo = startInfo;
         _instanceFactory = instanceFactory;
         _logger = startInfo.LoggerFactory.CreateLogger(RenderLog.Category);
@@ -104,6 +126,9 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
         LastPresentResult: 0);
 
     /// <inheritdoc/>
+    public RenderStats RenderStats => _stats.Current;
+
+    /// <inheritdoc/>
     public Exception? FatalException => _control.FatalException;
 
     /// <inheritdoc/>
@@ -111,6 +136,10 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
 
     /// <inheritdoc/>
     public long SuspendedConsumptions => _consumer.SuspendedConsumptions;
+
+    /// <inheritdoc/>
+    public Task<byte[]> CaptureFrameAsync(CancellationToken cancellationToken = default)
+        => _captures.Request(cancellationToken);
 
     /// <summary>Gets the renderer's snapshot ring (GPU tests observe slot state through it).</summary>
     internal SnapshotRing SnapshotRing => _consumer.Ring;
@@ -134,6 +163,69 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             }
 
             return true;
+        }
+    }
+
+    /// <summary>Gets a value indicating whether the sprite pipeline was created at startup.</summary>
+    internal bool HasSpritePipeline => _spritePipeline is not null;
+
+    /// <summary>Gets the texture-page cache (GPU tests observe the placeholder and counts).</summary>
+    internal TexturePageStore? PageStore => _pages;
+
+    /// <summary>Gets the largest instance-buffer capacity among the frames (GPU tests/diagnostics).</summary>
+    internal int InstanceCapacityHighWater
+    {
+        get
+        {
+            var capacity = 0;
+            for (var index = 0; index < _frames.Length; index++)
+            {
+                FrameInstanceResources? resources = _frames[index]?.InstanceResources;
+                if (resources is not null)
+                {
+                    capacity = Math.Max(capacity, resources.InstanceCapacity);
+                }
+            }
+
+            return capacity;
+        }
+    }
+
+    /// <summary>Gets the total number of instance-buffer growths across the frames.</summary>
+    internal int InstanceGrowthCount
+    {
+        get
+        {
+            var growths = 0;
+            for (var index = 0; index < _frames.Length; index++)
+            {
+                growths += _frames[index]?.InstanceResources.GrowthCount ?? 0;
+            }
+
+            return growths;
+        }
+    }
+
+    /// <inheritdoc/>
+    void IBindlessPageWriter.EnsureCapacity(int capacity)
+    {
+        // Growth happens between frames: the device is idle and every in-flight frame's fence has
+        // signaled before the per-frame descriptor pools/sets are recreated.
+        WaitForDeviceIdle("texture page capacity growth");
+
+        for (var index = 0; index < _frames.Length; index++)
+        {
+            _frames[index]?.InstanceResources.MarkFenceSignaled();
+            _frames[index]?.InstanceResources.RecreateBindless(capacity);
+        }
+    }
+
+    /// <inheritdoc/>
+    void IBindlessPageWriter.WritePage(int pageIndex, ImageView imageView, Sampler sampler)
+    {
+        for (var index = 0; index < _frames.Length; index++)
+        {
+            _frames[index]?.InstanceResources.WritePage(pageIndex, imageView, sampler);
         }
     }
 
@@ -211,6 +303,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
     {
         Volatile.Write(ref _readyFlag, 0);
         _consumer.Ring.Stop();
+        _captures.Close(CreateCaptureClosedException());
         _control.RequestStop();
         if (Volatile.Read(ref _stopReason) != (int)RendererStopReason.Fatal)
         {
@@ -373,6 +466,8 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 ColorImages,
                 _instance,
                 _logger);
+            _spritePipeline = SpritePipeline.Create(_device, _instance, _logger);
+            _spritePipeline.GetOrCreatePipeline(format);
             if (_control.IsStopRequested)
             {
                 SetStopReason(RendererStopReason.Requested);
@@ -380,8 +475,10 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             }
 
             CreateFrames();
+            CreatePageStore();
+            _planner = new SpriteFramePlanner(_pages!, _logger);
             TransitionTargets();
-            _clearLabel = _instance.CreateDebugLabel(ClearLabelText);
+            _passLabel = _instance.CreateDebugLabel(PassLabelText);
             UpdateValidationCounters();
             if (_control.IsStopRequested)
             {
@@ -462,13 +559,20 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 return;
             }
 
-            // The frame fence has signaled: the slot it held is retired, then the newest Ready is
-            // taken for this frame. A null result means another consumer took it; no frame.
+            // The frame fence has signaled: the frame's instance buffer is free to grow, its
+            // recorded capture (if any) can complete from the staging bytes, and the slot it held is
+            // retired before the newest Ready is taken for this frame. A null result means another
+            // consumer took it; no frame.
+            frame.InstanceResources.MarkFenceSignaled();
+            frame.Capture.Complete();
             SnapshotSlot? slot = _consumer.TakeForFreeFrame(_frameIndex);
             if (slot is null)
             {
                 continue;
             }
+
+            // Advance the texture-page state machine once per frame, before recording.
+            _pages!.Pump();
 
             Result resetFences = device.Api.ResetFences(device.Device, 1, &fence);
             if (resetFences != Result.Success)
@@ -486,11 +590,20 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                     $"vkResetCommandBuffer failed with VkResult {resetCommandBuffer}.");
             }
 
-            RecordClear(frame, _frameIndex);
+            OffscreenTarget target = _target!;
+            SpriteFramePlan plan = _planner!.Plan(
+                slot.Snapshot,
+                (int)target.Extent.Width,
+                (int)target.Extent.Height,
+                frame.InstanceResources);
+            RecordFrame(frame, _frameIndex, plan);
             Submit(frame);
+            frame.InstanceResources.MarkSubmitted();
+            frame.Capture.MarkSubmitted();
             _consumer.AttachToFrame(_frameIndex, slot);
             Interlocked.Increment(ref _lastFrameNumber);
             Interlocked.Increment(ref _framesDiscarded);
+            PublishStats(slot.Snapshot.Sequence, target, plan);
             SignalProgress();
             _frameIndex = (_frameIndex + 1) % FramesInFlight;
         }
@@ -498,7 +611,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
 
     private bool IsStopping() => _control.IsStopRequested || _consumer.IsStopped;
 
-    private void RecordClear(OffscreenFrame frame, int imageIndex)
+    private void RecordFrame(OffscreenFrame frame, int imageIndex, SpriteFramePlan plan)
     {
         VulkanDevice device = _device!;
         OffscreenTarget target = _target!;
@@ -517,38 +630,37 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
         _instance!.BeginCachedCommandBufferLabel(
             device.Device.Handle,
             commandBuffer.Handle,
-            _clearLabel);
-        var attachment = new RenderingAttachmentInfo
+            _passLabel);
+
+        bool capture = frame.Capture.BeginRecord(
+            _captures,
+            (int)target.Extent.Width,
+            (int)target.Extent.Height,
+            target.Format);
+        SpritePassRecorder.RecordPasses(
+            device.Api,
+            commandBuffer,
+            _spritePipeline!,
+            _spritePipeline!.GetOrCreatePipeline(target.Format),
+            frame.InstanceResources.DescriptorSet,
+            target.GetView(imageIndex),
+            target.GetImage(imageIndex),
+            plan.Cameras,
+            plan.CameraPlanCount);
+
+        if (capture)
         {
-            SType = StructureType.RenderingAttachmentInfo,
-            ImageView = target.GetView(imageIndex),
-            ImageLayout = ImageLayout.ColorAttachmentOptimal,
-            LoadOp = AttachmentLoadOp.Clear,
-            StoreOp = AttachmentStoreOp.Store,
-            ClearValue = new ClearValue
-            {
-                Color = new ClearColorValue
-                {
-                    Float32_0 = 0f,
-                    Float32_1 = 0f,
-                    Float32_2 = 0f,
-                    Float32_3 = 1f,
-                },
-            },
-        };
-        var rendering = new RenderingInfo
-        {
-            SType = StructureType.RenderingInfo,
-            RenderArea = new Rect2D { Extent = target.Extent },
-            LayerCount = 1,
-            ViewMask = 0,
-            ColorAttachmentCount = 1,
-            PColorAttachments = &attachment,
-            PDepthAttachment = null,
-            PStencilAttachment = null,
-        };
-        device.Api.CmdBeginRendering(commandBuffer, &rendering);
-        device.Api.CmdEndRendering(commandBuffer);
+            FrameCaptureRecorder.RecordCopy(
+                device.Api,
+                commandBuffer,
+                target.GetImage(imageIndex),
+                frame.Capture.StagingBuffer,
+                (int)target.Extent.Width,
+                (int)target.Extent.Height,
+                toPresentSrc: false);
+            frame.Capture.MarkRecorded();
+        }
+
         _instance.EndCommandBufferLabel(device.Device.Handle, commandBuffer.Handle);
 
         Result end = device.Api.EndCommandBuffer(commandBuffer);
@@ -557,6 +669,33 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             throw new Bork2dException($"vkEndCommandBuffer failed with VkResult {end}.");
         }
     }
+
+    private void PublishStats(long sequence, OffscreenTarget target, SpriteFramePlan plan)
+    {
+        RenderStats stats = FrameRenderStats.Create(
+            sequence,
+            (int)target.Extent.Width,
+            (int)target.Extent.Height,
+            plan,
+            _pages?.TexturePageCount ?? 0,
+            _pages?.TexturePageCapacityInEntries ?? 0,
+            Volatile.Read(ref _validationErrorCount),
+            Volatile.Read(ref _validationWarningCount));
+        _stats.Publish(in stats);
+    }
+
+    private void CompleteCaptures()
+    {
+        for (var index = 0; index < _frames.Length; index++)
+        {
+            _frames[index]?.Capture.Complete();
+        }
+    }
+
+    private ObjectDisposedException CreateCaptureClosedException()
+        => new(
+            nameof(VulkanOffscreenRenderer),
+            "The offscreen renderer stopped before the capture request could be served.");
 
     private void Submit(OffscreenFrame frame)
     {
@@ -587,6 +726,9 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
     private void CreateFrames()
     {
         VulkanDevice device = _device!;
+        SpritePipeline pipeline = _spritePipeline
+            ?? throw new Bork2dException(
+                "The offscreen renderer cannot create frames without the sprite pipeline.");
         _frames = new OffscreenFrame?[FramesInFlight];
         for (var index = 0; index < FramesInFlight; index++)
         {
@@ -596,6 +738,9 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 device.PhysicalDevice,
                 index,
                 device.QueueFamilyIndex,
+                pipeline,
+                TexturePageCapacity.Initial,
+                device.Limits.MaxStorageBufferRange,
                 _instance,
                 _logger);
             _frames[index] = frame;
@@ -605,6 +750,26 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 frame.CommandBuffer.Handle,
                 $"Bork2d offscreen frame {index} command buffer");
         }
+    }
+
+    /// <summary>
+    /// Creates the texture-page cache, uploads the placeholder (waiting its fence at startup), and
+    /// makes it resident at index 0. Failure is a renderer startup failure.
+    /// </summary>
+    private void CreatePageStore()
+    {
+        VulkanDevice device = _device!;
+        SpritePipeline pipeline = _spritePipeline
+            ?? throw new Bork2dException(
+                "The offscreen renderer cannot create texture pages without the sprite pipeline.");
+        var gpu = new VulkanTexturePages(device, pipeline, this, _instance, _logger);
+        _pages = new TexturePageStore(
+            _startInfo.Assets,
+            gpu,
+            (int)pipeline.MaxTexturePages,
+            (int)device.Limits.MaxImageDimension2D,
+            _logger);
+        _pages.Start();
     }
 
     private void TransitionTargets()
@@ -719,8 +884,10 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 "The Vulkan offscreen renderer failed: " + exception.Message,
                 exception);
 
-        // A renderer fatal wakes a blocked producer and stops further acquisition (Q9=I1).
+        // A renderer fatal wakes a blocked producer, stops further acquisition, and faults pending
+        // capture requests (M8 §6.12).
         _consumer.Ring.Stop();
+        _captures.Close(fatal);
         _control.PublishFatal(fatal);
         SetStopReason(RendererStopReason.Fatal);
         SetStatus(RendererStatus.Faulted);
@@ -752,11 +919,11 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             }
         }
 
-        if (_clearLabel != 0 && _instance is { } instance)
+        if (_passLabel != 0 && _instance is { } instance)
         {
             try
             {
-                instance.DestroyDebugLabel(_clearLabel);
+                instance.DestroyDebugLabel(_passLabel);
             }
             catch (Exception exception)
             {
@@ -764,22 +931,37 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             }
             finally
             {
-                _clearLabel = 0;
+                _passLabel = 0;
             }
         }
 
         // Every frame fence was observed and the device is idle: every held snapshot slot returns
-        // to Free before the device is destroyed.
+        // to Free before the device is destroyed. Capture requests recorded on those frames complete
+        // here from their staging bytes; requests that never reached a frame fault instead.
         ReleaseHeldSnapshots();
+
+        CompleteCaptures();
+        _captures.Close(CreateCaptureClosedException());
+
+        CapturePageCounters();
+        CaptureInstanceCounters();
 
         _target?.Dispose();
         _target = null;
 
+        // Frame descriptor sets/pools are destroyed before the page images/views they reference,
+        // and the pages before the pipeline that owns their samplers and the device itself.
         for (var index = 0; index < _frames.Length; index++)
         {
             _frames[index]?.Dispose();
             _frames[index] = null;
         }
+
+        _pages?.Destroy();
+        _pages = null;
+
+        _spritePipeline?.Destroy();
+        _spritePipeline = null;
 
         _device?.Destroy();
         _device = null;
@@ -790,6 +972,17 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
         }
 
         _instance = null;
+    }
+
+    private void WaitForDeviceIdle(string operation)
+    {
+        VulkanDevice device = _device!;
+        Result result = device.Api.DeviceWaitIdle(device.Device);
+        if (result != Result.Success)
+        {
+            throw new Bork2dException(
+                $"vkDeviceWaitIdle failed with VkResult {result} during {operation}.");
+        }
     }
 
     private void WaitForFrameFences(VulkanDevice device)
@@ -839,6 +1032,42 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
         }
     }
 
+    /// <summary>Records the page counters before the page store is destroyed for the stop log.</summary>
+    private void CapturePageCounters()
+    {
+        TexturePageStore? pages = _pages;
+        if (pages is null)
+        {
+            return;
+        }
+
+        _loggedPageCount = pages.TexturePageCount;
+        _loggedPageCapacity = pages.TexturePageCapacityInEntries;
+        _loggedPageGrowths = pages.GrowthCount;
+        _loggedFailedPaths = pages.FailedPathCount;
+    }
+
+    /// <summary>Records the instance-buffer high-water marks before the frames are destroyed.</summary>
+    private void CaptureInstanceCounters()
+    {
+        var capacity = 0;
+        var growths = 0;
+        for (var index = 0; index < _frames.Length; index++)
+        {
+            FrameInstanceResources? resources = _frames[index]?.InstanceResources;
+            if (resources is null)
+            {
+                continue;
+            }
+
+            capacity = Math.Max(capacity, resources.InstanceCapacity);
+            growths += resources.GrowthCount;
+        }
+
+        _loggedInstanceCapacity = capacity;
+        _loggedInstanceGrowths = growths;
+    }
+
     private void LogStarted()
     {
         OffscreenTarget? target = _target;
@@ -852,7 +1081,10 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 + "images={ImageCount}, framesInFlight={FramesInFlight}, memoryBytes={MemoryBytes}, "
                 + "handoff={Handoff}, ringDepth={RingDepth}, "
                 + "oneFramePerSnapshot={OneFramePerSnapshot}, instanceResources={InstanceResources}, "
-                + "validation={Validation}, framesPresented={FramesPresented}, "
+                + "instanceCapacity={InstanceCapacity}, texturePages={TexturePages}, "
+                + "texturePageCapacity={TexturePageCapacity}, bindlessLimit={BindlessLimit}, "
+                + "placeholder={Placeholder}, validation={Validation}, "
+                + "framesPresented={FramesPresented}, "
                 + "framesDiscarded={FramesDiscarded}, swapchainRecreations={SwapchainRecreations}, "
                 + "validationErrors={ValidationErrors}, validationWarnings={ValidationWarnings}, "
                 + "stopReason={StopReason}.",
@@ -867,6 +1099,11 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             SnapshotRing.SlotCapacity,
             "on",
             HasInstanceResources ? "on" : "off",
+            FrameInstanceResources.InitialCapacity,
+            _pages?.TexturePageCount ?? 0,
+            _pages?.TexturePageCapacityInEntries ?? 0,
+            _spritePipeline?.MaxTexturePages ?? 0,
+            _pages?.IsPlaceholderReady == true ? "on" : "off",
             _instance?.ValidationEnabled == true ? "on" : "off",
             0,
             Volatile.Read(ref _framesDiscarded),
@@ -886,7 +1123,12 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 + "backpressureWaits={BackpressureWaits}, maxLiveSnapshots={MaxLiveSnapshots}, "
                 + "suspendedConsumptions={SuspendedConsumptions}, "
                 + "framesPresented={FramesPresented}, framesDiscarded={FramesDiscarded}, "
-                + "swapchainRecreations={SwapchainRecreations}, "
+                + "swapchainRecreations={SwapchainRecreations}, texturePages={TexturePages}, "
+                + "texturePageCapacity={TexturePageCapacity}, pageGrowths={PageGrowths}, "
+                + "failedPages={FailedPages}, instanceCapacity={InstanceCapacity}, "
+                + "instanceGrowths={InstanceGrowths}, drawCalls={DrawCalls}, "
+                + "instances={Instances}, cameras={Cameras}, "
+                + "nonEmptyCameras={NonEmptyCameras}, skippedSprites={SkippedSprites}, "
                 + "validationErrors={ValidationErrors}, validationWarnings={ValidationWarnings}, "
                 + "lastFrameNumber={LastFrameNumber}, lastPresentResult={LastPresentResult}.",
             nameof(RendererMode.Offscreen),
@@ -900,6 +1142,17 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             0,
             Volatile.Read(ref _framesDiscarded),
             0,
+            _loggedPageCount,
+            _loggedPageCapacity,
+            _loggedPageGrowths,
+            _loggedFailedPaths,
+            _loggedInstanceCapacity,
+            _loggedInstanceGrowths,
+            _stats.Current.DrawCalls,
+            _stats.Current.Instances,
+            _stats.Current.Cameras,
+            _stats.Current.NonEmptyCameras,
+            _stats.Current.SkippedSprites,
             Volatile.Read(ref _validationErrorCount),
             Volatile.Read(ref _validationWarningCount),
             Volatile.Read(ref _lastFrameNumber),

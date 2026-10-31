@@ -1,0 +1,92 @@
+<Project>
+
+    <!--
+        Bork2d.ShaderCompiler.targets - build-time GLSL -> SPIR-V integration for Bork2d.Render.
+
+        Import this file from Bork2d.Render. Before CoreCompile it restores and builds the build-only
+        Bork2d.ShaderCompiler tool out of process, compiles the checked-in GLSL under Shaders/ to
+        SPIR-V, and adds the generated C# file (internal static byte arrays) to this project's
+        compilation. The tool and its Silk.NET.Shaderc packages never enter a runtime project, the
+        app output, or the AOT publish graph; no runtime shader I/O or compiler exists and no Vulkan
+        SDK is required.
+
+        Properties:
+          Bork2dShaderCompilerProjectFile   tool project; default build/Bork2d.ShaderCompiler
+          Bork2dShaderSourceDirectory       checked-in GLSL directory; default <project>/Shaders
+          Bork2dShaderCompilerEnabled       false disables the integration
+          Bork2dDotNetHost                  dotnet host; default dotnet
+
+        The target runs for design-time builds too: the clean-clone CI sequence restores only the
+        solution, then runs the format check with restore disabled, so the generated type must be
+        available to that compilation. The generated file lives under the intermediate output and is
+        never committed or published as a loose file. RemoveProperties keeps the consuming project's
+        RID/publish settings off the tool restore and build.
+    -->
+
+    <PropertyGroup>
+        <Bork2dShaderCompilerEnabled Condition="'$(Bork2dShaderCompilerEnabled)' == ''">true</Bork2dShaderCompilerEnabled>
+        <Bork2dShaderCompilerProjectFile Condition="'$(Bork2dShaderCompilerProjectFile)' == ''">$(MSBuildThisFileDirectory)Bork2d.ShaderCompiler\Bork2d.ShaderCompiler.csproj</Bork2dShaderCompilerProjectFile>
+        <Bork2dShaderSourceDirectory Condition="'$(Bork2dShaderSourceDirectory)' == ''">$(MSBuildProjectDirectory)\Shaders</Bork2dShaderSourceDirectory>
+        <Bork2dShaderCompilerTargetFramework Condition="'$(Bork2dShaderCompilerTargetFramework)' == ''">net11.0</Bork2dShaderCompilerTargetFramework>
+        <Bork2dDotNetHost Condition="'$(Bork2dDotNetHost)' == ''">dotnet</Bork2dDotNetHost>
+        <Bork2dShaderCompilerAssembly Condition="'$(Bork2dShaderCompilerAssembly)' == ''">$(MSBuildThisFileDirectory)Bork2d.ShaderCompiler\bin\$(Configuration)\$(Bork2dShaderCompilerTargetFramework)\Bork2d.ShaderCompiler.dll</Bork2dShaderCompilerAssembly>
+        <_Bork2dShaderModeSwitch Condition="'$(Configuration)' == 'Release'">--optimize</_Bork2dShaderModeSwitch>
+        <_Bork2dShaderModeSwitch Condition="'$(_Bork2dShaderModeSwitch)' == ''">--debug</_Bork2dShaderModeSwitch>
+    </PropertyGroup>
+
+    <Target Name="Bork2dRestoreShaderCompiler"
+            Condition="'$(Bork2dShaderCompilerEnabled)' != 'false' and '$(_Bork2dRestoreShaderCompilerCompleted)' != 'true'">
+        <PropertyGroup>
+            <_Bork2dRestoreShaderCompilerCompleted>true</_Bork2dRestoreShaderCompilerCompleted>
+        </PropertyGroup>
+        <MSBuild Projects="$(Bork2dShaderCompilerProjectFile)"
+                 Targets="Restore"
+                 Properties="Configuration=$(Configuration)"
+                 RemoveProperties="RuntimeIdentifier;SelfContained;OutDir;OutputPath;PublishDir;BaseOutputPath;BaseIntermediateOutputPath" />
+    </Target>
+
+    <Target Name="Bork2dBuildShaderCompiler"
+            DependsOnTargets="Bork2dRestoreShaderCompiler"
+            Condition="'$(Bork2dShaderCompilerEnabled)' != 'false'">
+        <MSBuild Projects="$(Bork2dShaderCompilerProjectFile)"
+                 Targets="Build"
+                 Properties="Configuration=$(Configuration)"
+                 RemoveProperties="RuntimeIdentifier;SelfContained;OutDir;OutputPath;PublishDir;BaseOutputPath;BaseIntermediateOutputPath" />
+        <Error Condition="!Exists('$(Bork2dShaderCompilerAssembly)')"
+               Text="Bork2d shaders: the shader compiler was not produced at '$(Bork2dShaderCompilerAssembly)'." />
+    </Target>
+
+    <!--
+        IntermediateOutputPath is computed by the SDK targets after the project body, so the
+        generated path is resolved inside a target rather than at evaluation time.
+    -->
+    <Target Name="Bork2dPrepareSpriteShaderBuild"
+            Condition="'$(Bork2dShaderCompilerEnabled)' != 'false'">
+        <PropertyGroup>
+            <_Bork2dShaderGeneratedFile>$(IntermediateOutputPath)ShaderCompiler\SpriteShaders.g.cs</_Bork2dShaderGeneratedFile>
+        </PropertyGroup>
+    </Target>
+
+    <Target Name="Bork2dCompileSpriteShaders"
+            DependsOnTargets="Bork2dPrepareSpriteShaderBuild;Bork2dBuildShaderCompiler"
+            Condition="'$(Bork2dShaderCompilerEnabled)' != 'false'"
+            Inputs="$(Bork2dShaderSourceDirectory)\sprite.vert;$(Bork2dShaderSourceDirectory)\sprite.frag;$(Bork2dShaderCompilerAssembly)"
+            Outputs="$(_Bork2dShaderGeneratedFile)">
+        <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(_Bork2dShaderGeneratedFile)'))" />
+        <Exec Command="&quot;$(Bork2dDotNetHost)&quot; &quot;$(Bork2dShaderCompilerAssembly)&quot; compile --output &quot;$(_Bork2dShaderGeneratedFile)&quot; --vertex &quot;$(Bork2dShaderSourceDirectory)\sprite.vert&quot; --fragment &quot;$(Bork2dShaderSourceDirectory)\sprite.frag&quot; $(_Bork2dShaderModeSwitch)"
+              WorkingDirectory="$(MSBuildProjectDirectory)"
+              StandardOutputImportance="high"
+              StandardErrorImportance="high" />
+    </Target>
+
+    <Target Name="Bork2dIncludeSpriteShaders"
+            DependsOnTargets="Bork2dCompileSpriteShaders"
+            BeforeTargets="CoreCompile"
+            Condition="'$(Bork2dShaderCompilerEnabled)' != 'false'">
+        <ItemGroup>
+            <Compile Include="$(_Bork2dShaderGeneratedFile)" Condition="Exists('$(_Bork2dShaderGeneratedFile)')" />
+            <FileWrites Include="$(_Bork2dShaderGeneratedFile)" Condition="Exists('$(_Bork2dShaderGeneratedFile)')" />
+        </ItemGroup>
+    </Target>
+
+</Project>

@@ -12,8 +12,8 @@
 > `Bork2d.Render`, and the asset service logs start/overlay/error/stop events; there is no per-frame
 > or per-asset-per-tick logging. Configuration is identical in all modes, and the default path runs in
 > the AOT gate (`Pong.Desktop`, headless with the baked pack for 120 ticks by default or
-> `--headless --ticks N`). The suite is 1158 tests (1141
-> deterministic plus 17 opt-in/conditional). The project-consolidation refactor (D-041/D-042) renamed
+> `--headless --ticks N`). The suite is 1362 tests (1335
+> deterministic plus 27 opt-in/conditional). The project-consolidation refactor (D-041/D-042) renamed
 > the engine categories to `Bork2d.Engine` and `Bork2d.Engine.Assets`; `Bork2d.Runtime` and
 > `Bork2d.Render` are unchanged. M6 makes the `Bork2d.Render` category current for instance,
 > validation, and device-selection events (§5.3), the windowed swapchain/clear/present and
@@ -21,7 +21,12 @@
 > loop-stop line. M7 adds the handoff fields/counters to the same one-shot renderer start/stop
 > lines (§5.3) and the handoff counters to the windowed/offscreen loop-stop lines and the
 > headless loop-stop line (§5.1). The Pong example (D-043/D-044) owns the game-side title/logging
-> behavior.
+> behavior. **M8 (sprite renderer) is implementation-complete through WP-5; the milestone PR is open
+> for review and is not merged.** WP-1 reconciled the docs, WP-2 added the
+> pipeline/camera/planning code, WP-3 added the page/start-stop fields, WP-4 added the draw
+> counters/statistics publication and throttled draw/content diagnostics (§5.4), and WP-5 adds no
+> logging change (the benchmark measures without per-frame logs). The rule remains: no per-frame,
+> per-sprite, or per-draw logging.
 
 ## 1. Surface
 
@@ -118,7 +123,7 @@ game code creates its own categories.
 | `Bork2d.Runtime` | builder, modes, lifecycle, windowing |
 | `Bork2d.Engine` | reserved for scene/time/snapshot diagnostics; no current log sites |
 | `Bork2d.Engine.Assets` | pack parsing, decompression, loading |
-| `Bork2d.Render` | Vulkan instance/validation/device selection (M6 WP-2); windowed swapchain create/recreate/minimize and renderer start/stop counters (WP-3); offscreen target/start/stop counters (WP-4) |
+| `Bork2d.Render` | Vulkan instance/validation/device selection (M6 WP-2); windowed swapchain create/recreate/minimize and renderer start/stop counters (WP-3); offscreen target/start/stop counters (WP-4); M8 WP-2 adds the shader/pipeline startup identity, WP-3 adds the page/instance startup fields, page capacity/stop counters, and the once-per-failed-path warning, and WP-4 adds the draw/instance/camera/skipped stop values, instance-growth lines, and throttled draw diagnostics (§5.4) |
 | game-defined | `CreateLogger("MyGame")` or `CreateLogger<T>()` |
 Startup logs use `Bork2d.Runtime` and one structured message after validation:
 
@@ -233,6 +238,38 @@ line. The `[GpuFact]` windowed and offscreen tests assert zero validation errors
 shutdown and record the counters and frame/consumed relationships. The renderer logs
 frame-presented/discarded, handoff, and validation counters once at stop. No line is emitted from
 the acquire/record/present hot path.
+
+### 5.4 Sprite renderer, pages, and stats (M8 WP-2–WP-4, `Current`)
+
+M8 adds no new category; it extends the `Bork2d.Render` one-shot lines and adds **throttled**
+diagnostics. WP-2 creates the pipeline/layout/samplers with static debug labels. WP-3 extends both
+start lines with the instance capacity, texture page count/capacity, bindless limit, and placeholder
+state, adds the page/growth/failed counters to both stop lines, logs one warning per failed path, and
+logs one information line per page-capacity growth. WP-4 adds the planner diagnostics (invalid
+layer once per renderer, invalid camera once per renderer/reason, non-Quad once per asset path,
+`Clear.Depth` once per renderer), the instance-growth information line, the draw/instance/camera/
+skipped values on the stop lines, and once-per-completed-frame `RenderStats` publication (silent).
+There is still no per-frame, per-sprite, per-draw, per-camera, or per-image logging, and
+`RenderStats`/`CaptureFrameAsync` never log per call.
+
+| Event | Level | Fields |
+| --- | --- | --- |
+| Sprite renderer started (start line extension) | Information | mode, pipeline/shader identity (build-time SPIR-V), page initial capacity, instance capacity (1024), bindless limit (effective `maxPerStage`/`maxDescriptorSet` update-after-bind sampled images), placeholder on/off, validation on/off — `Current` (WP-3) |
+| Page capacity grown | Information | old/new capacity, limit; once per capacity change — `Current` (WP-3) |
+| Instance buffer grown | Information | frame index, old/new capacity (instances/bytes), limit; once per capacity change — `Current` (WP-4) |
+| Placeholder used for a path | Warning | canonical asset path and the content failure kind; **once per failed path** for the run — `Current` (WP-3) |
+| Texture/page content failure | Warning | path/kind and reason; throttled once per unique path/kind — `Current` (WP-3: one warning per failed path) |
+| Invalid sprite/layer/non-Quad skip | Warning | invalid layer once per renderer, non-Quad once per asset path; totals live in counters — `Current` (WP-4) |
+| Invalid camera skipped | Warning | once per renderer per invalid reason (not per camera per frame) — `Current` (WP-4) |
+| `Clear.Depth` requested | Information | once per renderer; it behaves like `Clear.None` and never touches depth — `Current` (WP-4) |
+| Draw/content diagnostic totals | Information | repeated skips are counted and reported on the renderer stop line, not logged per occurrence — `Current` (WP-4) |
+| Renderer stopped (stop line extension) | Information | frames, draws/instances, cameras/non-empty, pages/capacity/growths, page uploads/failures/placeholder uses, skipped sprites, instance capacity/growths, validation errors/warnings, stop reason — `Current` (WP-3/WP-4) |
+| Page/instance capacity at the device limit, malformed sprite, shader/pipeline failure | Error | the exception naming the field/limit; the renderer-fatal path stops the ring and the host rethrows after teardown |
+
+The renderer also logs its final counters once at stop (the values are the same ones published in
+`IEngine.RenderStats`); the public stats/capture API is otherwise silent. Throttling means once per
+unique asset path/kind (or once per renderer for camera/invalid-layer/`Clear.Depth` kinds), with
+totals in counters; a failure must never produce a line per frame.
 
 ## 6. NativeAOT
 

@@ -9,7 +9,12 @@
 > the snapshot ring/capture, renderer consumption, host
 > backpressure, the paced headless loop, and the Pong `--headless` 120-tick gate
 > (`--headless --ticks N` overrides). The
-> warning/style/format/AOT gates and the docs link check are active. CI runs the docs link
+> warning/style/format/AOT gates and the docs link check are active. **M8 (sprite renderer) is
+> implementation-complete through WP-5; the milestone PR is open for review and is not merged.**
+> WP-1 reconciled the docs, WP-2 added the shader pipeline/camera math/instance planning, WP-3
+> added the texture pages/`RenderStats`, WP-4 added the draws/stats/capture, and WP-5 added the
+> explicit short-vs-long Pong/AOT gate, the Release 50,000-sprite 165 FPS benchmark, the manual
+> visual artifact, and the final docs (§2.1/§6). CI runs the docs link
 > check, build, tests, and format verification on PRs to `develop` and pushes to `develop`; the
 > NativeAOT publish/run gate (`Pong.Desktop` headless, windowed, and offscreen) is a required
 > local gate.
@@ -38,7 +43,10 @@
   (full clean-machine validation remains M10).
 - Vulkan 1.3 GPU/driver for windowed/offscreen runs and the GPU tests; the Khronos validation
   layer (Vulkan SDK) for validation evidence (its absence skips the strict GPU assertions with a
-  warning, D-M6-20). Headless builds/tests need neither.
+  warning, D-M6-20). Headless builds/tests need neither. **The Vulkan SDK is not required to
+  build or run the shader pipeline:** the checked-in GLSL is compiled at build time by the
+  build-only `Bork2d.ShaderCompiler` tool (Silk.NET.Shaderc 2.23.0); `glslangValidator`, `glslc`,
+  and `spirv-val` are optional local tools and are not invoked by the build.
 - NativeAOT toolchain (MSVC) for the local publish gate.
 
 ## 2. Build, test, and local gates
@@ -60,9 +68,9 @@ A `Pong.slnx` Release build still builds the external engine project references 
 `.slnx` has no configuration mapping outside `examples/pong`); the direct AOT publish is the Release
 proof.
 
-The engine suite is **1158 tests**: 1141 deterministic tests run in CI; 17 opt-in/conditional tests
+The engine suite is **1362 tests**: 1335 deterministic tests run in CI; 27 opt-in/conditional tests
 are skipped unless the environment variable or capability is present (9 `[WindowFact]` real-window
-tests, 3 reparse-point capability tests, and 5 `[GpuFact]` real-GPU tests). The deterministic set
+tests, 3 reparse-point capability tests, and 15 `[GpuFact]` real-GPU tests). The deterministic set
 includes the pack-format/writer tests, the path/VFS/browse/contract tests, the loader/threading and
 error-contract tests, generic pack-time reference validation, the public asset-reference/pack-build
 contracts, the runtime asset lifecycle/error-matrix tests, the builder/no-descriptor/no-host tests,
@@ -104,11 +112,14 @@ On a Vulkan 1.3 machine run the opt-in real-GPU tests with:
 
 ```powershell
 $env:BORK2D_RUN_GPU_TESTS = '1'
-dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "Category=Gpu"
+dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "Category=Gpu"   # correctness, validation enabled
+dotnet test src/Bork2d/Bork2d.slnx -c Release --filter "Category=Gpu" # includes the 165 FPS benchmark
 Remove-Item Env:BORK2D_RUN_GPU_TESTS
 ```
 
-The five `[GpuFact]` tests are skipped by default and are not a CI job (D-M6-05). One creates a
+There are **15** `[GpuFact]` tests, skipped by default and not a CI job (D-M6-05). They cover the
+device/bootstrap, windowed and offscreen renderers, the windowed app host, the offscreen app loop,
+and the M8 draw/passes/placeholder/fatal/paging/growth/capture contract. One creates a
 validation-enabled instance and selects an offscreen device; the windowed renderer test creates a
 real SDL window, instance, and surface on the test thread, consumes one snapshot per presented
 frame (30+), exercises resize/fullscreen/minimize, stops under frame load with a bounded join, and
@@ -120,6 +131,10 @@ factory hook and asserts `Setup`/`Tick`/`Teardown`, advanced `ITime`, discarded 
 renderer, and zero validation messages. They skip at runtime when the loader, desktop session, a
 suitable device, or the validation layer is unavailable. Run them locally before a renderer PR.
 
+The 50,000-sprite benchmark is the same `Category=Gpu` filter but is a **Release** gate: it skips in
+Debug (unoptimized code generation is not a performance measurement) and is the only test that
+asserts the approved median ≥165 FPS target. See [M8 gates](#21-shader-compiler-packages-and-m8-gates).
+
 NativeAOT publish/run is required for runtime-affecting changes (the runs are local, never CI):
 
 ```powershell
@@ -127,18 +142,27 @@ dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-
 $pong = 'examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe'
 & $pong --headless                        # headless gate: 120 ticks by default, baked 7-entry pack
 & $pong --headless --ticks 7              # headless override: exactly N completed ticks
-& $pong --windowed --ticks 120            # windowed gate: exit 0 after exactly 120 ticks
-& $pong --offscreen --ticks 120           # offscreen gate: exit 0 after exactly 120 ticks
+& $pong --windowed --ticks 120            # short gate: lifecycle/content/validation only
+& $pong --offscreen --ticks 120           # short gate: lifecycle/content/validation only
+& $pong --offscreen --ticks 20000         # long presentation gate: draw/statistics relationships
+& $pong --windowed --ticks 20000          # long windowed proof: same relationships
 ```
 
 The publish must report zero AOT/trim warnings and contain `assets.pck` and `SDL2.dll` (and no
 `vulkan-1.dll`, which is the system loader). M6 wires the windowed/offscreen renderer into the
 Runtime host, so the AOT publish graph compiles the Vulkan bindings; the published `--headless` run
 still never loads Vulkan, and the published windowed (`--windowed --ticks 120`) and offscreen
-(`--offscreen --ticks 120`) runs are the three-mode AOT gate on a GPU machine. The headless gate
+(`--offscreen --ticks 120`) runs are the short-mode AOT gate on a GPU machine. The headless gate
 exits 0 after exactly 120 completed ticks by default and after exactly N with `--headless --ticks
-N` (Q15=O2/F3); the windowed/offscreen gate is backpressured and exits on `Exit` after exactly 120
-ticks, and their frame counts are not asserted (Q22=V1). The GPU tests prove the discard path. Any
+N` (Q15=O2/F3); the windowed/offscreen 120-tick runs are backpressured and assert exit 0, one
+`Setup`/`Teardown`, exactly 120 completed ticks, validation `0/0`, and the loaded pack/content, but
+not the draw counters (the unpaced M7 loop can finish before the asynchronous texture pages are
+drawable; the stats are printed). The documented `--offscreen --ticks 20000` and
+`--windowed --ticks 20000` runs are the long presentation gate and assert `Cameras >= 1`,
+`NonEmptyCameras >= 1`, `DrawCalls >= 1`, `Instances >= 3`, `TexturePages >= 3`,
+`DrawCalls == NonEmptyCameras <= Cameras`, and validation `0/0`. The split threshold is the explicit
+`PongAcceptanceGate.LongRunTickThreshold = 1000`; there is no `TexturePages < 3` bypass, no pacing
+change, and no frame-count/duration assertion (Q22=V1). The GPU tests prove the discard path. Any
 `IL3000`/`IL3002` warning stays covered by the existing narrow `Pong.Desktop`
 suppression; a diagnostic publish with `NoWarn` cleared reports only those two codes (see
 [NativeAOT §6](architecture/nativeaot.md#6-native-libraries-and-silknet)).
@@ -155,10 +179,16 @@ and exits `0` only when the scene, the `GameSettings` struct root, the `sprites/
 `CircleProcessor` `textures/ball` descriptor and exact 16384-byte raw payload, the red/blue tints, the
 7-entry browse, exactly `N` completed ticks (`N = 120` by default or the explicit `--ticks` value),
 and the detached world all pass. The `--windowed --ticks 120` and `--offscreen --ticks 120` runs
-load the same pack and assert one `Setup`, exactly 120 completed ticks, and one `Teardown`; the
-backpressured runs are short by design and assert no frame count or duration (Q22=V1). The
-interactive `--windowed` run is the manual visibility/input check (the window shows the M7
-one-frame-per-snapshot black clear; sprites arrive in M8; the title carries the score/state). Inspect
+load the same pack and assert one `Setup`, exactly 120 completed ticks, one `Teardown`, validation
+`0/0`, and the same content chain; their draw statistics are printed but not asserted. The
+`--offscreen --ticks 20000`/`--windowed --ticks 20000` runs assert the same lifecycle/content plus
+the full draw/statistics relationships. The long runs are the presentation evidence; the short runs
+are intentionally not made to draw by pacing or sleeping (the M7 loop is unchanged). The
+interactive `--windowed` run is the manual visibility/input check (the window shows the M8
+per-camera sprite passes once the two texture pages are ready; the M8 WP-2 shader pipeline and the
+WP-3 texture pages/startup placeholder feed the WP-4 draws; the title carries the score/state).
+Note that the unpaced 120-tick automated run can finish before the asynchronous pages are drawable;
+a longer run is the visual/draw-stats check. Inspect
 the publish directory: it is a NativeAOT single-file output plus PDBs, so the
 managed assemblies are linked in. It must contain `Pong.Desktop.exe`, `assets.pck`, `SDL2.dll`, and
 the engine/runtime/`Pong.Common` PDBs (`Pong.Common.pdb` is the on-disk proof that the game assembly
@@ -166,6 +196,56 @@ is in the graph), and must not contain a `Pong.Assets`, `Bork2d.Bake`, `Tomlyn`,
 assembly.
 `dotnet clean src/Bork2d/Bork2d.slnx` and `dotnet clean examples/pong/Pong.slnx` remove the packs and
 the incremental state under the assets project's `obj/bork2d/bake`.
+
+### 2.1 Shader compiler, packages, and M8 gates
+
+The M8 sprite renderer compiles shaders at **build time**, not at runtime:
+
+- The build-only JIT tool `build/Bork2d.ShaderCompiler` pins `Silk.NET.Shaderc` **2.23.0** and
+  `Silk.NET.Shaderc.Native` **2.23.0** (build-only; they never enter the runtime or AOT publish
+  graph). No runtime project references them.
+- An MSBuild target (`build/Bork2d.ShaderCompiler.targets`, imported by `Bork2d.Render`) restores
+  and builds the tool out of process (with `RemoveProperties` so the consumer's RID/publish settings
+  do not leak), compiles the checked-in GLSL
+  (`src/Bork2d/Bork2d.Render/Shaders/sprite.vert`, `sprite.frag`) to SPIR-V (Vulkan 1.3 target;
+  debug info in Debug, optimization in Release), and emits
+  `obj/<Configuration>/<TFM>/ShaderCompiler/SpriteShaders.g.cs` with the SPIR-V byte arrays into
+  `Bork2d.Render`'s compilation before `CoreCompile`. The generated file is not committed and is never
+  a loose publish file; the code is linked into the app and the publish contains no `.spv` and no
+  shaderc assembly. The target also runs for design-time/format builds, so the clean-clone CI sequence
+  (`dotnet restore` → `dotnet format --no-restore` → `dotnet build --no-restore`) works without a
+  prior build. The tool project is **not** in `src/Bork2d/Bork2d.slnx` and is never referenced by a
+  runtime project.
+- **No Vulkan SDK is required.** `glslangValidator`, `glslc`, and `spirv-val` are not build
+  dependencies; installing the SDK is still useful for the validation-layer GPU evidence.
+- Do not add runtime shader compilation, shader file I/O, or a runtime shaderc dependency.
+
+M8 gates (in addition to the Debug/Release build, tests, format, docs link check, and AOT gate):
+
+```powershell
+pwsh scripts/check-docs.ps1
+git diff --check
+$env:BORK2D_RUN_GPU_TESTS = '1'
+dotnet test src/Bork2d/Bork2d.slnx -c Debug --filter "Category=Gpu"   # 14 correctness tests; benchmark skips
+dotnet test src/Bork2d/Bork2d.slnx -c Release --filter "Category=Gpu" # 15 tests incl. the benchmark
+Remove-Item Env:BORK2D_RUN_GPU_TESTS
+```
+
+- **GPU tests stay local-only** (`[GpuFact]`, serialized `RealGpu` collection, skipped without
+  `BORK2D_RUN_GPU_TESTS=1`); CI is unchanged and has no GPU runner. M8 GPU tests assert
+  counters/passes/validation/lifecycle/placeholder/paging/growth and the `CaptureFrameAsync`
+  **contract**; there are **no golden/pixel tests**. Visual acceptance is a manual `Pong` frame
+  obtained through `IEngine.CaptureFrameAsync` (raw RGBA under the untracked `artifacts/`) and
+  recorded in the milestone PR.
+- **Benchmark (local-only, opt-in Release `[GpuFact]`):** offscreen 1920×1080, one camera, 50,000
+  generated sprites (one texture/page, 500×100 grid, `ZIndex` 0…49,999), a 10-second measurement
+  window after a 2-second warm-up, vsync off, no artificial cap or sleep. Record p50/p95/max frame
+  time, FPS, allocations, and the machine/GPU/driver/SDK; zero steady-state allocations in the
+  measured path. Pass criterion: **median ≥165 FPS** (p50 ≤ ~6.06 ms). The benchmark skips in Debug
+  because unoptimized code generation is not a performance measurement; the Release target is not
+  weakened. If the target cannot be met, stop and report; do not lower it. As-built (2026-10-31):
+  median **177.3 FPS**, p50 5.640 ms, p95 6.562 ms, 1,744 frames/10.003 s, 0 measured allocations,
+  validation `0/0`.
 
 ## 3. Build, style, and warnings
 
@@ -218,7 +298,8 @@ documented. The rule applies to every new public API; do not remove it.
 ## 6. Tests and CI
 
 - Add unit tests with behavior changes; pack/format tests for asset changes; threading tests for
-  handoff changes; GPU/visual tests for renderer changes. Asset/pack tests build packs in memory or
+  handoff changes; GPU tests for renderer changes (structural/counter/lifecycle/API-contract
+  assertions — **no pixel/golden tests**). Asset/pack tests build packs in memory or
   in temp files (`PackBuilder`/`TempPackDirectory`) and never commit binary **test/pack** fixtures;
   the bake tests generate their own source trees and textures in temp directories, and the Pong AOT
   gate loads the game-baked pack. The committed game sources are
@@ -229,14 +310,21 @@ documented. The rule applies to every new public API; do not remove it.
   Asset-loader tests are deterministic: they use a narrow
   internal hook plus bounded signals/joins (no sleeps, retries, or timing assertions) to prove FIFO
   order, asynchronous completion, and shutdown cancellation.
+- **M8 renderer changes** add deterministic plan/math/page/instance-layout/public-API tests, the
+  fake-`IAssets` page-state and `RenderStats` tests (WP-3), the planner/growth/stats/capture-lifecycle
+  and zero-allocation tests (WP-4), the 50,000-sprite warmed-plan allocation test and the short/long
+  Pong gate tests (WP-5), plus opt-in GPU rendering, placeholder/paging, drawing, growth,
+  `CaptureFrameAsync` contract tests, and the Release benchmark (WP-4/WP-5). The benchmark and the
+  manual visual artifact are local evidence, not CI; there are no pixel/golden assertions.
 - Real-window tests use `[WindowFact]`, are skipped without `BORK2D_RUN_WINDOW_TESTS=1`, share the
   serialized `RealSdlWindow` collection, and may use only signals/bounded waits (no sleeps). Run
   them locally before a window/runtime PR. Real-GPU tests use `[GpuFact]`, are skipped without
   `BORK2D_RUN_GPU_TESTS=1`, share the serialized `RealGpu` collection, skip when the loader/device/
   validation layer is unavailable, and likewise use no sleeps. Run them locally before a renderer PR.
 - The dependency test and docs link check run in CI. The AOT publish gate (`Pong.Desktop`
-  `--headless` with its 120-tick default, `--headless --ticks N`, `--windowed --ticks 120`, and
-  `--offscreen --ticks 120`) is a required local gate, not a CI job. CI scope is unchanged: pull
+  `--headless` with its 120-tick default, `--headless --ticks N`, the short `--windowed --ticks 120`
+  and `--offscreen --ticks 120` runs, and the long `--offscreen --ticks 20000`/`--windowed --ticks
+  20000` presentation runs) is a required local gate, not a CI job. CI scope is unchanged: pull
   requests to `develop` and pushes to `develop` only (restore, format verify, build, Debug tests);
   there is no GPU, AOT, or examples-solution job.
 - GPU/validation checks need a Vulkan 1.3 machine from M6; the deterministic suite, headless builds,
@@ -269,6 +357,10 @@ documented. The rule applies to every new public API; do not remove it.
       window/renderer changes.
 - [ ] Pack format/version updated if assets changed.
 - [ ] Owning docs/API/decision log updated; status markers honest.
+- [ ] Shader changes compile through the build-time `Bork2d.ShaderCompiler` tool; no runtime shader
+      I/O, no new runtime package, and the publish has no shaderc assembly or loose `.spv`.
+- [ ] Renderer changes run the opt-in GPU tests locally; M8 renderer PRs record the
+      benchmark/manual visual check when they apply. No pixel/golden tests are added.
 - [ ] No unjustified suppressions.
 
 ## 9. Related documents

@@ -25,8 +25,16 @@
 > historical; the [file-processors spec](../specs/file-processors.md) and
 > [asset processors](asset-processors.md) own the current bake design.
 >
-> The editor is **M5**. `IEngine.Assets` returns the real service in every mode, including the
-> `WithoutAssets()` empty filesystem. `IAssets` member contracts and errors are owned by the
+> The editor is **removed from Stage 1** (M5 was dropped). `IEngine.Assets` returns the real service
+> in every mode, including the `WithoutAssets()` empty filesystem. **M8 (sprite renderer) is
+> implementation-complete through WP-5; the milestone PR is open for review and is not merged.**
+> The renderer resolves `SpriteAsset.Texture`/
+> `TextureDescriptor.Payload` through `IAssets` and owns the GPU page cache. M8 WP-2 added the shader
+> pipeline and the pure sprite field/quad/instance planning; WP-3 added the internal texture-page
+> cache (async prefetch, validation, generated placeholder, pooled uploads with fences, dynamic
+> capacity); WP-4 resolves the page per candidate sprite in the plan pre-pass and draws it; WP-5
+> adds no asset contract change. `IAssets`
+> member contracts and errors are owned by the
 > [API reference](../api/reference.md#7-iassets); this document owns the pack/VFS/asset model and
 > the bake pipeline.
 
@@ -61,6 +69,10 @@ assets.pck (+ overlays) → VFS (NativeAOT) → loader thread → deserialized a
   `DataRef` for raw data. `null` means absent.
 - Textures are raw bytes (RGBA8 now, KTX2 later); sprites carry UVs, pivot, topology, optional
   indices, and a pixels-per-unit scale, with no vertices array.
+- The renderer never reads the scene tree: it consumes the tick snapshot and resolves sprite texture
+  links through `IAssets` at draw time (`Current` in M8 WP-4). It loads the descriptor and
+  then the raw payload on the render thread through the one loader thread; the loader itself remains
+  deserialize-only.
 
 ## 2. Asset kinds
 
@@ -256,8 +268,9 @@ loads complete asynchronously. Do not call `Browse` in `Tick`; v1 has no unload.
 
 ## 7. Loading, pack validation, and failure
 
-`Status: loader and pack-build reference validation Current (M3/D-035); GPU readiness/upload
-Planned (M8).`
+`Status: loader and pack-build reference validation Current (M3/D-035); the GPU page subsystem
+(prefetch, validation, placeholder, pooled uploads, bindless descriptors, dynamic capacity) is
+`Current` (M8 WP-3); per-sprite page resolution in the frame plan is `Current` (M8 WP-4).`
 
 Thread ownership, enqueue-time snapshotting, task completion, and shutdown are owned by
 [Threading §6](threading.md#6-asset-and-pack-coordination); `IAssets` error kinds are owned by the
@@ -269,8 +282,10 @@ Thread ownership, enqueue-time snapshotting, task completion, and shutdown are o
   is no post-deserialize validation.
 - **Sprite asset loading.** `LoadAsset<SpriteAsset>` is a normal MessagePack read. It does not
   resolve `Texture`, decode the descriptor, read the raw payload, or run UV/scale/pivot/topology
-  checks. The renderer later resolves references and skips a sprite whose texture is absent or
-  missing. There is no handle, readiness state, placeholder, or sprite-specific retry.
+  checks. There is no handle, readiness state, placeholder, or sprite-specific retry. The renderer
+  (M8; page cache WP-3, per-sprite plan lookup WP-4) resolves the links at draw time through `IAssets`: a pending page
+  is skipped until ready, a missing/failed texture draws the generated placeholder page, and
+  malformed sprite fields are a fatal renderer error. None of this changes the load contract.
 - **References.** `AssetRef<T>`/`DataRef` hold canonical paths; `null` is absent. The reference
   overloads throw `ArgumentException` for an absent reference, and a present but missing link faults
   `NotFound` when loaded.
@@ -283,19 +298,26 @@ Thread ownership, enqueue-time snapshotting, task completion, and shutdown are o
   payload-size consistency are not runtime checks. The built-in texture processor validates
   descriptor dimensions, format/filter/wrap, and payload size; the bake validates binding,
   processor outputs, and references for all custom data; it does **not** validate sprite UVs, scale,
-  pivot, topology, or indices (D-M4-06). Sprite field validation and slicing belong to M5 (D-035's
-  broader sentence is narrowed by D-M4-06).
-- **No retry and no renderer.** There is no automatic retry, loose-file fallback, or blocking wait
-  (D-M3-18). The loader never creates GPU resources; M8 creates GPU pages/uploads on the render
-  thread and resolves sprite references at draw time. A sprite is drawable only when its asset,
-  descriptor, raw payload, and GPU page are available; a missing stage emits no instance.
+  pivot, topology, or indices (D-M4-06). **M5 is removed:** there is no bake/load-time sprite field
+  validation in Stage 1. The renderer's defensive draw-time rules apply instead: a malformed
+  `SpriteAsset` field (`Uvs`, `Scale`, `Pivot`, unknown topology, `Indices` on a `Quad`) is a fatal
+  `Bork2dException` naming the field and texture reference; `null` sprites, invalid layers, pending
+  pages, and non-`Quad` topologies are skipped; a missing/failed texture draws the placeholder.
+- **No retry and no blocking.** There is no automatic retry, loose-file fallback, or blocking wait
+  (D-M3-18). The loader never creates GPU resources. The M8 renderer creates GPU pages/uploads on the
+  render thread (WP-3), prefetches through `IAssets` asynchronously (polled, never awaited), and will
+  resolve sprite references in the draw-time plan (WP-4); a missing content path is marked failed for the run
+  and drawn with the placeholder. A sprite is drawable only when its asset, descriptor, and a ready
+  page (or the placeholder) are available.
 - **Logging** is owned by [Logging §5.2](logging.md#52-asset-service-m3): start, overlay mounted,
   load failure, load success at Debug, and stop; nothing per frame.
 
 ## 8. Texture descriptors
 
 `Status: public model Current (D-035); texture import and descriptor field validation Current (the
-built-in texture processor, D-036); GPU upload and KTX2 Planned (M6/M8).`
+built-in texture processor, D-036); GPU read/upload is `Current` (M8 WP-3: async descriptor+payload
+prefetch, content validation, pooled image/staging upload with a fence, generated placeholder);
+KTX2 is deferred.`
 
 A texture is a MessagePack **descriptor** plus a **raw payload**: `art/player` and
 `art/player-raw` (the descriptor path plus `-raw`).
@@ -326,18 +348,22 @@ missing sidecars are valid and take the builder's texture defaults
   `Bork2d.Engine.Assets` with PascalCase property-name keys (no `[Key]`) and no per-asset version.
   `Format`, `Filter`, and `Wrap` are the non-null `TextureFormat`/`TextureFilter`/`TextureWrap` enums
   (D-040). `System.Numerics.Vector2` uses Nerdbank's generated shape; there is no reflection resolver.
-- **No runtime validation.** `LoadAsset<TextureDescriptor>` returns the packed descriptor as
+- **No runtime validation at load.** `LoadAsset<TextureDescriptor>` returns the packed descriptor as
   stored. `PackBuilder` validates that a non-null `Payload` exists and targets a raw entry. The
   built-in texture processor owns canonical-path, dimension, format, filter/wrap, and payload-size
-  checks; the M5 editor reuses them. The processor is a normal registered processor, so a game can
-  replace it for an extension with another implementation.
-- **No payload read.** The loader never decompresses or uploads the payload; M8 reads it on first
-  texture use. There is no CPU texture resource or descriptor cache.
+  checks; no editor consumes them in Stage 1. The processor is a normal registered processor, so a
+  game can replace it for an extension with another implementation. The M8 renderer re-checks the
+  descriptor defensively when the content arrives (format, dimensions ≤ `maxImageDimension2D`, exact
+  payload length) and maps a bad one to the placeholder; the failed path is not retried (WP-3).
+- **No payload read at load.** The loader never decompresses or uploads the payload; the M8 renderer
+  reads it on first texture use through `IAssets` (WP-3 page cache; per-sprite plan lookup in WP-4). There
+  is no CPU texture resource or descriptor cache.
 
 ## 9. Sprite assets
 
 `Status: public model Current (D-035); the bake emits SpriteAsset as ordinary custom data (no sprite
-field validation); field validation and slicing are M5 (D-M4-06); GPU/draw Planned (M8).`
+field validation); there is no bake/load field validation in Stage 1 (M5 is removed); texture page
+resolution is `Current` (M8 WP-3) and the per-sprite plan lookup/draw is `Current` (M8 WP-4).`
 
 A sprite is a MessagePack asset (for example `sprites/player/idle`) describing a textured quad:
 
@@ -362,22 +388,26 @@ and pivot.
   quad is positioned around the pivot and converted to world Y-up; UVs stay top-left origin,
   ordered top-left, top-right, bottom-right, bottom-left.
 - `Quad` uses the four generated corners; indexed topologies are preserved for the future indexed
-  path. v1 draws `Quad` only; non-Quad assets are never silently treated as quads.
+  path. v1 draws `Quad` only: a non-Quad asset is skipped with a once-per-asset diagnostic and is
+  never silently treated as a quad.
 - **Public shape.** `SpriteAsset` is a public `[GenerateShape]` class in `Bork2d.Engine.Assets`.
   `PackBuilder` validates a non-null `Texture` reference exists and targets a MessagePack entry.
   The loader does not validate UVs, scale, pivot, topology, or indices, and the bake tooling does
   not either: a data TOML declaring `type = "Bork2d.Engine.Assets.SpriteAsset"` in `[bork2d]` is baked
-  as ordinary custom data, so an invalid sprite value can bake. M5 adds sprite field validation and
-  slicing (D-M4-06).
-- The bake tooling bakes the MessagePack form from TOML; the M5 editor writes TOML and adds slicing.
-  The renderer resolves sprite asset → descriptor → payload → GPU page; tint, layer, z-index, and
-  transform stay on the renderable. `ISpriteRender.Sprite` holds a loaded `SpriteAsset?` directly.
+  as ordinary custom data, so an invalid sprite value can bake. The approved M8 renderer applies the
+  draw-time rules instead: malformed fields are fatal, while `null`/invalid-layer/non-Quad/pending
+  sprites are skipped and a failed texture draws the placeholder.
+- The bake tooling bakes the MessagePack form from TOML; slicing and sprite field validation are not
+  planned for Stage 1. The renderer resolves sprite asset → descriptor → payload → GPU page; tint,
+  layer, z-index, and transform stay on the renderable. `ISpriteRender.Sprite` holds a loaded
+  `SpriteAsset?` directly.
 
 ## 10. TOML source model
 
 `Status: Current for custom data, sprites-as-data, and processor sources (D-036). The bake
 implements binding, required/unknown/type/range checks, processor/sidecar handling, and reference
-validation. Sprite field validation and slicing are M5 (D-M4-06).`
+validation. There is no sprite field validation or slicing in Stage 1 (M5 is removed); the M8
+renderer's draw-time fatal/skip rules apply.`
 
 Data is authored as TOML for readable, reviewable, diffable git history, then baked to MessagePack.
 One model describes both formats: the same `Bork2d.Engine`-referencing C# type is the TOML authoring
@@ -676,10 +706,13 @@ also configure overlay/DLC packs; the app opens the main pack at `Run()` (or the
 path) and mounts DLC packs with `IAssets.LoadPack`. Paths resolve against the
 process current directory or are given as absolute paths (D-M3-03/Q-10). There is no "next to the
 executable" fallback in the runtime; `Pong.Desktop` passes `AppContext.BaseDirectory/assets.pck`. The
-M5 editor reuses the builder and shares the validator/baker; the local gates build debug and release
-packs and run loader validation on both (CI builds Debug only).
+editor is not part of Stage 1 (M5 was removed); the builder and validator it was planned to share are
+`Current`. The local gates build debug and release packs and run loader validation on both (CI builds
+Debug only).
 
 ## 12. Editor
+
+`Status: not in Stage 1 (M5 removed); target design kept for reference.`
 
 `Bork2d.Editor` is an Avalonia library/app working on the source tree, not `assets.pck`; it is JIT and
 not part of the game runtime. `Project.Editor` is a thin game-specific host referencing
@@ -697,7 +730,7 @@ editor.Run();
 ```
 
 - `WithProject` points at the game's `MyGame.Assets` project; D-037 removes the M4 descriptor, and
-  the editor will consume the same builder configuration (M5 refinement).
+  the editor would consume the same builder configuration (not in Stage 1).
 - `WithAssetType<T>()` registers a serializable class for the property editor as a **compile-time
   registration** (no assembly scanning); the JIT editor may reflect for property metadata, and a
   source generator can replace that later without changing the API.
@@ -751,8 +784,8 @@ multi-project workspaces in v1.
 
 ## 14. Threading
 
-`Status: loader and pack-build reference validation Current (M3/D-035); renderer/GPU integration
-Planned (M8).`
+`Status: loader and pack-build reference validation Current (M3/D-035); the renderer/GPU
+integration is `Current` for the page cache/upload path (M8 WP-3) and the draw (M8 WP-4).`
 
 Loader ownership, queueing, enqueue-time resolution, task completion, and shutdown are owned by
 [Threading §6](threading.md#6-asset-and-pack-coordination). Pack-specific points:
@@ -763,17 +796,20 @@ Loader ownership, queueing, enqueue-time resolution, task completion, and shutdo
   each `LoadAsset<T>` returns a fresh instance.
 - `PackBuilder` validates asset references at pack build and runs in tooling, never in the runtime.
   The bake pipeline also validates binding, processor outputs, and references before packing (with
-  source spans where available), so a correct bake never reaches `PackBuilder`'s backstop. Sprite
-  field validation remains M5 (D-M4-06). Processors run sequentially on the bake thread and are not
-  part of the runtime.
-- The runtime has no GPU work yet. M8 creates GPU texture pages/uploads on the render thread and
-  resolves `SpriteAsset.Texture`/`TextureDescriptor.Payload` at draw time; load-and-keep applies to
-  packs in v1.
+  source spans where available), so a correct bake never reaches `PackBuilder`'s backstop. There is
+  no sprite field validation in Stage 1 (M5 is removed); the renderer's draw-time rules apply.
+  Processors run sequentially on the bake thread and are not part of the runtime.
+- The runtime's GPU work starts in M8 WP-3: the renderer calls `IAssets` from the render thread and
+  polls the resulting tasks (the loader thread remains the only loader) to create GPU texture
+  pages/uploads, and WP-4 resolves `SpriteAsset.Texture`/`TextureDescriptor.Payload` at draw time;
+  load-and-keep applies to packs in v1. No render-thread blocking wait exists for a page load.
 
 `WithHeadless` supports packs, `LoadData`, `LoadAsset<T>`, `Browse`, and `Exists`; sprites load as
 plain assets but no GPU page exists and nothing renders. `WithOffscreen` runs the M6 Vulkan renderer
 against a fixed target (`Setup` → `Tick`… → `Teardown` until `Exit`, `ITime` advances, frames are
-discarded); sprites and readback are M8/M10. Neither mode has `IWindow`/`IInput`. See
+discarded); WP-3 uploads the startup placeholder page, and WP-4 draws the sprites and provides the public
+`CaptureFrameAsync` readback.
+Neither mode has `IWindow`/`IInput`. See
 [Runtime lifecycle](runtime-lifecycle.md#2-modes).
 
 ## 15. Limits and security
@@ -802,11 +838,11 @@ that in exchange for no arbitrary caps, and fails cleanly rather than reading ou
 | --- | --- |
 | `Bork2d.Engine` | `Current` (M3/D-035): v1 pack reader/writer, structural validation, canonical paths, public `Bork2d.Engine.Assets.Pack.PackBuilder`/`PackCompressionMode`, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, the app-scoped service (one thread, FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, `AssetException`), and generic pack-time reference validation |
 | `assets.pck` reader/writer | `Current` (M3): v1 format reader and writer; the VFS, overlays, `Browse`/`Exists`, and the loader are wired through `IEngine.Assets` |
-| Texture descriptors and raw RGBA8 payloads | `Current` (M3/D-035; texture import D-036): public `TextureDescriptor` model with a `DataRef` payload; the built-in texture processor (`Required` sidecar, `png`/`jpg`/`jpeg`/`bmp`/`tga`) decodes from anywhere under the asset root to straight-alpha RGBA8, emits the descriptor + `<descriptor>-raw` payload, and validates dimensions, format/filter/wrap, and payload size. Payload read/upload and KTX2 are M8/M6 |
-| Sprite assets (UVs/scale/pivot/topology/indices) | `Current` (M3/D-035; data bake D-036): public `SpriteAsset` model with an `AssetRef<TextureDescriptor>` link, loaded via `LoadAsset<SpriteAsset>` and baked as ordinary custom data when a TOML declares its type in `[bork2d]`. No runtime or bake-time field validation; UV/pivot/scale/topology/indices validation and slicing are M5 (D-M4-06). Drawing is M8 |
+| Texture descriptors and raw RGBA8 payloads | `Current` (M3/D-035; texture import D-036): public `TextureDescriptor` model with a `DataRef` payload; the built-in texture processor (`Required` sidecar, `png`/`jpg`/`jpeg`/`bmp`/`tga`) decodes from anywhere under the asset root to straight-alpha RGBA8, emits the descriptor + `<descriptor>-raw` payload, and validates dimensions, format/filter/wrap, and payload size. GPU read/upload is `Current` in M8 WP-3 (async prefetch, content validation, generated placeholder, pooled upload with a fence, dynamic bindless capacity); KTX2 is deferred |
+| Sprite assets (UVs/scale/pivot/topology/indices) | `Current` (M3/D-035; data bake D-036): public `SpriteAsset` model with an `AssetRef<TextureDescriptor>` link, loaded via `LoadAsset<SpriteAsset>` and baked as ordinary custom data when a TOML declares its type in `[bork2d]`. No runtime or bake-time field validation; there is no sprite field validation or slicing in Stage 1 (M5 removed), so the M8 renderer's draw-time fatal/skip rules apply. Texture-page resolution is `Current` (M8 WP-3); drawing is `Current` (M8 WP-4) |
 | CPU resource table (descriptors/sprites) | Removed by D-035; the loader caches no resolved sprite/texture resources |
 | Runtime asset lifecycle | `Current` (M3): `WithoutAssets()`, base pack at `Run()` before the window/`Setup`, start/stop/error order, post-shutdown `ObjectDisposedException`, app disposal |
-| TOML model, baker, deterministic bake | `Current` (D-036/D-037/D-038): builder-configured ordered packs, per-source `[bork2d].type`, explicit `RegisterAsset<T>()` registrations, processor discovery/sidecars, shape-driven Tomlyn DOM binder, built-in texture processor, local + main cross-pack reference validation, structural determinism, schema-3 incremental manifest, atomic per-pack writes, CLI, and MSBuild targets. No project descriptor or generated host. Sprite field validation/slicing are M5 |
+| TOML model, baker, deterministic bake | `Current` (D-036/D-037/D-038): builder-configured ordered packs, per-source `[bork2d].type`, explicit `RegisterAsset<T>()` registrations, processor discovery/sidecars, shape-driven Tomlyn DOM binder, built-in texture processor, local + main cross-pack reference validation, structural determinism, schema-3 incremental manifest, atomic per-pack writes, CLI, and MSBuild targets. No project descriptor or generated host. No sprite field validation/slicing in Stage 1 |
 | `Bork2d.Bake` | `Current` (D-036/D-037/D-038): internal JIT implementation plus the **public** `Bork2d.Bake` builder/processor surface; `bake` is incremental (schema 3), `validate` is check-mode, `clean` removes packs + manifest state, and `copy-packs` serves consuming apps; exit codes `0`–`3`. `Bork2d.Bake.Cli` and `generate-host` are removed |
 | `build/Bork2d.Assets.targets` / `Bork2d.Assets.Copy.targets` | `Current`: the assets executable bakes after `Build` and cleans before `CoreClean`; the copy target builds the assets executable out of process when `Bork2dAssetsProjectFile` is set and copies packs to `$(TargetDir)`/`$(PublishDir)`. No descriptor properties, no pack-path list, no host build |
 | `Pong.Common` / `Pong.Assets` | `Current` (D-043/D-044): `Pong.Common` is the AOT-safe game assembly (`GameSettings` struct root, simulation, AI, title); `Pong.Assets` is the build-only executable owning `Assets/` and `CircleProcessor`, and bakes the 7-entry `assets.pck`. Neither the assets executable nor the builder enters the runtime/AOT publish |
@@ -816,7 +852,7 @@ that in exchange for no arbitrary caps, and fails cleanly rather than reading ou
 | `IAssets` load members | `Current` (M3/D-035): declarations, XML docs, the `IShapeable<T>` constraint, deserialize-only loader bodies, and `AssetRef<T>`/`DataRef` overloads; `IEngine.Assets` returns the real service in every mode |
 | `IAssets.LoadPack`/`Browse`/`Exists`, `AssetInfo` | `Current` (M3): `AssetInfo`, the internal VFS/lookup, and public delegation |
 | `AssetException`/`AssetErrorKind` | `Current` (M3): public error contract; pack open/parse/mount and reference-validation failures remain `Bork2dException` |
-| `Bork2d.Editor` / `Project.Editor` | `Planned` M5; editor and host are absent |
+| `Bork2d.Editor` / `Project.Editor` | `Out of scope` for Stage 1 (M5 removed); editor and host are absent |
 
 ## 17. Related documents
 
@@ -831,5 +867,5 @@ that in exchange for no arbitrary caps, and fails cleanly rather than reading ou
 - [API reference](../api/reference.md#7-iassets) — `IAssets` contract.
 - [M4 spec](../specs/m4-serialization-and-bake.md) and [WP0 report](../specs/m4-wp0-spike.md) —
   historical bake scope, feasibility findings, and as-built evidence.
-- [Roadmap](../roadmap.md) and [decision log](../decisions.md) — M3/M4/M5/M8 and D-010–D-012,
+- [Roadmap](../roadmap.md) and [decision log](../decisions.md) — M3/M4/M8 and D-010–D-012,
   D-M4-01…D-M4-15, D-036/D-037/D-038.

@@ -12,8 +12,16 @@
 > `Thread.Sleep` wait, unbounded catch-up, and no SDL, Vulkan, renderer, ring, or capture (Q11=K1,
 > Q12=L2, Q13=M4/F1, F5–F8). `Setup` runs before renderer readiness and the first `Tick` waits for it
 > (D-M6-06); a renderer failure around `Setup` still runs `Setup`, attempts `Teardown`, and reports
-> from `Run()` (D-M6-14). Sprites are M8. The suite is 1158 tests: 1141 deterministic tests in CI
-> plus 17 opt-in/conditional tests (9 real-window, 3 reparse-point, 5 real-GPU).
+> from `Run()` (D-M6-14). M8 is implementation-complete through WP-5; the milestone PR is open for
+> review and is not merged. WP-1 reconciled the docs, WP-2 added the shader
+> pipeline/camera math/instance planning, WP-3 added the texture pages/`RenderStats`, WP-4 added
+> the draw integration, per-frame stats publication, and `CaptureFrameAsync`, and WP-5 added the
+> explicit short-vs-long Pong/AOT gate, the Release benchmark, and the final docs. The host-side M8
+> additions are an internal `RendererStartInfo.Assets` member plus the public stats/capture bridges
+> described in §1 and §6. The suite is
+> 1362 tests: 1335 deterministic tests in CI plus 27 opt-in/conditional tests (9 real-window, 3
+> reparse-point, 15 real-GPU). The 120-tick windowed/offscreen runs assert lifecycle/content/
+> validation; the 20,000-tick runs assert the draw/statistics relationships.
 
 ## 1. Public startup contract
 
@@ -59,6 +67,20 @@ app.Run();
   the surface/instance/window and before the assets stop. A failed run still counts as the one call;
   a second call throws `InvalidOperationException`, and `Run()` after `Dispose()` throws
   `ObjectDisposedException`.
+- **Renderer input seam and stats/capture bridge (as built in M8 WP-3/WP-4).** The internal
+  `RendererStartInfo`
+  carries a required `IAssets Assets` member, supplied after `assetService.Start()` and before the
+  renderer is created, so the render thread can resolve descriptors/payloads without a
+  `Bork2d.Runtime` reference; the factory and both renderers reject a missing seam with a
+  `Bork2dException`. After the renderer is created the host installs an internal stats source
+  (`() => renderer.RenderStats`) so `IEngine.RenderStats` reads the renderer's board without touching
+  Vulkan, and the capture source (`renderer.CaptureFrameAsync`). Headless installs the
+  `NotSupportedException` capture source at `Run` start and keeps `RenderStats` at `default`. The
+  renderer publishes stats once per completed frame; `IEngine.CaptureFrameAsync` becomes
+  `ObjectDisposedException` after `Run`/`Dispose`. No Render or Vulkan type appears in a public
+  signature. The
+  renderer joins before `assetService.Stop()`, so the supplied `IAssets` stays valid for the
+  renderer's whole life.
 - A missing/malformed base pack throws `Bork2dException` from `Run()` before any window, platform,
   renderer, `Setup`, or `Teardown`; the partially started asset service is cleaned up. A
   window-platform start failure (SDL init/window, missing Vulkan loader/instance, surface creation)
@@ -89,13 +111,14 @@ app.Run();
 
 | Mode | Builder | Current behavior | Target |
 | --- | --- | --- | --- |
-| **Windowed** (default) | normal options | Visible SDL window on an OS/window thread; Vulkan 1.3 instance/surface created there; render thread owns device/swapchain, consumes one snapshot per frame, and presents an opaque-black clear; real `IWindow`/`IInput`, advanced `ITime`, ring-backpressured loop until exit/close/fatal; base pack + overlays + loads work | Sprites (M8) |
-| **Offscreen** | `WithOffscreen(w, h)` | Vulkan 1.3 render thread with a fixed sRGB target and two frames in flight; `Setup` → `Tick`… → `Teardown` until `IEngine.Exit()`, ring-backpressured ticks, `ITime` advanced, one discarded frame per consumed snapshot; no SDL, window, input, surface, swapchain, or readback | Sprites/readback (M8/M10) |
+| **Windowed** (default) | normal options | Visible SDL window on an OS/window thread; Vulkan 1.3 instance/surface created there; render thread owns device/swapchain, consumes one snapshot per frame, and presents the M8 per-camera sprite passes; real `IWindow`/`IInput`, advanced `ITime`, ring-backpressured loop until exit/close/fatal; base pack + overlays + loads work | M8 presentation gate: 120-tick short run asserts lifecycle/content/validation; 20,000-tick long run asserts draw/statistics |
+| **Offscreen** | `WithOffscreen(w, h)` | Vulkan 1.3 render thread with a fixed sRGB target and two frames in flight; `Setup` → `Tick`… → `Teardown` until `IEngine.Exit()`, ring-backpressured ticks, `ITime` advanced, one frame per consumed snapshot (discarded unless captured); no SDL, window, input, surface, or swapchain | M8 presentation gate: 120-tick short run asserts lifecycle/content/validation; 20,000-tick long run asserts draw/statistics; the 165 FPS benchmark uses this mode |
 | **Headless** | `WithHeadless(ticksPerSecond = 60)` | Paced `Setup` → `Tick`… → `Teardown` loop until `IEngine.Exit()`; the rate must be positive; fully synthesized `ITime` (tick 0 = 0/0, then `N/rate` and `1/rate`, no clamp); strict absolute grid with pure `Thread.Sleep` and unbounded catch-up; no SDL, window, input, renderer, ring, capture, or Vulkan loader | Pong gate: 120 ticks by default, `--headless --ticks N` overrides (Q15=O2/F3) |
 | **`WithoutAssets()`** | modifier in any mode | Empty VFS; no base pack required; `LoadPack` may mount overlays; one loader thread still starts | Unchanged |
 
 - **Windowed** is the normal game. **Offscreen** is for tests, benchmarks, and visual
-  validation; it creates no surface/swapchain and adds no public readback API (M8/M10).
+  validation; it creates no surface/swapchain, and `IEngine.CaptureFrameAsync` provides the public
+  readback (windowed and offscreen) with no screenshot-file API.
   **Headless** is for servers and data tools: graphics are absent, so created sprites never
   render; a run that never calls `Exit` continues until the process stops.
 - Windowed and offscreen require a Vulkan 1.3 loader/device (D-M6-02); there is no public opt-out.
@@ -123,8 +146,8 @@ app.Run();
   the tick ignores the renderer. Headless pacing is the strict absolute grid with a pure
   `Thread.Sleep` (Q13=M4/F1).
 - Windowed and offscreen render **one frame per consumed snapshot** (Q7=G1): the renderer waits when
-  no snapshot is `Ready` and never repeats the previous one; both still render a black clear until
-  sprites arrive in M8.
+  no snapshot is `Ready` and never repeats the previous one. Each frame runs the M8 planner and
+  records the per-camera sprite passes/draws (with the optional capture copy).
 
 ## 3. Builder options and validation
 
@@ -143,7 +166,7 @@ column marks options that remain stored-only.
 | `WithFullscreen(bool)` | `false` | `Current` (windowed) | Borderless desktop fullscreen on the primary monitor. |
 | `WithVSync(bool)` | `true` | `Current` (M6) | Windowed present-mode preference: FIFO when `true`; MAILBOX → IMMEDIATE → FIFO when `false` (D-M6-17). Logged with the actual mode. |
 | `WithHeadless(int ticksPerSecond = 60)` | `60` | `Current (M7)` | Paced loop until `Exit` (K1); the rate must be **positive** (`0` and negative are `Build()` errors, F6); the synthesized clock uses `Time = tickIndex / rate` and `DeltaTime = 1 / rate` (L2/F5) with no clamp (F7). |
-| `WithOffscreen(int width, int height)` | — | `Current` (M6/M7) | Windowless Vulkan target; the sizes are validated and fixed, one discarded frame per consumed snapshot, and the loop runs until `Exit` (D-M6-07) with ring backpressure; no readback (D-M6-23). |
+| `WithOffscreen(int width, int height)` | — | `Current` (M6/M7/M8) | Windowless Vulkan target; the sizes are validated and fixed, one frame per consumed snapshot (discarded unless captured), and the loop runs until `Exit` (D-M6-07) with ring backpressure. `CaptureFrameAsync` on request has no screenshot-file API. |
 | `WithMaxDeltaTime(double)` | `0.25` s | `Current` | Gameplay clamp for the windowed/offscreen `ITime.DeltaTime`; not a pacing delay. It does **not** clamp the synthesized headless step (F7). |
 | `WithValidation(bool)` | `true` in Debug, `false` in Release | `Current` (M6) | Requests `VK_LAYER_KHRONOS_validation` and `VK_EXT_debug_utils`; a missing layer logs a warning and the run continues (D-M6-20). |
 | `Build()` | — | `Current` | Validates and creates the app object. |
@@ -211,6 +234,7 @@ The host has three drivers, all on the `Run()` caller thread; the renderer runs 
   assetService.Start()                 // open/validate base pack, start loader; Bork2dException here
   platform.Start()                     // SDL window + Vulkan instance + surface, or Bork2dException
   renderer = factory.Create(startInfo); renderer.Start()   // returns without readiness (D-M6-06)
+  // M8: startInfo carries the started IAssets; the host installs the RenderStats and capture sources
   engine.SetExitCallback(renderer.WakeSnapshotWait)        // Q9=I1 wake on Exit()
   attach window/input proxies
   platform.AttachRenderer(renderer)    // OS thread posts confirmed extent/fullscreen/minimized
@@ -244,7 +268,8 @@ The host has three drivers, all on the `Run()` caller thread; the renderer runs 
 
   ```
   assetService.Start()
-  renderer = factory.Create(offscreen startInfo); renderer.Start()
+  renderer = factory.Create(offscreen startInfo)   // WP-3: startInfo carries the started IAssets
+  renderer.Start()
   engine.SetExitCallback(renderer.WakeSnapshotWait)
   if (!Exit) Setup(engine)
   if (!Exit && no renderer failure) renderer.WaitForReady()
@@ -314,8 +339,12 @@ resources, issue best-effort window commands, or use `IEngine.Assets`. Windowed 
 stops input and joins the renderer **before** the OS/window thread destroys the surface, instance,
 and window; then the platform quits SDL and joins its thread, and the assets stop. Offscreen stops
 and joins the renderer after `Teardown`, then stops the assets. The proxies are detached last. The
-app then detaches the root's direct children on `Dispose()`. A renderer cleanup failure during
-normal shutdown is logged and does not change the run's outcome (D-M6-27).
+renderer joins before `assetService.Stop()` on every path, so the `IAssets` supplied in
+`RendererStartInfo` outlives the render thread; the stop waits the upload/frame fences, destroys the
+per-frame pools/sets, pages, staging, and pipeline before the device, and faults pending
+`CaptureFrameAsync` requests (M8 WP-4, `Current`). The app then detaches the root's direct children on
+`Dispose()`. A renderer cleanup failure during normal shutdown is logged and does not change the
+run's outcome (D-M6-27).
 
 | Failure | Where detected | Behavior |
 | --- | --- | --- |
@@ -327,6 +356,13 @@ normal shutdown is logged and does not change the run's outcome (D-M6-27).
 | Surface creation failure | Windowed `platform.Start()` (OS thread), before the renderer and `Setup` | `Bork2dException` with the SDL error; no surface; the created instance is destroyed, the window destroyed, SDL released; assets stopped; no `Teardown`. |
 | Renderer factory/start failure | `Run()`, after platform start and during/after `Setup` | `Setup` still runs (D-M6-14); zero ticks; `Teardown` attempted when `Setup` succeeded; the renderer is stopped/joined; platform/assets shut down; `Bork2dException`. If `Setup` also throws, the `Setup` exception wins. |
 | Renderer readiness failure (no device/feature/format, swapchain or offscreen target creation) | Renderer thread; observed before the first tick (D-M6-06) | `Setup` already ran; zero ticks; `Teardown` attempted; renderer stopped/joined; platform/assets shut down; `Bork2dException` rethrown (aggregated with a teardown failure). |
+| Shader tool/SPIR-V/pipeline creation failure (M8 WP-2, `Current`) | Renderer thread before readiness | Same path as a readiness failure: `Bork2dException`; the renderer never becomes ready. |
+| Missing/null `IAssets` in the internal renderer start info (M8 WP-3, `Current`) | Renderer factory/creation | `Bork2dException` naming the missing seam; no windowed/offscreen run starts. |
+| Invalid camera at draw time (M8 WP-4, `Current`) | Renderer thread | The whole camera, including its clear, is skipped with a throttled diagnostic; the app continues. |
+| Malformed sprite fields, or instance capacity over `maxStorageBufferRange` (M8 WP-4, `Current`) | Renderer thread | Fatal `Bork2dException` naming the field/limit; the renderer-fatal path tears down once and rethrows. |
+| Texture page capacity at the effective device limit (M8 WP-3, `Current`) | Renderer thread | Fatal `Bork2dException` naming the limit and the requested entry; no page is dropped silently. |
+| Missing/failed/malformed texture content (M8 WP-3, `Current`) | Renderer thread | The path is marked failed for the run, one diagnostic is logged, and the placeholder is used; the app continues. |
+| `CaptureFrameAsync` before `Run()` / during a run / after `Run()` / headless (M8 WP-4, `Current`) | Engine bridge | `InvalidOperationException` / served by the renderer / `ObjectDisposedException` / `NotSupportedException`; a renderer fatal or stop faults pending requests. |
 | Exception in `Setup` | `Run()` | Renderer stopped/joined, platform and assets shut down; original exception; `Teardown` not called. A renderer failure is ignored in favour of the `Setup` exception (D-M6-14). |
 | Exception in `Tick` or a text handler | `Run()` | The acquired slot is abandoned (nothing is published); renderer stopped/joined, platform and assets shut down; `Teardown` attempted; original exception rethrown. |
 | `Tick` and `Teardown` both throw | `Run()` | `AggregateException` with both inner exceptions, after renderer join, platform shutdown, and asset stop. |

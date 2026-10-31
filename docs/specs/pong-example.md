@@ -6,7 +6,9 @@
 > As-built evidence is in §12. **M7 (frame handoff and pacing) extends the host gates and is merged
 > into `develop` (2026-10-31, PR #12, merge `5de5ac3`): `--headless` now runs 120 ticks by default
 > with `--headless --ticks N` overriding, and the windowed/offscreen runs are ring-backpressured.**
-> See §12.5.
+> M8 renders the scene and replaces the spec-time "no sprite renderer yet / black window" statement:
+> see §12.6 for the approved short-vs-long presentation gate, the draw statistics, and the manual
+> capture. See §12.5.
 
 ## 1. Goal
 
@@ -17,9 +19,10 @@ Bork2d game: `Pong.Common`, `Pong.Assets`, `Pong.Desktop`, plus `Pong.Tests`.
 Pong is now the engine's living example and its NativeAOT gate. It should exercise the existing
 public contract end to end: pack load, TOML data, `AssetRef` chains, baked textures, a custom bake
 processor, sprites, camera, layers, tint, transforms, time, keyboard input, window title, logging,
-and AOT/headless startup. There is no sprite renderer yet (M8), so the window is intentionally
-black; the game is still playable as a simulation and observable through the title, logs, and
-headless assertions. M6 adds the Vulkan clear and the three-mode AOT gate.
+and AOT/headless startup. At spec time there was no sprite renderer yet (M8), so the window was
+intentionally black; the game was playable as a simulation and observable through the title, logs,
+and headless assertions. **M8 supersedes this:** the window now draws the two paddles and the ball
+(see §12.6). M6 added the Vulkan clear and the three-mode AOT gate.
 
 ## 2. Non-goals
 
@@ -465,3 +468,31 @@ three-mode gate without changing the Pong game contract:
   (Q22=V1); steady-state coupling/backpressure is covered by the M7 deterministic ring tests and the
   opt-in GPU handoff tests. The full M7 evidence is in the
   [M7 spec as-built section](m7-frame-handoff.md#18-as-built-evidence-2026-10-31).
+
+### 12.6 M8 extension: the short-vs-long presentation gate (2026-10-31)
+
+M8 (sprite renderer; implementation complete through WP-5, PR open for review, not merged) keeps the
+Pong game and the unpaced M7 loop unchanged and splits the presentation gate with the compiled-in
+`PongAcceptanceGate.LongRunTickThreshold = 1000`:
+
+- **Short runs (`--windowed --ticks 120`, `--offscreen --ticks 120`).** Exit 0, exactly one
+  `Setup`/`Teardown`, exactly 120 completed ticks, validation `0/0`, and the same seven-entry
+  pack/content chain; the observed stats are printed (`texturePages=1`, `drawCalls=0`,
+  `instances=0`, `skippedSprites=3`) and no draw/instance/page relationship is asserted. The
+  unpaced loop can finish 120 ticks before the asynchronous texture pages are drawable; pacing or
+  sleeping was explicitly rejected.
+- **Long runs (`--offscreen --ticks 20000`, `--windowed --ticks 20000`).** Exit 0, exactly one
+  `Setup`/`Teardown`, exactly 20,000 completed ticks, and the unconditional relationships
+  `Cameras >= 1`, `NonEmptyCameras >= 1`, `DrawCalls >= 1`, `Instances >= 3`, `TexturePages >= 3`,
+  `DrawCalls == NonEmptyCameras <= Cameras`, validation `0/0`. AOT evidence: offscreen
+  `1/20000/1` with `drawCalls=1`, `instances=3`, `texturePages=3/256`, `skippedSprites=0`
+  (19,747 discarded frames), and windowed `1/20000/1` with the same relationships (8,334 presented
+  frames).
+- **Pong.Tests.** The suite is **58 tests**: the existing 46 plus the linked
+  `PongAcceptanceGateTests` (threshold split, short-run validation, and every long-run
+  relationship). `Pong.Desktop` links `PongAcceptanceGate.cs` into the test assembly through the
+  same no-`Pong.Desktop`-reference pattern as `PongArguments.cs`.
+- **Manual visual.** A 1280×720 RGBA8 frame captured through `IEngine.CaptureFrameAsync` from the
+  real baked Pong pack shows the dark clear, the red left paddle, the blue right paddle, and the
+  white ball; the raw artifact is untracked under `artifacts/` and was inspected by the
+  orchestrator/owner. The engine tests do not assert pixels.

@@ -1,4 +1,5 @@
 using System.Numerics;
+using Bork2d.Engine.Platform;
 using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
 
@@ -8,12 +9,20 @@ namespace Bork2d.Engine.Scene;
 /// An engine-owned camera: a transform plus projection and clear state.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Cameras are scene entities with no destruction state and no global registration. They are
 /// retained only while rooted; detaching keeps the instance valid for re-attachment.
+/// </para>
+/// <para>
+/// The screen/world helpers read the engine window's framebuffer size and the same pure
+/// <see cref="CameraProjection"/> math the renderer uses (M8 §6.3/§6.9). They hold no lock while
+/// reading the window and never require a particular thread.
+/// </para>
 /// </remarks>
 internal sealed class Camera<TLayer> : Transform, ICamera<TLayer>
     where TLayer : struct, Enum
 {
+    private readonly IWindow _window;
     private Vector4 _viewport;
     private float _size;
     private TLayer _cullingMask;
@@ -21,9 +30,11 @@ internal sealed class Camera<TLayer> : Transform, ICamera<TLayer>
     private Color _clearColor;
     private int _zIndex;
 
-    internal Camera(Lock structuralLock)
+    internal Camera(Lock structuralLock, IWindow window)
         : base(structuralLock)
     {
+        ArgumentNullException.ThrowIfNull(window);
+        _window = window;
         _viewport = new Vector4(0f, 0f, 1f, 1f);
         _size = 10f;
         _cullingMask = LayerValidation.All<TLayer>();
@@ -144,5 +155,82 @@ internal sealed class Camera<TLayer> : Transform, ICamera<TLayer>
                 _zIndex = value;
             }
         }
+    }
+
+    /// <inheritdoc/>
+    public Vector2 WorldSize => CreateProjection().WorldSize;
+
+    /// <inheritdoc/>
+    public Vector2 WorldToScreen(Vector2 world)
+    {
+        if (!float.IsFinite(world.X) || !float.IsFinite(world.Y))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(world),
+                world,
+                "World coordinates must be finite.");
+        }
+
+        return CameraProjection.WorldToFramebuffer(CreateProjection(), world);
+    }
+
+    /// <inheritdoc/>
+    public Vector2 ScreenToWorld(Vector2 screen)
+    {
+        if (!float.IsFinite(screen.X) || !float.IsFinite(screen.Y))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(screen),
+                screen,
+                "Framebuffer-pixel coordinates must be finite.");
+        }
+
+        return CameraProjection.FramebufferToWorld(CreateProjection(), screen);
+    }
+
+    private CameraProjectionResult CreateProjection()
+    {
+        float size;
+        Vector4 viewport;
+        ClearKind clear;
+        Color clearColor;
+        lock (Sync)
+        {
+            size = _size;
+            viewport = _viewport;
+            clear = _clear;
+            clearColor = _clearColor;
+        }
+
+        Matrix3x2 world = WorldMatrix();
+        Vector2 framebuffer;
+        try
+        {
+            framebuffer = _window.Size;
+        }
+        catch (NotSupportedException exception)
+        {
+            throw new InvalidOperationException(
+                "Camera screen/world helpers require a framebuffer. This app is headless or "
+                    + "offscreen, so IWindow.Size is not available.",
+                exception);
+        }
+
+        if (!CameraProjection.TryCreate(
+            framebuffer,
+            world,
+            size,
+            viewport,
+            clear,
+            clearColor,
+            out CameraProjectionResult projection))
+        {
+            throw new InvalidOperationException(
+                "The camera cannot be projected because "
+                    + CameraProjection.Describe(projection.Reason)
+                    + ".");
+        }
+
+        return projection;
     }
 }

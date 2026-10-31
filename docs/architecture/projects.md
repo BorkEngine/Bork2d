@@ -14,6 +14,18 @@
 > Render handoff ring/consumer and the Runtime
 > acquire/publish/headless host add **no** project reference, package, or public type beyond the
 > already-approved `FlipX`/`FlipY` (D-M7-02).
+> **M8 (sprite renderer) is implementation-complete through WP-5; the milestone PR is open for
+> review and is not merged.** WP-1 reconciled the docs, WP-2 added the shader
+> pipeline/camera math/instance planning, WP-3 added the texture pages/`RenderStats`, WP-4 added
+> the draw/statistics/capture integration, and WP-5 added the benchmark/Pong gate and final docs.
+> The approved target adds
+> only a **build-only** `Bork2d.ShaderCompiler` tool
+> (Silk.NET.Shaderc/Silk.NET.Shaderc.Native 2.23.0): no new runtime project, package, or public
+> Render type, and the dependency matrix in §2 is unchanged. WP-3's page subsystem and WP-4's
+> planner/capture resources are internal to
+> `Bork2d.Render` and add no reference; the only new public types are the approved
+> `Bork2d.Engine.Rendering.RenderStats` and the approved `IEngine<TLayer>.CaptureFrameAsync` member.
+> WP-5 adds no project or package.
 
 ## 1. Current projects
 
@@ -25,14 +37,15 @@ All engine projects target `net11.0` and live in `src/Bork2d/`; the Pong example
 | --- | --- | --- | --- |
 | `Bork2d.Engine` | none (Bork2d) | `Current` | Public contract (`Bork2d.Engine`, `.Scene`, `.Rendering`, `.Input`, `.Platform`, `.Assets`) plus the internal root-owned scene tree, transforms, time, MessagePack shape policy, v1 pack reader/writer, VFS, loader, and asset service. The tooling-only `Bork2d.Engine.Assets.Pack.PackBuilder`/`PackCompressionMode` stay public for pack creation. |
 | `Bork2d.Bake` | `Bork2d.Engine` | `Current` | Public JIT tooling surface (`BakeApplicationBuilder`, `BakeApplication`, `RegisterAsset<T>()`, `UseDefaultAssets()`, `UseDefaultProcessors()`, processor contracts, sidecar policy, output sink, commands) plus the internal implementation (Tomlyn binder, processor registry, texture processor, pack composition, schema-3 incremental planner). |
-| `Bork2d.Render` | `Bork2d.Engine` + `Silk.NET.Vulkan*` | `Current` (M6/M7) | Vulkan instance/validation/debug-utils bootstrap, physical and logical device selection (features, extensions, limits), the internal renderer seam and control channel, the pure surface-format/present-mode/swapchain policies, the windowed renderer (swapchain create/recreate, two frames in flight, dynamic-rendering clear, present, resize/minimize/fullscreen, surface-loss recovery, counters, validation observation), the offscreen renderer (two permanent sRGB targets, one allocation per image, clear/discard), and the M7 handoff (three-slot ring, snapshot consumer, combined wait, fence-held slot lifetime, suspended minimized drain, empty per-frame instance resources). Sprites/uploads and instance writes are M8. |
+| `Bork2d.Render` | `Bork2d.Engine` + `Silk.NET.Vulkan*` | `Current` (M6/M7; M8 WP-2 pipeline + WP-3 pages + WP-4 draws) | Vulkan instance/validation/debug-utils bootstrap, physical and logical device selection (features, extensions, limits), the internal renderer seam and control channel, the pure surface-format/present-mode/swapchain policies, the windowed renderer (swapchain create/recreate, two frames in flight, dynamic-rendering passes, present, resize/minimize/fullscreen, surface-loss recovery, counters, validation observation), the offscreen renderer (two permanent sRGB targets, one allocation per image, per-camera passes/discard), the M7 handoff (three-slot ring, snapshot consumer, combined wait, fence-held slot lifetime, suspended minimized drain), the M8 WP-2 internal `SpritePipeline` (descriptor-set layout, 64-byte push-constant pipeline layout, one pipeline per sRGB format, sampler cache), shared camera projection bridge, pure sprite sort/filter/quad/96-byte instance layout, the M8 WP-3 texture-page subsystem (async `IAssets` prefetch, validation, placeholder, pooled images/staging, upload fences, bindless writes, dynamic capacity) with the per-frame binding 0/1 resources, and the WP-4 planner/growable instances/per-camera draws/per-frame stats/capture staging. |
 | `Bork2d.Runtime` | `Bork2d.Engine`, `Bork2d.Render` | `Current` (M6/M7) | Public builder/app, validation, windowed SDL + Vulkan instance/surface host, renderer composition and startup/shutdown ordering, windowed/offscreen snapshot acquire/capture/publish with ring backpressure, the paced headless host, app-owned logging, and the app-scoped asset-service lifecycle. |
 | `Bork2d.Tests` | `Bork2d.Engine`, `Bork2d.Bake`, `Bork2d.Render`, `Bork2d.Runtime` | `Current` | Deterministic xUnit suite, dependency-matrix/public-surface tests, and the Q-20 metadata guard. It references no example project. |
 | `Pong.Common` (examples) | `Bork2d.Engine` | `Current` (D-043/D-044; AOT-compatible) | The game-side runtime library: `GameLayer`, the `[GenerateShape]` `GameSettings` struct root, `PongSide`, the engine-free deterministic `PongSimulation`, `PongAi`, `PongTitle`, and `PongGame` (the `IGame<GameLayer>` implementation, loaded sprite/descriptor chain, title, score logging, resize). |
 | `Pong.Assets` (examples) | `Bork2d.Bake`, `Pong.Common` | `Current` (D-043/D-044; build-time only) | Build-time executable for the game: bakes `Assets/` → `assets.pck` (7 entries), configures texture defaults, registers `GameSettings`, and registers `CircleProcessor` (JSON `.circle` source, `SidecarPolicy.None`). It owns the paddle PNG, the TOML sources, and the generated ball texture, and is never in the runtime/AOT publish graph. |
 | `Pong.Desktop` (examples) | `Bork2d.Runtime`, `Pong.Common` (+ build-only `Pong.Assets` through the copy target) | `Current` (D-043/D-044; M6/M7 three-mode gate) | NativeAOT host and the AOT gate: `--headless` 120-tick acceptance run (or `--headless --ticks N`), the interactive `--windowed [--ticks N]` example, and the non-interactive `--offscreen --ticks N` acceptance run. It imports `build/Bork2d.Assets.Copy.targets`; the assets executable is built out of process and its pack copied next to the app. |
 | `Pong.Tests` (examples) | `Pong.Common`, `Pong.Assets`, `Bork2d.Engine`, `Bork2d.Bake`, `Bork2d.Runtime` | `Current` | 46 deterministic xUnit tests: simulation/serve/bounce/scoring/pause/reset, AI steering, title formatting, the bake/load chain (real `Pong.Assets/Assets` copied to a temp project), invalid `.circle` diagnostics, the full headless `PongGame` run with an explicit tick limit, and the linked `PongArgumentsTests` mode/tick parsing cases (including the 120-tick headless default and the override). |
-| `Bork2d.Editor` | `Bork2d.Engine`, `Bork2d.Bake` (+ Avalonia) | `Planned` | Avalonia editor library/app; JIT; consumes the public `Bork2d.Bake` builder/processor surface. |
+| `Bork2d.Editor` | `Bork2d.Engine`, `Bork2d.Bake` (+ Avalonia) | `Out of scope` | Avalonia editor library/app; JIT; consumes the public `Bork2d.Bake` builder/processor surface. M5 was removed from Stage 1. |
+| `Bork2d.ShaderCompiler` (build-only) | `Silk.NET.Shaderc`, `Silk.NET.Shaderc.Native` `2.23.0` | `Current` (M8 WP-2; build-only) | Build-time tool at `build/Bork2d.ShaderCompiler`: compiles the checked-in GLSL under `Bork2d.Render/Shaders/` to SPIR-V (Vulkan 1.3 target) and emits generated C# with the SPIR-V byte arrays into `Bork2d.Render`'s compilation. JIT, build-only, and never in the runtime/AOT publish graph; no runtime project references it. No Vulkan SDK requirement. |
 
 `Bork2d.Engine` references `PolyType` `1.4.1` (the `IShapeable<T>` contract and the public
 generated shapes), `Nerdbank.MessagePack` `1.4.95` (generated-shape serialization; no reflection
@@ -62,6 +75,14 @@ independently, and no runtime project references the bake tooling or its package
 `Bork2d.Bake`/`Pong.Assets` tooling assemblies are built and executed out of process by the imported
 targets, so they never enter the desktop app's output or publish graph (the game-side `Pong.Common`
 assembly is expected there).
+
+`Bork2d.ShaderCompiler` is a **build-only** JIT tool (not a runtime project) that pins
+`Silk.NET.Shaderc` and `Silk.NET.Shaderc.Native` `2.23.0` (M8 WP-2, `Current`). The MSBuild target
+imported by `Bork2d.Render` restores and builds it out of process, compiles the checked-in GLSL to
+SPIR-V, and emits generated C# with the SPIR-V byte arrays into `Bork2d.Render`'s compilation before
+`CoreCompile` (including design-time/format builds, so the clean-clone CI sequence sees the type).
+The tool and its packages are never referenced by a runtime project and never appear in the AOT
+publish; no Vulkan SDK or `glslangValidator` build dependency is required.
 
 ## 2. Target dependency graph
 
@@ -115,7 +136,9 @@ Rules behind the matrix:
   Avalonia imaging; it consumes the public `Bork2d.Bake` surface.
 
 A new arrow requires updating this document and the dependency test; the dependency test fails
-otherwise.
+otherwise. The M8 build-only `Bork2d.ShaderCompiler` tool is deliberately **not** a row in this
+runtime matrix: no runtime or example project references it, it does not ship, and the matrix is
+unchanged by M8.
 
 ## 3. Public surface and assembly visibility
 
@@ -129,10 +152,16 @@ otherwise.
 | `Pong.Common` | The game library (`GameLayer`, `GameSettings`, `PongSide`, `PongSimulation`, `PongAi`, `PongTitle`, `PongGame`); a normal game surface, not engine API. |
 | `Pong.Assets` | **None.** `Program` and `CircleProcessor` are internal (visible to `Pong.Tests` through `InternalsVisibleTo`). |
 | `Pong.Desktop` | **None** (entry point only). |
-| `Bork2d.Editor` | `Bork2dEditorBuilder`, `Bork2dEditorApp`, and the public editor service types (`Planned`, M5). |
+| `Bork2d.Editor` | `Bork2dEditorBuilder`, `Bork2dEditorApp`, and the public editor service types (`Out of scope`, M5 removed). |
 
 `ILoggerFactory` is a Microsoft.Extensions.Logging type exposed by `IEngine`; it is not a Bork2d
 public type. `Bork2d.Engine` takes it from the .NET 11 shared framework.
+
+The approved M8 public additions are `ICamera<TLayer>.WorldToScreen`/`ScreenToWorld`/`WorldSize`, the
+public `Bork2d.Engine.Rendering.RenderStats` record struct, and `IEngine<TLayer>.RenderStats`/
+`CaptureFrameAsync` (§6.9 of the [M8 spec](../specs/m8-sprite-renderer.md#69-public-api)). The three
+camera members are `Current` (M8 WP-2); `RenderStats`/`IEngine.RenderStats` are `Current` (M8 WP-3);
+`CaptureFrameAsync` is `Current` (M8 WP-4). `Bork2d.Render` keeps zero public types.
 
 The pack writer is the one documented exception to the "implementation types stay internal" rule
 (D-001, D-M3-04): `PackBuilder`/`PackCompressionMode` exist for pack creation, not gameplay. The
@@ -259,7 +288,7 @@ ergonomics.
 | `Pong.Common` | `Bork2d.Engine` | `Bork2d.Runtime`, `Bork2d.Render`, `Bork2d.Bake` |
 | `Pong.Assets` | `Bork2d.Bake`, `Pong.Common` | `Bork2d.Runtime`, `Bork2d.Render` |
 | `Pong.Desktop` | `Bork2d.Runtime`, `Pong.Common`; build-only `Pong.Assets` (out of process) | `Bork2d.Render`, `Bork2d.Bake` (compile/publish) |
-| `Project.Editor` (M9/M5) | `Bork2d.Editor`, `Project.Common`; `Bork2d.Bake` | `Bork2d.Render` |
+| `Project.Editor` (out of scope) | `Bork2d.Editor`, `Project.Common`; `Bork2d.Bake` | `Bork2d.Render` |
 
 A developer's **runtime** code writes against two engine assemblies: `Bork2d.Engine` in
 `Pong.Common` and `Bork2d.Runtime` in `Pong.Desktop`. The build-time `Pong.Assets` project adds
@@ -284,13 +313,23 @@ are owned by [asset processors](asset-processors.md#3-project-model).
   `Pong.Desktop`). A `Pong.slnx` Release build still builds the external engine project references in
   Debug, because the `.slnx` has no configuration mapping for projects outside `examples/pong`; the
   direct Release publish below is the Release proof.
+- **M8 shader build (as built in WP-2):** an MSBuild target (`build/Bork2d.ShaderCompiler.targets`,
+  imported by `Bork2d.Render`) restores and builds the build-only `Bork2d.ShaderCompiler` tool out of
+  process and compiles the checked-in GLSL to SPIR-V, emitting
+  `obj/<Configuration>/<TFM>/ShaderCompiler/SpriteShaders.g.cs` into `Bork2d.Render`'s compilation
+  (Vulkan 1.3 target; debug info in Debug, optimized in Release). `RemoveProperties` keeps the
+  consuming project's RID/publish settings off the tool restore/build, and the target also runs for
+  design-time/format builds. It requires no Vulkan SDK, `glslangValidator`, or `glslc`, and there is no
+  runtime shader I/O or compiler. The generated code is linked into the executable and the publish
+  contains no shaderc assemblies or loose `.spv` files.
 - Local AOT gate:
   `dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-x64`, then run
   the published exe from its publish directory: `--headless` (120 ticks by default; mounts the baked
   7-entry pack, asserts the settings/sprite/descriptor/raw chain, exactly `N` completed ticks, and
   the detached root, exits 0), `--headless --ticks N` (exactly `N` ticks),
   `--windowed --ticks 120` (exit 0 after exactly 120 ticks; creates the window/instance/surface and
-  presents a black clear per consumed snapshot), and `--offscreen --ticks 120` (exit 0 after exactly
+  renders the per-camera sprite passes per consumed snapshot), and `--offscreen --ticks 120` (exit 0
+  after exactly
   120 ticks through the offscreen renderer; frame count not asserted). The publish must contain
   `Pong.Desktop.exe`,
   `assets.pck`, `SDL2.dll`, and the `Pong.Common`/engine PDBs (NativeAOT single-file links the managed

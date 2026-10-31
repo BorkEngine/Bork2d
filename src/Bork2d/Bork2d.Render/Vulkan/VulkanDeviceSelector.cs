@@ -410,7 +410,9 @@ internal static unsafe class VulkanDeviceSelector
                     + "maxImageArrayLayers={MaxImageArrayLayers}, "
                     + "maxColorAttachments={MaxColorAttachments}, "
                     + "maxFramebuffer={MaxFramebufferWidth}x{MaxFramebufferHeight}, "
-                    + "maxPerStageDescriptorUpdateAfterBindSampledImages={MaxSampledImages}.",
+                    + "maxPerStageDescriptorUpdateAfterBindSampledImages={MaxSampledImages}, "
+                    + "maxDescriptorSetUpdateAfterBindSampledImages={MaxSetSampledImages}, "
+                    + "maxStorageBufferRange={MaxStorageBufferRange}.",
                 candidate.Name,
                 candidate.Type,
                 $"0x{GetVendorId(vk, physicalDevice):X}",
@@ -425,7 +427,9 @@ internal static unsafe class VulkanDeviceSelector
                 limits.MaxColorAttachments,
                 limits.MaxFramebufferWidth,
                 limits.MaxFramebufferHeight,
-                limits.MaxPerStageDescriptorUpdateAfterBindSampledImages);
+                limits.MaxPerStageDescriptorUpdateAfterBindSampledImages,
+                limits.MaxDescriptorSetUpdateAfterBindSampledImages,
+                limits.MaxStorageBufferRange);
 
             return new VulkanDevice(
                 vk,
@@ -485,7 +489,9 @@ internal static unsafe class VulkanDeviceSelector
             limits.MaxColorAttachments,
             limits.MaxFramebufferWidth,
             limits.MaxFramebufferHeight,
-            indexing.MaxPerStageDescriptorUpdateAfterBindSampledImages);
+            indexing.MaxPerStageDescriptorUpdateAfterBindSampledImages,
+            indexing.MaxDescriptorSetUpdateAfterBindSampledImages,
+            limits.MaxStorageBufferRange);
     }
 
     private static void LogCandidate(ILogger logger, DeviceEvaluation evaluation)

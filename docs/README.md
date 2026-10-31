@@ -9,8 +9,8 @@
 > runtime integration), and the builder-configured bake: a game-owned `MyGame.Assets` executable
 > registers explicit data types and asset processors, bakes on build, and records a schema-3
 > incremental manifest. The project descriptor, generated host, `Bork2d.Bake.Cli`, and
-> `generate-host` are removed. The editor and the full sprite renderer are target designs for later
-> milestones; **M6 (Vulkan bring-up) is merged into `develop` (2026-10-31, PR #11, merge
+> `generate-host` are removed. The editor is out of Stage 1 (M5 removed); the sprite renderer is the
+> approved M8 target. **M6 (Vulkan bring-up) is merged into `develop` (2026-10-31, PR #11, merge
 > `5de725c`)**. The Render foundation, the windowed renderer, the offscreen
 > renderer, and the Runtime host wiring are complete, and the AOT/Pong gate proves the published
 > `--headless`, `--windowed --ticks 120`, and `--offscreen --ticks 120` runs with a zero-warning
@@ -20,6 +20,21 @@
 > `--headless` gate defaults to 120 ticks (`--headless --ticks N` overrides). The spec decisions are recorded (all 23 questions and F5–F8, in the
 > [decision log](decisions.md#m7-frame-handoff-and-pacing-decisions-approved-2026-10-31) as
 > `D-M7-01…D-M7-27`); as-built evidence is in [M7 spec §18](specs/m7-frame-handoff.md#18-as-built-evidence-2026-10-31).
+> **M8 (sprite renderer) is implementation-complete through WP-5; the milestone PR is open for
+> review and is not merged.** The owner-approved [M8 spec](specs/m8-sprite-renderer.md)
+> (2026-10-31) is the M8 contract. WP-1 reconciled the owning docs; WP-2 added the build-only shader
+> compiler + generated SPIR-V, the internal sprite pipeline/layout/sampler cache, the shared camera
+> projection, and the public `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` members; WP-3 added
+> the internal texture pages/placeholder/bindless resources and the public
+> `RenderStats`/`IEngine.RenderStats`; WP-4 added the shared frame planner, per-camera passes/draws,
+> growable mapped instance buffers, per-frame stats publication, and the public
+> `IEngine.CaptureFrameAsync` (all `Current`). WP-5 added the explicit short-vs-long Pong/AOT
+> presentation gate (`PongAcceptanceGate.LongRunTickThreshold = 1000`; the 120-tick runs assert
+> lifecycle/content/validation, the 20,000-tick runs assert the draw/statistics relationships), the
+> opt-in Release 50,000-sprite benchmark (median **177.3 FPS**, p50 5.640 ms, p95 6.562 ms, zero
+> measured allocations, validation 0/0), the manual `CaptureFrameAsync` visual artifact, and the
+> final as-built docs. The milestone PR is not merged; the 165 FPS target and all other gates were
+> kept.
 > Check status markers before treating an API as implemented.
 >
 > The [file-processors spec](specs/file-processors.md) owns implementation scope/acceptance; the
@@ -30,10 +45,12 @@
 > [spec](specs/pong-example.md)) is merged into `develop` (2026-10-29, PR #10) and replaces the exploratory smoke/fixture projects with
 > `examples/pong` and is the AOT gate: `Pong.Desktop` publishes with no tooling assembly in the
 > output, loads the 7-entry Pong pack headless, and runs `--headless` (120 ticks by default, or
-> `--headless --ticks N`), `--windowed --ticks 120`, and `--offscreen --ticks 120`. Verification is
-> the local gate set: Debug/Release zero-warning builds, 1141 deterministic plus 17
-> opt-in/conditional tests (1158 total) for the engine and 46 Pong tests, `dotnet format` for both
-> solutions, the docs link check, `git diff --check`, and the local AOT publish/run. CI runs on pull
+> `--headless --ticks N`), the short `--windowed --ticks 120`/`--offscreen --ticks 120` gate, and
+> the long `--offscreen --ticks 20000`/`--windowed --ticks 20000` presentation gate. Verification is
+> the local gate set: Debug/Release zero-warning builds, 1335 deterministic plus 27
+> opt-in/conditional tests (1362 total) for the engine, 58 Pong tests, `dotnet format` for both
+> solutions, the docs link check, `git diff --check`, the 50,000-sprite Release benchmark, and the
+> local AOT publish/run. CI runs on pull
 > requests to `develop` and pushes to `develop`; it does not build the Pong solution.
 
 Bork2d is a focused 2D game engine for .NET: **Vulkan 1.3** rendering, **SDL2** windowing through
@@ -48,8 +65,9 @@ Game code consumes exactly two assemblies:
 | `Bork2d.Engine` | Public contract and value types: engine, game, camera, sprite, input, assets, logging factory. No GPU/OS/Silk types. |
 | `Bork2d.Runtime` | Public startup surface: builder, app host, modes. Composes the engine, renderer, and platform implementations. |
 
-`Bork2d.Editor` is the planned JIT/Avalonia tool surface (M5). The `Bork2d.Engine` scene/time/asset
-implementation and `Bork2d.Render` are implementation details, except the tooling-only pack writer
+`Bork2d.Editor` is the planned JIT/Avalonia tool surface, not in Stage 1 (M5 removed). The
+`Bork2d.Engine` scene/time/asset implementation and `Bork2d.Render` are implementation details,
+except the tooling-only pack writer
 (`Bork2d.Engine.Assets.Pack.PackBuilder`/`PackCompressionMode`). `Bork2d.Bake` contains both the
 internal JIT bake implementation and its public builder/processor surface: the game-owned build-time
 `MyGame.Assets` executable references it, registers data types explicitly, has no generated host,
@@ -89,6 +107,7 @@ automatically wins. The [decision log](decisions.md) records the accepted choice
 | [Rendering](architecture/rendering.md) | contributors | Vulkan 1.3, one draw per camera, generated quads, bindless, present. |
 | [M6 spec](specs/m6-vulkan-bringup.md) | implementers | Vulkan bring-up scope, threads, windowed/offscreen clear, work packages, answered decisions (§16), acceptance. |
 | [M7 spec](specs/m7-frame-handoff.md) | implementers | Frame handoff/pacing scope, ring/capture semantics, headless loop, work packages, owner answers (§16), acceptance. |
+| [M8 spec](specs/m8-sprite-renderer.md) | implementers | Sprite renderer scope, owner-approved deltas (§2), per-camera passes, `IAssets`/pages/placeholder, build-time shader tool, 96-byte instances, public stats/capture, work packages, acceptance. |
 | [NativeAOT](architecture/nativeaot.md) | contributors | Runtime AOT constraints, generated shapes, local publish gate. |
 | [Logging](architecture/logging.md) | contributors | MEL/ZLogger, `IEngine.LoggerFactory`, default format. |
 | [API guide](api/guide.md) | game developers | Startup, modes, game loop, layers, cameras, sprites, input, assets. |
@@ -114,7 +133,8 @@ automatically wins. The [decision log](decisions.md) records the accepted choice
 - **Assets/editor/bake:** [Assets and tooling](architecture/assets-and-tooling.md) →
   [Asset processors](architecture/asset-processors.md) →
   [file-processors spec](specs/file-processors.md) →
-  [M4 spec](specs/m4-serialization-and-bake.md) → [Roadmap](roadmap.md#5-milestone-detail) M3–M5.
+  [M4 spec](specs/m4-serialization-and-bake.md) → [Roadmap](roadmap.md#5-milestone-detail) M3–M4,
+  M6–M8.
 - **NativeAOT/server:** [NativeAOT](architecture/nativeaot.md) →
   [Lifecycle modes](architecture/runtime-lifecycle.md#2-modes) →
   [API guide](api/guide.md#12-nativeaot).

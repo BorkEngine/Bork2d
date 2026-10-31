@@ -22,18 +22,31 @@
 > never enter the runtime/AOT graph. Runtime data types stay in `Project.Common`/`Pong.Common`. The
 > Pong desktop app builds the assets executable out of process through
 > `build/Bork2d.Assets.Copy.targets`; see [asset processors](asset-processors.md).
+>
+> **M8 (sprite renderer) is implementation-complete through WP-5; the milestone PR is open for
+> review and is not merged.** WP-1 reconciled the docs, WP-2 added the shader pipeline/camera
+> math/instance planning, WP-3 added the texture pages/`RenderStats`, WP-4 added the draw/statistics/
+> capture integration, and WP-5 added the explicit short-vs-long Pong/AOT presentation gate, the
+> Release benchmark, the manual visual artifact, and the final docs. The approved target adds a
+> second build-time-only tool, `Bork2d.ShaderCompiler`
+> (Silk.NET.Shaderc/Silk.NET.Shaderc.Native 2.23.0), which compiles checked-in GLSL to SPIR-V and
+> emits generated C# linked into `Bork2d.Render`. The tool and its packages never enter the runtime
+> or AOT publish graph; there is no runtime shader I/O, compiler, or Vulkan SDK requirement. WP-3/WP-4
+> added no package and no runtime project reference (the page subsystem is internal to
+> `Bork2d.Render`); WP-5 adds no public package or project reference either.
 
 ## 1. Scope
 
 | Component | NativeAOT required? | Why |
 | --- | --- | --- |
 | `Bork2d.Engine` | Yes | Public contract plus the runtime scene, transforms, time, snapshot policy, generated shapes, pack parsing, decompression, MessagePack decoding, and pack-time reference validation. |
-| `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. M6 adds the instance/validation/device-selection foundation, the windowed swapchain/clear/present renderer, and the offscreen target/renderer with the Runtime host wiring. Sprites/uploads are M8. The renderer is never constructed on the headless path. |
+| `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. M6 adds the instance/validation/device-selection foundation, the windowed swapchain/clear/present renderer, and the offscreen target/renderer with the Runtime host wiring. M8 WP-2 adds the generated-SPIR-V sprite pipeline/layout/samplers and the camera-projection bridge; WP-3 adds the internal texture-page subsystem (async `IAssets` prefetch, pooled images/staging, upload fences, bindless descriptors, dynamic capacity) and the per-frame binding 0/1 resources; WP-4 adds the planner, per-camera passes/draws, growable mapped instance buffers, per-frame stats publication, and capture staging. The renderer is never constructed on the headless path. |
 | `Bork2d.Runtime` | Yes | Builder, host, and app-owned logging. |
 | `Pong.Desktop` | Yes | The AOT desktop example and the local gate, published with `PublishAot`. It references `Bork2d.Engine`/`Bork2d.Runtime` plus the game-side `Pong.Common` and loads the baked 7-entry Pong pack for `--headless` (120 ticks by default; `--headless --ticks N` overrides) or runs the same pack windowed (`--windowed [--ticks N]`) or offscreen (`--offscreen --ticks N`). |
 | `Pong.Common` | Yes | Game-side runtime library: `GameSettings` (a `[GenerateShape]` struct root with sprite references), `PongGame`, `PongSimulation`, `PongAi`, and `PongTitle`; it references `Bork2d.Engine` only. |
-| `Bork2d.Editor` | No (JIT) | Avalonia desktop tool; may reflect over the game model. M5. |
+| `Bork2d.Editor` | No (JIT) | Avalonia desktop tool; may reflect over the game model. Not in Stage 1 (M5 removed). |
 | Asset baker / pack tool (`Bork2d.Bake`) | No (JIT) | Build-time tools; use explicit `RegisterAsset<T>()` registrations and TOML. No generated host, no reflection, and no `Bork2d.Bake.Cli` or `generate-host`. |
+| `Bork2d.ShaderCompiler` (build-only) | No (JIT) | Build-time tool that compiles checked-in GLSL to SPIR-V with Silk.NET.Shaderc 2.23.0 and emits generated C# linked into `Bork2d.Render`. `Current` (M8 WP-2); never in the runtime or AOT publish graph, and no Vulkan SDK is required. |
 | `MyGame.Assets` / `Pong.Assets` | No (JIT) | Game/build-time executables that own source roots, processors, and builder configuration; they bake packs when built and are never referenced by the runtime/AOT publish. Runtime data types remain in the AOT-safe `Pong.Common`. |
 | Tests | Mixed | Unit tests run JIT; `Pong.Desktop` is the one AOT publish/run gate. |
 
@@ -83,7 +96,7 @@ It may use:
 - static generics and `typeof(T)` metadata visible to the AOT compiler;
 - source-generated Nerdbank.MessagePack shapes, including `PackHeader`/`PackEntry` (M3);
 - explicit registrations: `WithGame(instance)` now, editor `WithAssetType<T>()`/
-  `WithWindow<T>()` in M5;
+  `WithWindow<T>()` if an editor returns (not in Stage 1);
 - bounded validation around generated pack header/entry shapes and known asset kinds.
 
 The game is a caller-constructed instance: `WithGame(instance)` has no `new()` constraint and no
@@ -144,15 +157,19 @@ explicit `RegisterAsset<T>()` entries, and processor code (JIT). They may use
 `System.Text.Json`/image decoders and reference `Project.Common` types, but they never enter the
 runtime publish graph. There is no generated host, no `MetadataLoadContext`, no host ALC, and no
 reflection over `Project.Common`.
-`Bork2d.Editor` (M5) may use Avalonia, reflection, TOML writing, and a collectible load context for
-editor reload. None of these dependencies may leak into `Bork2d.Engine`, `Bork2d.Render`,
+The M8 `Bork2d.ShaderCompiler` tool is build-time-only in the same way: it references
+Silk.NET.Shaderc/Silk.NET.Shaderc.Native 2.23.0, compiles the checked-in GLSL, and emits a generated
+C# source with the SPIR-V byte arrays into `Bork2d.Render`'s compilation; neither the tool nor the
+shaderc packages are referenced by a runtime project or included in the publish.
+`Bork2d.Editor` (not in Stage 1) may use Avalonia, reflection, TOML writing, and a collectible load
+context for editor reload. None of these dependencies may leak into `Bork2d.Engine`, `Bork2d.Render`,
 `Bork2d.Runtime`, `Pong.Common`, or the published AOT app;
 the runtime projects compile with AOT analyzers, and the dependency test proves the absence of
-Bake/Builder/Tomlyn/StbImageSharp and the assets executables. The runtime never parses TOML and
-never reflects over game members.
+Bake/Builder/Tomlyn/StbImageSharp, the M8 shader tool/shaderc packages, and the assets executables.
+The runtime never parses TOML and never reflects over game members.
 
-Editor registrations are explicit (`WithProject`, `WithAssetType<T>`, `WithWindow<T>`, M5) for
-determinism and a possible future AOT editor, not a current AOT requirement.
+Editor registrations are explicit (`WithProject`, `WithAssetType<T>`, `WithWindow<T>`; not in Stage 1)
+for determinism and a possible future AOT editor, not a current AOT requirement.
 
 ## 6. Native libraries and Silk.NET
 
@@ -193,7 +210,17 @@ determinism and a possible future AOT editor, not a current AOT requirement.
   ticks by default), `--headless --ticks N`, `--windowed --ticks 120`, and `--offscreen --ticks
   120` runs; the existing two-code suppression
   covers the shared resolver and no custom resolver or broader suppression was needed.
-- No runtime shader compilation: SPIR-V is built offline.
+- **No runtime shader compilation (as built in M8 WP-2).** A build-time
+  `Bork2d.ShaderCompiler` tool (Silk.NET.Shaderc 2.23.0, Vulkan 1.3 target) compiles the checked-in
+  GLSL (`Bork2d.Render/Shaders/sprite.vert`, `sprite.frag`) and emits a generated C# file with the
+  SPIR-V byte arrays into `Bork2d.Render`'s compilation. The generated SPIR-V is linked into the
+  single-file executable; the publish contains no loose `.spv` files, no shaderc assemblies, and no
+  shader I/O or compiler at runtime. The tool is restored/built out of process by
+  `build/Bork2d.ShaderCompiler.targets` (with `RemoveProperties` so RID/publish settings do not leak),
+  is not in `Bork2d.slnx`, and never enters the runtime/AOT graph. The Vulkan SDK is **not** a build
+  requirement; a locally installed `glslangValidator`/`glslc`/`spirv-val` is not used by the build.
+  WP-2's required AOT publish has no `Bork2d.ShaderCompiler`/Silk.NET.Shaderc assembly and no loose
+  `.spv`, and the published headless/offscreen/windowed runs exit 0.
 - The headless server must not initialize SDL or Vulkan; `WithHeadless(...)` must not load or
   call the graphics/windowing paths.
 
@@ -212,9 +239,12 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    There is no generated host and no host build step. The publish output must contain no
    `Pong.Assets`, `Bork2d.Bake`, Tomlyn, or StbImageSharp assembly (`Pong.Common` is the expected
    game-side assembly), must contain `assets.pck` and `SDL2.dll`, and must not contain
-   `vulkan-1.dll` (the system loader). The NativeAOT output is a single-file executable plus PDBs,
-   so the managed assemblies are linked in; `Pong.Common.pdb` is the remaining on-disk proof that
-   the game assembly was in the publish graph.
+   `vulkan-1.dll` (the system loader). M8 (verified in WP-2; unchanged through WP-5) additionally
+   requires no
+   `Bork2d.ShaderCompiler`/`Silk.NET.Shaderc` assembly and no loose `.spv` in the publish: the
+   generated SPIR-V C# is compiled into the app. The NativeAOT output is a single-file executable
+   plus PDBs, so the managed assemblies are linked in; `Pong.Common.pdb` is the remaining on-disk
+   proof that the game assembly was in the publish graph.
 4. Run the AOT-published headless example locally (no GPU): default logging, one `Setup`, **120
    `Tick`s by default** (`--headless --ticks N` runs exactly `N`), one `Teardown`, the **baked
    7-entry pack** (the `GameSettings` struct root with its
@@ -223,20 +253,34 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    payload, the red/blue tints), detached root, exit `0`. The success line reports the tick count
    and `tickLimit`.
 5. Run the AOT-published windowed and offscreen examples locally on a desktop session with a
-   Vulkan 1.3 device: `Pong.Desktop.exe --windowed --ticks 120` must exit `0` after exactly 120
-   ticks with one `Setup` and one `Teardown`, loading the same pack, consuming one black-clear
-   frame per snapshot (the short run consumes the first and supersedes the rest), and joining the
-   renderer; `Pong.Desktop.exe --offscreen --ticks 120` must exit `0` after exactly 120 ticks with
-   one `Setup`/`Teardown`, a 1280×720 sRGB offscreen target, and a joined renderer (frame count not
-   asserted, D-M6-13/Q22=V1). The interactive `--windowed` run observes the visible black-cleared
-   window, reads W/S/Space/R/Escape, and exits on Escape/close (sprites arrive in M8;
-   the title/logs carry the score and state).
-6. The **three-mode AOT gate** runs the AOT-published app on a GPU machine: `--headless` (120 ticks
-   by default, or `--headless --ticks N`) stays GPU-free, `--windowed --ticks 120` creates the SDL
-   window/instance/surface and presents a black clear per consumed snapshot, and `--offscreen
-   --ticks 120` runs the offscreen renderer until `Exit` (D-M6-13). All four runs exit 0; the
-   publish is zero-warning; and the published app runs with the narrow two-code Silk.NET
-   suppression.
+   Vulkan 1.3 device. The approved M8 gate is split by the explicit
+   `PongAcceptanceGate.LongRunTickThreshold = 1000`:
+   - **Short runs** (`--windowed --ticks 120`, `--offscreen --ticks 120`) must exit `0` after
+     exactly 120 ticks with one `Setup`/`Teardown`, the same pack, validation `0/0`, and the loaded
+     content; they print the observed stats but do **not** assert draw counters. The unpaced M7 loop
+     can finish 120 ticks before the asynchronous texture pages are drawable, so the short run
+     reports `texturePages=1`, `drawCalls=0`, `instances=0`, `skippedSprites=3` and is not the
+     presentation proof.
+   - **Long presentation runs** (`--offscreen --ticks 20000`, `--windowed --ticks 20000`) must exit
+     `0` after exactly 20,000 ticks with one `Setup`/`Teardown` and assert `Cameras >= 1`,
+     `NonEmptyCameras >= 1`, `DrawCalls >= 1`, `Instances >= 3`, `TexturePages >= 3`,
+     `DrawCalls == NonEmptyCameras <= Cameras`, and validation `0/0`. As built (2026-10-31):
+     offscreen `1/20000/1`, `drawCalls=1`, `instances=3`, `texturePages=3/256`,
+     `validation=0/0`, plus `skippedSprites=0`, exit 0; windowed `1/20000/1` with the same
+     relationships and 8,334 presented frames, exit 0. No pacing, sleep, or host-loop change is
+     involved.
+   - The placeholder page is created and uploaded at startup (`texturePages=1`,
+     `texturePageCapacity=256`, `bindlessLimit` logged) with no extra publish content; WP-4 draws
+     the three sprites with their tints once the two texture pages are ready. Visual acceptance is a
+     manual capture through `IEngine.CaptureFrameAsync` (raw RGBA under the untracked `artifacts/`),
+     not a pixel assertion. The interactive `--windowed` run reads W/S/Space/R/Escape and exits on
+     Escape/close; the title/logs carry the score and state.
+6. The **AOT gate** runs the AOT-published app on a GPU machine: `--headless` (120 ticks by default,
+   or `--headless --ticks N`) stays GPU-free; the short `--windowed --ticks 120` creates the SDL
+   window/instance/surface and presents one frame per consumed snapshot; the short `--offscreen
+   --ticks 120` runs the offscreen renderer until `Exit` (D-M6-13). The long windowed/offscreen
+   20,000-tick runs assert the draw/statistics relationships. All six runs exit 0; the publish is
+   zero-warning; and the published app runs with the narrow two-code Silk.NET suppression.
 7. `Pong.Desktop` loads the baked pack produced by the same tooling a game uses; the constrained
    `IShapeable<T>` contract makes a missing shape a compile-time error. `GameSettings` is a
    `readonly record struct` root with `AssetRef<SpriteAsset>` members, so it proves the D-M4-11

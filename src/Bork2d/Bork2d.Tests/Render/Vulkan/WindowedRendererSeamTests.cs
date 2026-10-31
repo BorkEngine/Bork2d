@@ -26,6 +26,65 @@ public sealed class WindowedRendererSeamTests
     }
 
     [Fact]
+    public void FactoryRejectsWindowedWithoutTheAssetSeam()
+    {
+        var factory = new VulkanRendererFactory();
+        RendererStartInfo startInfo = StartInfoWithoutAssets(new FakeVulkanInstance(), 0x1234);
+
+        var exception = Assert.Throws<Bork2dException>(() => factory.Create(startInfo));
+
+        Assert.Contains("IAssets", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FactoryRejectsOffscreenWithoutTheAssetSeam()
+    {
+        var factory = new VulkanRendererFactory();
+        var startInfo = new RendererStartInfo
+        {
+            Mode = RendererMode.Offscreen,
+            InstanceHandle = 0,
+            Width = 320,
+            Height = 240,
+            LoggerFactory = NullLoggerFactory.Instance,
+            Assets = null!,
+        };
+
+        var exception = Assert.Throws<Bork2dException>(() => factory.Create(startInfo));
+
+        Assert.Contains("IAssets", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheWindowedRendererRejectsAMissingAssetSeamAtCreation()
+    {
+        RendererStartInfo startInfo = StartInfoWithoutAssets(new FakeVulkanInstance(), 0x1234);
+
+        var exception = Assert.Throws<Bork2dException>(() => new VulkanRenderer(startInfo));
+
+        Assert.Contains("IAssets", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheOffscreenRendererRejectsAMissingAssetSeamAtCreation()
+    {
+        var startInfo = new RendererStartInfo
+        {
+            Mode = RendererMode.Offscreen,
+            InstanceHandle = 0,
+            Width = 320,
+            Height = 240,
+            LoggerFactory = NullLoggerFactory.Instance,
+            Assets = null!,
+        };
+
+        var exception = Assert.Throws<Bork2dException>(
+            () => new VulkanOffscreenRenderer(startInfo, new FakeVulkanInstanceFactory()));
+
+        Assert.Contains("IAssets", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FactoryRejectsWindowedWithoutAnInstance()
     {
         var factory = new VulkanRendererFactory();
@@ -58,6 +117,7 @@ public sealed class WindowedRendererSeamTests
             Width = 320,
             Height = 240,
             LoggerFactory = NullLoggerFactory.Instance,
+            Assets = new FakeAssets(),
         };
 
         IRenderer renderer = factory.Create(startInfo);
@@ -84,6 +144,7 @@ public sealed class WindowedRendererSeamTests
             Width = width,
             Height = height,
             LoggerFactory = NullLoggerFactory.Instance,
+            Assets = new FakeAssets(),
         };
 
         var exception = Assert.Throws<Bork2dException>(() => factory.Create(startInfo));
@@ -154,5 +215,23 @@ public sealed class WindowedRendererSeamTests
             VSync = true,
             ValidationRequested = true,
             LoggerFactory = NullLoggerFactory.Instance,
+            Assets = new FakeAssets(),
+        };
+
+    private static RendererStartInfo StartInfoWithoutAssets(
+        IVulkanInstance? instance,
+        nint surfaceHandle)
+        => new()
+        {
+            Mode = RendererMode.Windowed,
+            Instance = instance,
+            InstanceHandle = instance?.Handle ?? 0,
+            SurfaceHandle = surfaceHandle,
+            Width = 1280,
+            Height = 720,
+            VSync = true,
+            ValidationRequested = true,
+            LoggerFactory = NullLoggerFactory.Instance,
+            Assets = null!,
         };
 }

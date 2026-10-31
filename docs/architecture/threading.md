@@ -14,8 +14,16 @@
 > lifetime, the combined snapshot/control wait, and the suspended minimized drain are `Current` (M7
 > WP-3); the host acquire/capture/publish wiring, the blocked-producer wake paths, the minimized
 > 30 Hz tick cap, and the paced headless loop are `Current` (M7, §5.3/§7). The engine has no
-> debug-only tick-active, structural, or slot-state checks. The suite is 1158 tests: 1141
-> deterministic plus 17 opt-in/conditional.
+> debug-only tick-active, structural, or slot-state checks. The suite is 1362 tests: 1335
+> deterministic plus 27 opt-in/conditional. **M8 (sprite renderer) is implementation-complete
+> through WP-5; the milestone PR is open for review and is not merged.** WP-2 added the
+> pure camera/planning/instance-layout code (no new thread) and the renderer-owned sprite pipeline;
+> WP-3 added the render-thread texture-page subsystem (async `IAssets` calls polled from the render
+> thread, per-page upload fences, pooled memory) and the public `RenderStats` bridge; WP-4 added the
+> shared plan, per-camera passes/draws, per-frame stats publication, and the thread-safe
+> `CaptureFrameAsync` request queue with pooled per-frame staging; WP-5 added no thread or lock
+> change (the Release benchmark and the Pong gate are host-side evidence). M8 does **not** change
+> the frame snapshot.
 
 ## 1. Threads by mode
 
@@ -23,7 +31,7 @@
 | --- | :-: | :-: | :-: | --- |
 | **Tick** | yes | yes | yes | Windowed/offscreen loop (slot acquire, time, `IGame.Setup/Tick/Teardown`, input freeze/text dispatch, tick scope, scene/asset requests, snapshot capture, publish, shutdown); headless paced loop with the synthesized clock. May be any host thread. |
 | **OS/window** | yes | no | no | SDL video/events and window operations; public `IWindow` calls are marshaled here. |
-| **Render** | yes | yes | no | Vulkan device, swapchain (windowed) or offscreen targets, frames/fences, the snapshot ring and consumer, dynamic-rendering clear, present/discard. Started by the host before `Setup`; no `Tick` runs until it is ready. Uploads, sprite resolution, sorting, draws, and instance filling are M8. |
+| **Render** | yes | yes | no | Vulkan device, swapchain (windowed) or offscreen targets, frames/fences, the snapshot ring and consumer, the per-camera sprite passes/draws, present/discard, and the capture copy. Started by the host before `Setup`; no `Tick` runs until it is ready. M8 WP-2 adds the render-thread-owned sprite pipeline/layout/samplers (created after the color format is known); WP-3 adds the page subsystem (prefetch through `IAssets`, upload fences, descriptor writes, capacity growth) and the frame binding-1 bindless sets; WP-4 adds the planner, growable mapped instance filling, per-frame stats publication, and the capture queue/staging. |
 | **Asset loader** | yes | yes | yes | One per app: pack reads, decompression, and MessagePack deserialization. It caches no resolved assets and never touches SDL, Vulkan, or game entities. |
 | **Game workers** | yes | yes | yes | Game-spawned threads on distinct entities; the game joins them before `Tick` returns. |
 
@@ -75,7 +83,10 @@ The guarantees are deliberately precise:
 
 `Current` (internal, M7): the value-only model and the capture pass live in
 `Bork2d.Engine.Rendering` and are never part of the public `Bork2d.Engine` contract. Camera
-ordering, sprite sorting, and every draw remain M8. A snapshot is the renderer's complete input
+ordering, sprite sorting, and every draw are `Current` (M8 WP-4). **M8 does not
+change the snapshot:** it stays value-only and asset-agnostic except the loaded `SpriteAsset?`, and
+the renderer resolves textures through `IAssets` instead of receiving new snapshot fields. A
+snapshot is the renderer's complete input
 for one tick: immutable after publication, free of live entity references except the loaded
 `SpriteAsset?`, and built by an unordered traversal of the rooted tree with game workers joined.
 
@@ -105,7 +116,7 @@ for one tick: immutable after publication, free of live entity references except
 - **Built after `Tick`, asset-agnostic.** Capture runs with all workers joined; workers must not
   write scene state after `Tick` returns. A snapshot never contains textures, vertices, or derived
   sprite metadata; the renderer resolves the loaded `SpriteAsset.Texture` reference at draw time.
-  Flips are captured values (Q2=B1); M7 never draws.
+  Flips are captured values (Q2=B1); WP-4 draws them.
 - **Unordered capture, renderer sorting.** Capture walks `IEngine.Root` in no specified order
   through an internal-only visitor; the tree still exposes no child enumeration, traversal helper,
   entity identity, or stable order in the public API. M8 sorts sprites by `(Layer, ZIndex)`
@@ -342,8 +353,9 @@ thread never invokes a game callback.
 
 ## 6. Asset and pack coordination
 
-`Current (M3/D-035)` for the loader and pack-time reference validation; renderer/GPU integration is
-`Planned` (M8).
+`Current (M3/D-035)` for the loader and pack-time reference validation. The renderer/GPU integration
+(uploads/pages, render-thread `IAssets` calls, and the per-sprite lookup) is `Current` (M8
+WP-3/WP-4).
 
 - The internal asset service owns **one** dedicated loader thread per app and an unbounded FIFO
   request queue. There is no priority, no parallelism, and no cancellation token in the public API.
@@ -363,17 +375,32 @@ thread never invokes a game callback.
   and no CPU resource table.
 - **Pack-time reference validation** runs in `PackBuilder.Build`/`Write`, not on the loader thread.
   The builder walks each added asset's generated shape, collects every non-null reference, and
-  checks that the path exists and targets the matching raw/MessagePack kind. Field validation is
-  M4 baker/editor work.
+  checks that the path exists and targets the matching raw/MessagePack kind. There is no sprite
+  field validation in Stage 1 (M5 is removed); the renderer's defensive draw-time rules apply.
 - Shutdown stops accepting requests, cancels queued and in-flight load tasks (they complete as
   canceled), joins the loader at a safe point, and only then closes the mounted archives. After
   shutdown every `IAssets` member throws `ObjectDisposedException`.
 - The virtual filesystem overlay table is immutable except for an atomic swap when `LoadPack`
   mounts a new pack; later packs shadow earlier ones and there is no unload in v1.
-- M3 has no renderer work: the loader never creates GPU resources. In M8 the renderer will create
-  GPU texture pages and uploads on the render thread, resolving `SpriteAsset.Texture` and
-  `TextureDescriptor.Payload` at draw time; GPU page lifetime is retired after the referencing
-  frames complete.
+- **Render-thread `IAssets` coordination (`Current`, M8 WP-3).** The render thread calls
+  `LoadAsset<TextureDescriptor>`/`LoadData` directly; the calls complete asynchronously on the one
+  loader thread, which stays the single loader. A page is `Pending` while its load runs, and its
+  sprites are skipped (never blocking); a failed load maps the path to the placeholder and is not
+  retried. The renderer polls the returned tasks in its per-frame pump and never waits on a load; no
+  lock is held across a Vulkan call, fence wait, loader wait, or game callback. Pending tasks are
+  observed and ignored on stop. The host stops the asset service only after the renderer has joined,
+  so a render-thread load can never race a disposed service. GPU pages live for the run (no
+  eviction), are uploaded through a separate submit/fence, and are destroyed on the render thread
+  after `vkDeviceWaitIdle` at shutdown.
+- **Stats bridge (`Current`, M8 WP-3/WP-4).** `IEngine.RenderStats` returns a consistent immutable
+  snapshot. The runtime installs a source that reads the renderer's thread-safe board right after
+  renderer creation; the engine getter takes a short `System.Threading.Lock`, never blocks on the
+  GPU, never allocates, and swallows a throwing source. The renderer publishes once per completed
+  frame (after submit/present).
+  `IEngine.CaptureFrameAsync` enqueues a one-shot request under a short lock; the render thread
+  records the copy after the last camera pass and before present/discard, completes the task from
+  the frame fence, and never blocks the tick. The request queue is drained/faulted on stop/fatal,
+  and per-frame staging memory is pooled.
 
 See [Assets and tooling](assets-and-tooling.md).
 
@@ -387,7 +414,17 @@ Thread-specific rules:
   outlives the Vulkan instance/surface (windowed) or the owned instance/device (offscreen): the
   host stops and joins it before `platform.Shutdown()` destroys the surface/instance/window and
   before the assets stop. The asset loader thread is cancellable and joinable; queued and
-  in-flight load tasks are canceled and the loader is joined at shutdown (M3).
+  in-flight load tasks are canceled and the loader is joined at shutdown (M3). **M8 shutdown
+  ordering (as built in WP-3):** the renderer waits its frame/upload fences and `vkDeviceWaitIdle`,
+  destroys the per-frame pools/sets, the page images/views/staging/upload pool, the pipeline, and the
+  device, then joins; only afterwards does the host stop the asset service, so the `IAssets` instance
+  passed in `RendererStartInfo` outlives the renderer. Pending page-load tasks are observed and
+  ignored (including a load that completed with a fault between frames and was never pumped), and
+  every submitted upload fence is waited without a timeout before its resources are freed: a wait
+  failure (device loss) is logged and the in-flight page resources are deliberately not freed, so
+  no live copy can read freed memory. **WP-4 capture shutdown:** pending requests are drained and
+  faulted; requests already recorded on a frame complete from its fence before staging is destroyed,
+  so no task is left pending and no staging memory outlives the device.
 - **Shutdown with frames in flight.** `RequestStop` stops the ring (waking a blocked producer) and
   the control channel (waking a blocked consumer); a renderer fatal does the same before the host
   observes it at the next boundary (Q9=I1). The render thread waits its frame fences and
@@ -415,9 +452,13 @@ Thread-specific rules:
   access: `System.Threading.Lock`, not `lock (object)`, short critical sections, no lock across
   an await or blocking wait, structural lock before per-object lock.
 - Snapshot arrays are slot-private: the tick writes only the slot it owns; the renderer reads
-  only a slot in `Rendering`. M8 copies snapshot data into per-frame instance buffers (M7 allocates
-  those buffers empty and writes nothing); the GPU reads those buffers, not snapshot memory, and a
-  buffer is rewritten only after its fence. Uploads use persistently mapped memory.
+  only a slot in `Rendering`. WP-3 allocates each frame's 1024-record 96-byte host-visible coherent
+  instance buffer and writes binding 0; WP-4 maps it once, writes the records/camera ranges into it,
+  and grows it only at a free fence. Texture uploads use a host-visible staging pool and
+  a separate submit/fence. `RenderStats` is published once per completed frame and read as one
+  consistent snapshot (a short lock or an equivalent atomic snapshot), and the capture result is
+  handed to its task after the frame fence, never from inside a
+  render callback that the tick waits on.
 - Release builds keep the per-object locks; composite multi-property updates are neither atomic
   nor detected by the engine.
 
@@ -469,6 +510,20 @@ tick-cap tests with a fake scheduler, the headless K1/L2/F5–F8 schedule tests 
 plus one small real-time tolerant pacer test, and the host-level windowed/offscreen GPU handoff
 tests (Q19=S3). The suite is 1158 tests: 1141 deterministic tests in CI plus 17 opt-in/conditional
 (9 real-window, 3 reparse-point, 5 real-GPU).
+
+The suite is 1362 tests: 1335 deterministic tests in CI plus 27 opt-in/conditional (9 real-window,
+3 reparse-point, 15 real-GPU). WP-3 added the fake-`IAssets` page-state tests (pending/uploading
+skip, one load per path, placeholder mapping with the declared-dimension sizing, no-repeat-load,
+growth/limit failure, allocation-free steady lookup) and the `RenderStats` bridge tests (any-thread
+consistent reads, defaults before the source and in headless, a throwing source, allocation-free
+reads); WP-5 adds the 50,000-sprite warmed-plan allocation test and the linked Pong short/long gate
+tests, with no new thread or lock.
+
+WP-4 adds the zero-allocation plan/build tests, the instance-growth policy tests, the
+public-surface/capture-lifecycle tests, and the opt-in GPU tests that assert one draw per non-empty
+camera, per-camera clears/zero-camera behavior, the placeholder, fatal malformed sprites, instance/
+page growth, and the `CaptureFrameAsync` contract (length/lifecycle only, **no pixel/golden
+assertions**). GPU tests stay local-only; CI is unchanged.
 
 ## 10. Related documents
 
