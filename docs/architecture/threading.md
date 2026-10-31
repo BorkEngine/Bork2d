@@ -1,7 +1,8 @@
 # Threading and Frame Handoff
 
-> **Status:** implemented through M7 WP-4 (2026-10-31; the milestone is in progress and WP-5 owns the
-> final status). The M1 scene graph implements the structural and per-object
+> **Status:** implemented through M7 (2026-10-31; M7 is implemented on `m-7/common` with the
+> ready-for-review PR open/awaiting human review; it is not merged). The M1 scene graph implements
+> the structural and per-object
 > `System.Threading.Lock` rules in §2 and the public API has no thread affinity. The M2 windowed
 > platform's OS/window thread, command queue, confirmed-state snapshot, event pump, input freeze, and
 > the runtime tick loops that drive them are `Current` (§5). The M3 asset service's one loader
@@ -12,7 +13,7 @@
 > three-slot ring state machine are `Current` (M7 WP-2); renderer consumption, the fence-held slot
 > lifetime, the combined snapshot/control wait, and the suspended minimized drain are `Current` (M7
 > WP-3); the host acquire/capture/publish wiring, the blocked-producer wake paths, the minimized
-> 30 Hz tick cap, and the paced headless loop are `Current` (M7 WP-4, §5.3/§7). The engine has no
+> 30 Hz tick cap, and the paced headless loop are `Current` (M7, §5.3/§7). The engine has no
 > debug-only tick-active, structural, or slot-state checks. The suite is 1158 tests: 1141
 > deterministic plus 17 opt-in/conditional.
 
@@ -65,14 +66,14 @@ The guarantees are deliberately precise:
   request assets, mutate entities they own, read `ITime` snapshots, and hand data back through
   game-owned queues; they must join before `Tick` returns.
 - **The tick is the quiescence boundary.** The snapshot is built after `Tick` returns; a worker
-  still running then violates the contract (the internal capture pass is `Current`, M7 WP-2).
+  still running then violates the contract (the internal capture pass is `Current`, M7).
   Composite multi-property updates
   that must be atomic are the game's responsibility: the engine cannot detect a non-atomic
   update spanning multiple locked operations and performs no debug-only boundary checks.
 
 ## 3. Frame snapshot
 
-`Current` (internal, M7 WP-2): the value-only model and the capture pass live in
+`Current` (internal, M7): the value-only model and the capture pass live in
 `Bork2d.Engine.Rendering` and are never part of the public `Bork2d.Engine` contract. Camera
 ordering, sprite sorting, and every draw remain M8. A snapshot is the renderer's complete input
 for one tick: immutable after publication, free of live entity references except the loaded
@@ -119,13 +120,13 @@ for one tick: immutable after publication, free of live entity references except
 
 ## 4. Triple-buffer handoff
 
-`Current` (internal, M7 WP-2/WP-3) in `Bork2d.Render.Handoff`: the slots, `latest`,
-publish/take/release, waits, and counters (WP-2), and the renderer-side `SnapshotConsumer` plus the
-combined `SnapshotControlWait` (WP-3) exist and are covered by deterministic tests. The renderer
+`Current` (internal, M7) in `Bork2d.Render.Handoff`: the slots, `latest`,
+publish/take/release, waits, counters, the renderer-side `SnapshotConsumer`, and the combined
+`SnapshotControlWait` exist and are covered by deterministic tests. The renderer
 takes the newest `Ready` snapshot only for a free GPU frame, holds it until that frame's fence is
 observed, and releases it when the frame index is next reused or in the stop/fatal/idle drain. The
-host acquire/capture/publish wiring and the blocked-producer wake paths are `Current` (M7 WP-4, §5.3
-and §7), so a windowed/offscreen run now publishes and consumes snapshots. There are exactly
+host acquire/capture/publish wiring and the blocked-producer wake paths are `Current` (§5.3
+and §7), so a windowed/offscreen run publishes and consumes snapshots. There are exactly
 **three snapshot slots**. A slot is held until the GPU frame that consumed it signals its fence,
 which bounds run-ahead without growing an unbounded queue.
 
@@ -159,7 +160,7 @@ loop:
 `AcquireSnapshotSlot` blocks only when all slots are `Ready`/`Rendering`; that wait is frame
 backpressure, not an artificial delay, and it returns `null` on stop/exit/fatal. Publish order is
 `Ready` before `latest`; a superseded `Ready` slot is freed, and a `Rendering` slot is never freed
-by the producer. `WakeSnapshotWait` (installed by the host on `IEngine.Exit()` in WP-4) wakes a
+by the producer. `WakeSnapshotWait` (installed by the host on `IEngine.Exit()`) wakes a
 blocked acquire without stopping consumption, so the Exit tick can still publish (Q4=D1, Q9=I1).
 The producer's control flow is in §5.3.
 
@@ -425,22 +426,22 @@ Thread-specific rules:
 1. **Slot state machine.** Fake producer/consumer/fence with random delays: bounded run-ahead,
    no lost newest, no slot leak, no read of `Writing`, no free of `Rendering`, monotonic sequence.
    The internal ring state machine and a deterministic 10,000-snapshot stress are `Current`
-   (M7 WP-2).
+   (M7).
 2. **Render consumption.** `SnapshotConsumer`: one snapshot per GPU frame, the slot held
    `Rendering` until its frame index is reused, release-on-reuse, the suspended drain
    (`Ready → Free`, counted, never `Rendering`), and release-all after idle. The combined
    `SnapshotControlWait` wakes on a snapshot, a control post, a stop, or a fatal without polling.
-   Both are `Current` (M7 WP-3). **Host pacing** is `Current` (M7 WP-4): the windowed/offscreen tick
+   Both are `Current` (M7). **Host pacing** is `Current` (M7): the windowed/offscreen tick
    publishes one snapshot per completed tick (including the Exit tick), waits only when the ring is
    full, abandons the slot on a `Tick`/capture failure, and starts no further tick when `Exit` or a
    renderer fatal wakes a blocked acquire. The minimized 30 Hz tick cap is covered with the fake
    scheduler; the normal windowed and offscreen loops assert no sleep.
 3. **Concurrency.** N workers create/mutate distinct entities, then join; all appear exactly once
    with distinct references, detach/re-attach is safe, no entity-ID or order assertions.
-4. **Shutdown.** Renderer-level stop during submit/fence and the idle drain are `Current` (M7
-   WP-3): held slots are released, `Join` drains the ring, all threads exit within a timeout, and
-   every slot ends `Free`. Host-level stop/exit/fatal during a blocked acquire is `Current` (M7
-   WP-4): the wait wakes, zero extra ticks run, `Teardown` runs once, and the run joins and rethrows
+4. **Shutdown.** Renderer-level stop during submit/fence and the idle drain are `Current` (M7):
+   held slots are released, `Join` drains the ring, all threads exit within a timeout, and
+   every slot ends `Free`. Host-level stop/exit/fatal during a blocked acquire is `Current` (M7):
+   the wait wakes, zero extra ticks run, `Teardown` runs once, and the run joins and rethrows
    the renderer fatal.
 5. **Modes and allocation.** Headless has no SDL/render thread/ring and paces on the caller thread
    with the synthesized clock; offscreen has no surface/swapchain; fixed entity counts allocate
@@ -452,16 +453,16 @@ cancellation/join, enqueue ordering), the M6 SPSC control channel (ordering, lat
 coalescing, stop wake, one-shot fatal), the renderer host ordering (Setup before readiness, the
 first-tick gate, renderer fatal at a tick boundary, tick/teardown aggregation, offscreen `Exit` and
 `ITime`, headless no renderer), and the platform's confirmed-state posts/surface replacement. M7
-WP-2 adds the ring state-machine/backpressure/wake tests, the newest-wins supersession and
+adds the ring state-machine/backpressure/wake tests, the newest-wins supersession and
 `latest`-clearing checks, the scripted and concurrent 10,000-snapshot stress with fake
 frames/fences, the unordered capture tests (world matrices, detach/attach, invalid layers
 including bit 31, null assets, flips), the pooled high-water capacity tests, and the zero-allocation
-capture + publish + take + release test. M7 WP-3 adds the deterministic consumer tests (one frame
+capture + publish + take + release test. M7 also adds the deterministic consumer tests (one frame
 per consumed snapshot, held-to-reuse, suspended drain, release-all, counters), the combined-wait
 wake tests, ring `DiscardLatest` tests, the fake-renderer slot API/backpressure tests, and the
 rewritten opt-in GPU tests that publish snapshots one at a time and assert frame/consumed
-relationships, zero validation messages, and all slots `Free` after `Join`. M7 WP-4 adds the
-host handoff tests (acquire-before-freeze order, publish after capture, ring backpressure with no
+relationships, zero validation messages, and all slots `Free` after `Join`. The M7 host layer adds
+the host handoff tests (acquire-before-freeze order, publish after capture, ring backpressure with no
 input-edge loss, `Exit`/fatal/stop while a producer is blocked, slot abandonment on a `Tick`
 failure, the published Exit/close tick, the handoff counters in the stop log), the minimized 30 Hz
 tick-cap tests with a fake scheduler, the headless K1/L2/F5–F8 schedule tests with the fake clock

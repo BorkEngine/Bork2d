@@ -47,7 +47,7 @@ public sealed class PongArgumentsTests
     }
 
     [Fact]
-    public void HeadlessHasNoTickLimit()
+    public void HeadlessDefaultsToThe120TickAcceptanceRun()
     {
         Assert.True(PongArguments.TryParse(["--headless"], out PongArguments arguments, out string error));
 
@@ -55,7 +55,42 @@ public sealed class PongArgumentsTests
         Assert.True(arguments.Headless);
         Assert.False(arguments.Windowed);
         Assert.False(arguments.Offscreen);
-        Assert.Null(arguments.TickLimit);
+        Assert.Equal(PongArguments.DefaultHeadlessTickLimit, arguments.TickLimit);
+        Assert.Equal(120, arguments.TickLimit);
+    }
+
+    [Fact]
+    public void HeadlessAcceptsAnExplicitTickLimit()
+    {
+        Assert.True(
+            PongArguments.TryParse(["--headless", "--ticks", "7"], out PongArguments arguments, out string error));
+
+        Assert.Empty(error);
+        Assert.True(arguments.Headless);
+        Assert.False(arguments.Windowed);
+        Assert.False(arguments.Offscreen);
+        Assert.Equal(7, arguments.TickLimit);
+    }
+
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("1.5")]
+    public void HeadlessRejectsAMalformedTickCount(string tickCount)
+    {
+        Assert.False(
+            PongArguments.TryParse(["--headless", "--ticks", tickCount], out _, out string error));
+
+        Assert.Contains("--ticks", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HeadlessTicksWithoutAValueIsRejected()
+    {
+        Assert.False(PongArguments.TryParse(["--headless", "--ticks"], out _, out string error));
+
+        Assert.Contains("--ticks", error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -78,16 +113,6 @@ public sealed class PongArgumentsTests
 
         Assert.Contains("--offscreen", error, StringComparison.Ordinal);
         Assert.Contains("--ticks", error, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void TicksCannotBeCombinedWithHeadless()
-    {
-        Assert.False(
-            PongArguments.TryParse(["--headless", "--ticks", "1"], out _, out string error));
-
-        Assert.Contains("--ticks", error, StringComparison.Ordinal);
-        Assert.Contains("--headless", error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -121,13 +146,14 @@ public sealed class PongArgumentsTests
     }
 
     [Fact]
-    public void TicksWithoutWindowedOrOffscreenIsRejected()
+    public void TicksWithoutWindowedOffscreenOrHeadlessIsRejected()
     {
         Assert.False(PongArguments.TryParse(["--ticks", "1"], out _, out string error));
 
         Assert.Contains("--ticks", error, StringComparison.Ordinal);
         Assert.Contains("--windowed", error, StringComparison.Ordinal);
         Assert.Contains("--offscreen", error, StringComparison.Ordinal);
+        Assert.Contains("--headless", error, StringComparison.Ordinal);
     }
 
     [Fact]

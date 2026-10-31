@@ -1,15 +1,15 @@
 # Rendering
 
 > **Status:** target design for the renderer. Window creation, input, time, and the tick loops are
-> `Current` in `Bork2d.Runtime` (M2/M6); the `Bork2d.Render` foundation, the windowed
+> `Current` in `Bork2d.Runtime` (M2/M6/M7); the `Bork2d.Render` foundation, the windowed
 > swapchain/clear/present path, and offscreen targets plus the windowed/offscreen host wiring are
 > `Current` in M6 (merged 2026-10-31, PR #11). The internal value-only snapshot model, the capture
-> pass, and the three-slot ring state machine are `Current` (M7 WP-2); renderer consumption (one
+> pass, and the three-slot ring state machine are `Current` (M7); renderer consumption (one
 > presented/discarded frame per consumed snapshot, the slot held to the GPU fence, the suspended
-> minimized drain, and the empty per-frame instance resources) is `Current` (M7 WP-3). The host
-> acquire/capture/publish wiring and the pacing loops are M7 WP-4, so until WP-4 lands a
-> windowed/offscreen run has no snapshot to consume and draws no frame; sprite rendering is M8.
-> Everything below about pixels is `Planned` unless [Current status](#11-current-status) says
+> minimized drain, and the empty per-frame instance resources) is `Current` (M7), and the host
+> acquire/capture/publish wiring and the pacing loops are `Current` (M7), so a windowed/offscreen
+> run publishes and consumes snapshots and draws one black clear per snapshot. Sprite rendering is
+> M8. Everything below about pixels is `Planned` unless [Current status](#11-current-status) says
 > otherwise.
 ## 1. Scope
 
@@ -60,11 +60,12 @@ future work); log device, API version, driver, and limits, and validate page cap
 **M6 was the shape without a snapshot.** The render thread waits the frame fence, acquires an
 image, transitions it from `UNDEFINED` to `COLOR_ATTACHMENT_OPTIMAL`, begins one dynamic-rendering
 pass with `loadOp = CLEAR` to opaque black, ends it, transitions to `PRESENT_SRC_KHR`, submits with
-synchronization 2, and presents. **M7 WP-3 implements step 1's renderer half and the frame
+synchronization 2, and presents. **M7 implements step 1's renderer half and the frame
 coupling:** the clear pass is unchanged, but the render thread records exactly one frame per
 consumed snapshot, holds the snapshot slot until that frame's fence, releases the previous frame's
 slot when the frame index is reused, and waits (never re-presents) when no `Ready` snapshot exists.
-The Runtime host still does not publish snapshots (WP-4), so a windowed run shows no frame yet.
+The Runtime host publishes one snapshot per completed tick (M7), so a windowed run presents one
+black clear per snapshot.
 Step 3 (cameras, draws, instance filling) is M8; the frame's instance SSBO and descriptor set
 exist empty (Q10=J1). The Runtime host starts the renderer before `Setup` (D-M6-06).
 ### 3.2 Offscreen
@@ -73,14 +74,14 @@ Same clear shape as windowed without surface/swapchain/present/acquire/semaphore
 sRGB color images with one device-local allocation each, created once for the fixed
 `WithOffscreen(w, h)` extent. Each image is transitioned once from `UNDEFINED` to
 `COLOR_ATTACHMENT_OPTIMAL` and stays there; two frames in flight alternate the images, each gated by
-its own fence. **M7 WP-3:** every frame is recorded for exactly one consumed snapshot — the render
+its own fence. **M7:** every frame is recorded for exactly one consumed snapshot — the render
 thread waits the frame fence, releases that frame's previous snapshot slot, takes the newest
 `Ready`, records one dynamic-rendering pass with `loadOp = CLEAR` to opaque black and
 `storeOp = STORE`, submits with synchronization 2, attaches the slot, and counts a discarded frame.
 With no `Ready` snapshot it waits instead of discarding; there is no minimized path. There is no
 resize, present, readback, or host-visible memory (D-M6-23); pacing is one frame per consumed
-snapshot (D-M7-07 revises D-M6-12). The host publishing wiring is WP-4. **`Current` for the M6
-clear and the M7 consumption.**
+snapshot (D-M7-07 revises D-M6-12). The host publishes one snapshot per completed tick. **`Current`
+for the M6 clear and the M7 consumption.**
 
 **Headless and draw count.** `WithHeadless` never enters this document. One draw per non-empty
 camera: an empty camera clears but does not draw, the whole framebuffer is one pass, cameras are
@@ -222,11 +223,11 @@ ascending `ZIndex` (default `0`); ties are unspecified. A later `Clear.Color` wi
   2 permanent targets and 2 frames in flight, no present. Each windowed frame owns a command
   buffer/pool, a fence, and an image-available semaphore, and each swapchain image owns its
   render-finished semaphore (M6 WP-3). Each offscreen frame owns a command buffer/pool and a fence
-  (M6 WP-4). M7 WP-3 adds each frame's empty instance SSBO and frame descriptor set
+  (M6 WP-4). M7 adds each frame's empty instance SSBO and frame descriptor set
   (binding 0 only, Q10=J1); M8 fills them and adds the bindless binding/capacity.
-- **M7 handoff status (WP-2/WP-3).** The internal value-only snapshot model, the capture pass, and
-  the three-slot ring state machine are `Current` (M7 WP-2). The renderer consumes snapshots
-  (M7 WP-3): it takes the newest `Ready` for a free GPU frame, records exactly **one frame per
+- **M7 handoff status.** The internal value-only snapshot model, the capture pass, and
+  the three-slot ring state machine are `Current` (M7). The renderer consumes snapshots
+  (M7): it takes the newest `Ready` for a free GPU frame, records exactly **one frame per
   consumed snapshot**, holds the snapshot slot `Rendering` until that frame's fence is observed,
   releases it when the frame index is reused, and releases every held slot after
   `vkDeviceWaitIdle` (recreation/surface recovery/shutdown). The combined
@@ -235,8 +236,8 @@ ascending `ZIndex` (default `0`); ties are unspecified. A later `Clear.Color` wi
   minimized/zero extent the suspended consumer frees the newest `Ready` without GPU work (the slot
   never enters `Rendering`), counts a suspended consumption, and waits for control or a snapshot;
   restore resumes one frame per snapshot. The host acquire/capture/publish wiring and the pacing
-  loops are `Planned` (WP-4), so the current tree has no producer and records no frames. M7 adds no
-  draw.
+  loops are `Current` (M7): every completed windowed/offscreen tick publishes one snapshot, so the
+  renderer records frames. M7 adds no draw.
 - **Snapshot slot held to the fence.** A slot is held until the GPU frame that consumed it signals
   its fence, not just until data is copied: this bounds run-ahead to the ring, and the GPU never
   dereferences snapshot memory. `Join` drains every non-`Writing` slot, so every slot ends `Free`
@@ -262,19 +263,19 @@ presents the current frame first and recreates on the next iteration (D-M6-15); 
 `vkDeviceWaitIdle`, release the held snapshot slots, and pass the old handle as `oldSwapchain`.
 Device loss is fatal; surface loss gets exactly one replacement-surface recovery (D-M6-16).
 Presentation happens once per consumed snapshot (Q7=G1, D-M7-07), not continuously. **`Current`
-for the M6 swapchain/clear/present and the M7 renderer consumption**; the Runtime host
-acquire/publish wiring is WP-4.
+for the M6 swapchain/clear/present and the M7 renderer consumption**; the Runtime host publishes
+one snapshot per completed tick (M7).
 
 **Offscreen.** No surface, swapchain, or present; fixed `WithOffscreen(w, h)` extent; two permanent
 sRGB color images (one device allocation each) cleared and discarded with no public readback; one
 discarded frame per consumed snapshot (Q7=G1). **`Current` for the M6 clear and the M7
-consumption**; the host publishing wiring is WP-4.
+consumption**; the host publishes one snapshot per completed tick (M7).
 ## 10. Debugging, validation, and performance
 
 - Validation layers in debug and with `WithValidation(true)`, plus a debug messenger; errors are
   fatal in debug/test; `VK_EXT_debug_utils` names the instance, device, swapchain/offscreen images,
   image views, command buffers, the clear pass, and each frame's instance buffer/descriptor set.
-  **`Current` in M6 WP-3/WP-4 and M7 WP-3** for both paths; no per-frame or per-draw label churn.
+  **`Current` in M6 and M7** for both paths; no per-frame or per-draw label churn.
 - Counters: draws, instances, skipped sprites, resident pages, snapshot sequence, render CPU, present
   mode (M8). **`Current`:** frames presented (windowed), frames discarded (offscreen), swapchain
   recreations, validation errors/warnings, last frame number, last present result (M6), plus the
@@ -313,15 +314,15 @@ Provisional targets (validated in M8, not commitments):
 
 | Area | Status |
 | --- | --- |
-| SDL window creation, input, time, and the windowed/offscreen tick loops | `Current` M2/M6 (`Bork2d.Runtime`). The windowed platform creates the SDL window, Vulkan instance, and surface on the OS thread; the host starts the renderer before `Setup` and waits for readiness only before the first tick. |
-| `Bork2d.Render` | `Current` M6 WP-2→WP-4 and M7 WP-3: internal seam/control channel, Vulkan packages, instance/validation/debug-utils bootstrap, device selection, pure policies, the windowed renderer, the offscreen target/renderer, the handoff consumer/combined wait, and the empty per-frame instance resources. Sprites/uploads are M8. |
-| Vulkan instance/validation bootstrap and device/queue/feature logging | `Current` M6 WP-2 |
-| Windowed swapchain, acquire/present, dynamic-rendering clear, resize/minimize/fullscreen recreation, surface-loss recovery, counters | `Current` M6 WP-3, host-wired in WP-4 |
-| Offscreen targets, dynamic-rendering clear, discard, and the offscreen loop | `Current` M6 WP-4 |
-| Snapshot model/capture and the internal three-slot ring state machine | `Current` M7 WP-2 (internal; no draw, no host wiring) |
-| Renderer snapshot consumption (one presented/discarded frame per consumed snapshot), fence-held slot lifetime, suspended minimized drain, combined wait | `Current` M7 WP-3 (internal; the host does not publish yet) |
-| Host acquire/capture/publish wiring, backpressure, pacing | `Planned` M7 WP-4 |
-| Empty per-frame instance SSBO and frame descriptor set (binding 0, Q10=J1) | `Current` M7 WP-3 (allocated, unused) |
+| SDL window creation, input, time, and the windowed/offscreen tick loops | `Current` M2/M6/M7 (`Bork2d.Runtime`). The windowed platform creates the SDL window, Vulkan instance, and surface on the OS thread; the host starts the renderer before `Setup` and waits for readiness only before the first tick; ticks are ring-backpressured. |
+| `Bork2d.Render` | `Current` M6/M7: internal seam/control channel, Vulkan packages, instance/validation/debug-utils bootstrap, device selection, pure policies, the windowed renderer, the offscreen target/renderer, the handoff consumer/combined wait, and the empty per-frame instance resources. Sprites/uploads are M8. |
+| Vulkan instance/validation bootstrap and device/queue/feature logging | `Current` M6 |
+| Windowed swapchain, acquire/present, dynamic-rendering clear, resize/minimize/fullscreen recreation, surface-loss recovery, counters | `Current` M6, host-wired in M6/M7 |
+| Offscreen targets, dynamic-rendering clear, discard, and the offscreen loop | `Current` M6 |
+| Snapshot model/capture and the internal three-slot ring state machine | `Current` M7 (internal; no draw) |
+| Renderer snapshot consumption (one presented/discarded frame per consumed snapshot), fence-held slot lifetime, suspended minimized drain, combined wait | `Current` M7 |
+| Host acquire/capture/publish wiring, backpressure, pacing | `Current` M7 |
+| Empty per-frame instance SSBO and frame descriptor set (binding 0, Q10=J1) | `Current` M7 (allocated, unused) |
 | Sprite pipeline, bindless binding/pages, shader build, asset upload, instance writes, flips at draw time | `Planned` M8 |
 | Headless | `Current` for the asset/tick path with no SDL/Vulkan/renderer; the renderer is intentionally absent because headless has no GPU work |
 
