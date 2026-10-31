@@ -1005,8 +1005,9 @@ An opt-in Release-mode `[GpuFact]` benchmark in `Bork2d.Tests`, local-only:
   `-c Release`. The 165 FPS target is unchanged.
 - The benchmark is not CI; the PR records the machine and evidence. If the target cannot be met,
   stop and report; do not lower the target without the owner.
-- **As built (2026-10-31, AOT Release solution, AMD Radeon 8060S, driver 32.0.32015.7029, Vulkan
-  loader 1.4.363.0, .NET SDK 11.0.100-rc.1.26425.128):** median **177.3 FPS** (p50 5.640 ms), p95
+- **As built (2026-10-31, Release JIT test host; Windows 11 Pro 10.0.26300, AMD Ryzen AI MAX+ 395 /
+  Radeon 8060S, driver 32.0.32015.7029, Vulkan loader 1.4.363.0, .NET SDK 11.0.100-rc.1.26425.128):**
+  median **177.3 FPS** (p50 5.640 ms), p95
   **152.4 FPS** (6.562 ms), max 10.312 ms, mean 174.3 FPS, 1,744 frames / 10.003 s;
   `instanceCapacity=65536`; one draw, 50,000 instances, one non-empty camera, `TexturePages=2`
   (placeholder + the one benchmark page), validation `0/0`; benchmark-thread and process-wide
