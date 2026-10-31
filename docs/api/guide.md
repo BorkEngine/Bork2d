@@ -2,8 +2,8 @@
 
 > **Status:** implemented through M4, the D-036/D-037/D-038 asset-processor task merged into
 > `develop` (2026-10-27, PR #8), the Pong example (D-043/D-044; merged 2026-10-29, PR #10), M6
-> (Vulkan bring-up; merged 2026-10-31, PR #11), and M7 (frame handoff and pacing; implemented on
-> `m-7/common`, the ready-for-review PR is open/awaiting human review and is not merged). M1
+> (Vulkan bring-up; merged 2026-10-31, PR #11), and M7 (frame handoff and pacing; merged into
+> `develop` 2026-10-31, PR #12, merge `5de5ac3`). M1
 > (foundation), M2 (SDL
 > windowed host), and M3 (pack, VFS, runtime integration) exist in
 > `Bork2d.Runtime`/`Bork2d.Engine` and are merged into `develop`.

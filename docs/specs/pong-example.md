@@ -3,10 +3,10 @@
 > **Status:** merged into `develop` (2026-10-29, PR #10, merge `0273f58`). Implementation
 > ran on `task/pong-example/wp-1` … `wp-5` and integrated through `task/pong-example/common`. This
 > document is the scope authority for the task; the owner-approved decisions are D-043 and D-044.
-> As-built evidence is in §12. **M7 (frame handoff and pacing) extends the host gates on
-> `m-7/common`: `--headless` now runs 120 ticks by default with `--headless --ticks N` overriding,
-> and the windowed/offscreen runs are ring-backpressured. M7 is implemented; its ready-for-review PR
-> is open/awaiting human review and is not merged.** See §12.5.
+> As-built evidence is in §12. **M7 (frame handoff and pacing) extends the host gates and is merged
+> into `develop` (2026-10-31, PR #12, merge `5de5ac3`): `--headless` now runs 120 ticks by default
+> with `--headless --ticks N` overriding, and the windowed/offscreen runs are ring-backpressured.**
+> See §12.5.
 
 ## 1. Goal
 
@@ -430,8 +430,8 @@ StbImageSharp assembly. Full machine/GPU/driver/SDK details and the deviations a
 
 ### 12.5 M7 extension: the 120-tick headless gate and the handoff host (2026-10-31)
 
-M7 (frame handoff and pacing; implemented on `m-7/common`, PR open/awaiting review, not merged)
-changes the three-mode gate without changing the Pong game contract:
+M7 (frame handoff and pacing; merged into `develop` 2026-10-31, PR #12, merge `5de5ac3`) changes the
+three-mode gate without changing the Pong game contract:
 
 - **Headless tick gate (Q15=O2/F3).** `Pong.Desktop --headless` now runs the paced K1 headless loop
   for exactly **120 ticks by default**; `--headless --ticks N` overrides with a positive `N` and the

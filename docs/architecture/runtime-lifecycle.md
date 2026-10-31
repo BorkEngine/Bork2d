@@ -1,7 +1,7 @@
 # Runtime Lifecycle
 
-> **Status:** implemented through M7 (2026-10-31; M7 is implemented on `m-7/common` with the
-> ready-for-review PR open/awaiting human review; it is not merged). The builder, its validation,
+> **Status:** implemented through M7 (2026-10-31; M7 is merged into `develop` with PR #12, merge
+> `5de5ac3`). The builder, its validation,
 > the windowed/offscreen hosts with
 > the Vulkan renderer thread and the snapshot handoff, the paced headless loop, app `Dispose()`, the
 > internal windowed platform (SDL window, Vulkan instance/surface, input/time handoff), and the

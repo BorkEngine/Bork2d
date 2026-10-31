@@ -10,8 +10,8 @@
 > `Bork2d.Render` holds the renderer foundation, the windowed and offscreen renderers, and the
 > internal seam; `Bork2d.Runtime` hosts both renderers and still exposes only the builder/app. The
 > windowed/offscreen AOT gate is proven (zero-warning publish and three published runs exit 0).
-> M7 (frame handoff and pacing) is implemented on `m-7/common` (ready-for-review PR
-> open/awaiting human review; not merged): the Render handoff ring/consumer and the Runtime
+> M7 (frame handoff and pacing) is merged into `develop` (2026-10-31, PR #12, merge `5de5ac3`): the
+> Render handoff ring/consumer and the Runtime
 > acquire/publish/headless host add **no** project reference, package, or public type beyond the
 > already-approved `FlipX`/`FlipY` (D-M7-02).
 

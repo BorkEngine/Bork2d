@@ -1,6 +1,6 @@
 # M7 — Frame Handoff and Pacing (spec)
 
-> **Status:** **Implemented — ready for review (PR open, awaiting human review; not merged).** This
+> **Status:** **Merged into `develop` (2026-10-31, PR #12, merge `5de5ac3`).** This
 > file defines the approved scope, semantics, evidence, work packages, and decision register for M7
 > (frame handoff and pacing). All of Q1–Q23 and F5–F8 are answered (§16.0); WP-1 recorded them in the
 > [decision log](../decisions.md#m7-frame-handoff-and-pacing-decisions-approved-2026-10-31) as
@@ -8,11 +8,10 @@
 > tick cap, Q9=I1, Q10=J1, Q11=K1, Q12=L2 (fully synthesized headless clock), Q13=M4 (strict grid,
 > pure `Sleep`), Q14=N1, Q15=O2 (120-tick default), Q16=P1, Q17=X2, Q18=R1, Q19=S3, Q20=T1, Q21=U1,
 > Q22=V1, Q23=W1; F5 first tick 0/0, F6 positive headless rate, F7 no clamp, F8 unbounded catch-up.
-> **F6 supersedes D-017's `0` uncapped headless rate.** WP-1–WP-4 landed on `m-7/wp-1`…`m-7/wp-4`
-> and are merged into `m-7/common`; WP-5 is landed on `m-7/wp-5` (this change) and is merged by the
-> orchestrator before the milestone PR is opened. The as-built local evidence is in **§18**. The
-> milestone is **not merged** and is not claimed to be; the human reviews the PR. §4 (inherited
-> constraints) and the baseline facts in §3 are binding history.
+> **F6 supersedes D-017's `0` uncapped headless rate.** WP-1–WP-5 landed on `m-7/wp-1`…`m-7/wp-5`
+> and were merged into `m-7/common`; the milestone PR (`m-7/common` → `develop`, PR #12, merge
+> `5de5ac3`) is **merged**. The as-built local evidence is in **§18**. §4 (inherited constraints)
+> and the baseline facts in §3 are binding history.
 >
 > M7 is roadmap [M7 — Frame handoff and pacing](../roadmap.md#5-milestone-detail): a bounded run-ahead
 > snapshot ring for windowed/offscreen, plus timer-paced headless. M6 (Vulkan bring-up) is merged
@@ -712,8 +711,8 @@ CI stays unchanged: no GPU job; GPU tests remain a local gate (D-M6-05).
 | [API reference](../api/reference.md) | `ISpriteRender.FlipX`/`FlipY` (Q2=B1); `WithHeadless` positive-rate validation and the synthesized headless `ITime` (Q12/F5/F6/F7); §2/§4 time and `Exit`; §12 builder/`Run` behavior; no other public surface (Q16=P1). |
 | [API guide](../api/guide.md) | §2 Modes (`WithHeadless(0)` is rejected; headless `ITime` is synthesized and ignores `WithMaxDeltaTime`), §6 sprites (flips), §8 Time, §11 lifetimes/threading: backpressure, headless loop/pacing, no draw change. |
 | `IEngine`/`ISpriteRender` XML docs | WP-1 fixes the stale `Time`/`Exit` statements (Q18); WP-2 adds the flip members and WP-4 updates the time/`Exit` wording when the M7 behavior lands. |
-| [docs/README.md](../README.md) | M7 status: implemented on `m-7/common`; ready-for-review PR open/awaiting human review (not merged); keep the spec link. |
-| [Roadmap](../roadmap.md) | M7 detail status and progress-log row: Implemented (`m-7/common`; PR open/awaiting review, not merged), with the §18 evidence. |
+| [docs/README.md](../README.md) | M7 status: merged into `develop` (2026-10-31, PR #12, merge `5de5ac3`); keep the spec link. |
+| [Roadmap](../roadmap.md) | M7 detail status and progress-log row: merged into `develop` (2026-10-31, PR #12, merge `5de5ac3`), with the §18 evidence. |
 | M6 spec | Historical; do not rewrite its as-built evidence. The decision log carries the revisions/supersessions. |
 
 Same-change rule: any behavior/contract/status change ships with its owning doc in the same work
@@ -741,9 +740,9 @@ contract and WP-3/WP-4 share the host/renderer seam, so no file-level split was 
 starts from an ambiguous base.
 
 All five work packages landed: WP-1–WP-4 are merged into `m-7/common` (`7b4cf5e`, `08e8203`,
-`08cdf2a`, `5bfe31b`) and WP-5 landed on `m-7/wp-5` and is merged by the orchestrator before the
-milestone PR opens. All five WP branches started from the latest `origin/m-7/common` in order; no
-parallel wave ran. As-built evidence is in §18.
+`08cdf2a`, `5bfe31b`), WP-5 is merged (`08416d9`), and the milestone PR merged into `develop`
+(2026-10-31, PR #12, merge `5de5ac3`). All five WP branches started from the latest
+`origin/m-7/common` in order; no parallel wave ran. As-built evidence is in §18.
 
 ## 13. Acceptance criteria
 
@@ -1115,10 +1114,9 @@ shared, so likely still sequential); **W3** a different split (owner specifies).
 ## 18. As-built evidence (2026-10-31)
 
 M7 was implemented on `m-7/common` from the M6-finalized `develop` baseline (`d37c02a`) as the five
-owner-approved sequential work packages (Q23=W1). It is **implemented and ready for review**; the
-milestone PR `m-7/common` → `develop` is opened by the orchestrator and is **not merged**, so this
-section records local evidence, not a merge. The milestone is done only when the §13 checklist is
-reviewed and the human approves the PR.
+owner-approved sequential work packages (Q23=W1). It **merged into `develop` (2026-10-31, PR #12,
+merge `5de5ac3`)**; this section records the local evidence gathered before the merge. The §13
+checklist is met and the human approved the PR.
 
 ### 18.1 Work packages and branch history
 
@@ -1128,7 +1126,7 @@ reviewed and the human approves the PR.
 | WP-2 | `m-7/wp-2` | `43241a8` | `08e8203` | Internal `FrameSnapshot`/`CameraSnapshot`/`SpriteSnapshot` and the capture pass, public `FlipX`/`FlipY` (Q2=B1), the three-slot ring in `Bork2d.Render` (Q1=A1), and deterministic ring/stress/capture/allocation tests. |
 | WP-3 | `m-7/wp-3` | `016f9f8` | `08cdf2a` | Renderer consumption: one frame per snapshot (Q7=G1), fence-held slots, suspended minimized drain plus the 30 Hz tick cap (Q8/F4), empty per-frame instance resources (Q10=J1), counters/logs, deterministic and opt-in GPU handoff tests. |
 | WP-4 | `m-7/wp-4` | `97a76e7` | `5bfe31b` | Host acquire/capture/publish for windowed/offscreen, the blocked-wait error matrix (Q9=I1), the paced headless K1 loop with L2 synthesized time and M4/F1 pacing, deterministic host/headless tests, docs. |
-| WP-5 | `m-7/wp-5` | this change | orchestrator merge before the PR opens | Pong `--headless` 120-tick default and `--headless --ticks N` override (Q15=O2/F3), the three-mode AOT evidence (Q22=V1), final status/docs, and the PR evidence draft. |
+| WP-5 | `m-7/wp-5` | `f935fea` | `08416d9` | Pong `--headless` 120-tick default and `--headless --ticks N` override (Q15=O2/F3), the three-mode AOT evidence (Q22=V1), final status/docs, and the PR evidence draft. |
 
 No parallel wave ran: every WP branch started from the latest `origin/m-7/common` in merge order
 WP-1 → WP-5 and was merged with `--no-ff`. WP-5 changes no engine behavior or public API; it changes
@@ -1257,12 +1255,11 @@ handoff tests (30+ frames), not by the short AOT gate.
 
 ### 18.6 Documentation, decisions, and status
 
-- The M7 decision section was updated from "implementation in progress" to **implemented; PR
-  open/awaiting review** with no decision changes (`D-M7-01…D-M7-27` and the Q17=X2 in-place
-  revisions stand).
+- The M7 decision section records **implemented and merged** with no decision changes
+  (`D-M7-01…D-M7-27` and the Q17=X2 in-place revisions stand).
 - The spec, `docs/README.md`, `docs/roadmap.md`, `docs/contributing.md`, the Pong spec, and the
-  architecture/API docs now describe the as-built behavior and the honest M7 status
-  (implemented, PR open/awaiting human review, **not merged**). The stale one-tick/uncapped/`0`
+  architecture/API docs now describe the as-built behavior and the final M7 status
+  (**merged into `develop` 2026-10-31, PR #12, merge `5de5ac3`**). The stale one-tick/uncapped/`0`
   statements are reconciled, and the intermediate WP-4/WP-5 notes are removed.
 - The API reference/guide and the `IEngine`/`ITime`/`Bork2dApp`/`Bork2dAppBuilder` XML docs carry the
   final M7 wording; WP-5 changes no behavior or public API.

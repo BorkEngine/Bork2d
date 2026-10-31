@@ -1,7 +1,7 @@
 # Threading and Frame Handoff
 
-> **Status:** implemented through M7 (2026-10-31; M7 is implemented on `m-7/common` with the
-> ready-for-review PR open/awaiting human review; it is not merged). The M1 scene graph implements
+> **Status:** implemented through M7 (2026-10-31; M7 is merged into `develop` with PR #12, merge
+> `5de5ac3`). The M1 scene graph implements
 > the structural and per-object
 > `System.Threading.Lock` rules in §2 and the public API has no thread affinity. The M2 windowed
 > platform's OS/window thread, command queue, confirmed-state snapshot, event pump, input freeze, and

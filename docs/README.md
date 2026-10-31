@@ -14,11 +14,10 @@
 > `5de725c`)**. The Render foundation, the windowed renderer, the offscreen
 > renderer, and the Runtime host wiring are complete, and the AOT/Pong gate proves the published
 > `--headless`, `--windowed --ticks 120`, and `--offscreen --ticks 120` runs with a zero-warning
-> publish. **M7 (frame handoff and pacing) is implemented on `m-7/common`; the ready-for-review PR
-> is open/awaiting human review and is not merged.** WP-1–WP-5 landed sequentially: the snapshot
-> ring/capture, renderer consumption, host backpressure, and the paced headless loop are
-> implementation-complete, and the Pong `--headless` gate defaults to 120 ticks (`--headless
-> --ticks N` overrides). The spec decisions are recorded (all 23 questions and F5–F8, in the
+> publish. **M7 (frame handoff and pacing) is merged into `develop` (2026-10-31, PR #12, merge
+> `5de5ac3`).** WP-1–WP-5 landed sequentially: the snapshot ring/capture, renderer consumption,
+> host backpressure, and the paced headless loop are implementation-complete, and the Pong
+> `--headless` gate defaults to 120 ticks (`--headless --ticks N` overrides). The spec decisions are recorded (all 23 questions and F5–F8, in the
 > [decision log](decisions.md#m7-frame-handoff-and-pacing-decisions-approved-2026-10-31) as
 > `D-M7-01…D-M7-27`); as-built evidence is in [M7 spec §18](specs/m7-frame-handoff.md#18-as-built-evidence-2026-10-31).
 > Check status markers before treating an API as implemented.

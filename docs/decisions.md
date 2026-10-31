@@ -271,8 +271,8 @@ follow-ups F5–F8 were settled by the owner across the M7 spec's
 question register for traceability, and this section is the authoritative decision wording.
 `D-M7-01…D-M7-15` are Q1–Q15, `D-M7-16…D-M7-23` are Q16–Q23, and `D-M7-24…D-M7-27` are F5–F8.
 These decisions are **approved and implemented**: the owner-approved W1 plan (D-M7-23) landed on
-`m-7/common` as WP-1–WP-5, and the ready-for-review PR is open/awaiting human review; the milestone
-is **not merged**. The table records the agreed contract (no decision was changed by implementation);
+`m-7/common` as WP-1–WP-5, and the milestone **merged into `develop` (2026-10-31, PR #12, merge
+`5de5ac3`)**. The table records the agreed contract (no decision was changed by implementation);
 the as-built evidence is in the
 [M7 spec §18](specs/m7-frame-handoff.md#18-as-built-evidence-2026-10-31). Q17=X2 (D-M7-17) is
 the owner-approved exception to the append-only rule: the older entries affected by M7 are amended

@@ -3,7 +3,7 @@
 > **Status:** M1–M4 are merged into `develop`; **D-036/D-037/D-038 are merged (2026-10-27, PR #8)**
 > and the Pong example (D-043/D-044) is merged into `develop` (2026-10-29, PR #10). M6 (Vulkan
 > bring-up) is merged (2026-10-31, PR #11, merge `5de725c`); **M7 (frame handoff and pacing) is
-> implemented on `m-7/common` (ready-for-review PR open/awaiting human review; not merged).** The
+> merged into `develop` (2026-10-31, PR #12, merge `5de5ac3`).** The
 > builder,
 > windowed/offscreen Vulkan hosts with the snapshot handoff, the paced headless loop, scene graph,
 > logging, asset pipeline, builder-configured bake, and AOT baseline are `Current`. Windowed and

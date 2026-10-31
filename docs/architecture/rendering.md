@@ -3,7 +3,8 @@
 > **Status:** target design for the renderer. Window creation, input, time, and the tick loops are
 > `Current` in `Bork2d.Runtime` (M2/M6/M7); the `Bork2d.Render` foundation, the windowed
 > swapchain/clear/present path, and offscreen targets plus the windowed/offscreen host wiring are
-> `Current` in M6 (merged 2026-10-31, PR #11). The internal value-only snapshot model, the capture
+> `Current` in M6 (merged 2026-10-31, PR #11). M7 is merged into `develop` (2026-10-31, PR #12,
+> merge `5de5ac3`). The internal value-only snapshot model, the capture
 > pass, and the three-slot ring state machine are `Current` (M7); renderer consumption (one
 > presented/discarded frame per consumed snapshot, the slot held to the GPU fence, the suspended
 > minimized drain, and the empty per-frame instance resources) is `Current` (M7), and the host

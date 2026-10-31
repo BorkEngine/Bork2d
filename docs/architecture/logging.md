@@ -1,8 +1,8 @@
 # Logging
 
 > **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4), M6 (Vulkan
-> bring-up; merged 2026-10-31, PR #11), and M7 (frame handoff and pacing; implemented on
-> `m-7/common`, the ready-for-review PR is open/awaiting human review and is not merged). The
+> bring-up; merged 2026-10-31, PR #11), and M7 (frame handoff and pacing; merged into `develop`
+> 2026-10-31, PR #12, merge `5de5ac3`). The
 > builder creates an app-owned
 > Microsoft.Extensions.Logging factory, installs a plain-text ZLogger console provider by default,
 > logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`. The

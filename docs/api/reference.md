@@ -1,8 +1,8 @@
 # API Reference
 
 > **Status:** the implemented M2/M3/M4 contract plus M6 (Vulkan bring-up; merged 2026-10-31, PR #11)
-> and M7 (frame handoff and pacing; implemented on `m-7/common`, the ready-for-review PR is
-> open/awaiting human review and is not merged) on top of the asset-processor task merged into
+> and M7 (frame handoff and pacing; merged into `develop` 2026-10-31, PR #12, merge `5de5ac3`) on
+> top of the asset-processor task merged into
 > `develop`
 > (2026-10-27, PR #8). M1
 > (foundation), M2 (SDL windowed host), M3 (pack, VFS,
@@ -631,8 +631,8 @@ do not serialize them; an undefined value is a safe query that returns `false`. 
 
 ## 12. Runtime surface
 
-`Status: Current (M2/M3, M6, M7; M7 is implemented on `m-7/common` with the ready-for-review PR
-open/awaiting human review and is not merged).` The builder, windowed/offscreen Vulkan hosts with
+`Status: Current (M2/M3, M6, M7; M7 is merged into `develop` 2026-10-31, PR #12, merge `5de5ac3`).`
+The builder, windowed/offscreen Vulkan hosts with
 the snapshot handoff, the paced headless loop, validation, app-owned logging, window/input proxies,
 time, and the asset-service lifecycle are implemented. Windowed and offscreen require Vulkan 1.3; the renderer is
 composed internally and adds no public member (D-M6-24). Sprites remain M8.

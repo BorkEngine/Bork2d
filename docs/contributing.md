@@ -5,8 +5,8 @@
 > bring-up; merged 2026-10-31, PR #11). M6 delivered the Render
 > foundation, the windowed renderer and opt-in windowed GPU test, the offscreen renderer, Runtime
 > host wiring, and opt-in offscreen GPU tests; WP-5 proves the three-mode AOT gate. **M7 (frame
-> handoff and pacing) is implemented on `m-7/common`; the ready-for-review PR is open/awaiting human
-> review and is not merged.** M7 delivered the snapshot ring/capture, renderer consumption, host
+> handoff and pacing) is merged into `develop` (2026-10-31, PR #12, merge `5de5ac3`).** M7 delivered
+> the snapshot ring/capture, renderer consumption, host
 > backpressure, the paced headless loop, and the Pong `--headless` 120-tick gate
 > (`--headless --ticks N` overrides). The
 > warning/style/format/AOT gates and the docs link check are active. CI runs the docs link
