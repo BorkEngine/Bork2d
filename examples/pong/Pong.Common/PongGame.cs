@@ -130,6 +130,24 @@ public sealed class PongGame : IGame<GameLayer>
     /// <summary>Gets the world transform that owns the paddles and the ball.</summary>
     public ITransform? World { get; private set; }
 
+    /// <summary>
+    /// Gets the render stats captured at teardown, or the latest snapshot after
+    /// <see cref="RefreshRenderStats"/> (M8 §10).
+    /// </summary>
+    public RenderStats RenderStats { get; private set; }
+
+    /// <summary>
+    /// Re-reads <c>IEngine.RenderStats</c> so the desktop host can assert the completed run's
+    /// counters after <c>Run()</c> returned (the getter keeps the last published frame).
+    /// </summary>
+    public void RefreshRenderStats()
+    {
+        if (_engine is { } engine)
+        {
+            RenderStats = engine.RenderStats;
+        }
+    }
+
     /// <inheritdoc/>
     public void Setup(IEngine<GameLayer> engine)
     {
@@ -234,6 +252,7 @@ public sealed class PongGame : IGame<GameLayer>
     public void Teardown()
     {
         TeardownCount++;
+        RefreshRenderStats();
 
         if (Simulation is { } simulation)
         {
