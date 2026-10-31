@@ -56,9 +56,24 @@ internal interface IRenderer
     /// <remarks>
     /// The runtime installs this as the engine's stats source, so the tick thread reads it without
     /// touching Vulkan. The property is thread-safe, allocation-free, and never blocks on the GPU;
-    /// per-frame publishing is the M8 draw work package.
+    /// the renderer publishes once per completed frame.
     /// </remarks>
     RenderStats RenderStats { get; }
+
+    /// <summary>
+    /// Requests the next completed frame as RGBA8 bytes for <c>IEngine.CaptureFrameAsync</c>
+    /// (M8 §6.9).
+    /// </summary>
+    /// <remarks>
+    /// The request is queued thread-safely; the render thread records the image-to-buffer copy after
+    /// the last camera pass and before present/discard, and completes the task from the frame fence.
+    /// At most the frame's current extent is captured, one <see cref="byte"/> array is allocated per
+    /// request, and the staging memory is pooled per GPU frame. A stop/fatal faults pending requests;
+    /// a cancelled token faults the task with <see cref="OperationCanceledException"/>.
+    /// </remarks>
+    /// <param name="cancellationToken">The caller's cancellation token.</param>
+    /// <returns>The frame's row-major, top-left-origin RGBA8 bytes.</returns>
+    Task<byte[]> CaptureFrameAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Gets the one-shot fatal error observed by the host at a tick boundary.</summary>
     Exception? FatalException { get; }

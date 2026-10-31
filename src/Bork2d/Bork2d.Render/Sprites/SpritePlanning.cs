@@ -159,6 +159,77 @@ internal static class SpritePlanning
         return count;
     }
 
+    /// <summary>
+    /// Sorts camera indices by <c>ZIndex</c> ascending without allocating or touching the snapshot.
+    /// </summary>
+    /// <remarks>
+    /// Cameras apply in this order; equal <c>ZIndex</c> values are unspecified. The sort is the same
+    /// preallocated-index heap sort as <see cref="Sort"/>, so a warm plan allocates nothing.
+    /// </remarks>
+    /// <param name="cameras">The captured cameras in capture order.</param>
+    /// <param name="indices">
+    /// The output index buffer; at least <paramref name="cameras"/>'s length. The remaining entries
+    /// are left untouched.
+    /// </param>
+    /// <exception cref="ArgumentException">The index buffer is too small.</exception>
+    internal static void SortCameras(ReadOnlySpan<CameraSnapshot> cameras, Span<int> indices)
+    {
+        if (indices.Length < cameras.Length)
+        {
+            throw new ArgumentException(
+                $"The index buffer must hold {cameras.Length} entries.",
+                nameof(indices));
+        }
+
+        for (var index = 0; index < cameras.Length; index++)
+        {
+            indices[index] = index;
+        }
+
+        Span<int> ordered = indices[..cameras.Length];
+        for (var root = (ordered.Length / 2) - 1; root >= 0; root--)
+        {
+            SiftDownCameras(cameras, ordered, root, ordered.Length);
+        }
+
+        for (var end = ordered.Length - 1; end > 0; end--)
+        {
+            (ordered[0], ordered[end]) = (ordered[end], ordered[0]);
+            SiftDownCameras(cameras, ordered, root: 0, end);
+        }
+    }
+
+    private static void SiftDownCameras(
+        ReadOnlySpan<CameraSnapshot> cameras,
+        Span<int> indices,
+        int root,
+        int count)
+    {
+        while (true)
+        {
+            int child = (root * 2) + 1;
+            if (child >= count)
+            {
+                return;
+            }
+
+            int right = child + 1;
+            if (right < count
+                && cameras[indices[right]].ZIndex > cameras[indices[child]].ZIndex)
+            {
+                child = right;
+            }
+
+            if (cameras[indices[child]].ZIndex <= cameras[indices[root]].ZIndex)
+            {
+                return;
+            }
+
+            (indices[root], indices[child]) = (indices[child], indices[root]);
+            root = child;
+        }
+    }
+
     private static void SiftDown(
         ReadOnlySpan<SpriteSnapshot> sprites,
         Span<int> indices,

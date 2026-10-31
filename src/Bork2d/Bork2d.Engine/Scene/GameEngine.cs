@@ -36,9 +36,14 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     private const int ExitActive = 0;
     private const int ExitRequestedState = 1;
     private const int ExitStopped = 2;
+    private const int CaptureUnavailable = 0;
+    private const int CaptureAvailable = 1;
+    private const int CaptureHeadless = 2;
+    private const int CaptureDisposed = 3;
 
     private readonly Lock _structuralLock = new();
     private readonly Lock _renderStatsLock = new();
+    private readonly Lock _captureLock = new();
     private readonly SceneRoot _root;
     private readonly SnapshotCapture<TLayer> _capture;
     private readonly IInput? _input;
@@ -47,6 +52,8 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     private Action? _exitCallback;
     private Func<RenderStats>? _renderStatsSource;
     private RenderStats _renderStats;
+    private Func<CancellationToken, Task<byte[]>>? _captureSource;
+    private int _captureState = CaptureUnavailable;
 
     internal GameEngine(
         ITime time,
@@ -133,6 +140,88 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     /// <param name="source">The source, or <see langword="null"/> to return the last snapshot.</param>
     internal void SetRenderStatsSource(Func<RenderStats>? source)
         => Volatile.Write(ref _renderStatsSource, source);
+
+    /// <inheritdoc/>
+    public Task<byte[]> CaptureFrameAsync(CancellationToken cancellationToken = default)
+    {
+        Func<CancellationToken, Task<byte[]>>? source;
+        int state;
+        lock (_captureLock)
+        {
+            source = _captureSource;
+            state = _captureState;
+        }
+
+        return state switch
+        {
+            CaptureAvailable when source is not null => source(cancellationToken),
+            CaptureHeadless => throw new NotSupportedException(
+                "CaptureFrameAsync requires a windowed or offscreen app; a headless run has no "
+                    + "renderer or frames to capture."),
+            CaptureDisposed => throw new ObjectDisposedException(
+                nameof(GameEngine<TLayer>),
+                "CaptureFrameAsync is unavailable after the run returned or the app was disposed."),
+            _ => throw new InvalidOperationException(
+                "CaptureFrameAsync requires a running windowed or offscreen app; no capture source "
+                    + "is installed before Run()."),
+        };
+    }
+
+    /// <summary>
+    /// Installs (or clears) the host's frame-capture source (M8 §6.9).
+    /// </summary>
+    /// <remarks>
+    /// The runtime installs the renderer request delegate after the renderer is created and before
+    /// <c>Setup</c>, so the game may capture during <c>Setup</c>/<c>Tick</c>/<c>Teardown</c>. The
+    /// delegate must be thread-safe and non-blocking; it is invoked outside every engine lock.
+    /// </remarks>
+    /// <param name="source">The renderer capture delegate, or <see langword="null"/> to clear it.</param>
+    internal void SetCaptureSource(Func<CancellationToken, Task<byte[]>>? source)
+    {
+        lock (_captureLock)
+        {
+            if (_captureState == CaptureDisposed)
+            {
+                return;
+            }
+
+            _captureSource = source;
+            _captureState = source is null ? CaptureUnavailable : CaptureAvailable;
+        }
+    }
+
+    /// <summary>
+    /// Marks the capture lifecycle as headless (no renderer or frames) at run start (M8 §6.9).
+    /// </summary>
+    internal void SetCaptureUnsupported()
+    {
+        lock (_captureLock)
+        {
+            if (_captureState == CaptureDisposed)
+            {
+                return;
+            }
+
+            _captureSource = null;
+            _captureState = CaptureHeadless;
+        }
+    }
+
+    /// <summary>
+    /// Marks the capture lifecycle disposed after <c>Run</c> returns/throws or the app is disposed.
+    /// </summary>
+    /// <remarks>
+    /// Sticky: a later source installation is ignored, so post-shutdown calls throw
+    /// <see cref="ObjectDisposedException"/> as documented.
+    /// </remarks>
+    internal void MarkCaptureDisposed()
+    {
+        lock (_captureLock)
+        {
+            _captureSource = null;
+            _captureState = CaptureDisposed;
+        }
+    }
 
     /// <summary>
     /// Gets a value indicating whether <see cref="Exit"/> was called while the run is active.

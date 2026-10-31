@@ -138,6 +138,34 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     ISpriteRender<TLayer> CreateSpriteRender(ITransform parent);
 
     /// <summary>
+    /// Captures the latest completed frame as RGBA8 bytes (M8 §6.9).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The bytes are row-major with a top-left origin and are exactly
+    /// <c>FramebufferWidth * FramebufferHeight * 4</c> long for the captured frame (see
+    /// <see cref="RenderStats"/>). The copy includes every camera clear and draw and excludes OS
+    /// window chrome. If no frame has completed yet, the next completed frame is captured; each call
+    /// gets its own <see cref="byte"/> array, while internal staging memory is pooled per GPU frame.
+    /// </para>
+    /// <para>
+    /// Callable from any thread while a windowed or offscreen app is running; it never blocks the tick
+    /// or render thread and does not affect rendering when unused. A cancelled
+    /// <paramref name="cancellationToken"/> faults the returned task with
+    /// <see cref="OperationCanceledException"/>; a renderer stop or fatal faults pending requests.
+    /// </para>
+    /// <para>
+    /// Throws <see cref="InvalidOperationException"/> before <c>Run()</c> (the host has not installed a
+    /// capture source), <see cref="NotSupportedException"/> during a headless run (there is no
+    /// renderer), and <see cref="ObjectDisposedException"/> after <c>Run()</c> returns or the app is
+    /// disposed.
+    /// </para>
+    /// </remarks>
+    /// <param name="cancellationToken">Cancels a pending capture request.</param>
+    /// <returns>The captured frame's RGBA8 bytes.</returns>
+    Task<byte[]> CaptureFrameAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Requests a graceful shutdown. May be called from any thread.
     /// </summary>
     /// <remarks>

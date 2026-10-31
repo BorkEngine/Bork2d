@@ -136,8 +136,10 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         finally
         {
             // Post-shutdown Exit() is a no-op (D-M2-17); this also covers a failed run and clears
-            // the renderer wake callback.
+            // the renderer wake callback. CaptureFrameAsync becomes ObjectDisposedException after
+            // the run, while the last published RenderStats stay readable (M8 §6.9).
             _engine.MarkStopped();
+            _engine.MarkCaptureDisposed();
         }
     }
 
@@ -150,6 +152,7 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
 
         _disposed = true;
         _engine.MarkStopped();
+        _engine.MarkCaptureDisposed();
         try
         {
             // Detach before disposing the logger so a retained IWindow/IInput fails with
@@ -580,6 +583,11 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         IHeadlessTime headlessTime = _headlessTime
             ?? throw new InvalidOperationException("A headless run requires the synthesized clock.");
 
+        // A headless run never creates a renderer, so CaptureFrameAsync throws NotSupportedException
+        // for the duration (M8 §6.9). Installing this at Run start leaves the pre-Run state as
+        // InvalidOperationException.
+        _engine.SetCaptureUnsupported();
+
         _assetService.Start();
         try
         {
@@ -754,6 +762,11 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         // without touching Vulkan. Headless never gets here and keeps returning default. The
         // closure is allocated once at renderer creation, not per read.
         _engine.SetRenderStatsSource(() => renderer.RenderStats);
+
+        // The capture delegate is the renderer's thread-safe request queue; installing it before
+        // Setup lets the game capture from any callback (M8 §6.9). Headless never gets here and
+        // instead installs the NotSupported source at Run start.
+        _engine.SetCaptureSource(renderer.CaptureFrameAsync);
 
         return renderer;
     }
