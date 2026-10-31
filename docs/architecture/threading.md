@@ -15,7 +15,10 @@
 > WP-3); the host acquire/capture/publish wiring, the blocked-producer wake paths, the minimized
 > 30 Hz tick cap, and the paced headless loop are `Current` (M7, §5.3/§7). The engine has no
 > debug-only tick-active, structural, or slot-state checks. The suite is 1158 tests: 1141
-> deterministic plus 17 opt-in/conditional.
+> deterministic plus 17 opt-in/conditional. **M8 (sprite renderer) is in progress:** the approved
+> target adds render-thread `IAssets` calls, the public stats/capture bridge, and page/instance
+> resources, and it does **not** change the frame snapshot. No M8 code is written yet (WP-1 is
+> documentation reconciliation).
 
 ## 1. Threads by mode
 
@@ -23,7 +26,7 @@
 | --- | :-: | :-: | :-: | --- |
 | **Tick** | yes | yes | yes | Windowed/offscreen loop (slot acquire, time, `IGame.Setup/Tick/Teardown`, input freeze/text dispatch, tick scope, scene/asset requests, snapshot capture, publish, shutdown); headless paced loop with the synthesized clock. May be any host thread. |
 | **OS/window** | yes | no | no | SDL video/events and window operations; public `IWindow` calls are marshaled here. |
-| **Render** | yes | yes | no | Vulkan device, swapchain (windowed) or offscreen targets, frames/fences, the snapshot ring and consumer, dynamic-rendering clear, present/discard. Started by the host before `Setup`; no `Tick` runs until it is ready. Uploads, sprite resolution, sorting, draws, and instance filling are M8. |
+| **Render** | yes | yes | no | Vulkan device, swapchain (windowed) or offscreen targets, frames/fences, the snapshot ring and consumer, dynamic-rendering clear, present/discard. Started by the host before `Setup`; no `Tick` runs until it is ready. The approved M8 target adds uploads, sprite resolution through `IAssets`, sorting, per-camera passes, instance filling, and the stats/capture bridge (in progress; no M8 code yet). |
 | **Asset loader** | yes | yes | yes | One per app: pack reads, decompression, and MessagePack deserialization. It caches no resolved assets and never touches SDL, Vulkan, or game entities. |
 | **Game workers** | yes | yes | yes | Game-spawned threads on distinct entities; the game joins them before `Tick` returns. |
 
@@ -75,7 +78,10 @@ The guarantees are deliberately precise:
 
 `Current` (internal, M7): the value-only model and the capture pass live in
 `Bork2d.Engine.Rendering` and are never part of the public `Bork2d.Engine` contract. Camera
-ordering, sprite sorting, and every draw remain M8. A snapshot is the renderer's complete input
+ordering, sprite sorting, and every draw are the approved M8 target (in progress). **M8 does not
+change the snapshot:** it stays value-only and asset-agnostic except the loaded `SpriteAsset?`, and
+the renderer resolves textures through `IAssets` instead of receiving new snapshot fields. A
+snapshot is the renderer's complete input
 for one tick: immutable after publication, free of live entity references except the loaded
 `SpriteAsset?`, and built by an unordered traversal of the rooted tree with game workers joined.
 
@@ -342,8 +348,8 @@ thread never invokes a game callback.
 
 ## 6. Asset and pack coordination
 
-`Current (M3/D-035)` for the loader and pack-time reference validation; renderer/GPU integration is
-`Planned` (M8).
+`Current (M3/D-035)` for the loader and pack-time reference validation. The renderer/GPU integration
+is the approved M8 target, in progress (no M8 code yet).
 
 - The internal asset service owns **one** dedicated loader thread per app and an unbounded FIFO
   request queue. There is no priority, no parallelism, and no cancellation token in the public API.
@@ -363,17 +369,29 @@ thread never invokes a game callback.
   and no CPU resource table.
 - **Pack-time reference validation** runs in `PackBuilder.Build`/`Write`, not on the loader thread.
   The builder walks each added asset's generated shape, collects every non-null reference, and
-  checks that the path exists and targets the matching raw/MessagePack kind. Field validation is
-  M4 baker/editor work.
+  checks that the path exists and targets the matching raw/MessagePack kind. There is no sprite
+  field validation in Stage 1 (M5 is removed); the renderer's defensive draw-time rules apply.
 - Shutdown stops accepting requests, cancels queued and in-flight load tasks (they complete as
   canceled), joins the loader at a safe point, and only then closes the mounted archives. After
   shutdown every `IAssets` member throws `ObjectDisposedException`.
 - The virtual filesystem overlay table is immutable except for an atomic swap when `LoadPack`
   mounts a new pack; later packs shadow earlier ones and there is no unload in v1.
-- M3 has no renderer work: the loader never creates GPU resources. In M8 the renderer will create
-  GPU texture pages and uploads on the render thread, resolving `SpriteAsset.Texture` and
-  `TextureDescriptor.Payload` at draw time; GPU page lifetime is retired after the referencing
-  frames complete.
+- **Render-thread `IAssets` coordination (approved M8 target, in progress).** The render thread may
+  call `LoadAsset<TextureDescriptor>`/`LoadData` directly; the calls complete asynchronously on the
+  one loader thread, which stays the single loader. A page is `Pending` while its load runs, and its
+  sprites are skipped (never blocking); a failed load maps the path to the placeholder and is not
+  retried. The renderer never waits on a load in a frame, and pending tasks are ignored on stop.
+  The host stops the asset service only after the renderer has joined, so a render-thread load can
+  never race a disposed service. GPU pages live for the run (no eviction), are uploaded through a
+  separate submit/fence, and are destroyed on the render thread after `vkDeviceWaitIdle` at
+  shutdown.
+- **Stats/capture bridge (approved M8 target).** `IEngine.RenderStats` is a consistent immutable
+  snapshot published by the renderer once per completed frame; `IEngine.CaptureFrameAsync` enqueues
+  a one-shot request that the render thread serves by copying the composited image after the last
+  camera pass and before present/discard. Both are thread-safe and non-blocking: no tick- or
+  render-thread callback waits on them, no lock is held across a Vulkan call, fence wait, loader
+  wait, or game callback, and the capture copy never stalls the tick. Pending captures
+  fault/cancel on renderer stop/fatal.
 
 See [Assets and tooling](assets-and-tooling.md).
 
@@ -387,7 +405,11 @@ Thread-specific rules:
   outlives the Vulkan instance/surface (windowed) or the owned instance/device (offscreen): the
   host stops and joins it before `platform.Shutdown()` destroys the surface/instance/window and
   before the assets stop. The asset loader thread is cancellable and joinable; queued and
-  in-flight load tasks are canceled and the loader is joined at shutdown (M3).
+  in-flight load tasks are canceled and the loader is joined at shutdown (M3). **M8 shutdown
+  ordering (approved target, in progress):** the renderer drains pending `CaptureFrameAsync`
+  requests (faulting or canceling them), waits its upload fences and `vkDeviceWaitIdle`, destroys
+  pages/pipeline/sets/buffers, then joins; only afterwards does the host stop the asset service, so
+  the `IAssets` instance passed in `RendererStartInfo` outlives the renderer.
 - **Shutdown with frames in flight.** `RequestStop` stops the ring (waking a blocked producer) and
   the control channel (waking a blocked consumer); a renderer fatal does the same before the host
   observes it at the next boundary (Q9=I1). The render thread waits its frame fences and
@@ -415,9 +437,13 @@ Thread-specific rules:
   access: `System.Threading.Lock`, not `lock (object)`, short critical sections, no lock across
   an await or blocking wait, structural lock before per-object lock.
 - Snapshot arrays are slot-private: the tick writes only the slot it owns; the renderer reads
-  only a slot in `Rendering`. M8 copies snapshot data into per-frame instance buffers (M7 allocates
-  those buffers empty and writes nothing); the GPU reads those buffers, not snapshot memory, and a
-  buffer is rewritten only after its fence. Uploads use persistently mapped memory.
+  only a slot in `Rendering`. The approved M8 target writes 96-byte instance records into each
+  frame's host-visible coherent per-frame buffer (M7 allocates those buffers empty and writes
+  nothing); the GPU reads those buffers, not snapshot memory, and a buffer is rewritten only after
+  its fence and only grows at a free fence. Texture uploads use a host-visible staging ring and a
+  separate submit/fence. `RenderStats` is published once per completed frame and read as one
+  consistent snapshot (a short lock or an equivalent atomic snapshot), and the capture result is
+  handed to its task after the frame, never from inside a render callback that the tick waits on.
 - Release builds keep the per-object locks; composite multi-property updates are neither atomic
   nor detected by the engine.
 
@@ -469,6 +495,14 @@ tick-cap tests with a fake scheduler, the headless K1/L2/F5–F8 schedule tests 
 plus one small real-time tolerant pacer test, and the host-level windowed/offscreen GPU handoff
 tests (Q19=S3). The suite is 1158 tests: 1141 deterministic tests in CI plus 17 opt-in/conditional
 (9 real-window, 3 reparse-point, 5 real-GPU).
+
+The approved M8 target adds (in progress; no M8 tests yet): fake-`IAssets` page-state tests
+(pending skip, fault-once, placeholder mapping, no-repeat-load, growth/limit failure); a
+stats/capture bridge consistency test (any-thread reads, defaults before the first frame and in
+headless, cancellation, and lifetime); zero-allocation plan/build tests; and the opt-in GPU tests
+that assert one draw per non-empty camera, per-camera clears, the placeholder, page growth, and the
+`CaptureFrameAsync` contract (length/lifecycle only, **no pixel/golden assertions**). GPU tests stay
+local-only; CI is unchanged.
 
 ## 10. Related documents
 

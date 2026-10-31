@@ -10,8 +10,11 @@
 > `Build()` validates and `Run()` runs the Vulkan-backed windowed loop (window, input, time) or the
 > offscreen loop until `Exit`, both with the snapshot handoff and ring backpressure; headless runs a
 > paced no-GPU loop until `Exit` with a fully synthesized clock. The base pack (or the
-> `WithoutAssets()` empty filesystem) opens before the window and `Setup`. Sprites are M8; the
-> window shows a black clear. See the [API reference](reference.md#12-runtime-surface).
+> `WithoutAssets()` empty filesystem) opens before the window and `Setup`. Sprites are the approved
+> M8 target and **M8 is in progress** (WP-1 is documentation reconciliation; no M8 code is written
+> yet); M7 still shows a black clear. The approved M8 public additions are
+> `ICamera.WorldToScreen`/`ScreenToWorld`, `IEngine.RenderStats`, and `IEngine.CaptureFrameAsync`
+> (all `Planned`/not declared). See the [API reference](reference.md#12-runtime-surface).
 >
 > Assets/processors are configured in a build-time `MyGame.Assets` executable with
 > `BakeApplicationBuilder`; the project descriptor and generated host are removed, data types are
@@ -31,7 +34,7 @@ parentheses.
 | `Pong.Common` (`Project.Common`) | `Bork2d.Engine` only | Gameplay classes and runtime `[GenerateShape]` data types: `PongGame`, `PongSimulation`, `PongAi`, `PongTitle`, `PongSide`, `GameSettings`. |
 | `Pong.Assets` (`MyGame.Assets`) | `Bork2d.Bake` + `Pong.Common` | Build-time executable: asset roots, processors (`CircleProcessor`), `BakeApplicationBuilder` config, CLI; bakes on build. |
 | `Pong.Desktop` (`Project.Desktop`) | `Bork2d.Runtime` + `Pong.Common`; build-only `Pong.Assets` | Entry point that builds and runs the app; the NativeAOT gate. |
-| `Project.Editor` (M5) | `Bork2d.Editor` + `Project.Common` | Thin Avalonia editor host. |
+| `Project.Editor` | `Bork2d.Editor` + `Project.Common` | Thin Avalonia editor host (not in Stage 1; M5 removed). |
 
 Do not reference `Bork2d.Render` from runtime game code; it is an implementation detail
 ([Projects and dependencies](../architecture/projects.md)). **Tooling and
@@ -75,8 +78,8 @@ app.Run();
   `Teardown` loop until `IEngine.Exit()` with a fully synthesized clock. Windowed and offscreen
   require Vulkan 1.3; headless needs no GPU and never loads Vulkan/SDL. The base pack is opened by
   `Run()` (M3). The windowed/offscreen loop has no target rate or frame limiter — it is
-  backpressured by the snapshot ring — except the minimized-only 30 Hz tick cap; the window is black
-  until sprites arrive in M8.
+  backpressured by the snapshot ring — except the minimized-only 30 Hz tick cap; M7 shows a black
+  clear and the approved M8 target draws the scene (in progress).
 - `using`/`Dispose()` detaches the root's direct children and the window/input proxies and disposes
   the app-owned logger factory. It never calls `Teardown` again. `Dispose()` while `Run()` is active
   throws `InvalidOperationException`; call `IEngine.Exit()` or close the window first.
@@ -87,8 +90,8 @@ app.Run();
 
 | Mode | Selection | M7 behavior | Target |
 | --- | --- | --- | --- |
-| Windowed (default) | `WithTitle`/`WithSize`/`WithVSync` | Visible SDL window, Vulkan instance/surface, input, time, a ring-backpressured loop until exit/close, one snapshot published/presented per tick, and a black clear. Ticks are capped at 30 Hz only while minimized. | Sprites (M8). |
-| Offscreen | `WithOffscreen(width, height)` | Vulkan renderer with a fixed sRGB target; `Setup` → `Tick`… → `Teardown` until `Exit`, `ITime` advances, ring-backpressured ticks with one discarded frame per snapshot; no window, input, SDL, surface, or readback. | Sprites/readback (M8/M10). |
+| Windowed (default) | `WithTitle`/`WithSize`/`WithVSync` | Visible SDL window, Vulkan instance/surface, input, time, a ring-backpressured loop until exit/close, one snapshot published/presented per tick, and a black clear. Ticks are capped at 30 Hz only while minimized. | Sprite renderer plus `RenderStats`/`CaptureFrameAsync` (M8, in progress). |
+| Offscreen | `WithOffscreen(width, height)` | Vulkan renderer with a fixed sRGB target; `Setup` → `Tick`… → `Teardown` until `Exit`, `ITime` advances, ring-backpressured ticks with one discarded frame per snapshot; no window, input, SDL, surface, or readback. | Sprite renderer; `CaptureFrameAsync` readback on request (M8, in progress; no screenshot files). |
 | Headless | `WithHeadless(ticksPerSecond = 60)` | Paced loop until `Exit`; the rate must be positive (`WithHeadless(0)` is a `Build()` error); fully synthesized `ITime` (tick 0 = 0/0, then `N/rate` and `1/rate`, no clamp); strict grid, pure `Thread.Sleep`, unbounded catch-up; no window, input, SDL, Vulkan, renderer, or ring. | Pong gate: 120 ticks by default, `--headless --ticks N` (Q15=O2/F3). |
 
 The modes are mutually exclusive, and window-only options are rejected in headless/offscreen.
@@ -141,9 +144,10 @@ $pong = 'examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Des
   (`Pong - 3 : 2 - Serving...`, `Pong - 3 : 2 - Paused - Space to resume`,
   `Pong - 11 : 7 - Left wins - R to restart, Esc to quit`); scores, pause, match end, and setup are
   logged at Information, never per frame.
-- **Rendering is still M8:** the window is deliberately a black clear. Sprites, camera, and layers
-  are wired, so the example becomes visibly rendered when the sprite renderer lands; offscreen
-  frames are discarded with no readback.
+- **Rendering (M8, in progress):** M7 deliberately draws a black clear. Sprites, camera, and layers
+  are wired, so the example becomes visibly rendered when the sprite renderer lands; the approved
+  gate then asserts the `RenderStats` relationships and a manual visual check, with offscreen frames
+  discarded unless `CaptureFrameAsync` is requested.
 
 ## 3. Write a game
 
@@ -212,7 +216,8 @@ public sealed class MyGame : IGame<GameLayer>
 ```
 
 Target label: `LoadAsset<SpriteAsset>` is real (the sprite asset is a normal public MessagePack
-asset), and rendering requires M8, so nothing draws yet. The camera/transform code is `Current`;
+asset), and drawing is the approved M8 target (in progress), so nothing draws in M7 yet. The
+camera/transform code is `Current`;
 time is `Current` in every mode (real in windowed/offscreen, fully synthesized in headless).
 `Setup` is synchronous,
 so the example starts the load and assigns the asset in `Tick` when it completes; blocking startup on
@@ -228,7 +233,7 @@ _player.Layer       = GameLayer.World;
 ```
 
 - `0` is `None`, not a layer. A renderable with layer `0` or more than one bit is skipped by the
-  renderer (M8).
+  M8 renderer (approved target, in progress; no effect in M7).
 - Up to 32 named single-bit flags; the enum must be `int`-backed. The builder validates it and
   rejects composites.
 - A camera mask may combine bits; `0` sees nothing. `CreateCamera(parent)` requires a parent; use
@@ -247,14 +252,35 @@ camera.ClearColor = Color.Black;
 camera.ZIndex = 0;                         // ascending order; higher applies later
 ```
 
-- `Size` is the **half** visible height in world units; width follows from the viewport aspect.
-  Scale is not a zoom control.
-- `Viewport` is normalized `(x, y, width, height)`, top-left origin. `ZIndex` orders cameras
-  ascending, higher later, default `0`; ties are unspecified (M8). Split screen uses two cameras
-  with viewports `(0, 0, 0.5, 1)` and `(0.5, 0, 0.5, 1)`;
-  `ScreenToWorld`/`WorldToScreen` are `Planned` (not declared in `Bork2d.Engine` yet).
-- Multiple cameras are supported; each non-empty camera issues one draw (M8). A later camera with
-  `Clear.Color` wipes its viewport, while `Clear.None` overlays.
+- `Size` is the **half** visible height in world units; width follows from the rounded viewport
+  aspect. Scale is not a zoom control (a non-unit camera scale makes the camera invalid).
+- `Viewport` is normalized `(x, y, width, height)`, top-left origin, rounded half-up and clamped to
+  the framebuffer. `ZIndex` orders cameras ascending, higher later, default `0`; ties are
+  unspecified. Split screen uses two cameras with viewports `(0, 0, 0.5, 1)` and `(0.5, 0, 0.5, 1)`.
+- **Approved M8 draw semantics (in progress):** each camera is its own dynamic-rendering pass over
+  its pixel rect with no frame-level safety clear. `Clear.Color` clears only that rect
+  (`loadOp=CLEAR`), `Clear.None` preserves earlier output (`LOAD`), and `Clear.Depth` logs once and
+  behaves like `None`. A later `Clear.Color` wipes only its viewport, while `Clear.None` overlays.
+  An empty `Clear.Color` camera still clears its rect (no draw); an empty `Clear.None` camera records
+  nothing; a frame with no cameras clears nothing.
+- **Invalid cameras are skipped, not thrown at draw time:** a non-positive/non-finite `Size`, a
+  non-finite or non-positive viewport, an empty rounded rect, an unknown `ClearKind`, a non-finite
+  `ClearColor`, a singular camera matrix, or a non-unit camera scale skips the whole camera
+  (including its clear) with a throttled diagnostic. The setters do not validate.
+- **Screen/world helpers** are the approved M8 additions (`Planned`; not declared yet).
+  `WorldToScreen` returns global framebuffer pixels (the viewport offset is included) and uses the
+  same camera inverse, `Size`, rounded viewport/aspect, and Y-flip as the renderer. Both helpers
+  throw `ArgumentOutOfRangeException` for non-finite input and `InvalidOperationException` for an
+  invalid camera; they never return NaN silently.
+- Multiple cameras are supported; each non-empty camera issues exactly one draw inside its own pass,
+  and a camera's mask (`CullingMask`) selects the layers it sees.
+
+For example:
+
+```csharp
+Vector2 pixel = camera.WorldToScreen(worldPoint);   // framebuffer pixels, top-left origin
+Vector2 world = camera.ScreenToWorld(mousePixel);   // inverse; outside-viewport points extrapolate
+```
 
 ## 6. Sprites and transforms
 
@@ -277,17 +303,50 @@ sprite.LocalScale = new Vector2(2, 2);
   pivot, topology, optional `indices`, a texture reference, and a **pixels-per-unit** scale;
   `LocalScale` multiplies it. There is no global PPU and no vertices array. See
   [Assets and tooling](../architecture/assets-and-tooling.md).
-- `Sprite = null` hides the entity; a sprite whose texture reference is absent or missing is
-  non-drawable until the texture and GPU page are ready (M8). Do not block.
+- `Sprite = null` hides the entity and draws nothing. A sprite whose texture page is still loading
+  is skipped until it is ready (never block on it); a missing/failed/unsupported texture draws a
+  generated magenta/black placeholder with the sprite's tint, and the app continues.
 - `ZIndex` orders within a layer, higher later; ties are unspecified. `Tint` multiplies the
   texture, `White` is neutral.
-- `FlipX`/`FlipY` mirror the sprite around its pivot without changing the transform; both default
-  to `false`. They are `Current` for storage and M7 frame-snapshot capture; the M8 renderer applies
-  them at draw time, so nothing is visibly mirrored yet.
+- `FlipX`/`FlipY` mirror the **geometry** around the pivot in local space, each corner keeping its
+  UV; the transform is untouched, `FlipX && FlipY` mirrors both axes, and a negative `LocalScale`
+  composes with them. Both default to `false`. They are `Current` for storage and M7 frame-snapshot
+  capture; the M8 renderer applies them at draw time, so nothing is visibly mirrored in M7.
+- **Fatal content (approved M8).** Malformed sprite fields are a fatal renderer error
+  (`Bork2dException` naming the field and texture reference): null/short/non-finite UVs,
+  `Scale <= 0`/non-finite, a non-finite pivot or one outside `[0,1]`, an unknown topology, or
+  non-null `Indices` on a `Quad`. There is no bake/load validation in Stage 1, so a bad asset fails
+  the renderer instead of being silently repaired.
+- **Skipped content (approved M8).** Null sprites, layer `0`/multi-bit layers, non-`Quad` topology
+  (once per asset, never approximated as a quad), and pending pages are skipped with a diagnostic.
+  UVs outside `[0,1]` are allowed and use the descriptor's wrap mode.
 - Parenting preserves the world transform: assigning `Parent` later keeps the child in place,
   cycles and setting the root's own parent throw `InvalidOperationException`, and a non-engine or
   foreign-engine parent throws `Bork2dException`. `ITransform.DetachAll()` detaches direct children
   without destroying them. See [Scene ownership](../architecture/scene-ownership.md).
+
+### Render stats and frame capture (M8, Planned)
+
+The approved M8 public API lets a game observe what the renderer did without reaching into
+`Bork2d.Render`:
+
+```csharp
+RenderStats stats = _engine.RenderStats;   // last completed frame; defaults/zero before the first
+// stats.DrawCalls == stats.NonEmptyCameras; stats.TexturePages includes the placeholder.
+byte[] rgba = await _engine.CaptureFrameAsync(cancellationToken); // latest completed frame
+```
+
+- `RenderStats` describes the **last completed frame** (validation counts are cumulative for the
+  run) and is safe to read from any thread. Before the first frame, in headless, and after
+  `Build()`/`Dispose()` it returns defaults/zero; it never throws and never blocks.
+- `CaptureFrameAsync` returns RGBA8, row-major, top-left origin, exactly
+  `FramebufferWidth * FramebufferHeight * 4` bytes, including all camera clears/draws and excluding
+  OS chrome. The copy is recorded after the last camera pass and before present/discard, so it does
+  not stall the tick. Windowed BGRA is swizzled to RGBA; offscreen RGBA is copied directly.
+- Errors: `NotSupportedException` in headless, `InvalidOperationException` before `Run()`,
+  `ObjectDisposedException` after `Run()`/`Dispose()`, and `OperationCanceledException` when the
+  token cancels a pending request. There is no pixel-format option and no screenshot file.
+- The engine's own tests do **not** assert pixels; visual acceptance is a manual windowed check.
 
 ## 7. Input
 
@@ -453,9 +512,9 @@ byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
   (defaults `Rgba8`/`Linear`/`Clamp`), never strings. Both sprite and
   descriptor are public MessagePack assets in `Bork2d.Engine.Assets`; the built-in texture processor (a
   normal registered processor) validates descriptor fields, and the bake validates
-  binding/references, while sprite field validation (UV extents, pivot, topology, indices) is M5
-  (D-M4-06), not the loader. `PackBuilder` validates every non-null reference when it builds a pack;
-  the runtime trusts the pack.
+  binding/references. There is no sprite field validation in Stage 1 (M5 removed); the M8 renderer's
+  draw-time rules apply instead (see §6). `PackBuilder` validates every non-null reference when it
+  builds a pack; the runtime trusts the pack.
 - **Colors.** `Color` is linear RGBA and serializes as the float array `[r, g, b, a]` through the
   public `ColorMarshaler` infrastructure, not as an object map; `Color` stays non-`partial`. The
   marshaler is generated into the assembly that declares the containing asset type, so a game
@@ -496,7 +555,8 @@ byte[] texturePixels = await _engine.Assets.LoadData(texture.Payload);
 
 ### Data serialization and bake
 
-`Status: Current (D-036/D-037/D-038). Sprite field validation and slicing are M5.` Author data as
+`Status: Current (D-036/D-037/D-038). There is no sprite field validation or slicing in Stage 1
+(M5 removed).` Author data as
 TOML in the pack roots configured by the builder, declare each type in its own `[bork2d]` table, and
 let the tooling bake the main pack and any DLC packs. The runtime never sees TOML.
 
@@ -758,7 +818,7 @@ builder.Write("assets.pck"); // overwrites; relative paths resolve against the c
 - The runtime libraries are `IsAotCompatible`; AOT publish/run is a required local gate.
   `Pong.Desktop --headless` (120 ticks by default), `--headless --ticks N`, `--windowed --ticks
   120`, and `--offscreen --ticks 120` load the baked 7-entry pack and exit 0; the windowed/offscreen
-  runs need a GPU, and the window shows a black clear until sprites arrive in M8. See
+  runs need a GPU, and M7 shows a black clear (the approved M8 target draws the three sprites). See
   [Start the engine](#2-start-the-engine).
 
 See [NativeAOT](../architecture/nativeaot.md).
