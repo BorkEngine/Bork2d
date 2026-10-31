@@ -120,6 +120,7 @@ public sealed class Bork2dAppTests
         ITransform? transform = null;
         var game = new ScriptedGame<GameLayer>
         {
+            ExitAfterFirstTick = true,
             OnSetup = engine => transform = engine.CreateTransform(engine.Root),
         };
         var app = new Bork2dAppBuilder<GameLayer>()
@@ -209,6 +210,7 @@ public sealed class Bork2dAppTests
         var error = new InvalidOperationException("teardown failed");
         var game = new ScriptedGame<GameLayer>
         {
+            ExitAfterFirstTick = true,
             OnTeardown = () => throw error,
         };
         using var app = new Bork2dAppBuilder<GameLayer>()
@@ -228,7 +230,7 @@ public sealed class Bork2dAppTests
     [Fact]
     public void EngineWindowInputAndEmptyAssetFileSystemBehaveAsDocumented()
     {
-        var game = new ScriptedGame<GameLayer>();
+        var game = new ScriptedGame<GameLayer> { ExitAfterFirstTick = true };
         IReadOnlyList<AssetInfo>? browse = null;
         bool? exists = null;
         Task<SpriteAsset>? spriteTask = null;
@@ -305,16 +307,18 @@ public sealed class Bork2dAppTests
     }
 
     [Fact]
-    public void OneTickModesNeverCreateTheSdlPlatform()
+    public void HeadlessNeverCreatesTheSdlPlatformOrRenderer()
     {
         var invoked = false;
         var rendererFactory = new FakeRendererFactory();
+        var instanceFactory = new FakeVulkanInstanceFactory();
         var game = new TestGame<GameLayer>();
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
             .WithoutAssets()
             .WithRendererFactory(rendererFactory)
+            .WithVulkanInstanceFactory(instanceFactory)
             .WithSdlApiFactory(() =>
             {
                 invoked = true;
@@ -326,34 +330,37 @@ public sealed class Bork2dAppTests
 
         Assert.False(invoked);
         Assert.Equal(0, rendererFactory.CreateCount);
+        Assert.Equal(0, instanceFactory.CreateCount);
         Assert.Equal(1, game.SetupCount);
         Assert.Equal(1, game.TickCount);
         Assert.Equal(1, game.TeardownCount);
     }
 
     [Fact]
-    public void HeadlessIgnoresExitKeepsTheClockStillAndCreatesNoRenderer()
+    public void HeadlessLoopUsesTheSynthesizedClockAndHonorsExit()
     {
         var rendererFactory = new FakeRendererFactory();
         var instanceFactory = new FakeVulkanInstanceFactory();
-        double? time = null;
-        double? delta = null;
-        var game = new ScriptedGame<GameLayer>
-        {
-            OnSetup = engine => engine.Exit(),
-        };
+        var clock = new FakeSchedulerClock();
+        var times = new List<double>();
+        var deltas = new List<double>();
+        var game = new ScriptedGame<GameLayer>();
         game.OnTick = () =>
         {
             var engine = game.Engine!;
-            time = engine.Time.Time;
-            delta = engine.Time.DeltaTime;
-            engine.Exit();
+            times.Add(engine.Time.Time);
+            deltas.Add(engine.Time.DeltaTime);
+            if (game.TickCount == 3)
+            {
+                engine.Exit();
+            }
         };
 
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
-            .WithHeadless()
+            .WithHeadless(ticksPerSecond: 50)
             .WithoutAssets()
+            .WithSchedulerClock(clock)
             .WithRendererFactory(rendererFactory)
             .WithVulkanInstanceFactory(instanceFactory)
             .Build();
@@ -363,10 +370,16 @@ public sealed class Bork2dAppTests
         Assert.Equal(0, rendererFactory.CreateCount);
         Assert.Equal(0, instanceFactory.CreateCount);
         Assert.Equal(1, game.SetupCount);
-        Assert.Equal(1, game.TickCount);
+        Assert.Equal(3, game.TickCount);
         Assert.Equal(1, game.TeardownCount);
-        Assert.Equal(0d, time);
-        Assert.Equal(0d, delta);
+
+        // F5/L2: tick 0 reports 0/0; tick N >= 1 reports N / rate and 1 / rate.
+        Assert.Equal([0d, 0.02d, 0.04d], times);
+        Assert.Equal([0d, 0.02d, 0.02d], deltas);
+
+        // The pacer slept the strict-grid remainder before ticks 1 and 2, not before tick 0.
+        Assert.Equal(2, clock.SleepCount);
+        Assert.Equal(0.04d, clock.TotalSleepSeconds, precision: 6);
     }
 
     [Fact]

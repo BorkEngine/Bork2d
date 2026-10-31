@@ -1,14 +1,16 @@
 # API Reference
 
 > **Status:** the implemented M2/M3/M4 contract plus M6 (Vulkan bring-up; merged 2026-10-31, PR #11)
-> on top of the asset-processor task merged into `develop`
+> and M7 host/headless (WP-4; the milestone is in progress and WP-5 owns the final status and the
+> Pong/AOT gate) on top of the asset-processor task merged into `develop`
 > (2026-10-27, PR #8). M1
 > (foundation), M2 (SDL windowed host), M3 (pack, VFS,
 > runtime integration), and M4 (serialization/bake) are implemented and merged into `develop`.
 > `Current` means implemented in this tree and covered by tests; `Partial` means the declaration
 > exists but behavior is stubbed, unwired, or incomplete; `Planned` means an agreed target that is
-> not implemented. Windowed and offscreen modes run the real Vulkan renderer (windowed shows a black
-> clear; offscreen discards); headless keeps the one-tick no-GPU path. `IEngine.Assets` is the real
+> not implemented. Windowed and offscreen modes run the real Vulkan renderer with the snapshot
+> handoff (windowed presents a black clear, offscreen discards one frame per consumed snapshot);
+> headless runs a paced no-GPU loop with a fully synthesized clock. `IEngine.Assets` is the real
 > app-scoped asset service in every mode, opening
 > the base pack (or the `WithoutAssets()` empty filesystem) before the window and `Setup`.
 > Renderer pixels/sprites are M8. See the [roadmap](../roadmap.md). The current milestone spec and
@@ -44,14 +46,15 @@ scene state afterwards.
 - Concurrent composite updates to one object are the game's synchronization responsibility.
 - Frame snapshots are captured after `Tick` (M7); workers must not write scene state afterwards.
 
-Mode behavior in M6: **windowed** (the default) creates one visible SDL window and the Vulkan
-instance/surface on an engine-owned OS/window thread, starts the renderer before `Setup`, runs an
-uncapped `Tick` loop until `Exit()`/close/fatal error, makes `IWindow`/`IInput` real, advances
-`ITime`, and presents a black clear. **Offscreen** runs the Vulkan renderer against a fixed target
-with no SDL/window/input/surface, loops `Setup` → `Tick`… → `Teardown` until `Exit()`, advances
-`ITime`, and discards frames. **Headless** creates no renderer, SDL, or Vulkan, keeps the one-tick
-`Setup` → `Tick` → `Teardown` path, returns a throwing `IWindow` stub, throws
-`NotSupportedException` from the `IInput` getter, and keeps `ITime` at `0`.
+Mode behavior in M7: **windowed** (the default) creates one visible SDL window and the Vulkan
+instance/surface on an engine-owned OS/window thread, starts the renderer before `Setup`, runs a
+ring-backpressured `Tick` loop until `Exit()`/close/fatal error (one snapshot published per completed
+tick), makes `IWindow`/`IInput` real, advances `ITime`, and presents a black clear. **Offscreen**
+runs the Vulkan renderer against a fixed target with no SDL/window/input/surface, loops `Setup` →
+`Tick`… → `Teardown` until `Exit()` with ring backpressure, advances `ITime`, and discards one frame
+per snapshot. **Headless** creates no renderer, SDL, ring, or Vulkan, runs a paced `Setup` → `Tick`…
+→ `Teardown` loop until `Exit()` with a fully synthesized clock, returns a throwing `IWindow` stub,
+and throws `NotSupportedException` from the `IInput` getter.
 
 ### 1.2 Units and conventions
 
@@ -68,7 +71,7 @@ from the top-left, and an integer `ZIndex` sorts higher later. Sprite asset geom
 | Window | Visible at `Run()` start; 1280x720 framebuffer pixels; resizable `true`, fullscreen `false`, cursor visible `true`, minimized `false`, VSync `true` (stored). |
 | Assets pack | The relative string `"assets.pck"`, opened by `Run()` and resolved against the process current directory (absolute paths are accepted). `WithoutAssets()` selects an empty filesystem and needs no pack. |
 | Max delta | `0.25` s gameplay clamp in windowed mode, not a pacing delay. |
-| Headless / logging | `60` ticks/s stored (`0` = uncapped; one tick in M2) / ZLogger console, local time ms, no colors or file sink; minimum Debug (Debug) or Information (Release). |
+| Headless / logging | `60` ticks/s (must be `> 0`; `0` is a `Build()` error) paced loop until `Exit()` / ZLogger console, local time ms, no colors or file sink; minimum Debug (Debug) or Information (Release). |
 | Camera | `Size = 10` (half-height), `Viewport = (0,0,1,1)`, `CullingMask` = all declared flags, `Clear = Color`, `ClearColor = Black`, `ZIndex = 0`. |
 | Sprite renderable | `Sprite = null`, `Layer = 0` (**invalid**; skipped by the future renderer), `Tint = White`, `ZIndex = 0`. |
 
@@ -145,13 +148,13 @@ not a concrete transform type.
 
 | Member | Status | Semantics |
 | --- | --- | --- |
-| `Time` | `Current` (M2/M6) | Monotonic time/delta snapshot. Windowed and offscreen modes advance it once per tick (first tick both `0`); headless never advances it, so both stay `0`. |
+| `Time` | `Current` (M2/M6/M7) | Monotonic time/delta snapshot. Windowed and offscreen modes advance it once per tick (first tick both `0`). Headless is fully synthesized: tick 0 reports `0`/`0`, tick `N >= 1` reports `Time = N / ticksPerSecond` and `DeltaTime = 1 / ticksPerSecond`; `WithMaxDeltaTime` does not clamp it. |
 | `Window` | `Current` (M2) | The property access never throws. Windowed mode returns the internal proxy attached for the duration of `Run()`; headless/offscreen return an `UnsupportedWindow` whose **members** throw `NotSupportedException`. After a windowed run, retained references throw `ObjectDisposedException` from their members. |
 | `Input` | `Current` (M2) | Windowed mode returns the internal input proxy; the getter itself never throws there. Headless/offscreen have no input, so the getter itself throws `NotSupportedException`. After a windowed run, retained references throw `ObjectDisposedException` from their members. |
 | `Assets` | `Current` (M3) | The real app-scoped `IAssets` service in every mode; the getter never throws. Opens the base pack (or the `WithoutAssets()` empty filesystem) at `Run()` before the window and `Setup`. After `Run()` returns/throws or the app is disposed, every member throws `ObjectDisposedException` (D-M3-14). |
 | `LoggerFactory` / `Root` | `Current` | App-owned MEL/ZLogger factory (non-null; create per-category loggers; disposed by `Bork2dApp.Dispose()`) / read-only root of the strong scene graph. |
 | `CreateTransform` / `CreateCamera` / `CreateSpriteRender` | `Current` | Create a node under `parent`; the two renderable creators require a parent (`null` throws `ArgumentNullException`). A new node keeps default local values and starts at the parent's origin. |
-| `Exit()` | `Current` (M2/M6) | Windowed/offscreen: the current tick finishes and the loop stops before the next boundary. A request during `Setup` skips every tick and the readiness wait but still tears down once. Headless ignores it (one tick). A no-op after the run or disposal. |
+| `Exit()` | `Current` (M2/M6/M7) | The current tick finishes and publishes its snapshot (windowed/offscreen), then the loop stops before the next tick in every mode. A request during `Setup` skips every tick and the readiness wait but still tears down once. A windowed/offscreen tick blocked waiting for a free snapshot slot wakes and starts no further tick; a headless pacing sleep is not interrupted, so shutdown latency is bounded by one period. A no-op after the run or disposal. |
 
 - The engine does not own the loop; `Bork2d.Runtime` does, and `IEngine` has no public
   `Run`/`Update`/`Draw`. `TLayer` must be an `int`-backed `[Flags]` enum with 1–32 named
@@ -175,23 +178,25 @@ out of `Bork2dApp.Run()` after cleanup (§12). There is no `Run`/`Update`/`Draw`
 
 ## 4. `ITime`
 
-`Status: Current (M2, windowed/offscreen).` `ITime` declares `double DeltaTime { get; }` and
-`double Time { get; }`. The windowed and offscreen hosts advance it once per tick, before `Tick`
-(windowed also before text dispatch); headless runs one tick and never advances it.
+`Status: Current (M2/M6/M7).` `ITime` declares `double DeltaTime { get; }` and
+`double Time { get; }`. The windowed and offscreen hosts advance it once per tick, after the
+snapshot slot is acquired and before `Tick` (windowed also before text dispatch); headless replaces it
+with a fully synthesized clock advanced once per tick.
 
 | Property | Semantics |
 | --- | --- |
-| `Time` | `0` on the first tick; afterwards the raw monotonic `Stopwatch` seconds since that tick, never clamped. `0` in headless. |
-| `DeltaTime` | Exactly `0` on the first tick; afterwards the raw interval between tick starts, clamped to the builder's `WithMaxDeltaTime` value. `0` in headless. |
+| `Time` | Windowed/offscreen: `0` on the first tick; afterwards the raw monotonic `Stopwatch` seconds since that tick, never clamped. Headless: `0` on tick 0, then `tickIndex / ticksPerSecond`. |
+| `DeltaTime` | Windowed/offscreen: exactly `0` on the first tick; afterwards the raw interval between tick starts, clamped to the builder's `WithMaxDeltaTime` value. Headless: `0` on tick 0, then exactly `1 / ticksPerSecond`, never clamped (F7). |
 
 - `ITime` has no `MaxDeltaTime` property. The clamp is configured with
   `Bork2dAppBuilder.WithMaxDeltaTime` (`0.25` s default), validated by `Build()`, and is a gameplay
-  clamp, not a pacing delay.
-
-- No `TickCount`, fixed timestep, accumulator, or render interpolation. Windowed/offscreen begin
-  with no pacing wait at all (M7 adds frame-handoff backpressure); headless pacing is M7.
-- The clock is never wall-clock time and does not pause on focus loss or minimization; games can
-  pause themselves.
+  clamp, not a pacing delay; it does not apply to the headless synthesized step.
+- No `TickCount`, fixed timestep, accumulator, or render interpolation. Windowed/offscreen are
+  backpressured by the snapshot ring (no timer; the only exception is the minimized-only 30 Hz tick
+  cap); headless follows a strict absolute grid with a pure `Thread.Sleep` and unbounded catch-up.
+- The windowed/offscreen clock is never wall-clock time and does not pause on focus loss or
+  minimization; games can pause themselves. The headless pacer reads system time only to schedule
+  ticks and catch up.
 - Reads are thread-safe locked snapshots, so a `double` can never be observed torn. `ITime` keeps
   its last values readable after `Run()` returns or the app is disposed.
 
@@ -262,7 +267,8 @@ headless/offscreen have no input at all, so
   `NotSupportedException`; after windowed shutdown the returned object's members throw
   `ObjectDisposedException`. The input proxy is available from `Setup` (empty snapshot) through
   `Teardown` (most recent snapshot).
-- The loop is uncapped: reads are taken once per tick, and there is no per-frame input logging.
+- Reads are taken once per tick from the frozen snapshot; the windowed loop has no timer (ring
+  backpressure only), and there is no per-frame input logging.
 - Input is frozen at tick start and reads are stable for the whole `Tick`; events that arrive during
   `Tick` belong to the next freeze. Reads during `Setup` return a fully empty snapshot (all queries
   `false`, zero position/delta/wheel), so keys held during `Setup` produce press edges at the first
@@ -623,10 +629,10 @@ do not serialize them; an undefined value is a safe query that returns `false`. 
 
 ## 12. Runtime surface
 
-`Status: Current (M2/M3, M6).` The builder, windowed/offscreen Vulkan hosts, headless one-tick
-app, validation, app-owned logging, window/input proxies, time, and the asset-service lifecycle are
-implemented. Windowed and offscreen require Vulkan 1.3; the renderer is composed internally and adds
-no public member (D-M6-24). Frame handoff/pacing and sprites remain later milestones.
+`Status: Current (M2/M3, M6, M7).` The builder, windowed/offscreen Vulkan hosts with the snapshot
+handoff, the paced headless loop, validation, app-owned logging, window/input proxies, time, and the
+asset-service lifecycle are implemented. Windowed and offscreen require Vulkan 1.3; the renderer is
+composed internally and adds no public member (D-M6-24). Sprites remain M8.
 
 ### `Bork2dAppBuilder<TLayer>`
 
@@ -655,12 +661,15 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
   on any thread; `Build()` validates once, and defaults are in §1.3.
 - Modes are windowed (default), `WithHeadless(ticksPerSecond)`, or `WithOffscreen(w, h)`. The
   windowless modes are mutually exclusive; window-only options (`WithTitle`, `WithSize`,
-  `WithResizable`, `WithFullscreen`, `WithVSync`) are rejected in them. `WithHeadless` defaults
-  to 60 and `0` means uncapped; the rate is stored and validated but the mode runs one tick
-  (pacing is M7). `WithOffscreen` validates positive sizes and creates a fixed sRGB Vulkan target;
-  the offscreen loop runs `Setup` → `Tick`… → `Teardown` until `IEngine.Exit()`, advances `ITime`
-  per tick, and discards frames with no readback (D-M6-07/D-M6-23). `IWindow` members and the
-  `IInput` getter still throw `NotSupportedException` offscreen.
+  `WithResizable`, `WithFullscreen`, `WithVSync`) are rejected in them. `WithHeadless` defaults to
+  60; the rate must be **greater than zero** (`0` and negative values are `Build()` errors, F6), and
+  the mode runs a paced `Setup` → `Tick`… → `Teardown` loop until `IEngine.Exit()` with a fully
+  synthesized clock (tick 0 = `0`/`0`, then `N / rate` and `1 / rate`, no clamp). `WithOffscreen`
+  validates positive sizes and creates a fixed sRGB Vulkan target; the offscreen loop runs
+  `Setup` → `Tick`… → `Teardown` until `IEngine.Exit()`, is backpressured by the snapshot ring,
+  advances `ITime` per tick, and discards one frame per consumed snapshot with no readback
+  (D-M6-07/D-M6-23). `IWindow` members and the `IInput` getter still throw `NotSupportedException`
+  offscreen.
 - Windowed and offscreen require a Vulkan 1.3 loader/device (D-M6-02); a missing loader/instance/
   device/feature/sRGB format is a `Bork2dException`. Windowed `platform.Start()` failures (SDL
   window, instance, surface) happen before `Setup`; renderer start/readiness failures happen after
@@ -677,12 +686,13 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
   paths resolve against the process current directory, and a missing/malformed pack throws
   `Bork2dException` there. `WithoutAssets()` selects an empty VFS instead, needs no pack, still
   allows `LoadPack` overlays, and is idempotent. The two are mutually exclusive and `Build()` throws
-  `Bork2dException` if both were used. `WithMaxDeltaTime` is a safety clamp for windowed/offscreen
-  `ITime.DeltaTime`, not a pacing delay; `WithValidation` is effective in M6 (see above).
+  `Bork2dException` if both were used. `WithMaxDeltaTime` is a safety clamp for the windowed/offscreen
+  `ITime.DeltaTime`, not a pacing delay, and does not clamp the headless synthesized step.
 - `Build()` validates the game, mode, layer enum, sizes, window options, delta clamp, headless rate,
-  title, pack path, and asset selection, then creates the logging factory, the unstarted asset
-  service, and the app. It is filesystem-free and creates no SDL state, window, GPU resources, or
-  threads. The exact validation order belongs to
+  title, pack path, and asset selection, then creates the logging factory, the clock (monotonic
+  `StopwatchTime` for windowed/offscreen, fully synthesized `SynthesizedTime` for headless), the
+  unstarted asset service, and the app. It is filesystem-free and creates no SDL state, window, GPU
+  resources, or threads. The exact validation order belongs to
   [Runtime lifecycle §3](../architecture/runtime-lifecycle.md#3-builder-options-and-validation).
 
 ### `Bork2dApp`
@@ -691,19 +701,26 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 
 - **Windowed `Run()`** starts the asset service (opening/validating the base pack or the empty
   VFS), starts the SDL window + Vulkan instance + surface on the engine-owned OS/window thread,
-  starts the renderer thread without waiting for readiness, runs `Setup` immediately, waits for
-  renderer readiness before the first tick, then runs an uncapped `Setup` → `Tick`… → `Teardown`
-  loop until `IEngine.Exit()`, the window close button/`SDL_QUIT`, a renderer fatal, or a platform
-  fatal. It joins the renderer before destroying the surface/instance/window, quits SDL, stops the
-  asset service, and joins the OS thread. It never sleeps, spins, or paces; the window shows a
-  continuous black clear until M8.
-- **Offscreen `Run()`** starts the asset service, creates/starts the offscreen renderer, runs
-  `Setup`, waits for readiness before the first tick, loops `Tick` until `IEngine.Exit()` or a
-  renderer fatal (advancing `ITime` each tick), then tears down, joins the renderer, and stops the
-  asset service. It creates no SDL/window/input/surface/swapchain and has no readback.
-- **Headless `Run()`** starts the asset service, runs `Setup`, exactly one `Tick`, then `Teardown`,
-  and stops the asset service, on the caller thread, with no platform, renderer, Vulkan loader, or
-  clock advance; `IEngine.Exit()` is ignored.
+  starts the renderer thread without waiting for readiness, installs the engine's exit wake on the
+  renderer, runs `Setup` immediately, waits for renderer readiness before the first tick, then runs a
+  `Setup` → `Tick`… → `Teardown` loop until `IEngine.Exit()`, the window close button/`SDL_QUIT`, a
+  renderer fatal, or a platform fatal. Each tick acquires a snapshot slot (blocking only when the
+  ring is full), freezes input, advances time, dispatches text, runs `Tick`, captures the engine
+  snapshot, and publishes it; the Exit/close tick is published. While minimized the loop is capped
+  at 30 ticks per second. It joins the renderer before destroying the surface/instance/window, quits
+  SDL, stops the asset service, and joins the OS thread. It has no target rate or timer otherwise;
+  the window shows a black clear until M8.
+- **Offscreen `Run()`** starts the asset service, creates/starts the offscreen renderer, installs
+  the exit wake, runs `Setup`, waits for readiness before the first tick, loops `Tick` until
+  `IEngine.Exit()` or a renderer fatal (ring-backpressured, `ITime` advanced per tick, one snapshot
+  published and one frame discarded per completed tick), then tears down, joins the renderer, and
+  stops the asset service. It creates no SDL/window/input/surface/swapchain and has no readback.
+- **Headless `Run()`** starts the asset service, runs `Setup`, then a paced `Tick`… loop until
+  `IEngine.Exit()`, one `Teardown`, and stops the asset service, on the caller thread, with no
+  platform, renderer, ring, capture, Vulkan loader, or real-clock read. The synthesized `ITime`
+  reports tick 0 as `0`/`0` and tick `N >= 1` as `N / ticksPerSecond` and `1 / ticksPerSecond`;
+  `WithMaxDeltaTime` does not clamp it; a stall produces an unbounded back-to-back catch-up run; a
+  run that never calls `Exit()` continues until the process stops.
 - **Errors and shutdown order** are owned by
   [Runtime lifecycle §6](../architecture/runtime-lifecycle.md#6-shutdown-and-error-propagation):
   a `Setup` failure runs no `Teardown`; a `Tick`/text-handler failure still tears down and rethrows;
@@ -777,12 +794,13 @@ builder.Write("assets.pck");   // overwrites; relative to the current directory
 
 | Situation | Contract |
 | --- | --- |
-| Invalid builder config (missing/duplicate game, conflicting modes, invalid layer enum, non-positive size/delta, negative headless rate) | `Build()` throws `Bork2dException`; nothing starts. |
+| Invalid builder config (missing/duplicate game, conflicting modes, invalid layer enum, non-positive size/delta, non-positive headless rate) | `Build()` throws `Bork2dException`; nothing starts. |
 | Null builder argument or null `CreateCamera`/`CreateSpriteRender` parent | `ArgumentNullException`; a blank string throws `ArgumentException` at the call. |
 | Non-engine or other-engine parent; singular parent world matrix | `Bork2dException`. |
 | Self/cycle parent; setting the root's own parent or a root local value | `InvalidOperationException`. |
 | SDL init / window creation / platform-thread startup failure | Windowed `Run()` throws `Bork2dException` containing `SDL_GetError()` before `Setup`; no `Teardown`; the window and OS thread were already cleaned up. |
-| Game callback exceptions | `Setup` propagates without `Teardown`; a `Tick` or text-handler failure still tears down and rethrows the original; `AggregateException` when `Tick` and `Teardown` both throw. The window and OS thread are cleaned up in every path. |
+| Game callback exceptions | `Setup` propagates without `Teardown`; a `Tick` or text-handler failure still tears down and rethrows the original (the acquired snapshot slot is abandoned and nothing is published); `AggregateException` when `Tick` and `Teardown` both throw. The window and OS thread are cleaned up in every path. |
+| Renderer fatal/stop while a windowed/offscreen tick is blocked in the ring wait | The wait wakes (Q9=I1), no further tick starts, `Teardown` runs once when `Setup` succeeded, the renderer joins, and the fatal `Bork2dException` is rethrown. |
 | Fatal platform error after windowed startup | Loop stops at the next boundary; `Teardown` is attempted; the fatal `Bork2dException` is rethrown (`AggregateException` if `Teardown` also throws). The OS thread's cleanup may already have destroyed the window before `Teardown`; the proxies stay attached for best-effort access (D-033). |
 | `Bork2dApp.Dispose()` during an active `Run()` | `InvalidOperationException` from any thread; the loop is unaffected. |
 | Second `Run()`, or `Run()` after `Dispose()` | `InvalidOperationException` / `ObjectDisposedException`. |

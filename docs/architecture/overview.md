@@ -2,17 +2,18 @@
 
 > **Status:** M1–M4 are merged into `develop`; **D-036/D-037/D-038 are merged (2026-10-27, PR #8)**
 > and the Pong example (D-043/D-044) is merged into `develop` (2026-10-29, PR #10). M6 (Vulkan
-> bring-up) is merged (2026-10-31, PR #11, merge `5de725c`), so the builder,
-> windowed/offscreen Vulkan hosts, headless one-tick host, scene graph, logging, asset pipeline,
-> builder-configured bake, and AOT baseline are `Current`. Windowed and offscreen run a real render
-> thread that clears an opaque-black sRGB target; the M7 snapshot model/capture/ring (WP-2) and
-> renderer consumption (WP-3: one presented/discarded frame per consumed snapshot, fence-held slot
-> lifetime, suspended minimized drain, empty instance resources) are `Current`. The host
-> acquire/capture/publish wiring, pacing, and the headless loop (M7 WP-4) and the sprite renderer
-> (M8) are `Planned`; until WP-4 lands a windowed/offscreen run has no snapshot to consume and
-> records no frame. The windowed/offscreen AOT/Pong gate is proven. Status detail is in
-> [the roadmap](../roadmap.md). The engine suite is 1121 tests (1105 deterministic + 16
-> opt-in/conditional).
+> bring-up) is merged (2026-10-31, PR #11, merge `5de725c`); M7 WP-1–WP-3 are merged into
+> `m-7/common` and WP-4 is implemented on `m-7/wp-4` (the milestone is in progress; WP-5 owns the
+> Pong gate and the final status). The builder,
+> windowed/offscreen Vulkan hosts with the snapshot handoff, the paced headless loop, scene graph,
+> logging, asset pipeline, builder-configured bake, and AOT baseline are `Current`. Windowed and
+> offscreen acquire, capture, and publish one snapshot per tick and the renderer records one
+> presented/discarded frame per consumed snapshot with the slot held to its fence (WP-3/WP-4); the
+> tick is backpressured by the ring and the only timer is the minimized-only 30 Hz tick cap. Headless
+> runs the K1 paced loop with the L2 synthesized clock, the M4/F1 strict grid, and unbounded catch-up
+> (Q11–Q13, F5–F8). The sprite renderer (M8) is `Planned`. The windowed/offscreen AOT/Pong gate is
+> proven through M6; WP-5 re-proves it for M7. Status detail is in [the roadmap](../roadmap.md). The
+> engine suite is 1158 tests (1141 deterministic + 17 opt-in/conditional).
 >
 > Source file types are registered asset processors with `[GenerateShape]` sidecars when settings are
 > required; the built-in texture importer is one processor. Data types are registered explicitly with
@@ -71,10 +72,12 @@ there is no descriptor and no generated host. See [asset processors](asset-proce
   runtime; entities have no IDs. The
   pack writer is the public tooling exception in `Bork2d.Engine`; it validates references at pack
   build.
-- **Headless and offscreen modes.** Servers run with no window, GPU, renderer, or Vulkan loader;
-  headless is one tick today and becomes timer-paced at a configured rate in M7 (WP-4). Offscreen
-  runs a real Vulkan render thread against a fixed sRGB target and records one discarded frame per
-  consumed snapshot (M7 WP-3); the host publishing wiring and readback are M7 WP-4/M8/M10.
+- **Headless and offscreen modes.** Servers run with no window, GPU, renderer, or Vulkan loader:
+  headless runs a paced `Setup` → `Tick`… → `Teardown` loop until `Exit` with a fully synthesized
+  clock, a positive tick rate, a strict absolute grid, and unbounded catch-up (Q11–Q13, F5–F8).
+  Offscreen runs a real Vulkan render thread against a fixed sRGB target and records one discarded
+  frame per consumed snapshot; the host publishes one snapshot per tick and backpressures the tick.
+  Readback is M8/M10.
 - **Diagnostics and quality.** Microsoft.Extensions.Logging/ZLogger, `IEngine.LoggerFactory`;
   warnings and style violations are build errors.
 - **A short, composable startup API** through a builder in `Bork2d.Runtime`.
@@ -123,24 +126,25 @@ window commands, event pump) and one render thread (device, swapchain, snapshot 
 started by the host; the game loop runs on the caller's tick thread. Offscreen mode owns the same
 render thread but no OS/window thread; headless owns neither. Every mode owns one app-scoped asset
 loader thread. The host starts the renderer without waiting for readiness, runs `Setup` immediately,
-and waits for readiness only before the first tick (D-M6-06). The renderer records exactly one GPU
-frame per consumed snapshot and waits when none is `Ready` (Q7=G1, M7 WP-3); it holds the snapshot
-slot until that frame's fence. The tick-side acquire/capture/publish wiring and pacing are M7 WP-4,
-so until then the host publishes nothing and the renderer records no frame. No thread touches
-another thread's domain (SDL, Vulkan, or game objects).
+and waits for readiness only before the first tick (D-M6-06). Each windowed/offscreen tick acquires
+a ring slot, runs `Tick`, captures, and publishes; the renderer records exactly one GPU frame per
+consumed snapshot and waits when none is `Ready` (Q7=G1), holding the slot until that frame's fence.
+A tick that requests `Exit` still publishes (Q4=D1), and a renderer fatal/stop while the tick is
+blocked wakes it with no further tick (Q9=I1). Headless has no ring: it paces on the `Run()` thread
+with a fully synthesized clock. No thread touches another thread's domain (SDL, Vulkan, or game
+objects).
 
 | Mode | Tick | OS/window thread | Render thread | SDL | Vulkan | Pacing (current) |
 | --- | :-: | :-: | :-: | :-: | :-: | --- |
-| Windowed | yes | yes | yes | yes | yes | uncapped ticks; renderer waits for a snapshot (host wiring WP-4) |
-| Offscreen | yes | no | yes | no | yes | uncapped ticks; renderer waits for a snapshot (host wiring WP-4) |
-| Headless | yes | no | no | no | no | one tick (timer-paced M7 WP-4) |
+| Windowed | yes | yes | yes | yes | yes | ring backpressure; minimized-only 30 Hz tick cap |
+| Offscreen | yes | no | yes | no | yes | ring backpressure |
+| Headless | yes | no | no | no | no | strict absolute grid, pure `Thread.Sleep`, unbounded catch-up |
 
 All three modes are selected and validated by the builder. Windowed and offscreen run the real
 renderer and the tick loop until `Exit`/close/fatal; the window is visible from `Run()` start and
-destroyed before `Run()` returns. Headless keeps the one-tick M1 sequence. In the target design the
-tick publishes an immutable snapshot into a three-slot ring that the render thread consumes, and the
-tick may wait only when the ring is full; headless has no ring and is timer-paced. The state machine
-is in [Threading and frame handoff](threading.md).
+destroyed before `Run()` returns. Headless runs until `Exit` (a run without `Exit` continues until
+the process stops) and never loads SDL or Vulkan. The state machine is in
+[Threading and frame handoff](threading.md).
 
 ## 6. Invariants
 
@@ -158,7 +162,7 @@ bug, not a style preference.
 7. **Layers are single bits, culling masks combinations**: layer `0` or a multi-bit layer is invalid and skipped with a debug diagnostic.
 8. **World units are abstract and Y-up; rotation is CCW degrees normalized to `[0, 360)`**: `Camera.Size` is half the visible height, and sprite assets carry UVs, a pivot, a topology, optional indices, and a pixels-per-unit scale.
 9. **There is no depth buffer in v1**: draw order is layer then `ZIndex`, ties are unspecified with no entity-ID tie-breaker (D-026), and `ClearKind.Depth` is reserved.
-10. **At most one window and one app process in v1**: modes are windowed, offscreen, or headless; headless has no window, GPU, renderer, or Vulkan loader and stores its tick rate (default 60, `0` = uncapped; pacing arrives in M7).
+10. **At most one window and one app process in v1**: modes are windowed, offscreen, or headless; headless has no window, GPU, renderer, or Vulkan loader, requires a **positive** `ticksPerSecond` (`0` is a `Build()` error), runs until `Exit`, and reports a fully synthesized clock (tick 0 = 0/0, then `N/rate` and `1/rate`, no clamp) paced by a strict absolute grid with pure `Thread.Sleep` and unbounded catch-up (Q11–Q13, F5–F8).
 11. **No steady-state per-frame allocations** in the tick snapshot builder or renderer hot path.
 12. **The runtime is NativeAOT- and trim-safe**: no runtime reflection, assembly scanning, runtime TOML, or dynamic code; MessagePack shapes are source-generated.
 13. **Packs are the runtime asset source**: TOML and source images live in the game-owned
@@ -170,12 +174,13 @@ Source file types are registered processors (D-036).
 15. **Warnings and C# style violations are build errors**, with a format gate in CI.
 16. **Pre-1.0 breaking changes are allowed**, but every public change updates the API guide, reference, and decision log in the same change.
 17. **Scene objects are root-owned**: `IEngine.Root` strongly owns its tree, `Root.DetachAll()` detaches direct children, `ISceneRoot` is read-only, and there is no entity `Dispose`/`IsAlive` (detach with `Parent = null`, re-attach later). See [Scene ownership](scene-ownership.md).
-18. **Headless never calls SDL or the Vulkan loader**, creates no instance/device/platform/renderer, and remains one-tick.
+18. **Headless never calls SDL or the Vulkan loader**, creates no instance/device/platform/renderer/ring/snapshot, runs `Setup` → `Tick`… → `Teardown` until `Exit` (Q11=K1), and paces with a synthesized clock on a strict grid (Q12/Q13).
 19. **Windowed and offscreen require Vulkan 1.3**: the OS/window thread owns the windowed instance/surface; the render thread owns the device, swapchain, offscreen targets, frames, and recording. No renderer thread outlives `Run()`.
 20. **`Setup` runs before renderer readiness and is never skipped because the renderer failed**; no `Tick` runs before readiness (D-M6-06/D-M6-14).
 21. **Every frame starts with an opaque-black clear and has no depth**; the M7 renderer records one
-    frame per consumed snapshot and adds no camera, draw, or readback. The host publishing wiring
-    that feeds those snapshots is WP-4.
+    frame per consumed snapshot and adds no camera, draw, or readback. The host publishes exactly one
+    snapshot per completed windowed/offscreen tick (including the `Exit` tick) after `Tick` returns,
+    with the slot held in the ring until the consuming frame's fence.
 
 ## 7. Read next
 

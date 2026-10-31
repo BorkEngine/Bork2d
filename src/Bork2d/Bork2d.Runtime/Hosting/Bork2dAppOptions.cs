@@ -12,9 +12,10 @@ namespace Bork2d.Runtime.Hosting;
 /// by <see cref="Bork2dAppBuilder{TLayer}.Build"/>.
 /// </summary>
 /// <remarks>
-/// The host consumes the game, the mode, the window options, the maximum delta time, the asset
-/// selection, and the internal SDL factory seam. The remaining options are stored and validated now
-/// so the M6 composition can consume them without changing the public builder surface.
+/// The host consumes the game, the mode, the window options, the maximum delta time (windowed/
+/// offscreen only), the headless tick rate, the asset selection, the internal SDL/renderer/Vulkan
+/// seams, and the scheduler clock seam. Validation happens once in
+/// <see cref="Bork2dAppBuilder{TLayer}.Build"/>.
 /// </remarks>
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
 internal sealed class Bork2dAppOptions<TLayer> where TLayer : struct, Enum
@@ -80,7 +81,7 @@ internal sealed class Bork2dAppOptions<TLayer> where TLayer : struct, Enum
     /// <summary>Gets or sets a value indicating whether vertical sync is preferred.</summary>
     internal bool VSync { get; set; } = true;
 
-    /// <summary>Gets or sets the headless ticks per second; 0 means uncapped.</summary>
+    /// <summary>Gets or sets the headless ticks per second; must be positive (F6).</summary>
     internal int HeadlessTicksPerSecond { get; set; } = 60;
 
     /// <summary>Gets or sets the offscreen target width.</summary>
@@ -127,6 +128,18 @@ internal sealed class Bork2dAppOptions<TLayer> where TLayer : struct, Enum
     /// builder surface.
     /// </remarks>
     internal IVulkanInstanceFactory? VulkanInstanceFactory { get; set; }
+
+    /// <summary>
+    /// Gets or sets the internal monotonic clock/wait seam for the headless pacing grid and the
+    /// windowed minimized tick cap (M7 WP-4, Q21=U1).
+    /// </summary>
+    /// <remarks>
+    /// <see langword="null"/> means production: <see cref="SystemSchedulerClock"/> with a monotonic
+    /// <c>Stopwatch</c> and a pure <c>Thread.Sleep</c>. Tests inject a fake so schedule and
+    /// minimized-cap assertions are deterministic. This member is internal and not part of the
+    /// public builder surface.
+    /// </remarks>
+    internal ISchedulerClock? SchedulerClock { get; set; }
 
     /// <summary>Gets or sets the window-only options that were explicitly set.</summary>
     internal Bork2dWindowOptionFlags WindowOptionsSet { get; set; }

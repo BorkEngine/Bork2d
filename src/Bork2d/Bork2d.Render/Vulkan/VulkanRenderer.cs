@@ -119,6 +119,12 @@ internal sealed unsafe class VulkanRenderer : IRenderer
     /// <summary>Gets the renderer's snapshot ring (GPU tests observe slot state through it).</summary>
     internal SnapshotRing SnapshotRing => _consumer.Ring;
 
+    /// <summary>
+    /// Gets a value indicating whether the instance the windowed renderer was started with has the
+    /// validation layer enabled (host-level GPU tests gate their validation evidence on it).
+    /// </summary>
+    internal bool ValidationEnabled => _instance?.ValidationEnabled == true;
+
     /// <summary>Gets a value indicating whether every GPU frame owns its empty instance resources.</summary>
     internal bool HasInstanceResources
     {

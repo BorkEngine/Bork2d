@@ -1,12 +1,14 @@
 # API Guide
 
 > **Status:** implemented through M4, the D-036/D-037/D-038 asset-processor task merged into
-> `develop` (2026-10-27, PR #8), the Pong example (D-043/D-044; merged 2026-10-29, PR #10), and
-> M6 (Vulkan bring-up; merged 2026-10-31, PR #11). M1 (foundation), M2 (SDL
+> `develop` (2026-10-27, PR #8), the Pong example (D-043/D-044; merged 2026-10-29, PR #10), M6
+> (Vulkan bring-up; merged 2026-10-31, PR #11), and M7 host/headless (WP-4; the milestone is in
+> progress and WP-5 owns the final status and the Pong/AOT gate). M1 (foundation), M2 (SDL
 > windowed host), and M3 (pack, VFS, runtime integration) exist in
 > `Bork2d.Runtime`/`Bork2d.Engine` and are merged into `develop`.
 > `Build()` validates and `Run()` runs the Vulkan-backed windowed loop (window, input, time) or the
-> offscreen loop until `Exit`; headless keeps the one-tick no-GPU path. The base pack (or the
+> offscreen loop until `Exit`, both with the snapshot handoff and ring backpressure; headless runs a
+> paced no-GPU loop until `Exit` with a fully synthesized clock. The base pack (or the
 > `WithoutAssets()` empty filesystem) opens before the window and `Setup`. Sprites are M8; the
 > window shows a black clear. See the [API reference](reference.md#12-runtime-surface).
 >
@@ -65,13 +67,15 @@ app.Run();
   There is no parameterless-constructor or reflection requirement. The game must stay alive through
   `Run()`.
 - `Build()` validates the configuration. `Run()` blocks until shutdown. Windowed mode creates one
-  visible window and a Vulkan instance/surface, runs an uncapped `Tick` loop until
-  `IEngine.Exit()`, the close button, or a fatal error, and presents a continuous black clear.
-  Offscreen mode runs the windowed-shaped loop against a fixed Vulkan target until
-  `IEngine.Exit()` and advances `ITime` per tick. Headless calls `Setup`, exactly one `Tick`, and
-  `Teardown`, then returns. Windowed and offscreen require Vulkan 1.3; headless needs no GPU and
-  never loads Vulkan/SDL. The base pack is opened by `Run()` (M3). No loop has a frame limiter
-  (M7); the window is black until sprites arrive in M8.
+  visible window and a Vulkan instance/surface, runs a `Tick` loop until `IEngine.Exit()`, the close
+  button, or a fatal error, publishes one snapshot per completed tick, and presents a black clear.
+  Offscreen mode runs the same backpressured loop against a fixed Vulkan target until
+  `IEngine.Exit()` and advances `ITime` per tick. Headless runs a paced `Setup` → `Tick`… →
+  `Teardown` loop until `IEngine.Exit()` with a fully synthesized clock. Windowed and offscreen
+  require Vulkan 1.3; headless needs no GPU and never loads Vulkan/SDL. The base pack is opened by
+  `Run()` (M3). The windowed/offscreen loop has no target rate or frame limiter — it is
+  backpressured by the snapshot ring — except the minimized-only 30 Hz tick cap; the window is black
+  until sprites arrive in M8.
 - `using`/`Dispose()` detaches the root's direct children and the window/input proxies and disposes
   the app-owned logger factory. It never calls `Teardown` again. `Dispose()` while `Run()` is active
   throws `InvalidOperationException`; call `IEngine.Exit()` or close the window first.
@@ -80,17 +84,17 @@ app.Run();
 
 ### Modes
 
-| Mode | Selection | M6 behavior | Target |
+| Mode | Selection | M7 behavior | Target |
 | --- | --- | --- | --- |
-| Windowed (default) | `WithTitle`/`WithSize`/`WithVSync` | Visible SDL window, Vulkan instance/surface, input, time, an uncapped loop until exit/close, and a continuous black clear. | Snapshot handoff/pacing (M7), sprites (M8). |
-| Offscreen | `WithOffscreen(width, height)` | Vulkan renderer with a fixed sRGB target; `Setup` → `Tick`… → `Teardown` until `Exit`, `ITime` advances, frames discarded; no window, input, SDL, surface, or readback. | Pacing (M7), sprites/readback (M8/M10). |
-| Headless | `WithHeadless(ticksPerSecond = 60)` | One-tick `Setup`/`Tick`/`Teardown`; no window, input, SDL, Vulkan, or clock advance. | Paced loop at the rate, `0` = uncapped (M7). |
+| Windowed (default) | `WithTitle`/`WithSize`/`WithVSync` | Visible SDL window, Vulkan instance/surface, input, time, a ring-backpressured loop until exit/close, one snapshot published/presented per tick, and a black clear. Ticks are capped at 30 Hz only while minimized. | Sprites (M8). |
+| Offscreen | `WithOffscreen(width, height)` | Vulkan renderer with a fixed sRGB target; `Setup` → `Tick`… → `Teardown` until `Exit`, `ITime` advances, ring-backpressured ticks with one discarded frame per snapshot; no window, input, SDL, surface, or readback. | Sprites/readback (M8/M10). |
+| Headless | `WithHeadless(ticksPerSecond = 60)` | Paced loop until `Exit`; the rate must be positive (`WithHeadless(0)` is a `Build()` error); fully synthesized `ITime` (tick 0 = 0/0, then `N/rate` and `1/rate`, no clamp); strict grid, pure `Thread.Sleep`, unbounded catch-up; no window, input, SDL, Vulkan, renderer, or ring. | Pong gate `--headless --ticks N` (WP-5). |
 
 The modes are mutually exclusive, and window-only options are rejected in headless/offscreen.
 They are separate hosts, not three modes in one process. In headless/offscreen `IWindow` members
-and the `IInput` getter throw `NotSupportedException`; headless `ITime` stays `0`, while offscreen
-advances it per tick. Windowed and offscreen require Vulkan 1.3 (a missing loader/device is a
-`Bork2dException`; a missing validation layer only warns). See
+and the `IInput` getter throw `NotSupportedException`; headless reports the synthesized values
+above, while offscreen advances `ITime` per tick. Windowed and offscreen require Vulkan 1.3 (a
+missing loader/device is a `Bork2dException`; a missing validation layer only warns). See
 [Runtime lifecycle](../architecture/runtime-lifecycle.md#2-modes).
 
 ### Logging
@@ -107,23 +111,28 @@ the `ILoggingBuilder`, owns provider configuration, and the app disposes the fac
 
 ### Pong example (AOT host)
 
-`Pong.Desktop` is the reference game host and the NativeAOT gate. `--headless` runs the one-tick
-acceptance smoke against the baked 7-entry pack; the windowed runs are the playable example:
+`Pong.Desktop` is the reference game host and the NativeAOT gate. The windowed/offscreen runs are
+the playable and automated examples; the headless smoke terminates only once WP-5 adds its tick
+limit:
 
 ```powershell
 dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-x64 --nologo
-& examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe --headless
-& examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe --windowed
 & examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe --windowed --ticks 120
+& examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Desktop.exe --offscreen --ticks 120
 ```
 
-- `--headless`: loads `AppContext.BaseDirectory/assets.pck`, constructs `PongGame`, runs one
-  headless tick, asserts setup/tick/teardown, the 7 pack entries, the settings/sprites/textures/raw
-  byte counts and tints, then exits 0.
+- **Headless gate change is M7 WP-5.** The M7 runtime runs the paced headless loop until
+  `IEngine.Exit()`, so `Pong.Desktop --headless` now needs a tick limit to terminate. Pong has no
+  headless tick limit until WP-5 adds `--headless --ticks N` with a default of 120 (Q15=O2/F3);
+  until then do not run the published `--headless` command as a gate (it would run until the
+  process is stopped).
+- `--windowed --ticks N` and `--offscreen --ticks N`: automated acceptance; exit 0 after exactly `N`
+  completed ticks. `--ticks` requires one of those modes and `N >= 1`; invalid or unknown arguments
+  print usage and exit with code 2. The handoff publishes the Exit tick and one frame is presented
+  or discarded per consumed snapshot; frame counts and elapsed time are not asserted.
 - `--windowed` (or no arguments): interactive 1280×720 resizable window. `W`/`S` move the left
-  paddle, `Space` pauses/resumes, `R` resets the match, `Escape` exits; the right paddle is AI.
-- `--windowed --ticks N`: automated acceptance; exits 0 after exactly `N` completed ticks. `--ticks`
-  requires `--windowed` and `N >= 1`; invalid or unknown arguments print usage and exit with code 2.
+  paddle, `Space` pauses/resumes, `R` resets the match, `Escape` exits; the right paddle is AI. The
+  tick loop is backpressured by the snapshot ring (and capped at 30 Hz while minimized).
 - The window title carries the score and state/prompt
   (`Pong - 3 : 2 - Serving...`, `Pong - 3 : 2 - Paused - Space to resume`,
   `Pong - 11 : 7 - Left wins - R to restart, Esc to quit`); scores, pause, match end, and setup are
@@ -200,7 +209,8 @@ public sealed class MyGame : IGame<GameLayer>
 
 Target label: `LoadAsset<SpriteAsset>` is real (the sprite asset is a normal public MessagePack
 asset), and rendering requires M8, so nothing draws yet. The camera/transform code is `Current`;
-time is `Current` in windowed and offscreen modes and stays `0` in headless. `Setup` is synchronous,
+time is `Current` in every mode (real in windowed/offscreen, fully synthesized in headless).
+`Setup` is synchronous,
 so the example starts the load and assigns the asset in `Tick` when it completes; blocking startup on
 the load is also acceptable when a scene must be complete before the first tick.
 
@@ -277,9 +287,9 @@ sprite.LocalScale = new Vector2(2, 2);
 
 ## 7. Input
 
-`Status: Current (M2, windowed).` The windowed host freezes physical input once per tick, advances
-the clock, dispatches queued text, then calls `Tick`. Offscreen runs no input; headless/offscreen
-have no input at all: the `IEngine.Input` getter throws `NotSupportedException`.
+`Status: Current (M2, windowed).` The windowed host acquires a snapshot slot, freezes physical input,
+advances the clock, dispatches queued text, then calls `Tick`. Offscreen runs no input; headless and
+offscreen have no input at all: the `IEngine.Input` getter throws `NotSupportedException`.
 
 ```csharp
 public void Tick()
@@ -332,13 +342,18 @@ var dt = (float)_engine.Time.DeltaTime; // seconds, clamped by the builder's Wit
 var now = _engine.Time.Time;            // raw seconds since the first tick
 ```
 
-- `Status: Current (M2/M6, windowed/offscreen).` The first tick publishes `Time = 0` and
-  `DeltaTime = 0`; afterwards `Time` is raw monotonic seconds (never clamped) and `DeltaTime` is the
-  interval between tick starts clamped by the builder's `WithMaxDeltaTime` (default 0.25 s).
-- In headless the one-tick host never advances the clock, so both values stay `0` until M7. Do not
-  assume a non-zero delta or a tick count there. Offscreen advances `ITime` per tick like windowed.
+- `Status: Current (M2/M6/M7).` The first tick publishes `Time = 0` and `DeltaTime = 0`; afterwards
+  `Time` is raw monotonic seconds (never clamped) and `DeltaTime` is the interval between tick starts
+  clamped by the builder's `WithMaxDeltaTime` (default 0.25 s).
+- In headless the clock is **fully synthesized** (M7): tick 0 reports `0`/`0`, tick `N >= 1` reports
+  `Time = N / ticksPerSecond` and `DeltaTime = 1 / ticksPerSecond`. `WithMaxDeltaTime` does not clamp
+  the step. Do not derive wall time from `ITime.Time` in headless; it advances one exact step per
+  tick, so a catch-up run advances it quickly. Offscreen advances a real clock per tick like
+  windowed.
 - Variable timestep; no accumulator, fixed step, or render interpolation. The windowed/offscreen
-  loops are uncapped (M7 adds frame-handoff backpressure); headless pacing is M7.
+  loops are backpressured by the snapshot ring (`Exit` still stops before the next tick; a headless
+  pacing sleep is not interrupted, so shutdown latency is bounded by one period). The minimized-only
+  30 Hz windowed tick cap is the only target rate.
 - For deterministic simulation, run your own fixed-step accumulator inside `Tick`. See
   [Threading](../architecture/threading.md).
 
@@ -712,13 +727,19 @@ builder.Write("assets.pck"); // overwrites; relative paths resolve against the c
 - Create entities inside `Setup`/`Tick`/`Teardown`. Any thread may call the public API there; no
   process-main-thread requirement. Structural attach/detach is serialized by the engine-owned
   structural lock; local properties use per-object locks.
-- `Run()` runs until `IEngine.Exit()` or the close button. `Dispose()` during an active `Run()`
-  throws `InvalidOperationException`; dispose after `Run()` returns. A failed `Run()` still counts
-  as the app's one run and still detaches the root's children.
+- `Run()` runs until `IEngine.Exit()` or the close button in every mode. Windowed/offscreen ticks are
+  backpressured by the snapshot ring: a stalled renderer stalls the game at most ring-depth ahead,
+  and the Exit tick's snapshot is still published. The minimized-only 30 Hz cap is the only target
+  rate. `Dispose()` during an active `Run()` throws `InvalidOperationException`; dispose after
+  `Run()` returns. A failed `Run()` still counts as the app's one run and still detaches the root's
+  children.
 - Workers may mutate **distinct** entities concurrently and must join before `Tick` returns.
   Composite updates to the same entity need game-level synchronization. Frame snapshots are
   captured after `Tick` (M7); workers must not write scene state afterwards. Worker exceptions
   must be observed and propagated by the game.
+- Headless `Run()` has no renderer, ring, SDL, or Vulkan; it paces on the `Run()` thread and catches
+  up with system time after a stall. `IEngine.Exit()` stops it before the next tick (a sleep is not
+  interrupted). A run that never calls `Exit()` continues until the process stops.
 
 ## 12. NativeAOT
 
@@ -731,10 +752,10 @@ builder.Write("assets.pck"); // overwrites; relative paths resolve against the c
 - `partial` on a `[GenerateShape]` type is PolyType's rule, not a Bork2d attribute; a missing shape
   is a compile-time error. There is no runtime TOML, reflection serializer, or bake reference.
 - The runtime libraries are `IsAotCompatible`; AOT publish/run is a required local gate.
-  `Pong.Desktop --headless` loads the baked 7-entry pack (the `GameSettings` struct root with
-  `AssetRef<SpriteAsset>` links, the paddle/ball sprites and descriptors, exact raw payloads, and the
-  tints) and exits 0; `--windowed --ticks 120` runs the same pack and exits 0 (it needs a GPU from
-  M6); the window shows a black clear until sprites arrive in M8.
+  `Pong.Desktop --windowed --ticks 120` and `--offscreen --ticks 120` load the baked 7-entry pack
+  and exit 0 (they need a GPU); the window shows a black clear until sprites arrive in M8. The
+  `--headless` count is owned by WP-5 (Q15=O2/F3: 120 ticks by default, `--headless --ticks N`); see
+  [Start the engine](#2-start-the-engine).
 
 See [NativeAOT](../architecture/nativeaot.md).
 

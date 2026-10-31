@@ -201,8 +201,29 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <summary>
     /// Selects headless mode: no window, GPU, or render thread.
     /// </summary>
-    /// <param name="ticksPerSecond">The tick rate; <c>0</c> means uncapped.</param>
+    /// <param name="ticksPerSecond">
+    /// The required positive tick rate used by the paced headless loop.
+    /// </param>
     /// <returns>This builder, for fluent chaining.</returns>
+    /// <remarks>
+    /// <para>
+    /// Headless runs a paced loop: asset start, <c>Setup</c>, <c>Tick</c>… until
+    /// <c>IEngine.Exit()</c>, one <c>Teardown</c>, asset stop, with no window, SDL, Vulkan loader,
+    /// renderer, snapshot ring, or capture. Ticks follow a strict absolute deadline grid with a pure
+    /// <c>Thread.Sleep</c> wait and unbounded catch-up after a stall; <c>Exit</c> stops the loop
+    /// before the next tick.
+    /// </para>
+    /// <para>
+    /// The headless <see cref="ITime"/> is fully synthesized: tick <c>0</c> reports
+    /// <c>Time = DeltaTime = 0</c>; tick <c>N &gt;= 1</c> reports <c>Time = N / ticksPerSecond</c>
+    /// and <c>DeltaTime = 1 / ticksPerSecond</c>. <see cref="WithMaxDeltaTime"/> does not clamp the
+    /// synthesized step.
+    /// </para>
+    /// <para>
+    /// The rate must be positive; <c>0</c> and negative values are <see cref="Bork2dException"/>
+    /// errors from <see cref="Build"/>.
+    /// </para>
+    /// </remarks>
     public Bork2dAppBuilder<TLayer> WithHeadless(int ticksPerSecond = 60)
     {
         _options.Mode = Bork2dAppMode.Headless;
@@ -217,6 +238,11 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <param name="width">The positive offscreen target width.</param>
     /// <param name="height">The positive offscreen target height.</param>
     /// <returns>This builder, for fluent chaining.</returns>
+    /// <remarks>
+    /// The run creates a fixed sRGB Vulkan target, publishes one snapshot per completed tick, and
+    /// is backpressured by the snapshot ring; the renderer discards one frame per consumed snapshot
+    /// until <c>IEngine.Exit()</c>. There is no surface, window, input, or readback.
+    /// </remarks>
     public Bork2dAppBuilder<TLayer> WithOffscreen(int width, int height)
     {
         _options.Mode = Bork2dAppMode.Offscreen;
@@ -231,6 +257,10 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// </summary>
     /// <param name="seconds">The positive clamp in seconds. This is not a pacing delay.</param>
     /// <returns>This builder, for fluent chaining.</returns>
+    /// <remarks>
+    /// The clamp applies to the windowed/offscreen <c>ITime.DeltaTime</c> only. The headless
+    /// synthesized step is exactly <c>1 / ticksPerSecond</c> and is never clamped (M7 F7).
+    /// </remarks>
     public Bork2dAppBuilder<TLayer> WithMaxDeltaTime(double seconds)
     {
         _options.MaxDeltaTime = seconds;
@@ -285,6 +315,25 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     }
 
     /// <summary>
+    /// Supplies an internal test seam for the monotonic clock/wait used by the headless pacing grid
+    /// and the windowed minimized tick cap. Not part of the public API.
+    /// </summary>
+    /// <param name="clock">The monotonic clock and wait seam.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <remarks>
+    /// <see cref="Build"/> never calls it and creates no clock state. A headless run paces with it;
+    /// a windowed run uses it only to keep the minimized tick-start interval at one thirtieth of a
+    /// second; offscreen never sleeps. Tests inject a fake so schedule assertions are deterministic.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="clock"/> is <see langword="null"/>.</exception>
+    internal Bork2dAppBuilder<TLayer> WithSchedulerClock(ISchedulerClock clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        _options.SchedulerClock = clock;
+        return this;
+    }
+
+    /// <summary>
     /// Supplies an internal test seam for the Vulkan instance factory. Not part of the public API.
     /// </summary>
     /// <param name="factory">Creates the platform/offscreen Vulkan instance.</param>
@@ -310,8 +359,11 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <para>
     /// Validation runs first, then the app-owned logger factory is created, the startup
     /// mode/validation message is logged, and the internal engine, clock, an <b>unstarted</b> asset
-    /// service, and the runtime are created. The factory and the asset service are disposed if
-    /// creation fails after they were built.
+    /// service, and the runtime are created. Windowed/offscreen apps get a monotonic
+    /// <c>StopwatchTime</c> (first tick <c>0/0</c>, clamped delta); headless apps get a fully
+    /// synthesized <c>SynthesizedTime</c> (<c>Time = tickIndex / rate</c>, <c>DeltaTime = 1 / rate</c>,
+    /// no clamp). The factory and the asset service are disposed if creation fails after they were
+    /// built.
     /// </para>
     /// <para>
     /// <see cref="Build"/> stays filesystem-free: it does not resolve a pack path, open a file,
@@ -340,7 +392,8 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
                 _options.Mode,
                 typeof(TLayer).FullName);
 
-            var time = new StopwatchTime(_options.MaxDeltaTime);
+            var time = CreateTime();
+            var schedulerClock = _options.SchedulerClock ?? new SystemSchedulerClock();
 
             WindowProxy? windowProxy = null;
             InputProxy? inputProxy = null;
@@ -380,7 +433,8 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
                 assetService,
                 _options,
                 windowProxy,
-                inputProxy);
+                inputProxy,
+                schedulerClock);
             return new Bork2dApp(runtime);
         }
         catch
@@ -394,6 +448,11 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
             throw;
         }
     }
+
+    private ITime CreateTime()
+        => _options.Mode == Bork2dAppMode.Headless
+            ? new SynthesizedTime()
+            : new StopwatchTime(_options.MaxDeltaTime);
 
     private IGame<TLayer> Validate()
     {
@@ -432,10 +491,11 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 
             case Bork2dAppMode.Headless:
                 RejectWindowOptions();
-                if (_options.HeadlessTicksPerSecond < 0)
+                if (_options.HeadlessTicksPerSecond <= 0)
                 {
                     throw new Bork2dException(
-                        $"Headless ticks per second must be >= 0; got {_options.HeadlessTicksPerSecond}.");
+                        "Headless ticks per second must be greater than zero; got "
+                        + $"{_options.HeadlessTicksPerSecond}.");
                 }
 
                 break;

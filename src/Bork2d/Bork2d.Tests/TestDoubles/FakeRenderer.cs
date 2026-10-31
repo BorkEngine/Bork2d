@@ -27,7 +27,9 @@ internal sealed class FakeRenderer : IRenderer
     private readonly ManualResetEventSlim _ready = new(initialState: false);
     private readonly ManualResetEventSlim _stopped = new(initialState: false);
     private readonly ManualResetEventSlim _posted = new(initialState: false);
+    private readonly ManualResetEventSlim _changed = new(initialState: false);
     private readonly SnapshotRing _ring = new();
+    private readonly Lock _heldGate = new();
     private readonly List<SnapshotSlot> _heldSlots = [];
     private Exception? _fatalException;
     private int _status = (int)RendererStatus.NotStarted;
@@ -36,6 +38,12 @@ internal sealed class FakeRenderer : IRenderer
     private int _stopRequested;
     private int _joined;
     private int _waitForReadyCount;
+    private int _abandonCount;
+    private int _acquireCount;
+    private int _acquireBlockedCount;
+    private long _lastPublishedSequence;
+    private double _lastPublishedTime;
+    private double _lastPublishedDeltaTime;
     private long _suspendedConsumptions;
 
     /// <summary>Gets or sets a value indicating whether <see cref="Start"/> becomes ready.</summary>
@@ -69,13 +77,44 @@ internal sealed class FakeRenderer : IRenderer
     public long SuspendedConsumptions => Interlocked.Read(ref _suspendedConsumptions);
 
     /// <inheritdoc/>
-    public SnapshotSlot? AcquireSnapshotSlot() => _ring.Acquire();
+    public SnapshotSlot? AcquireSnapshotSlot()
+    {
+        Interlocked.Increment(ref _acquireCount);
+        _changed.Set();
+
+        // With one producer and a hold-mode consumer that only releases from the test thread, a
+        // full ring means the ring's acquire must block; record that deterministically before the
+        // call so host tests can synchronize without polling.
+        var full = true;
+        foreach (SnapshotSlot candidate in _ring.Slots)
+        {
+            if (candidate.State == SnapshotSlotState.Free)
+            {
+                full = false;
+                break;
+            }
+        }
+
+        if (full)
+        {
+            Interlocked.Increment(ref _acquireBlockedCount);
+            _changed.Set();
+        }
+
+        return _ring.Acquire();
+    }
 
     /// <inheritdoc/>
     public void PublishSnapshot(SnapshotSlot slot)
     {
         ArgumentNullException.ThrowIfNull(slot);
         _ring.Publish(slot);
+
+        // Record the published snapshot values for host tests that assert what the tick captured.
+        Interlocked.Exchange(ref _lastPublishedSequence, slot.Snapshot.Sequence);
+        _lastPublishedTime = slot.Snapshot.Time;
+        _lastPublishedDeltaTime = slot.Snapshot.DeltaTime;
+        _changed.Set();
         if (AutoConsume)
         {
             SnapshotSlot? taken = _ring.TakeLatest();
@@ -88,12 +127,16 @@ internal sealed class FakeRenderer : IRenderer
         }
 
         // Hold mode: model two GPU frames in flight that keep their snapshot slot until released.
-        if (_heldSlots.Count < RendererFramesInFlight)
+        // The host publishes on the tick thread while tests release from the test thread.
+        lock (_heldGate)
         {
-            SnapshotSlot? taken = _ring.TakeLatest();
-            if (taken is not null)
+            if (_heldSlots.Count < RendererFramesInFlight)
             {
-                _heldSlots.Add(taken);
+                SnapshotSlot? taken = _ring.TakeLatest();
+                if (taken is not null)
+                {
+                    _heldSlots.Add(taken);
+                }
             }
         }
     }
@@ -102,19 +145,66 @@ internal sealed class FakeRenderer : IRenderer
     public void AbandonSnapshotSlot(SnapshotSlot slot)
     {
         ArgumentNullException.ThrowIfNull(slot);
+        Interlocked.Increment(ref _abandonCount);
         _ring.Abandon(slot);
+        _changed.Set();
     }
 
     /// <inheritdoc/>
     public void WakeSnapshotWait() => _ring.SignalExit();
 
+    /// <summary>Gets the number of slots the host abandoned after a Tick/capture failure.</summary>
+    internal int AbandonCount => Volatile.Read(ref _abandonCount);
+
+    /// <summary>Gets the number of slot acquisitions the host attempted (tests assert tick order).</summary>
+    internal int AcquireCount => Volatile.Read(ref _acquireCount);
+
+    /// <summary>
+    /// Gets the number of acquisitions that found all three slots occupied and therefore had to wait
+    /// for a fence/superseded release.
+    /// </summary>
+    internal int AcquireBlockedCount => Volatile.Read(ref _acquireBlockedCount);
+
+    /// <summary>
+    /// Gets the sequence of the last snapshot the host published (read after the run joins).
+    /// </summary>
+    internal long LastPublishedSequence => Interlocked.Read(ref _lastPublishedSequence);
+
+    /// <summary>
+    /// Gets the captured <c>ITime.Time</c> of the last snapshot the host published (read after the
+    /// run joins).
+    /// </summary>
+    internal double LastPublishedTime => _lastPublishedTime;
+
+    /// <summary>
+    /// Gets the captured <c>ITime.DeltaTime</c> of the last snapshot the host published (read after
+    /// the run joins).
+    /// </summary>
+    internal double LastPublishedDeltaTime => _lastPublishedDeltaTime;
+
     /// <summary>Gets the number of snapshots the hold mode currently keeps <c>Rendering</c>.</summary>
-    internal int HeldSnapshotCount => _heldSlots.Count;
+    internal int HeldSnapshotCount
+    {
+        get
+        {
+            lock (_heldGate)
+            {
+                return _heldSlots.Count;
+            }
+        }
+    }
 
     /// <summary>Releases the snapshots the hold mode kept <c>Rendering</c> (a simulated fence).</summary>
     internal void ReleaseHeldSnapshots()
     {
-        foreach (SnapshotSlot slot in _heldSlots)
+        SnapshotSlot[] held;
+        lock (_heldGate)
+        {
+            held = [.. _heldSlots];
+            _heldSlots.Clear();
+        }
+
+        foreach (SnapshotSlot slot in held)
         {
             if (slot.State == SnapshotSlotState.Rendering)
             {
@@ -122,8 +212,55 @@ internal sealed class FakeRenderer : IRenderer
             }
         }
 
-        _heldSlots.Clear();
+        _changed.Set();
     }
+
+    /// <summary>
+    /// Waits at most <paramref name="timeout"/> until <paramref name="predicate"/> holds (tests only;
+    /// event-based, no polling or sleeps).
+    /// </summary>
+    /// <param name="predicate">The condition to observe.</param>
+    /// <param name="timeout">The bounded wait.</param>
+    /// <returns><see langword="true"/> when the predicate held; <see langword="false"/> on timeout.</returns>
+    internal bool WaitFor(Func<bool> predicate, TimeSpan timeout)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        while (true)
+        {
+            if (predicate())
+            {
+                return true;
+            }
+
+            _changed.Reset();
+            if (predicate())
+            {
+                return true;
+            }
+
+            TimeSpan remaining = timeout - stopwatch.Elapsed;
+            if (remaining <= TimeSpan.Zero)
+            {
+                return predicate();
+            }
+
+            if (!_changed.Wait(remaining))
+            {
+                return predicate();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Waits at most <paramref name="timeout"/> until at least <paramref name="count"/> snapshots were
+    /// published (tests only; event-based, no polling or sleeps).
+    /// </summary>
+    /// <param name="count">The required published count.</param>
+    /// <param name="timeout">The bounded wait.</param>
+    /// <returns><see langword="true"/> when the count was reached; <see langword="false"/> on timeout.</returns>
+    internal bool WaitForPublished(long count, TimeSpan timeout)
+        => WaitFor(() => _ring.Counters.Published >= count, timeout);
 
     /// <summary>
     /// Drains the newest <c>Ready</c> snapshot without a GPU frame, modelling the suspended
@@ -138,6 +275,7 @@ internal sealed class FakeRenderer : IRenderer
         }
 
         Interlocked.Increment(ref _suspendedConsumptions);
+        _changed.Set();
         return true;
     }
 
@@ -245,6 +383,7 @@ internal sealed class FakeRenderer : IRenderer
         SetStatus(RendererStatus.Faulted);
         Volatile.Write(ref _stopReason, (int)RendererStopReason.Fatal);
         _ready.Set();
+        _changed.Set();
         CompleteStop();
     }
 
@@ -257,6 +396,7 @@ internal sealed class FakeRenderer : IRenderer
         }
 
         _stopped.Set();
+        _changed.Set();
     }
 
     /// <inheritdoc/>
