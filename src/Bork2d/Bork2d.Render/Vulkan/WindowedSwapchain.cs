@@ -165,6 +165,18 @@ internal sealed unsafe class WindowedSwapchain : IDisposable
             capabilities.MaxImageCount);
         SwapchainSurfaceSelection selection = SwapchainPolicy.SelectSurfaceProperties(capabilities);
 
+        // CaptureFrameAsync copies the presented image, so every swapchain image needs transfer-source
+        // usage in addition to color attachment (M8 §6.9).
+        const ImageUsageFlags usage = ImageUsageFlags.ColorAttachmentBit
+            | ImageUsageFlags.TransferSrcBit;
+        if ((capabilities.SupportedUsageFlags & ImageUsageFlags.TransferSrcBit) == 0)
+        {
+            throw new Bork2dException(
+                "The Vulkan surface does not support VK_IMAGE_USAGE_TRANSFER_SRC_BIT on its "
+                    + "swapchain images, which CaptureFrameAsync requires; the windowed renderer "
+                    + "cannot start on this surface.");
+        }
+
         var createInfo = new SwapchainCreateInfoKHR
         {
             SType = StructureType.SwapchainCreateInfoKhr,
@@ -174,7 +186,7 @@ internal sealed unsafe class WindowedSwapchain : IDisposable
             ImageColorSpace = format.ColorSpace,
             ImageExtent = extent,
             ImageArrayLayers = 1,
-            ImageUsage = ImageUsageFlags.ColorAttachmentBit,
+            ImageUsage = usage,
             ImageSharingMode = SharingMode.Exclusive,
             QueueFamilyIndexCount = 0,
             PQueueFamilyIndices = null,

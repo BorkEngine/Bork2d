@@ -9,10 +9,10 @@
 > the snapshot ring/capture, renderer consumption, host
 > backpressure, the paced headless loop, and the Pong `--headless` 120-tick gate
 > (`--headless --ticks N` overrides). The
-> warning/style/format/AOT gates and the docs link check are active. **M8 (sprite renderer) is in
-> progress** (WP-1 docs reconciliation, WP-2 shader pipeline/camera math/instance planning, and WP-3
-> texture pages/`RenderStats` are complete): the remaining work adds the draw path, sprite GPU tests,
-> and the 50,000-sprite benchmark
+> warning/style/format/AOT gates and the docs link check are active. **M8 (sprite renderer) is at
+> WP-4** (WP-1 docs reconciliation, WP-2 shader pipeline/camera math/instance planning, WP-3
+> texture pages/`RenderStats`, and WP-4 draws/stats/capture are complete): the remaining effort is
+> the 50,000-sprite benchmark and the final Pong presentation gate
 > (§2.1/§6). CI runs the docs link
 > check, build, tests, and format verification on PRs to `develop` and pushes to `develop`; the
 > NativeAOT publish/run gate (`Pong.Desktop` headless, windowed, and offscreen) is a required
@@ -164,10 +164,11 @@ and exits `0` only when the scene, the `GameSettings` struct root, the `sprites/
 and the detached world all pass. The `--windowed --ticks 120` and `--offscreen --ticks 120` runs
 load the same pack and assert one `Setup`, exactly 120 completed ticks, and one `Teardown`; the
 backpressured runs are short by design and assert no frame count or duration (Q22=V1). The
-interactive `--windowed` run is the manual visibility/input check (the window shows the M7
-one-frame-per-snapshot black clear; the M8 WP-2 shader pipeline and the WP-3 texture pages/startup
-placeholder are created but no draw is recorded until WP-4; the title carries the score/state).
-Inspect
+interactive `--windowed` run is the manual visibility/input check (the window shows the M8
+per-camera sprite passes once the two texture pages are ready; the M8 WP-2 shader pipeline and the
+WP-3 texture pages/startup placeholder feed the WP-4 draws; the title carries the score/state).
+Note that the unpaced 120-tick automated run can finish before the asynchronous pages are drawable;
+a longer run is the visual/draw-stats check. Inspect
 the publish directory: it is a NativeAOT single-file output plus PDBs, so the
 managed assemblies are linked in. It must contain `Pong.Desktop.exe`, `assets.pck`, `SDL2.dll`, and
 the engine/runtime/`Pong.Common` PDBs (`Pong.Common.pdb` is the on-disk proof that the game assembly
@@ -285,8 +286,10 @@ documented. The rule applies to every new public API; do not remove it.
   internal hook plus bounded signals/joins (no sleeps, retries, or timing assertions) to prove FIFO
   order, asynchronous completion, and shutdown cancellation.
 - **M8 renderer changes** add deterministic plan/math/page/instance-layout/public-API tests, the
-  fake-`IAssets` page-state and `RenderStats` tests (WP-3), and zero-allocation tests, plus opt-in GPU
-  rendering, placeholder/paging, and `CaptureFrameAsync` contract tests (WP-4). The 50,000-sprite
+  fake-`IAssets` page-state and `RenderStats` tests (WP-3), the planner/growth/stats/capture-lifecycle
+  and zero-allocation tests (WP-4), plus opt-in GPU
+  rendering, placeholder/paging, drawing, growth, and `CaptureFrameAsync` contract tests (WP-4). The
+  50,000-sprite
   benchmark and the manual windowed visual check are local evidence, not CI; there are no
   pixel/golden assertions.
 - Real-window tests use `[WindowFact]`, are skipped without `BORK2D_RUN_WINDOW_TESTS=1`, share the

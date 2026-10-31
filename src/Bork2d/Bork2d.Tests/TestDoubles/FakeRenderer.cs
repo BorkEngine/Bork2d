@@ -308,6 +308,17 @@ internal sealed class FakeRenderer : IRenderer
     internal RenderStats RenderStats { get; set; }
 
     /// <summary>
+    /// Gets or sets the capture handler the host's capture source invokes, or <see langword="null"/>
+    /// for an empty successful capture.
+    /// </summary>
+    internal Func<CancellationToken, Task<byte[]>>? CaptureHandler { get; set; }
+
+    /// <summary>Gets the number of capture requests the host forwarded.</summary>
+    internal int CaptureRequestCount => Volatile.Read(ref _captureRequestCount);
+
+    private int _captureRequestCount;
+
+    /// <summary>
     /// Gets or sets a value indicating whether publishing auto-consumes the snapshot (default
     /// <see langword="true"/>).
     /// </summary>
@@ -337,6 +348,19 @@ internal sealed class FakeRenderer : IRenderer
 
     /// <inheritdoc/>
     RenderStats IRenderer.RenderStats => RenderStats;
+
+    /// <inheritdoc/>
+    public Task<byte[]> CaptureFrameAsync(CancellationToken cancellationToken = default)
+    {
+        Interlocked.Increment(ref _captureRequestCount);
+        if (CaptureHandler is { } handler)
+        {
+            return handler(cancellationToken);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Array.Empty<byte>());
+    }
 
     /// <inheritdoc/>
     public Exception? FatalException => Volatile.Read(ref _fatalException);

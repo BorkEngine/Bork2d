@@ -106,12 +106,25 @@ public sealed class RenderStatsPublicSurfaceTests
         Assert.Equal(
             new[]
             {
+                "CaptureFrameAsync(CancellationToken)",
                 "CreateCamera(ITransform)",
                 "CreateSpriteRender(ITransform)",
                 "CreateTransform(ITransform)",
                 "Exit()",
             },
             methods);
+    }
+
+    [Fact]
+    public void CaptureFrameAsyncHasTheApprovedSignature()
+    {
+        MethodInfo method = Assert.IsAssignableFrom<MethodInfo>(
+            typeof(IEngine<>).GetMethod("CaptureFrameAsync"));
+
+        Assert.Equal(typeof(Task<byte[]>), method.ReturnType);
+        ParameterInfo parameter = Assert.Single(method.GetParameters());
+        Assert.Equal(typeof(CancellationToken), parameter.ParameterType);
+        Assert.True(parameter.IsOptional, "The cancellation token must be optional.");
     }
 
     [Fact]

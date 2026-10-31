@@ -31,7 +31,8 @@ internal sealed unsafe class WindowedFrame : IDisposable
         CommandBuffer commandBuffer,
         Fence fence,
         Semaphore imageAvailable,
-        FrameInstanceResources instanceResources)
+        FrameInstanceResources instanceResources,
+        FrameCapture capture)
     {
         _vk = vk;
         _device = device;
@@ -41,6 +42,7 @@ internal sealed unsafe class WindowedFrame : IDisposable
         Fence = fence;
         ImageAvailable = imageAvailable;
         InstanceResources = instanceResources;
+        Capture = capture;
     }
 
     /// <summary>Gets the frame's command pool.</summary>
@@ -57,6 +59,9 @@ internal sealed unsafe class WindowedFrame : IDisposable
 
     /// <summary>Gets the empty instance buffer and frame descriptor set (Q10=J1).</summary>
     internal FrameInstanceResources InstanceResources { get; }
+
+    /// <summary>Gets the frame's pooled readback staging and pending capture requests (M8 §6.9).</summary>
+    internal FrameCapture Capture { get; }
 
     /// <summary>Creates one frame's Vulkan objects.</summary>
     /// <param name="vk">The Vulkan API object.</param>
@@ -158,7 +163,8 @@ internal sealed unsafe class WindowedFrame : IDisposable
                 commandBuffer,
                 fence,
                 imageAvailable,
-                instanceResources);
+                instanceResources,
+                new FrameCapture(vk, device, physicalDevice, frameIndex, logger));
         }
         catch
         {
@@ -179,6 +185,7 @@ internal sealed unsafe class WindowedFrame : IDisposable
             return;
         }
 
+        Capture.Destroy();
         InstanceResources.Destroy();
         DestroyBestEffort(
             _vk,

@@ -28,7 +28,8 @@ internal sealed unsafe class OffscreenFrame : IDisposable
         CommandPool pool,
         CommandBuffer commandBuffer,
         Fence fence,
-        FrameInstanceResources instanceResources)
+        FrameInstanceResources instanceResources,
+        FrameCapture capture)
     {
         _vk = vk;
         _device = device;
@@ -37,6 +38,7 @@ internal sealed unsafe class OffscreenFrame : IDisposable
         CommandBuffer = commandBuffer;
         Fence = fence;
         InstanceResources = instanceResources;
+        Capture = capture;
     }
 
     /// <summary>Gets the frame's command pool.</summary>
@@ -50,6 +52,9 @@ internal sealed unsafe class OffscreenFrame : IDisposable
 
     /// <summary>Gets the empty instance buffer and frame descriptor set (Q10=J1).</summary>
     internal FrameInstanceResources InstanceResources { get; }
+
+    /// <summary>Gets the frame's pooled readback staging and pending capture requests (M8 §6.9).</summary>
+    internal FrameCapture Capture { get; }
 
     /// <summary>Creates one offscreen frame's Vulkan objects.</summary>
     /// <param name="vk">The Vulkan API object.</param>
@@ -139,7 +144,8 @@ internal sealed unsafe class OffscreenFrame : IDisposable
                 pool,
                 commandBuffer,
                 fence,
-                instanceResources);
+                instanceResources,
+                new FrameCapture(vk, device, physicalDevice, frameIndex, logger));
         }
         catch
         {
@@ -160,6 +166,7 @@ internal sealed unsafe class OffscreenFrame : IDisposable
             return;
         }
 
+        Capture.Destroy();
         InstanceResources.Destroy();
         DestroyBestEffort(_vk, _device, _logger, Pool, Fence);
     }

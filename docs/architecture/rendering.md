@@ -10,16 +10,17 @@
 > minimized drain, and the per-frame instance/bindless resources) is `Current` (M7/WP-3), and the host
 > acquire/capture/publish wiring and the pacing loops are `Current` (M7), so a windowed/offscreen
 > run publishes and consumes snapshots and clears the target once per snapshot.
-> **M8 (sprite renderer) is in progress:** the M8 spec
+> **M8 (sprite renderer) is in progress at WP-4:** the M8 spec
 > ([`docs/specs/m8-sprite-renderer.md`](../specs/m8-sprite-renderer.md)) is owner-approved. WP-1
 > reconciled the owning docs; WP-2 added the build-time shader tool/pipeline, the shared camera
 > projection/rounding math, the public camera helpers, and the pure sprite planning/quad/96-byte
 > instance layout; WP-3 added the internal texture pages (async `IAssets` prefetch, content
 > validation, generated placeholder, device-local pool, staging pool, upload fences, bindless
 > descriptors, dynamic capacity), the replacement per-frame resources (binding 0 + binding 1), and
-> the public `RenderStats` type/`IEngine.RenderStats` bridge. Per-camera passes, draws, per-frame
-> stats publication, and `CaptureFrameAsync` are `Planned` (WP-4). Everything below about sprite
-> pixels is `Planned` unless [Current status](#11-current-status) says otherwise.
+> the public `RenderStats` type/`IEngine.RenderStats` bridge; WP-4 adds the shared frame planner,
+> per-camera passes/draws, growable mapped instance buffers, per-frame stats publication, and
+> `CaptureFrameAsync`. The benchmark and final Pong presentation gate are WP-5. Everything below is
+> `Current` unless [Current status](#11-current-status) says otherwise.
 ## 1. Scope
 
 The renderer turns one immutable [frame snapshot](threading.md#3-frame-snapshot) into pixels:
@@ -28,14 +29,14 @@ The renderer turns one immutable [frame snapshot](threading.md#3-frame-snapshot)
 - sprites are quads resolved from sprite assets (UVs, pivot, topology, pixels-per-unit scale);
 - a camera's visible quads share one pipeline, one instance buffer, and one bindless texture set;
 - sprite textures resolve as `SpriteAsset.Texture` → `TextureDescriptor` → `DataRef` payload → a
-  resident GPU page through the app's `IAssets` seam (pages `Current` in M8 WP-3; the draw-time
-  resolution is WP-4);
+  resident GPU page through the app's `IAssets` seam (pages `Current` since M8 WP-3; the per-sprite
+  lookup is `Current` in WP-4);
 - Vulkan 1.3 dynamic rendering: no render pass/framebuffer for the swapchain, no depth buffer;
 - explicit ordering by layer and `ZIndex`; windowed and offscreen modes (headless has none).
 
 It knows no game types, layer enum, TOML, or source tree; it consumes flattened snapshot data and
 the loaded public asset values (`SpriteAsset`/`TextureDescriptor`), and loads descriptor/payload
-pairs through `IAssets` on the render thread (M8 target).
+pairs through `IAssets` on the render thread (M8 WP-3; `Current`).
 ## 2. Backend stack and device requirements
 
 | Concern | Choice |
@@ -82,13 +83,13 @@ synchronization 2, and presents. **M7 implements step 1's renderer half and the 
 coupling:** the clear pass is unchanged, but the render thread records exactly one frame per
 consumed snapshot, holds the snapshot slot until that frame's fence, releases the previous frame's
 slot when the frame index is reused, and waits (never re-presents) when no `Ready` snapshot exists.
-The Runtime host publishes one snapshot per completed tick (M7), so an M7 windowed run presents one
-black clear per snapshot. **M8 supersedes the single clear pass and step 3's M7 scope:** cameras,
-draws, instance filling, and the per-camera passes are the approved M8 target, in progress. WP-3
-replaced the M7 empty per-frame resources: each frame owns the 1024-record instance SSBO (binding 0
-written) and the variable-count bindless set (binding 1) with the placeholder at index 0; WP-4 adds
-the instance filling and the per-camera passes. The Runtime host starts the renderer before `Setup`
-(D-M6-06).
+**M8 supersedes the single clear pass and step 3's M7 scope:** both renderers now run the shared
+`SpriteFramePlanner`, record one dynamic-rendering pass per valid camera with the approved load
+ops, fill the frame's mapped instance buffer, and record at most one `vkCmdDraw` per non-empty
+camera; `CaptureFrameAsync` copies the composited image after the last pass. WP-3 replaced the M7
+empty per-frame resources: each frame owns a growable host-visible instance SSBO (binding 0, mapped
+once) and the variable-count bindless set (binding 1) with the placeholder at index 0. The Runtime
+host starts the renderer before `Setup` (D-M6-06).
 ### 3.2 Offscreen
 
 Same clear shape as windowed without surface/swapchain/present/acquire/semaphores: two permanent
@@ -102,11 +103,12 @@ one consumed snapshot — the render thread waits the frame fence, releases that
 snapshot slot, takes the newest `Ready`, records one dynamic-rendering pass with
 `loadOp = CLEAR` to opaque black and `storeOp = STORE`, submits with synchronization 2, attaches the
 slot, and counts a discarded frame. With no `Ready` snapshot it waits instead of discarding; there is
-no minimized path. There is no resize, present, or readback in M7 (D-M6-23; the approved M8 target
-adds the public capture); pacing is one frame per consumed snapshot (D-M7-07 revises D-M6-12). The
-host publishes one snapshot per completed tick. **`Current` for the M6 clear and the M7
-consumption.** WP-3 creates the offscreen bindless resources and uploads the placeholder at startup;
-the per-camera passes/draws and `CaptureFrameAsync` remain WP-4.
+no minimized path. **M8 (as built):** every frame runs the shared planner, records the per-camera
+passes with the approved load ops, and records the optional capture copy (transition to
+`TRANSFER_SRC_OPTIMAL`, copy, transition back to `COLOR_ATTACHMENT_OPTIMAL`) before submitting;
+otherwise the frame is discarded. The public capture path replaces the M7 "no readback" limitation
+(D-M6-23 is superseded by the owner-approved M8 API). Pacing is one frame per consumed snapshot
+(D-M7-07 revises D-M6-12). The host publishes one snapshot per completed tick.
 
 **Headless and draw count.** `WithHeadless` never enters this document. One draw per non-empty
 camera, one dynamic-rendering pass per camera over its rounded pixel viewport: an empty
@@ -119,9 +121,10 @@ The render thread owns this work; the tick thread supplies immutable snapshots o
 snapshot is already value-only: each `SpriteSnapshot` carries the loaded `SpriteAsset?`, the
 `(Layer, ZIndex)` sort keys, the world matrix, the tint, and the `FlipX`/`FlipY` flags (Q2=B1), and
 M8 does **not** change it. Everything that derives quad size, pivot, UVs, and a texture index from
-the asset, and everything that draws, is the approved M8 target. WP-2 already provides the pure
-planner, fatal-field validation, quad/flip math, and 96-byte instance layout (§5); WP-3 provides the
-page resolution (page cache/placeholder); the draw recording remains planned (WP-4).
+the asset, and everything that draws, is `Current` in M8 WP-4. WP-2 provides the pure planner,
+fatal-field validation, quad/flip math, and 96-byte instance layout (§5); WP-3 provides the page
+resolution (page cache/placeholder); WP-4's `SpriteFramePlanner` performs the one-shot resolve and
+writes the records directly into the frame's mapped instance buffer.
 
 1. Take the immutable snapshot of loaded sprite assets; the renderer never reads the scene tree.
 2. Sort `SpriteSnapshot`s once by `(Layer, ZIndex)` ascending; all cameras share the order, filtering
@@ -187,8 +190,9 @@ host-visible coherent instance SSBO written into binding 0 and a bindless descri
 binding 1 allocated with a variable descriptor count equal to the current page capacity
 (`DescriptorSetVariableDescriptorCountAllocateInfo`) and the `UPDATE_AFTER_BIND` pool flag. Both
 renderers write the placeholder descriptor at index 0 during startup; page descriptors are written as
-pages become ready and rewritten after a capacity growth. WP-4 fills/binds the instances and records
-the draws.
+pages become ready and rewritten after a capacity growth. WP-4 maps the instance buffer once,
+grows/fills it through the planner, binds the frame descriptor set, pushes the camera view-projection,
+and records the draws.
 
 Camera data travels in a 64-byte push constant (view-projection); no per-camera descriptor set.
 One graphics pipeline: dynamic rendering, one sRGB attachment, no depth; no vertex input (geometry
@@ -200,12 +204,12 @@ The instance record is a fixed 96-byte std430 ABI: `transform0` (M11, M12, M21, 
 (pivotX, pivotY, textureIndex, flags). The CPU writes the same layout and a unit test asserts the
 stride/offsets. `FlipX`/`FlipY` are encoded as the sign of `sizeX`/`sizeY` (algebraically the same as
 the `size * sx`/`size * sy` formula in §4), so the reserved `flags` stays zero in M8. WP-2 adds the
-internal `SpriteInstance`, the mapped-memory writer, and the pure sort/filter/quad planner; the
-growable buffers below remain WP-4. Each GPU frame owns one host-visible coherent instance buffer
-that starts at 1024 instances; when a frame needs more and its fence is already signaled, the buffer
-is recreated at `max(required, capacity × 2)` (rounded to a power of two) and binding 0 is updated.
-There is no CPU frame array, no staging copy, and no growth while the frame is in flight. Allocation
-failure or exceeding `maxStorageBufferRange` is fatal.
+internal `SpriteInstance`, the mapped-memory writer, and the pure sort/filter/quad planner; WP-4 adds
+`SpriteFramePlanner` and the growable, mapped buffer. Each GPU frame owns one host-visible coherent
+instance buffer that starts at 1024 instances; when a frame needs more and its fence is already
+signaled, the buffer is recreated at `max(required, capacity × 2)` (rounded to a power of two),
+remapped, and binding 0 is updated. There is no CPU frame array, no staging copy, and no growth while
+the frame is in flight. Allocation failure or exceeding `maxStorageBufferRange` is fatal.
 
 ```c
 vkCmdDraw(cmd, 4, instanceCount, 0, firstInstance);
@@ -221,7 +225,8 @@ the sources, the tool/MSBuild targets, and the internal `SpritePipeline` (descri
 vertex input/triangle strip/four vertices per instance/dynamic viewport-scissor/no culling/straight
 alpha/sample count 1, and a `(filter, wrap)` sampler cache with `maxLod = 0`). Both renderer startups
 create it after the color format is known and destroy it in cleanup; creation failure is a clean
-renderer startup failure (D-M6-14). No descriptor write, bind, or draw is recorded yet. The vertex
+renderer startup failure (D-M6-14). WP-4 records the descriptor-set bind, push constant, viewport/
+scissor, and one draw per non-empty camera. The vertex
 shader fetches instances and generates corners; the fragment shader samples the bindless array and
 multiplies the linear tint. `VkPipelineRenderingCreateInfo` carries the color format and no
 depth/stencil format.
@@ -235,7 +240,8 @@ depth/stencil format.
   change and no new project dependency. `Current` (M8 WP-3, internal `Bork2d.Render.Textures`).
 - The bindless array holds combined image samplers, one per resident page; `TextureIndex` selects
   the page. The shader sees a runtime-sized, partially bound `uniform sampler2D textures[]`; only
-  resident pages have valid descriptors. `Current` (WP-3) for the descriptors; the draw use is WP-4.
+  resident pages have valid descriptors. `Current` (WP-3) for the descriptors; WP-4 samples them in
+  the per-camera draw.
 - One page per descriptor path for the run; the first successful load wins, later descriptor
   instances for the same path reuse it, and there is no eviction or replacement. `Current` (WP-3).
 - **Placeholder:** a generated 8×8 magenta/black checkerboard at index `0`, nearest filter, clamp
@@ -275,7 +281,7 @@ depth/stencil format.
   `SpritePipeline`. Descriptor writes use `COMBINED_IMAGE_SAMPLER` with
   `PARTIALLY_BOUND | UPDATE_AFTER_BIND` and a variable count. Missing content uses the placeholder;
   Vulkan allocation/queue/device failures stay fatal. KTX2 is later. `Current` (WP-3) for page
-  uploads/samplers; the draw sampling is WP-4.
+  uploads/samplers; WP-4 samples them in the per-camera draw.
 ## 7. Coordinates, camera, and projection
 ### 7.1 World space
 
@@ -355,10 +361,15 @@ non-empty camera: an empty `Clear.Color` camera produces a clear-only pass, an e
   buffer/pool, a fence, and an image-available semaphore, and each swapchain image owns its
   render-finished semaphore (M6 WP-3). Each offscreen frame owns a command buffer/pool and a fence
   (M6 WP-4). M7 added each frame's empty instance SSBO and frame descriptor set
-  (binding 0 only, Q10=J1). **M8 WP-3 replaces those empty resources:** each frame owns a
-  1024-record host-visible 96-byte-record instance buffer (binding 0) and a variable-count bindless
-  descriptor set (binding 1) whose descriptors are written as pages become ready; WP-4 grows the
-  instance buffer, fills it, binds the set, and records the draws.
+  (binding 0 only, Q10=J1). **M8 WP-3/WP-4 replaces those empty resources:** each frame owns a
+  growable, mapped host-visible 96-byte-record instance buffer (binding 0) and a variable-count
+  bindless descriptor set (binding 1) whose descriptors are written as pages become ready; WP-4
+  grows/fills the instance buffer, binds the set, and records the draws.
+- **M8 capture.** A pending `CaptureFrameAsync` records `COLOR_ATTACHMENT_OPTIMAL →
+  TRANSFER_SRC_OPTIMAL`, `vkCmdCopyImageToBuffer` into the frame's pooled host-visible staging
+  buffer, then `TRANSFER_SRC_OPTIMAL → PRESENT_SRC_KHR` (windowed) or back to
+  `COLOR_ATTACHMENT_OPTIMAL` (offscreen). The task completes from the frame fence; the host swizzles
+  BGRA to RGBA. No capture request adds no copy and no staging allocation.
 - **M7 handoff status.** The internal value-only snapshot model, the capture pass, and
   the three-slot ring state machine are `Current` (M7). The renderer consumes snapshots
   (M7): it takes the newest `Ready` for a free GPU frame, records exactly **one frame per
@@ -371,7 +382,8 @@ non-empty camera: an empty `Clear.Color` camera produces a clear-only pass, an e
   never enters `Rendering`), counts a suspended consumption, and waits for control or a snapshot;
   restore resumes one frame per snapshot. The host acquire/capture/publish wiring and the pacing
   loops are `Current` (M7): every completed windowed/offscreen tick publishes one snapshot, so the
-  renderer records frames. M7 adds no draw.
+  renderer records frames. M8 WP-4 records the per-camera sprite passes/draws from those snapshots and
+  the optional capture copy.
 - **Snapshot slot held to the fence.** A slot is held until the GPU frame that consumed it signals
   its fence, not just until data is copied: this bounds run-ahead to the ring, and the GPU never
   dereferences snapshot memory. `Join` drains every non-`Writing` slot, so every slot ends `Free`
@@ -401,15 +413,15 @@ presents the current frame first and recreates on the next iteration (D-M6-15); 
 `vkDeviceWaitIdle`, release the held snapshot slots, and pass the old handle as `oldSwapchain`.
 Device loss is fatal; surface loss gets exactly one replacement-surface recovery (D-M6-16).
 Presentation happens once per consumed snapshot (Q7=G1, D-M7-07), not continuously. **`Current`
-for the M6 swapchain/clear/present and the M7 renderer consumption**; the Runtime host publishes
+for the M6 swapchain/present foundation and the M7 renderer consumption**; M8 WP-4 replaces the frame
+clear with the per-camera passes and records the optional capture copy. The Runtime host publishes
 one snapshot per completed tick (M7).
 
 **Offscreen.** No surface, swapchain, or present; fixed `WithOffscreen(w, h)` extent; two permanent
-sRGB color images (one device allocation each) cleared and discarded; one discarded frame per
-consumed snapshot (Q7=G1). M7 has no public readback; the approved M8 target adds
-`IEngine.CaptureFrameAsync`, which copies the composited image (RGBA8, top-left origin) after the
-last camera pass and before discard, only when requested. **`Current` for the M6 clear and the M7
-consumption**; the host publishes one snapshot per completed tick (M7).
+sRGB color images (one device allocation each) with the per-camera passes and discard; one frame per
+consumed snapshot (Q7=G1). `IEngine.CaptureFrameAsync` copies the composited image (RGBA8, top-left
+origin) after the last camera pass and before discard, only when requested. **`Current` in M8 WP-4**;
+the host publishes one snapshot per completed tick (M7).
 ## 10. Debugging, validation, and performance
 
 - Validation layers in debug and with `WithValidation(true)`, plus a debug messenger; errors are
@@ -419,16 +431,18 @@ consumption**; the host publishes one snapshot per completed tick (M7).
 - Counters (M8): frames completed/sequence, captured/drawn cameras, draw calls/instances,
   captured/skipped sprites, texture pages/capacity, page uploads/failures/placeholder uses,
   page/instance-buffer growths, instance capacity/overflow, and plan/upload CPU. The public subset is
-  `IEngine.RenderStats`; the rest are internal and feed logs/tests. **`Current` (WP-3):** the page
-  counters (`TexturePageCount`, capacity, growths, failed paths), the page/upload diagnostics, and
-  the public `RenderStats` type/property/bridge (per-frame publication is WP-4). **`Current`:**
+  `IEngine.RenderStats`; the rest are internal and feed logs/tests. **`Current` (WP-3/WP-4):** the
+  page counters (`TexturePageCount`, capacity, growths, failed paths), the page/upload diagnostics,
+  the draw/instance/camera/skipped counters, and the public `RenderStats` type/property/bridge with
+  once-per-completed-frame publication. **`Current`:**
   frames presented (windowed), frames discarded (offscreen), swapchain
   recreations, validation errors/warnings, last frame number, last present result (M6), plus the
   M7 handoff counters — snapshots published/consumed/superseded, backpressure waits, max live
   snapshots, and suspended consumptions (Q8) — logged once at start/stop; the offscreen start line
   also logs extent/format/images/memory bytes, and both start lines log handoff on, ring depth 3,
   one frame per snapshot, instance capacity 1024, the texture page capacity/limit, placeholder on,
-  and instance resources on.
+  and instance resources on. Both stop lines include the last published draw/instance/camera/skipped
+  values, instance capacity/growths, page counters, and validation counts.
 - Failures: no suitable device/feature or shader/pipeline failure is fatal; `OUT_OF_DATE`/
   `SUBOPTIMAL` recreate; device loss is fatal; surface loss recovers once; an invalid camera is
   skipped with its clear (throttled diagnostic); a null sprite, invalid layer, non-`Quad` topology,
@@ -440,8 +454,9 @@ consumption**; the host publishes one snapshot per completed tick (M7).
   loader/instance/surface fails windowed `platform.Start()` before `Setup`; a renderer
   device/feature/format/target failure is reported after `Setup` (D-M6-06). **`Current` in M6** for
   both paths plus the M7 fatal/stop wake; the WP-3 page failures (content failure → placeholder, one
-  log per path; capacity limit → fatal) and the missing-`IAssets` startup failure are `Current`; the
-  M8 draw-pass failures are `Planned` (WP-4).
+  log per path; capacity limit → fatal), the missing-`IAssets` startup failure, and the M8 WP-4
+  draw-pass failures (malformed sprite fields fatal, invalid cameras skipped, throttled diagnostics)
+  are `Current`.
 
 Rules: one `vkCmdDraw` per non-empty camera, inside that camera's single dynamic-rendering pass; no
 per-sprite descriptors or indirect draws; per-frame instance buffers grow only at a free fence and
@@ -468,21 +483,21 @@ p95 is the stability metric. The benchmark and GPU tests are local-only, not CI.
 | Area | Status |
 | --- | --- |
 | SDL window creation, input, time, and the windowed/offscreen tick loops | `Current` M2/M6/M7 (`Bork2d.Runtime`). The windowed platform creates the SDL window, Vulkan instance, and surface on the OS thread; the host starts the renderer before `Setup` and waits for readiness only before the first tick; ticks are ring-backpressured. |
-| `Bork2d.Render` | `Current` M6/M7 plus M8 WP-2/WP-3: internal seam/control channel, Vulkan packages, instance/validation/debug-utils bootstrap, device selection, pure policies, the windowed renderer, the offscreen target/renderer, the handoff consumer/combined wait, the internal `SpritePipeline` (descriptor-set layout/pipeline layout/pipeline-per-sRGB-format/sampler cache), the shared camera-projection bridge, and the internal texture-page subsystem (async `IAssets` prefetch, content validation, placeholder, device-local pool, staging pool, upload fences, bindless descriptor writes, dynamic capacity). The per-frame instance SSBO and bindless set are `Current` (WP-3); per-camera draws and per-frame stats publication remain `Planned` (WP-4). |
+| `Bork2d.Render` | `Current` M6/M7 plus M8 WP-2/WP-3/WP-4: internal seam/control channel, Vulkan packages, instance/validation/debug-utils bootstrap, device selection, pure policies, the windowed renderer, the offscreen target/renderer, the handoff consumer/combined wait, the internal `SpritePipeline` (descriptor-set layout/pipeline layout/pipeline-per-sRGB-format/sampler cache), the shared camera-projection bridge, the internal texture-page subsystem (async `IAssets` prefetch, content validation, placeholder, device-local pool, staging pool, upload fences, bindless descriptor writes, dynamic capacity), the `SpriteFramePlanner`, the growable mapped instance buffers, the per-camera passes/draws, per-frame stats publication, and the capture queue/staging. The M8 benchmark and final Pong gate remain WP-5. |
 | Vulkan instance/validation bootstrap and device/queue/feature logging | `Current` M6 |
 | Windowed swapchain, acquire/present, dynamic-rendering clear, resize/minimize/fullscreen recreation, surface-loss recovery, counters | `Current` M6, host-wired in M6/M7 |
 | Offscreen targets, dynamic-rendering clear, discard, and the offscreen loop | `Current` M6 |
 | Snapshot model/capture and the internal three-slot ring state machine | `Current` M7 (internal; no draw) |
 | Renderer snapshot consumption (one presented/discarded frame per consumed snapshot), fence-held slot lifetime, suspended minimized drain, combined wait | `Current` M7 |
 | Host acquire/capture/publish wiring, backpressure, pacing | `Current` M7 |
-| Per-frame instance SSBO (binding 0) and bindless page set (binding 1) | `Current` M8 WP-3 (instance capacity 1024; placeholder descriptor written; filled/bound/drawn in WP-4) |
-| Build-time shader tool, GLSL, generated SPIR-V, sprite pipeline/layout/samplers | `Current` M8 WP-2 (internal; created at renderer startup; no draw/bind yet) |
-| Texture-page cache: async prefetch, validation, 8×8 placeholder, pool/staging, upload fences, dynamic capacity, bindless writes | `Current` M8 WP-3 (internal; placeholder resident at startup; draw-time resolution is WP-4) |
-| Public `RenderStats` type and `IEngine.RenderStats` bridge | `Current` M8 WP-3 (default until WP-4 publishes per-frame values) |
+| Per-frame instance SSBO (binding 0) and bindless page set (binding 1) | `Current` M8 WP-3/WP-4 (mapped 1024-record initial capacity, growable at a free fence; filled/bound/drawn) |
+| Build-time shader tool, GLSL, generated SPIR-V, sprite pipeline/layout/samplers | `Current` M8 WP-2/WP-4 (internal; created at renderer startup; bound and drawn) |
+| Texture-page cache: async prefetch, validation, 8×8 placeholder, pool/staging, upload fences, dynamic capacity, bindless writes | `Current` M8 WP-3/WP-4 (internal; placeholder resident at startup; per-sprite lookup in the plan pre-pass) |
+| Public `RenderStats` type and `IEngine.RenderStats` bridge | `Current` M8 WP-3/WP-4 (published once per completed frame) |
 | Camera projection/rounding helper and public `WorldToScreen`/`ScreenToWorld`/`WorldSize` | `Current` M8 WP-2 (shared by the camera and the renderer bridge; deterministic tests) |
-| 96-byte instance ABI, mapped-memory writer, pure sprite sort/filter/quad validation | `Current` M8 WP-2 (no GPU instance growth/fill/draw yet) |
-| M8 remaining contract (approved 2026-10-31; WP-4) | `Planned` M8, **in progress**: per-camera dynamic-rendering passes with no frame-level safety pass and `Clear.Color`/`Clear.None`/`Clear.Depth` load ops; instance filling/camera ranges and growable buffers; per-frame `RenderStats` publication; `CaptureFrameAsync`; draw/content diagnostics. The `IAssets` seam, texture pages/pool/staging/dynamic growth/placeholder, bindless descriptors, and the public `RenderStats` type are `Current` (WP-3). See the [M8 spec](../specs/m8-sprite-renderer.md). |
-| Headless | `Current` for the asset/tick path with no SDL/Vulkan/renderer; the renderer is intentionally absent because headless has no GPU work; `RenderStats` stays default (`Current`, WP-3) and `CaptureFrameAsync` throws `NotSupportedException` (WP-4) |
+| 96-byte instance ABI, mapped-memory writer, planner/growth/draw integration | `Current` M8 WP-2/WP-4 (deterministic planning/growth tests and GPU drawing/growth coverage) |
+| M8 remaining contract (approved 2026-10-31; WP-5) | `Planned` M8: the 50,000-sprite/165 FPS benchmark, the final Pong presentation/AOT gate, and the milestone PR. The draw/pass/instance/stats/capture contract is `Current` (WP-4). See the [M8 spec](../specs/m8-sprite-renderer.md). |
+| Headless | `Current` for the asset/tick path with no SDL/Vulkan/renderer; the renderer is intentionally absent because headless has no GPU work; `RenderStats` stays default and `CaptureFrameAsync` throws `NotSupportedException` (WP-4) |
 
 ## 12. Related documents
 

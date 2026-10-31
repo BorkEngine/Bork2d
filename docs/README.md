@@ -20,14 +20,15 @@
 > `--headless` gate defaults to 120 ticks (`--headless --ticks N` overrides). The spec decisions are recorded (all 23 questions and F5–F8, in the
 > [decision log](decisions.md#m7-frame-handoff-and-pacing-decisions-approved-2026-10-31) as
 > `D-M7-01…D-M7-27`); as-built evidence is in [M7 spec §18](specs/m7-frame-handoff.md#18-as-built-evidence-2026-10-31).
-> **M8 (sprite renderer) is in progress:** the owner-approved
+> **M8 (sprite renderer) is at WP-4:** the owner-approved
 > [M8 spec](specs/m8-sprite-renderer.md) (2026-10-31) is the M8 contract. WP-1 reconciled the owning
 > docs; WP-2 added the build-only shader compiler + generated SPIR-V, the internal sprite
 > pipeline/layout/sampler cache, the shared camera projection, and the public
 > `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` members; WP-3 added the internal texture
-> pages/placeholder/bindless resources and the public `RenderStats`/`IEngine.RenderStats` (all
-> `Current`). `IEngine.CaptureFrameAsync` remains `Planned` (WP-4), and the
-> renderer still draws a black clear until the draw integration lands.
+> pages/placeholder/bindless resources and the public `RenderStats`/`IEngine.RenderStats`; WP-4 added
+> the shared frame planner, per-camera passes/draws, growable mapped instance buffers, per-frame
+> stats publication, and the public `IEngine.CaptureFrameAsync` (all `Current`). The 50,000-sprite
+> benchmark and the final Pong presentation gate remain WP-5.
 > Check status markers before treating an API as implemented.
 >
 > The [file-processors spec](specs/file-processors.md) owns implementation scope/acceptance; the
@@ -39,8 +40,8 @@
 > `examples/pong` and is the AOT gate: `Pong.Desktop` publishes with no tooling assembly in the
 > output, loads the 7-entry Pong pack headless, and runs `--headless` (120 ticks by default, or
 > `--headless --ticks N`), `--windowed --ticks 120`, and `--offscreen --ticks 120`. Verification is
-> the local gate set: Debug/Release zero-warning builds, 1235 deterministic plus 17
-> opt-in/conditional tests (1252 total) for the engine and 46 Pong tests, `dotnet format` for both
+> the local gate set: Debug/Release zero-warning builds, 1334 deterministic plus 26
+> opt-in/conditional tests (1360 total) for the engine and the Pong tests, `dotnet format` for both
 > solutions, the docs link check, `git diff --check`, and the local AOT publish/run. CI runs on pull
 > requests to `develop` and pushes to `develop`; it does not build the Pong solution.
 
