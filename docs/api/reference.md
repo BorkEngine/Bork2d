@@ -499,7 +499,9 @@ clamping, zero-size skip, positive-`Size` check, or diagnostic yet. Target seman
 ## 9. `ISpriteRender<TLayer>`
 
 `Status: Partial.` M2 properties store values; renderer semantics are `Planned` (M8): no
-validation or diagnostic runs yet. Target semantics (M8):
+validation or diagnostic runs yet. The flip members are `Current` for storage and frame-snapshot
+capture (M7); they have no visible effect until the M8 renderer applies them. Target semantics
+(M8):
 
 | Member | Semantics |
 | --- | --- |
@@ -507,13 +509,17 @@ validation or diagnostic runs yet. Target semantics (M8):
 | `TLayer Layer { get; set; }` | Exactly one non-zero bit; `0` and composites are invalid and skipped with a diagnostic. |
 | `Color Tint { get; set; }` | Linear RGBA multiplied with the texture; `White` is neutral. |
 | `int ZIndex { get; set; }` | Sort within a layer; higher draws later; ties are unspecified. |
-| `FlipX`, `FlipY` | `Planned` (not declared): mirror the sprite without changing the transform. |
+| `bool FlipX { get; set; }` | `Current` (storage/capture, M7; drawn in M8): mirrors the sprite horizontally around its pivot without changing the transform. Default `false`. |
+| `bool FlipY { get; set; }` | `Current` (storage/capture, M7; drawn in M8): mirrors the sprite vertically around its pivot without changing the transform. Default `false`. |
 
 - The sprite asset supplies UVs, pivot, topology, optional `indices`, a texture reference, and a
   **pixels-per-unit** scale; `LocalScale` multiplies it. There is no global PPU or vertices array.
 - Sorting is layer numeric value, then `ZIndex`; ties are unspecified. Hide with
   `Sprite = null` or detach with `Parent = null`. Headless produces no instance, and the object is
   not `IDisposable` and has no `IsAlive`.
+- `FlipX`/`FlipY` are plain (non-`ITransform`) properties: setting them never touches the local or
+  world transform. The M7 engine captures them into the internal frame snapshot; the M8 renderer
+  applies them at draw time.
 
 ## 10. `ITransform`
 

@@ -267,7 +267,9 @@ sprite.LocalScale = new Vector2(2, 2);
   non-drawable until the texture and GPU page are ready (M8). Do not block.
 - `ZIndex` orders within a layer, higher later; ties are unspecified. `Tint` multiplies the
   texture, `White` is neutral.
-- `FlipX`/`FlipY` are `Planned` (not declared in `Bork2d.Engine` yet).
+- `FlipX`/`FlipY` mirror the sprite around its pivot without changing the transform; both default
+  to `false`. They are `Current` for storage and M7 frame-snapshot capture; the M8 renderer applies
+  them at draw time, so nothing is visibly mirrored yet.
 - Parenting preserves the world transform: assigning `Parent` later keeps the child in place,
   cycles and setting the root's own parent throw `InvalidOperationException`, and a non-engine or
   foreign-engine parent throws `Bork2dException`. `ITransform.DetachAll()` detaches direct children
