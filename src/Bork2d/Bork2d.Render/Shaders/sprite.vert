@@ -39,12 +39,14 @@ void main()
 {
     Instance instance = instances[gl_InstanceIndex];
 
-    // TL, TR, BR, BL with a top-left origin.
+    // Triangle-strip order TL, TR, BL, BR with a top-left origin. The strip's two triangles are
+    // TL-TR-BL and TR-BL-BR, which tile the quad along the TR-BL diagonal. (TL, TR, BR, BL would
+    // overlap on the right and leave the local left triangle uncovered.)
     vec2 corners[4] = vec2[4](
         vec2(0.0, 0.0),
         vec2(1.0, 0.0),
-        vec2(1.0, 1.0),
-        vec2(0.0, 1.0));
+        vec2(0.0, 1.0),
+        vec2(1.0, 1.0));
     vec2 corner = corners[gl_VertexIndex];
 
     vec2 pivot = instance.misc.xy;
@@ -62,22 +64,23 @@ void main()
 
     gl_Position = pc.viewProjection * vec4(world, 1.0);
 
+    // Match the TL, TR, BL, BR strip order: uv0 is TL,TR and uv1 is BR,BL.
     vec2 uv;
     if (gl_VertexIndex == 0)
     {
-        uv = instance.uv0.xy;
+        uv = instance.uv0.xy; // TL
     }
     else if (gl_VertexIndex == 1)
     {
-        uv = instance.uv0.zw;
+        uv = instance.uv0.zw; // TR
     }
     else if (gl_VertexIndex == 2)
     {
-        uv = instance.uv1.xy;
+        uv = instance.uv1.zw; // BL
     }
     else
     {
-        uv = instance.uv1.zw;
+        uv = instance.uv1.xy; // BR
     }
 
     vUv = uv;

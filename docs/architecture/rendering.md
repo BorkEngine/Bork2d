@@ -158,13 +158,18 @@ There is no `Vertices[4]` and no vertex buffer. The vertex shader derives the co
 approved pivot/flip formula:
 
 ```
-corners  = { (0,0), (1,0), (1,1), (0,1) }      // TL, TR, BR, BL
+corners  = { (0,0), (1,0), (0,1), (1,1) }      // TL, TR, BL, BR (triangle-strip order)
 c        = corners[gl_VertexIndex]
 sx       = FlipX ? -1 : 1
 sy       = FlipY ? -1 : 1
 local    = ((c.x - pivot.x) * size.x * sx, (pivot.y - c.y) * size.y * sy)
 position = viewProj * vec4(transform * local, 0, 1)
 ```
+
+The strip order is **TL, TR, BL, BR**: the two triangles `TL-TR-BL` and `TR-BL-BR` tile the quad
+along the TR-BL diagonal. The perimeter order TL, TR, BR, BL would overlap on the right and leave
+the local left triangle uncovered. The UV selection follows the vertex order (TL, TR, BL, BR); the
+asset/instance UV order remains TL/TR/BR/BL.
 
 `FlipX`/`FlipY` mirror the **geometry** around the pivot in local space; each corner keeps its UV,
 the transform is unchanged, `FlipX && FlipY` mirrors both axes, and a negative `LocalScale` composes
@@ -200,8 +205,9 @@ and records the draws.
 
 Camera data travels in a 64-byte push constant (view-projection); no per-camera descriptor set.
 One graphics pipeline: dynamic rendering, one sRGB attachment, no depth; no vertex input (geometry
-from the instance SSBO and `gl_VertexIndex`); triangle strip, 4 vertices/instance; dynamic
-viewport/scissor; culling and depth test/write disabled; straight alpha `src*a + dst*(1-a)`.
+from the instance SSBO and `gl_VertexIndex`); triangle strip, 4 vertices/instance in TL, TR, BL, BR
+order; dynamic viewport/scissor; culling and depth test/write disabled; straight alpha
+`src*a + dst*(1-a)`.
 
 The instance record is a fixed 96-byte std430 ABI: `transform0` (M11, M12, M21, M22),
 `transform1` (M31, M32, sizeX, sizeY), `uv0` (TL, TR), `uv1` (BR, BL), `tint`, and `misc`
