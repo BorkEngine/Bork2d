@@ -14,7 +14,9 @@
 > `5de725c`)**. The Render foundation, the windowed renderer, the offscreen
 > renderer, and the Runtime host wiring are complete, and the AOT/Pong gate proves the published
 > `--headless`, `--windowed --ticks 120`, and `--offscreen --ticks 120` runs with a zero-warning
-> publish. Check status markers before treating an API as implemented.
+> publish. **M7 (frame handoff and pacing) has a [spec](specs/m7-frame-handoff.md); fourteen
+> answers plus eight follow-ups are recorded in §16.0, and Q6 and Q16–Q23 remain open; it is not
+> implemented.** Check status markers before treating an API as implemented.
 >
 > The [file-processors spec](specs/file-processors.md) owns implementation scope/acceptance; the
 > [asset processors](architecture/asset-processors.md) doc owns the architecture. The
@@ -82,6 +84,7 @@ automatically wins. The [decision log](decisions.md) records the accepted choice
 | [Pong example spec](specs/pong-example.md) | implementers | Pong game/asset contract, work packages, acceptance criteria, and as-built evidence (§12). |
 | [Rendering](architecture/rendering.md) | contributors | Vulkan 1.3, one draw per camera, generated quads, bindless, present. |
 | [M6 spec](specs/m6-vulkan-bringup.md) | implementers | Vulkan bring-up scope, threads, windowed/offscreen clear, work packages, answered decisions (§16), acceptance. |
+| [M7 spec](specs/m7-frame-handoff.md) | implementers | Frame handoff/pacing scope, ring/capture semantics, headless loop, work packages, owner answers and open decisions (§16), acceptance. |
 | [NativeAOT](architecture/nativeaot.md) | contributors | Runtime AOT constraints, generated shapes, local publish gate. |
 | [Logging](architecture/logging.md) | contributors | MEL/ZLogger, `IEngine.LoggerFactory`, default format. |
 | [API guide](api/guide.md) | game developers | Startup, modes, game loop, layers, cameras, sprites, input, assets. |
