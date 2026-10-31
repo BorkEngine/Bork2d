@@ -2,7 +2,7 @@
 
 > **Status:** current through M4, the merged D-036/D-037/D-038 asset-processor task
 > (2026-10-27, PR #8), the Pong example (D-043/D-044; merged 2026-10-29, PR #10), and M6 (Vulkan
-> bring-up; implemented 2026-10-30, final PR pending human review). M6 delivered the Render
+> bring-up; merged 2026-10-31, PR #11). M6 delivered the Render
 > foundation, the windowed renderer and opt-in windowed GPU test, the offscreen renderer, Runtime
 > host wiring, and opt-in offscreen GPU tests; WP-5 proves the three-mode AOT gate. The
 > warning/style/format/AOT gates and the docs link check are active. CI runs the docs link

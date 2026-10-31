@@ -2,7 +2,7 @@
 
 > **Status:** `Current` through M4, the merged asset-processor task (D-036/D-037/D-038, 2026-10-27,
 > PR #8), the Pong example (D-043/D-044; merged 2026-10-29, PR #10), and M6 (Vulkan bring-up;
-> implemented 2026-10-30, final PR pending human review).
+> merged 2026-10-31, PR #11).
 > The project-consolidation refactor (D-041/D-042, merged 2026-10-28, PR #9) merged Api/Common/Assets
 > into `Bork2d.Engine` and Bake.Builder into `Bork2d.Bake`; `Bork2d.Engine`, `Bork2d.Render`,
 > `Bork2d.Runtime`, and `Pong.Common` compile with `IsAotCompatible` plus the trim and AOT analyzers,

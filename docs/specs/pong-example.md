@@ -395,7 +395,7 @@ dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-
 
 ### 12.4 M6 extension: offscreen mode and the three-mode AOT gate (2026-10-30)
 
-M6 (Vulkan bring-up; implemented 2026-10-30, final PR pending human review) adds D-M6-13:
+M6 (Vulkan bring-up; merged 2026-10-31, PR #11) adds D-M6-13:
 `Pong.Desktop` gains `--offscreen --ticks N`, runs the non-interactive `PongGame` through
 `WithOffscreen(1280, 720)`, and exits 0 after exactly `N` ticks. The offscreen renderer clears a
 fixed 1280×720 `R8G8B8A8Srgb` target with two images and discards continuous frames; the frame

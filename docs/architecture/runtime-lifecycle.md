@@ -1,7 +1,6 @@
 # Runtime Lifecycle
 
-> **Status:** implemented through M6 (2026-10-30; M6 is implemented and awaits the final
-> human-reviewed PR). The builder, its validation, the windowed/offscreen hosts with the Vulkan renderer
+> **Status:** implemented through M6 (merged 2026-10-31, PR #11). The builder, its validation, the windowed/offscreen hosts with the Vulkan renderer
 > thread, the headless one-tick path, app `Dispose()`, the internal windowed platform (SDL window,
 > Vulkan instance/surface, input/time handoff), and the app-scoped asset service are `Current`.
 > Windowed and offscreen modes run the real renderer (`Bork2d.Render`): windowed creates the

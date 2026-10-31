@@ -10,8 +10,8 @@ that consumes immutable frame snapshots. The runtime is **NativeAOT**, assets sh
 > window, creates the Vulkan instance/surface on the OS thread, and runs the renderer and an
 > uncapped loop; offscreen mode runs the renderer against a fixed sRGB target until `Exit` and
 > advances `ITime`; headless keeps the one-tick, no-GPU path. The runtime loads and browses
-> `assets.pck` through the app-scoped asset service. **M6 (Vulkan bring-up) is implemented
-> (2026-10-30) and awaits the final human-reviewed PR** (not merged): the Render foundation, the
+> `assets.pck` through the app-scoped asset service. **M6 (Vulkan bring-up) is merged into
+> `develop` (2026-10-31, PR #11, merge `5de725c`)**: the Render foundation, the
 > windowed renderer, the offscreen renderer, and the Runtime host wiring are complete, and the
 > AOT/Pong gate proves the published `--headless`, `--windowed --ticks 120`, and
 > `--offscreen --ticks 120` runs with a zero-warning publish. The bake is the game-owned builder

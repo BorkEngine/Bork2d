@@ -6,7 +6,7 @@
 > exploratory smoke/fixture projects (D-043/D-044; merged 2026-10-29, PR #10).
 > `Bork2d.Engine` carries the `Bork2d.Engine.*` public contract plus the internal engine
 > implementation, and `Bork2d.Bake` carries the public bake-tooling surface plus the internal bake
-> implementation. M6 (Vulkan bring-up) is implemented (2026-10-30; final PR pending human review):
+> implementation. M6 (Vulkan bring-up) is merged (2026-10-31, PR #11, merge `5de725c`):
 > `Bork2d.Render` holds the renderer foundation, the windowed and offscreen renderers, and the
 > internal seam; `Bork2d.Runtime` hosts both renderers and still exposes only the builder/app. The
 > windowed/offscreen AOT gate is proven (zero-warning publish and three published runs exit 0).

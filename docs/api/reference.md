@@ -1,7 +1,7 @@
 # API Reference
 
-> **Status:** the implemented M2/M3/M4 contract plus M6 (Vulkan bring-up; implemented 2026-10-30,
-> final PR pending human review) on top of the asset-processor task merged into `develop`
+> **Status:** the implemented M2/M3/M4 contract plus M6 (Vulkan bring-up; merged 2026-10-31, PR #11)
+> on top of the asset-processor task merged into `develop`
 > (2026-10-27, PR #8). M1
 > (foundation), M2 (SDL windowed host), M3 (pack, VFS,
 > runtime integration), and M4 (serialization/bake) are implemented and merged into `develop`.

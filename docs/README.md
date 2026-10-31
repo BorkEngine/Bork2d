@@ -10,8 +10,8 @@
 > registers explicit data types and asset processors, bakes on build, and records a schema-3
 > incremental manifest. The project descriptor, generated host, `Bork2d.Bake.Cli`, and
 > `generate-host` are removed. The editor and the full sprite renderer are target designs for later
-> milestones; **M6 (Vulkan bring-up) is implemented (2026-10-30) and awaits the final
-> human-reviewed PR** (not merged). The Render foundation, the windowed renderer, the offscreen
+> milestones; **M6 (Vulkan bring-up) is merged into `develop` (2026-10-31, PR #11, merge
+> `5de725c`)**. The Render foundation, the windowed renderer, the offscreen
 > renderer, and the Runtime host wiring are complete, and the AOT/Pong gate proves the published
 > `--headless`, `--windowed --ticks 120`, and `--offscreen --ticks 120` runs with a zero-warning
 > publish. Check status markers before treating an API as implemented.

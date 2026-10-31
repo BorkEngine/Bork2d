@@ -1,6 +1,6 @@
 # M6 — Vulkan Bring-Up (spec)
 
-> **Status:** **Implemented (2026-10-30); final PR pending human review.** This
+> **Status:** **Merged into `develop` (2026-10-31, PR #11, merge `5de725c`).** This
 > file defines the scope, semantics, evidence, work packages, and decision register for M6 (Vulkan
 > bring-up); the roadmap progress log tracks implementation.
 >
@@ -844,9 +844,8 @@ All 22 questions are answered; the register is kept for traceability. Each row n
 
 ## 18. As-built evidence (2026-10-30)
 
-**Implementation status:** implemented on `m-6/wp-5`; the final milestone PR is pending human
-review (the orchestrator opens it, and this branch does not merge). §1–§17 remain the spec of
-record; §3 is unchanged and no owner decision was reopened.
+**Implementation status:** merged into `develop` via PR #11 (merge `5de725c`, 2026-10-31). §1–§17
+remain the spec of record; §3 is unchanged and no owner decision was reopened.
 
 ### 18.1 Work packages and merge order
 
@@ -856,10 +855,11 @@ record; §3 is unchanged and no owner decision was reopened.
 | WP-2 | `m-6/wp-2` | `Bork2d.Render` foundation: packages/unsafe, instance/validation/debug-utils bootstrap, device/feature selection and logging, pure policies, deterministic tests, dependency/docs. | `777ea98` |
 | WP-3 | `m-6/wp-3` | SDL Vulkan surface seam, SPSC control channel, windowed swapchain/clear/present, resize/fullscreen/minimize, surface-loss policy, counters, validation, opt-in GPU test. | `e1536e1` |
 | WP-4 | `m-6/wp-4` | Offscreen target/renderer (two sRGB images, clear/discard, fence pacing), Runtime composition (Setup-before-readiness, first-tick gate, offscreen `Exit`/`ITime`, error precedence), host/platform tests, docs. | `49f4777` |
-| WP-5 | `m-6/wp-5` | Pong `--offscreen --ticks N` (D-M6-13), linked `PongArgumentsTests`, three-mode AOT publish/run evidence, final docs, full gates. | pending |
+| WP-5 | `m-6/wp-5` | Pong `--offscreen --ticks N` (D-M6-13), linked `PongArgumentsTests`, three-mode AOT publish/run evidence, final docs, full gates. | `89c6117` |
 
 WP-5 is based on `49f4777` (`origin/m-6/common` after WP-4). WP-1–WP-5 were sequential; WP-3 and
-WP-4 were not parallel because both touch `Bork2d.Render` and the Runtime host.
+WP-4 were not parallel because both touch `Bork2d.Render` and the Runtime host. The milestone PR #11
+merged `m-6/common` into `develop` as `5de725c` (2026-10-31).
 
 ### 18.2 Test counts
 
