@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Bork2d.Engine;
 using Bork2d.Render.Diagnostics;
+using Bork2d.Render.Handoff;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Core;
 using Silk.NET.Vulkan;
@@ -11,15 +12,22 @@ namespace Bork2d.Render.Vulkan;
 
 /// <summary>
 /// The production windowed Vulkan renderer: one render thread owns the device, swapchain, frames,
-/// and the dynamic-rendering clear, and presents continuously until the host stops it
-/// (D-M6-01, D-M6-06).
+/// the snapshot ring, and the dynamic-rendering clear, and records exactly one GPU frame per
+/// consumed snapshot until the host stops it (Q7=G1, D-M6-06).
 /// </summary>
 /// <remarks>
 /// <para>
 /// <see cref="Start"/> creates one background thread and returns immediately. The thread selects a
 /// present-capable device, creates the swapchain and two frames in flight, then marks the renderer
 /// ready. The host observes readiness, status, counters, and the one-shot fatal error through
-/// <see cref="IRenderer"/>.
+/// <see cref="IRenderer"/>; it drives the snapshot handoff through the slot API in M7 WP-4.
+/// </para>
+/// <para>
+/// With no <c>Ready</c> snapshot the render thread blocks on the combined snapshot/control wait; it
+/// never repeats or re-presents the previous snapshot. A snapshot slot is held until the consuming
+/// GPU frame's fence is observed and is released when that frame is reused or during the
+/// stop/fatal/idle drain. While minimized or at zero extent the suspended consumer frees the newest
+/// snapshot without GPU work and the thread waits for control or a snapshot (Q8=H1).
 /// </para>
 /// <para>
 /// Steady-state frames allocate nothing, log nothing, and never call <c>vkDeviceWaitIdle</c>.
@@ -36,6 +44,8 @@ internal sealed unsafe class VulkanRenderer : IRenderer
     private readonly RendererStartInfo _startInfo;
     private readonly ILogger _logger;
     private readonly RendererControlChannel _control = new();
+    private readonly SnapshotConsumer _consumer = new(new SnapshotRing(), FramesInFlight);
+    private readonly SnapshotControlWait _wait;
     private readonly ManualResetEventSlim _ready = new(initialState: false);
     private readonly ManualResetEventSlim _progress = new(initialState: false);
 
@@ -59,7 +69,6 @@ internal sealed unsafe class VulkanRenderer : IRenderer
     private int _lastPresentResult;
     private int _validationErrorCount;
     private int _validationWarningCount;
-    private long _minimizedSkips;
     private Result _lastResult = Result.Success;
     private WindowExtent _requestedExtent;
     private bool _fullscreen;
@@ -76,6 +85,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         _startInfo = startInfo;
         _logger = startInfo.LoggerFactory.CreateLogger(RenderLog.Category);
         _requestedExtent = new WindowExtent(startInfo.Width, startInfo.Height);
+        _wait = new SnapshotControlWait(_consumer.Ring, _control);
     }
 
     /// <inheritdoc/>
@@ -100,9 +110,54 @@ internal sealed unsafe class VulkanRenderer : IRenderer
     /// <inheritdoc/>
     public Exception? FatalException => _control.FatalException;
 
-    /// <summary>Gets the number of times the renderer skipped acquire/present while minimized.</summary>
-    /// <remarks>Diagnostic only; the GPU tests use it to observe the minimized policy.</remarks>
-    internal long MinimizedSkips => Volatile.Read(ref _minimizedSkips);
+    /// <inheritdoc/>
+    public SnapshotRingCounters SnapshotCounters => _consumer.Counters;
+
+    /// <inheritdoc/>
+    public long SuspendedConsumptions => _consumer.SuspendedConsumptions;
+
+    /// <summary>Gets the renderer's snapshot ring (GPU tests observe slot state through it).</summary>
+    internal SnapshotRing SnapshotRing => _consumer.Ring;
+
+    /// <summary>
+    /// Gets a value indicating whether the instance the windowed renderer was started with has the
+    /// validation layer enabled (host-level GPU tests gate their validation evidence on it).
+    /// </summary>
+    internal bool ValidationEnabled => _instance?.ValidationEnabled == true;
+
+    /// <summary>Gets a value indicating whether every GPU frame owns its empty instance resources.</summary>
+    internal bool HasInstanceResources
+    {
+        get
+        {
+            if (_frames.Length != FramesInFlight)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < FramesInFlight; index++)
+            {
+                if (_frames[index]?.InstanceResources is null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
+
+    /// <inheritdoc/>
+    public SnapshotSlot? AcquireSnapshotSlot() => _consumer.Ring.Acquire();
+
+    /// <inheritdoc/>
+    public void PublishSnapshot(SnapshotSlot slot) => _consumer.Ring.Publish(slot);
+
+    /// <inheritdoc/>
+    public void AbandonSnapshotSlot(SnapshotSlot slot) => _consumer.Ring.Abandon(slot);
+
+    /// <inheritdoc/>
+    public void WakeSnapshotWait() => _consumer.Ring.SignalExit();
 
     /// <inheritdoc/>
     public void Start()
@@ -149,6 +204,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
     public void RequestStop()
     {
         Volatile.Write(ref _readyFlag, 0);
+        _consumer.Ring.Stop();
         _control.RequestStop();
         if (Volatile.Read(ref _stopReason) != (int)RendererStopReason.Fatal)
         {
@@ -165,36 +221,52 @@ internal sealed unsafe class VulkanRenderer : IRenderer
     }
 
     /// <inheritdoc/>
-    public void Join() => _thread?.Join();
+    public void Join()
+    {
+        _thread?.Join();
+        DrainSnapshotsAfterJoin();
+    }
 
     /// <inheritdoc/>
     public bool Join(TimeSpan timeout)
     {
         Thread? thread = _thread;
-        return thread is null || thread.Join(timeout);
+        if (thread is null)
+        {
+            DrainSnapshotsAfterJoin();
+            return true;
+        }
+
+        if (!thread.Join(timeout))
+        {
+            return false;
+        }
+
+        DrainSnapshotsAfterJoin();
+        return true;
     }
 
     /// <summary>
-    /// Waits at most <paramref name="timeout"/> for the counters to satisfy a predicate
-    /// (GPU tests only; event-based, no polling or sleeps).
+    /// Waits at most <paramref name="timeout"/> for a renderer predicate (GPU tests only;
+    /// event-based, no polling or sleeps).
     /// </summary>
-    /// <param name="predicate">The counter condition to observe.</param>
+    /// <param name="predicate">The condition to observe.</param>
     /// <param name="timeout">The bounded wait.</param>
     /// <returns><see langword="true"/> when the predicate held; <see langword="false"/> on timeout.</returns>
-    internal bool WaitForProgress(Func<RendererCounters, bool> predicate, TimeSpan timeout)
+    internal bool WaitForProgress(Func<bool> predicate, TimeSpan timeout)
     {
         ArgumentNullException.ThrowIfNull(predicate);
 
         var stopwatch = Stopwatch.StartNew();
         while (true)
         {
-            if (predicate(Counters))
+            if (predicate())
             {
                 return true;
             }
 
             _progress.Reset();
-            if (predicate(Counters))
+            if (predicate())
             {
                 return true;
             }
@@ -207,8 +279,38 @@ internal sealed unsafe class VulkanRenderer : IRenderer
 
             if (!_progress.Wait(remaining))
             {
-                return predicate(Counters);
+                return predicate();
             }
+        }
+    }
+
+    /// <summary>
+    /// Waits at most <paramref name="timeout"/> for the counters to satisfy a predicate
+    /// (GPU tests only; event-based, no polling or sleeps).
+    /// </summary>
+    /// <param name="predicate">The counter condition to observe.</param>
+    /// <param name="timeout">The bounded wait.</param>
+    /// <returns><see langword="true"/> when the predicate held; <see langword="false"/> on timeout.</returns>
+    internal bool WaitForProgress(Func<RendererCounters, bool> predicate, TimeSpan timeout)
+        => WaitForProgress(() => predicate(Counters), timeout);
+
+    /// <summary>
+    /// Frees every non-<c>Writing</c> slot once the render thread has joined.
+    /// </summary>
+    /// <remarks>
+    /// Join is the quiescent point (Q9=I1): a fatal mid-tick may publish after the renderer's
+    /// cleanup, so the ring cannot be fully drained until the render thread is gone. A slot still
+    /// <c>Writing</c> belongs to a producer and is never touched.
+    /// </remarks>
+    private void DrainSnapshotsAfterJoin()
+    {
+        try
+        {
+            _consumer.Ring.DrainAfterRenderThreadJoined();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Vulkan snapshot-ring drain after join failed.");
         }
     }
 
@@ -298,23 +400,32 @@ internal sealed unsafe class VulkanRenderer : IRenderer
 
     private void RunFrames()
     {
-        while (!_control.IsStopRequested)
+        while (true)
         {
             ObserveValidation();
-            if (_control.IsStopRequested)
+            if (IsStopping())
             {
-                break;
+                return;
             }
 
             DrainControlMessages();
-            if (_control.IsStopRequested)
+            if (IsStopping())
             {
-                break;
+                return;
             }
 
             if (_minimized || _requestedExtent.IsZeroOrMinimized)
             {
-                WaitWhileMinimized();
+                if (DrainWhileMinimized())
+                {
+                    continue;
+                }
+
+                if (_wait.Wait() == SnapshotWaitOutcome.Stopped)
+                {
+                    return;
+                }
+
                 continue;
             }
 
@@ -335,7 +446,16 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             switch (action)
             {
                 case SwapchainAction.SkipMinimized:
-                    WaitWhileMinimized();
+                    if (DrainWhileMinimized())
+                    {
+                        continue;
+                    }
+
+                    if (_wait.Wait() == SnapshotWaitOutcome.Stopped)
+                    {
+                        return;
+                    }
+
                     break;
 
                 case SwapchainAction.Fatal:
@@ -354,6 +474,17 @@ internal sealed unsafe class VulkanRenderer : IRenderer
                     break;
 
                 case SwapchainAction.Present:
+                    // Q7=G1: with no consumed snapshot there is no GPU frame; wait, never repeat.
+                    if (!_consumer.HasReadySnapshot)
+                    {
+                        if (_wait.Wait() == SnapshotWaitOutcome.Stopped)
+                        {
+                            return;
+                        }
+
+                        break;
+                    }
+
                     PresentFrame();
                     break;
 
@@ -364,21 +495,31 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         }
     }
 
-    private void WaitWhileMinimized()
+    private bool IsStopping() => _control.IsStopRequested || _consumer.IsStopped;
+
+    /// <summary>
+    /// Drains the newest Ready snapshot without GPU work while minimized or at zero extent
+    /// (Q8=H1). Returns <see langword="true"/> when a snapshot was dropped.
+    /// </summary>
+    private bool DrainWhileMinimized()
     {
         if (!_minimizedLogged)
         {
             _logger.LogDebug(
                 "Vulkan renderer minimized: reason=Minimize, extent={Width}x{Height}; "
-                    + "skipping acquire/present.",
+                    + "draining snapshots without GPU work.",
                 _requestedExtent.Width,
                 _requestedExtent.Height);
             _minimizedLogged = true;
         }
 
-        Interlocked.Increment(ref _minimizedSkips);
+        if (!_consumer.DrainSuspended())
+        {
+            return false;
+        }
+
         SignalProgress();
-        _control.WaitForWork();
+        return true;
     }
 
     private void DrainControlMessages()
@@ -428,6 +569,14 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             throw new Bork2dException($"vkWaitForFences failed with VkResult {wait}.");
         }
 
+        // The frame fence has signaled: the snapshot the frame held is retired, then the newest
+        // Ready snapshot is taken for this frame. With no snapshot there is no GPU frame.
+        SnapshotSlot? slot = _consumer.TakeForFreeFrame(_frameIndex);
+        if (slot is null)
+        {
+            return;
+        }
+
         uint imageIndex = 0;
         Result acquire = _swapchainApi!.AcquireNextImage(
             device.Device,
@@ -438,17 +587,21 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             ref imageIndex);
         if (acquire == Result.ErrorDeviceLost)
         {
+            _consumer.ReleaseTaken(slot);
             throw CreateFatalForResult(acquire);
         }
 
         if (acquire is Result.ErrorOutOfDateKhr or Result.ErrorSurfaceLostKhr)
         {
+            // The snapshot never became a GPU frame: free it immediately (never wait a fence).
+            _consumer.ReleaseTaken(slot);
             _lastResult = acquire;
             return;
         }
 
         if (acquire != Result.Success && acquire != Result.SuboptimalKhr)
         {
+            _consumer.ReleaseTaken(slot);
             throw new Bork2dException(
                 $"vkAcquireNextImageKHR failed with VkResult {acquire}.");
         }
@@ -472,6 +625,8 @@ internal sealed unsafe class VulkanRenderer : IRenderer
 
         RecordClear(frame, imageIndex, swapchain, device);
         Submit(frame, imageIndex, swapchain, device);
+        _consumer.AttachToFrame(_frameIndex, slot);
+
         Result present = Present(imageIndex, device, swapchain);
         Volatile.Write(ref _lastPresentResult, (int)present);
         if (present is Result.Success or Result.SuboptimalKhr)
@@ -721,6 +876,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer
     private void Recreate(SwapchainRecreateReason reason)
     {
         WaitForDeviceIdle("swapchain recreation");
+
+        // vkDeviceWaitIdle completed every in-flight fence: their snapshot slots are free.
+        ReleaseHeldSnapshots("swapchain recreation");
         CreateSwapchain(reason);
         _lastResult = Result.Success;
     }
@@ -737,6 +895,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         _surfaceRecoveryAttempted = true;
         Result lostResult = _lastResult;
         WaitForDeviceIdle("surface recovery");
+        ReleaseHeldSnapshots("surface recovery");
         _swapchain?.Dispose();
         _swapchain = null;
 
@@ -797,7 +956,10 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             WindowedFrame frame = WindowedFrame.Create(
                 device.Api,
                 device.Device,
+                device.PhysicalDevice,
+                index,
                 device.QueueFamilyIndex,
+                _instance,
                 _logger);
             _frames[index] = frame;
             _instance!.SetObjectName(
@@ -805,6 +967,25 @@ internal sealed unsafe class VulkanRenderer : IRenderer
                 ObjectType.CommandBuffer,
                 frame.CommandBuffer.Handle,
                 $"Bork2d frame {index} command buffer");
+        }
+    }
+
+    /// <summary>
+    /// Releases every snapshot slot the renderer holds after the device became idle, before the
+    /// swapchain is recreated or recovered (Q8/Q9; every slot must end Free).
+    /// </summary>
+    private void ReleaseHeldSnapshots(string operation)
+    {
+        try
+        {
+            _consumer.ReleaseAll();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Vulkan snapshot-slot release failed during {Operation}.",
+                operation);
         }
     }
 
@@ -901,6 +1082,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             ?? new Bork2dException(
                 "The Vulkan renderer failed: " + exception.Message,
                 exception);
+
+        // A renderer fatal wakes a blocked producer and stops further acquisition (Q9=I1).
+        _consumer.Ring.Stop();
         _control.PublishFatal(fatal);
         SetStopReason(RendererStopReason.Fatal);
         SetStatus(RendererStatus.Faulted);
@@ -945,6 +1129,10 @@ internal sealed unsafe class VulkanRenderer : IRenderer
                 _clearLabel = 0;
             }
         }
+
+        // Every frame fence was observed and the device is idle: no GPU frame references a
+        // snapshot slot any more, so every held slot returns to Free before teardown.
+        ReleaseHeldSnapshots("shutdown");
 
         _swapchain?.Dispose();
         _swapchain = null;
@@ -1005,9 +1193,10 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         _logger.LogInformation(
             "Vulkan renderer started: mode={Mode}, extent={Width}x{Height}, format={Format}, "
                 + "colorSpace={ColorSpace}, presentMode={PresentMode}, images={ImageCount}, "
-                + "framesInFlight={FramesInFlight}, validation={Validation}, "
-                + "framesPresented={FramesPresented}, framesDiscarded={FramesDiscarded}, "
-                + "swapchainRecreations={SwapchainRecreations}, "
+                + "framesInFlight={FramesInFlight}, handoff={Handoff}, ringDepth={RingDepth}, "
+                + "oneFramePerSnapshot={OneFramePerSnapshot}, instanceResources={InstanceResources}, "
+                + "validation={Validation}, framesPresented={FramesPresented}, "
+                + "framesDiscarded={FramesDiscarded}, swapchainRecreations={SwapchainRecreations}, "
                 + "validationErrors={ValidationErrors}, validationWarnings={ValidationWarnings}, "
                 + "stopReason={StopReason}.",
             nameof(RendererMode.Windowed),
@@ -1018,6 +1207,10 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             swapchain.PresentMode,
             swapchain.ImageCount,
             FramesInFlight,
+            "on",
+            SnapshotRing.SlotCapacity,
+            "on",
+            HasInstanceResources ? "on" : "off",
             _instance?.ValidationEnabled == true ? "on" : "off",
             Volatile.Read(ref _framesPresented),
             0,
@@ -1029,14 +1222,25 @@ internal sealed unsafe class VulkanRenderer : IRenderer
 
     private void LogStopped()
     {
+        SnapshotRingCounters snapshots = _consumer.Counters;
         _logger.LogInformation(
             "Vulkan renderer stopped: mode={Mode}, reason={Reason}, "
+                + "snapshotsPublished={SnapshotsPublished}, snapshotsConsumed={SnapshotsConsumed}, "
+                + "snapshotsSuperseded={SnapshotsSuperseded}, "
+                + "backpressureWaits={BackpressureWaits}, maxLiveSnapshots={MaxLiveSnapshots}, "
+                + "suspendedConsumptions={SuspendedConsumptions}, "
                 + "framesPresented={FramesPresented}, framesDiscarded={FramesDiscarded}, "
                 + "swapchainRecreations={SwapchainRecreations}, "
                 + "validationErrors={ValidationErrors}, validationWarnings={ValidationWarnings}, "
                 + "lastFrameNumber={LastFrameNumber}, lastPresentResult={LastPresentResult}.",
             nameof(RendererMode.Windowed),
             StopReason,
+            snapshots.Published,
+            snapshots.Consumed,
+            snapshots.Superseded,
+            snapshots.BackpressureWaits,
+            snapshots.MaxLive,
+            _consumer.SuspendedConsumptions,
             Volatile.Read(ref _framesPresented),
             0,
             Volatile.Read(ref _swapchainRecreations),

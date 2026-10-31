@@ -133,15 +133,18 @@ public sealed class Bork2dAppBuilderTests
     }
 
     [Theory]
+    [InlineData(0)]
     [InlineData(-1)]
     [InlineData(int.MinValue)]
-    public void HeadlessTickRateMustNotBeNegative(int ticksPerSecond)
+    public void HeadlessTickRateMustBePositive(int ticksPerSecond)
     {
         var builder = new Bork2dAppBuilder<GameLayer>()
             .WithGame(new TestGame<GameLayer>())
             .WithHeadless(ticksPerSecond);
 
-        Assert.Throws<Bork2dException>(() => builder.Build());
+        var exception = Assert.Throws<Bork2dException>(() => builder.Build());
+
+        Assert.Contains("greater than zero", exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -250,11 +253,11 @@ public sealed class Bork2dAppBuilderTests
     }
 
     [Fact]
-    public void BuildsUncappedHeadless()
+    public void BuildsHeadlessAtAPositiveRate()
     {
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(new TestGame<GameLayer>())
-            .WithHeadless(0)
+            .WithHeadless(30)
             .Build();
 
         Assert.NotNull(app);
@@ -300,10 +303,10 @@ public sealed class Bork2dAppBuilderTests
     [Fact]
     public void ModeSelectorsUpdateTheStoredMode()
     {
-        var headless = new Bork2dAppBuilder<GameLayer>().WithHeadless(0).Options;
+        var headless = new Bork2dAppBuilder<GameLayer>().WithHeadless(30).Options;
         Assert.Equal(Bork2dAppMode.Headless, headless.Mode);
         Assert.True(headless.HeadlessSelected);
-        Assert.Equal(0, headless.HeadlessTicksPerSecond);
+        Assert.Equal(30, headless.HeadlessTicksPerSecond);
 
         var offscreen = new Bork2dAppBuilder<GameLayer>().WithOffscreen(320, 200).Options;
         Assert.Equal(Bork2dAppMode.Offscreen, offscreen.Mode);

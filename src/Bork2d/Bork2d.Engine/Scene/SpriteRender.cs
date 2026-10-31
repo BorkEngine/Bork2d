@@ -18,6 +18,8 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
     private TLayer _layer;
     private Color _tint;
     private int _zIndex;
+    private bool _flipX;
+    private bool _flipY;
 
     internal SpriteRender(Lock structuralLock)
         : base(structuralLock)
@@ -26,6 +28,8 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
         _layer = default;
         _tint = Color.White;
         _zIndex = 0;
+        _flipX = false;
+        _flipY = false;
     }
 
     public SpriteAsset? Sprite
@@ -100,6 +104,44 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
             lock (Sync)
             {
                 _zIndex = value;
+            }
+        }
+    }
+
+    public bool FlipX
+    {
+        get
+        {
+            lock (Sync)
+            {
+                return _flipX;
+            }
+        }
+
+        set
+        {
+            lock (Sync)
+            {
+                _flipX = value;
+            }
+        }
+    }
+
+    public bool FlipY
+    {
+        get
+        {
+            lock (Sync)
+            {
+                return _flipY;
+            }
+        }
+
+        set
+        {
+            lock (Sync)
+            {
+                _flipY = value;
             }
         }
     }

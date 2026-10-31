@@ -1,15 +1,18 @@
 # M7 — Frame Handoff and Pacing (spec)
 
-> **Status:** **Draft — owner decisions recorded (22 answers, 2026-10-31, revised).** This file defines
-> the proposed scope, semantics, evidence, work packages, and the decision register for M7 (frame
-> handoff and pacing). **Fourteen of the twenty-three questions plus eight follow-ups are answered**
-> (§16.0): Q1=A1, Q2=B1, Q3=C2, Q4=D1, Q5=E1, Q7=G1, Q8=H1 + a 30 Hz minimized tick cap, Q9=I1,
-> Q10=J1, Q11=K1, Q12=L2 (fully synthesized headless clock), Q13=M4 (strict grid, pure `Sleep`),
-> Q14=N1, Q15=O2 (120-tick default); F1–F8 (F5 first tick 0/0, F6 positive headless rate, F7 no
-> clamp, F8 unbounded catch-up). **F6 supersedes D-017's `0` uncapped headless rate.** **Open:** Q6
-> and Q16–Q23. Nothing in this milestone is implemented. §4 (inherited constraints) and the baseline
-> facts in §3 are binding; §16.0 records the owner's answers, which are **not yet in the decision log**
-> (WP-1 records them as `D-M7-01…`).
+> **Status:** **Implemented — ready for review (PR open, awaiting human review; not merged).** This
+> file defines the approved scope, semantics, evidence, work packages, and decision register for M7
+> (frame handoff and pacing). All of Q1–Q23 and F5–F8 are answered (§16.0); WP-1 recorded them in the
+> [decision log](../decisions.md#m7-frame-handoff-and-pacing-decisions-approved-2026-10-31) as
+> `D-M7-01…D-M7-27`: Q1=A1, Q2=B1, Q3=C2, Q4=D1, Q5=E1, Q6=Z1, Q7=G1, Q8=H1 + a 30 Hz minimized
+> tick cap, Q9=I1, Q10=J1, Q11=K1, Q12=L2 (fully synthesized headless clock), Q13=M4 (strict grid,
+> pure `Sleep`), Q14=N1, Q15=O2 (120-tick default), Q16=P1, Q17=X2, Q18=R1, Q19=S3, Q20=T1, Q21=U1,
+> Q22=V1, Q23=W1; F5 first tick 0/0, F6 positive headless rate, F7 no clamp, F8 unbounded catch-up.
+> **F6 supersedes D-017's `0` uncapped headless rate.** WP-1–WP-4 landed on `m-7/wp-1`…`m-7/wp-4`
+> and are merged into `m-7/common`; WP-5 is landed on `m-7/wp-5` (this change) and is merged by the
+> orchestrator before the milestone PR is opened. The as-built local evidence is in **§18**. The
+> milestone is **not merged** and is not claimed to be; the human reviews the PR. §4 (inherited
+> constraints) and the baseline facts in §3 are binding history.
 >
 > M7 is roadmap [M7 — Frame handoff and pacing](../roadmap.md#5-milestone-detail): a bounded run-ahead
 > snapshot ring for windowed/offscreen, plus timer-paced headless. M6 (Vulkan bring-up) is merged
@@ -89,7 +92,10 @@ environment facts, not portable requirements. GPU tests and the AOT gate remain 
 
 ### 3.3 Stale statements this milestone must reconcile (found while writing this spec)
 
-These are documentation defects, not M7 decisions; Q18 asks how to handle them.
+These are documentation defects, not M7 decisions. Q18=R1: the statements that are already false in
+the current tree (the offscreen clauses) were fixed in WP-1's docs pass; the headless
+one-tick/zero-clock statements were accurate at spec time and were updated when WP-4/WP-5 landed
+(see §18).
 
 | Location | Statement | Reality |
 | --- | --- | --- |
@@ -115,7 +121,7 @@ These are documentation defects, not M7 decisions; Q18 asks how to handle them.
 | Windowed/offscreen ticks are variable-timestep: `DeltaTime` is wall-clock between tick starts, clamped by `WithMaxDeltaTime` (default 0.25 s), first tick `0`; no accumulator, no render interpolation. | D-004; [Runtime lifecycle §4](../architecture/runtime-lifecycle.md#4-time) |
 | `Setup` runs before renderer readiness and is never skipped because the renderer failed; no `Tick` runs before readiness; a renderer failure around `Setup` runs zero ticks and attempts `Teardown` (D-M6-14); errors keep the M2 precedence. | D-M6-06, D-M6-14; [Runtime lifecycle §6](../architecture/runtime-lifecycle.md#6-shutdown-and-error-propagation) |
 | The render thread never calls SDL and never reads live scene state; the OS/window thread owns SDL, the windowed instance/surface; the renderer is stopped/joined before the surface/instance/window are destroyed. | D-M6-09, D-M6-25; [Threading §1](../architecture/threading.md#1-threads-by-mode) |
-| Headless never calls SDL or the Vulkan loader and creates no renderer; `WithHeadless` and `WithOffscreen` are mutually exclusive with each other and with window options; the headless rate is `>= 0`, `0` uncapped — **F6 (owner) revises this to `> 0`**, superseding D-017's headless-uncapped clause. | D-017 as revised by F6; [Overview §6](../architecture/overview.md#6-invariants); [Runtime lifecycle §2](../architecture/runtime-lifecycle.md#2-modes) |
+| Headless never calls SDL or the Vulkan loader and creates no renderer; `WithHeadless` and `WithOffscreen` are mutually exclusive with each other and with window options; the headless rate is `> 0` (F6, superseding D-017's `0`-uncapped clause, D-M7-25). | D-017 as revised by F6/D-M7-25; [Overview §6](../architecture/overview.md#6-invariants); [Runtime lifecycle §2](../architecture/runtime-lifecycle.md#2-modes) |
 | Windowed/offscreen run the real renderer; offscreen loops until `Exit` and advances `ITime`; frames clear/discard; no public readback. | D-M6-02, D-M6-07, D-M6-23; [Runtime lifecycle §2](../architecture/runtime-lifecycle.md#2-modes) |
 | Tick-scoped scene mutation: workers join before `Tick` returns; the capture point is quiescent; per-object/structural locks use `System.Threading.Lock`; snapshots carry no entity references. | D-015, D-024; [Threading §2](../architecture/threading.md#2-tick-scoped-concurrency) |
 | Scene objects are root-owned with no `Dispose`/`IsAlive`; detach and re-attach the same instance; the tree is unordered with no entity IDs. | D-023, D-026; [Scene ownership §4](../architecture/scene-ownership.md#4-renderer-and-snapshot-relationship) |
@@ -187,17 +193,20 @@ contains no tooling assembly and no `vulkan-1.dll`.
   offscreen: not planned (D-004).
 - Multi-window, Linux/macOS guarantees, hot reload, editor/preview.
 - Pack format, TOML/bake, asset loading, VFS/overlays: unchanged (no new dependency).
-- A general-purpose allocator, GPU timestamp queries, or a public frame/diagnostics API (Q16).
+- A general-purpose allocator, GPU timestamp queries, or a public frame/diagnostics API (Q16=P1).
 
 ## 6. Architecture
 
 > **Reading note.** The responsibilities and the ring protocol below are the target already documented
 > in [Threading §3–§4](../architecture/threading.md#4-triple-buffer-handoff); they are restated so the
-> milestone is self-contained. **Answered in §16.0 (2026-10-31):** Q1=A1, Q2=B1, Q3=C2, Q4=D1,
-> Q5=E1, Q7=G1, Q8=H1 + a 30 Hz minimized tick cap, Q9=I1, Q10=J1, Q11=K1, Q12=L2, Q13=M4/F1,
-> Q14=N1, Q15=O2/F3. **Still open:** Q6 (slot array capacity) and Q16–Q23 (public additions,
-> decisions/docs, tests, gate assertions, WP plan). F5–F8 are answered (first tick 0/0, positive
-> rate, no clamp, unbounded catch-up); F6 supersedes D-017's `0` uncapped headless rate.
+> milestone is self-contained. **All questions are answered in §16.0 (2026-10-31):** Q1=A1, Q2=B1,
+> Q3=C2, Q4=D1, Q5=E1, Q6=Z1, Q7=G1, Q8=H1 + a 30 Hz minimized tick cap, Q9=I1, Q10=J1, Q11=K1,
+> Q12=L2, Q13=M4/F1, Q14=N1, Q15=O2/F3, Q16=P1, Q17=X2, Q18=R1, Q19=S3, Q20=T1, Q21=U1, Q22=V1,
+> Q23=W1; F5–F8 are answered (first tick 0/0, positive rate, no clamp, unbounded catch-up). F6
+> supersedes D-017's `0` uncapped headless rate. The decisions are recorded as
+> `D-M7-01…D-M7-27` in the
+> [decision log](../decisions.md#m7-frame-handoff-and-pacing-decisions-approved-2026-10-31); all five
+> work packages have landed and implementation is as-built (§18).
 
 ### 6.1 Modules, ownership, and boundaries
 
@@ -215,7 +224,7 @@ Regardless of Q1, the responsibilities are fixed by the target design:
 
 Boundary rules (inherited, enforced by the dependency test and review):
 
-- Q2=B1 adds public `FlipX`/`FlipY`; no other new public type or member unless Q16 approves one.
+- Q2=B1 adds public `FlipX`/`FlipY`; no other new public type or member (Q16=P1).
   `Bork2d.Engine` remains free of Vulkan, Silk, SDL, and renderer types; it gains an internal
   snapshot/capture implementation.
 - `Bork2d.Render` still references only `Bork2d.Engine` + `Silk.NET.Vulkan*`; it never references
@@ -254,7 +263,7 @@ Rules:
 
 ### 6.3 Snapshot model and capture
 
-**Types (internal, in `Bork2d.Engine` per Q1=A1; fields per Threading §3 plus the open Q6).**
+**Types (internal, in `Bork2d.Engine` per Q1=A1; fields per Threading §3 plus the Q6=Z1 capacity policy).**
 
 | Type | Fields | Notes |
 | --- | --- | --- |
@@ -279,7 +288,8 @@ Rules:
 - **Immutable after publication**: the tick writes only its `Writing` slot; the renderer reads only
   a `Rendering` slot; a slot is never overwritten while published or referenced by a GPU frame.
 - **Pooled capacity**: each slot owns its arrays; after warm-up a capture allocates nothing
-  (Q6 covers the initial/growth policy). Capture must not use LINQ, boxing, or per-node allocation.
+  (Q6=Z1: arrays start empty, grow to the high-water mark, never shrink). Capture must not use LINQ,
+  boxing, or per-node allocation.
 - **Locking**: the traversal must respect the existing structural-then-per-object lock order and must
   not deadlock or take the structural lock reentrantly without proving that safe; holding the
   structural lock for the whole traversal is allowed only if it cannot block a game callback. The
@@ -439,7 +449,7 @@ answers (§16.0):
 
 ### 6.8 Startup, shutdown, and error matrix (M7 changes only)
 
-| Situation | Where detected | Behavior (pending the noted answers) |
+| Situation | Where detected | Behavior (answers recorded in §16.0) |
 | --- | --- | --- |
 | Renderer fatal while the tick is blocked in the ring wait | Ring wait / host | Q9=I1: the wait wakes; no new tick starts; the host runs `Teardown` once (if `Setup` succeeded), stops/joins the renderer, stops the platform/assets, and rethrows the renderer `Bork2dException`. |
 | Renderer stop while the tick is blocked | Ring wait / host | Q9=I1: the wait returns failure; the loop starts no further tick and publishes nothing; shutdown proceeds. The normal host path stops the renderer only after the loop has finished, so this is the fatal/race case. |
@@ -455,8 +465,8 @@ answers (§16.0):
 ### 6.9 Allocation and performance
 
 - **No steady-state allocations** in capture, publication, consumption, or the render frame. Arrays
-  are slot-private and grown only when a new high-water mark is reached (Q6); no LINQ, no boxing, no
-  per-node allocation, no per-frame delegate allocation.
+  are slot-private, start empty, and grow only when a new high-water mark is reached, never shrinking
+  (Q6=Z1); no LINQ, no boxing, no per-node allocation, no per-frame delegate allocation.
 - Capture cost is proportional to the number of cameras/sprites and the depth of their transforms
   (world-matrix evaluation); the existing per-object locks are the baseline. M7 must not add a
   per-frame traversal allocation or a second full-tree pass.
@@ -469,7 +479,7 @@ answers (§16.0):
 
 ### 6.10 Diagnostics, logging, and counters
 
-New internal counters (exposed to tests, logged once at stop; no public API unless Q16):
+New internal counters (exposed to tests, logged once at stop; no public API, Q16=P1):
 
 | Counter | Meaning |
 | --- | --- |
@@ -691,7 +701,7 @@ CI stays unchanged: no GPU job; GPU tests remain a local gate (D-M6-05).
 
 | Document | Change |
 | --- | --- |
-| [Decisions](../decisions.md) | WP-1 records the §16.0 answers and the later answers as `D-M7-01…`, with `Superseded by`/`Revised by` markers for the affected M2/M6 entries (Q17); F6 supersedes D-017's headless-uncapped clause. |
+| [Decisions](../decisions.md) | WP-1 records all answers as `D-M7-01…D-M7-27`; Q17=X2 amends the affected M2/M6 entries in place with `(revised by D-M7-xx, owner Q17=X2)` notes; F6 revises D-017's headless-uncapped clause. |
 | [Threading](../architecture/threading.md) | §3 capture is `Current` (fields, Q2=B1 flips); §4 ring/handoff `Current` (Q1=A1, Q7=G1); §7 shutdown with in-flight frames and the Q8 suspended path; §9 tests; remove `Planned` markers. |
 | [Rendering](../architecture/rendering.md) | §3.1/§3.2 one frame per snapshot (Q7=G1); §9 snapshot coupling, slot-held-to-fence, Q8 suspended consumption; §10 counters; §11 status. |
 | [Runtime lifecycle](../architecture/runtime-lifecycle.md) | §1/§2/§5 loop shapes (windowed/offscreen acquire→publish; headless K1 loop with L2 synthesized time, positive rate, no clamp, unbounded catch-up, M4/F1 pacing); §4 time; §6 error table; §7 minimized/backpressure. |
@@ -699,32 +709,41 @@ CI stays unchanged: no GPU job; GPU tests remain a local gate (D-M6-05).
 | [Projects](../architecture/projects.md) | No new project/package (Q1=A1 uses the existing Engine↔Render IVT); update only if that changes. |
 | [NativeAOT](../architecture/nativeaot.md) | No new native dependency; the headless gate command/evidence (Q15=O2). |
 | [Logging](../architecture/logging.md) | `Bork2d.Render`/`Bork2d.Runtime` M7 events and counters (§6.10); no per-frame logging. |
-| [API reference](../api/reference.md) | `ISpriteRender.FlipX`/`FlipY` (Q2=B1); `WithHeadless` positive-rate validation and the synthesized headless `ITime` (Q12/F5/F6/F7); §2/§4 time and `Exit`; §12 builder/`Run` behavior; any approved Q16 surface. |
+| [API reference](../api/reference.md) | `ISpriteRender.FlipX`/`FlipY` (Q2=B1); `WithHeadless` positive-rate validation and the synthesized headless `ITime` (Q12/F5/F6/F7); §2/§4 time and `Exit`; §12 builder/`Run` behavior; no other public surface (Q16=P1). |
 | [API guide](../api/guide.md) | §2 Modes (`WithHeadless(0)` is rejected; headless `ITime` is synthesized and ignores `WithMaxDeltaTime`), §6 sprites (flips), §8 Time, §11 lifetimes/threading: backpressure, headless loop/pacing, no draw change. |
-| `IEngine`/`ISpriteRender` XML docs | Add the flip members and fix the stale `Time`/`Exit` statements; describe the M7 behavior (Q18). |
-| [docs/README.md](../README.md) | Spec entry/status header (this file); update when M7 lands. |
-| [Roadmap](../roadmap.md) | Status/progress only when the milestone lands; M7 "Not started" until then. |
-| M6 spec | Historical; do not rewrite its as-built evidence. The decision log carries the supersessions. |
+| `IEngine`/`ISpriteRender` XML docs | WP-1 fixes the stale `Time`/`Exit` statements (Q18); WP-2 adds the flip members and WP-4 updates the time/`Exit` wording when the M7 behavior lands. |
+| [docs/README.md](../README.md) | M7 status: implemented on `m-7/common`; ready-for-review PR open/awaiting human review (not merged); keep the spec link. |
+| [Roadmap](../roadmap.md) | M7 detail status and progress-log row: Implemented (`m-7/common`; PR open/awaiting review, not merged), with the §18 evidence. |
+| M6 spec | Historical; do not rewrite its as-built evidence. The decision log carries the revisions/supersessions. |
 
 Same-change rule: any behavior/contract/status change ships with its owning doc in the same work
 package. The docs link check runs after any heading/file change.
 
-## 12. Work packages (proposed; owner approval required)
+## 12. Work packages (approved: W1, sequential)
 
-Sequential is the default; any parallel wave needs the AGENTS.md §3.1 dependency/file-overlap check
-recorded in the milestone PR. Proposed split:
+The owner approved Q23=W1 on 2026-10-31: five sequential work packages in the order below
+(WP-1 → WP-2 → WP-3 → WP-4 → WP-5), each on its own `m-7/wp-<K>` branch merged into `m-7/common` in
+that order. No parallel wave is approved: WP-2 and WP-3 share the snapshot/ring contract and WP-3 and
+WP-4 share the host/renderer seam, so the AGENTS.md §3.1 dependency/file-overlap check rules out
+running them concurrently. The split is the approved plan, not a proposal; changes require a new
+owner decision and a PR note.
 
 | WP | Branch | Scope | Acceptance |
 | --- | --- | --- | --- |
-| WP-1 | `m-7/wp-1` | Record the §16.0 answers and the later answers as `D-M7-01…`, add supersession markers, update the spec status/answers, mark M7 in progress, link the spec. Docs only. | Docs check; decisions consistent; no code. |
+| WP-1 | `m-7/wp-1` | Record all answers as `D-M7-01…D-M7-27` (Q17=X2 in-place amendments), update the spec status/answers, mark M7 in progress in the README/roadmap, and fix the already-false M6 offscreen statements (Q18). Docs only. | Docs check; decisions consistent; no code. |
 | WP-2 | `m-7/wp-2` | Snapshot model in Engine + capture + public flips (Q2=B1) + the ring in Render (Q1=A1); Q3/Q4/Q5/Q6; deterministic state-machine/stress/capture/allocation tests; dependency/docs. | Ring invariants, capture/flips, 10k stress, no allocations; build/tests/format. |
 | WP-3 | `m-7/wp-3` | Renderer consumption: one frame per snapshot (Q7=G1), minimized drain without GPU work plus the 30 Hz tick cap (Q8/F4), empty instance resources (Q10=J1), fences/suspended/recreation/stop/fatal handling, counters/logs, deterministic fake tests + opt-in GPU handoff tests. | Slots held to fences, no leak/deadlock; validation clean; GPU tests pass locally. |
 | WP-4 | `m-7/wp-4` | Host integration for windowed/offscreen (acquire/publish, blocked-wait errors, shutdown) and the headless K1 loop with L2 synthesized time and M4/F1 pacing (Q11–Q14/F1/F3/F5–F8, Q21), deterministic host/headless tests, docs. | Backpressure/error matrix; headless loop/rate/time; no SDL/Vulkan in headless; suite green. |
 | WP-5 | `m-7/wp-5` | Pong/AOT gate (`--headless --ticks N` per Q15=O2/F3; Q22), publish/run evidence, final docs, full gates, PR. | AOT zero warnings; published runs exit 0; docs/tests/format; PR with evidence. |
 
-Dependencies: WP-1 → WP-2 → WP-3 → WP-4 → WP-5. WP-2 and WP-3 both touch the snapshot/ring contract;
-WP-3 and WP-4 both touch the host/renderer seam, so they are sequential unless the owner approves a
-file-level split (Q23). No branch starts from an ambiguous base.
+Dependencies: WP-1 → WP-2 → WP-3 → WP-4 → WP-5 (Q23=W1, approved). WP-2/WP-3 share the snapshot/ring
+contract and WP-3/WP-4 share the host/renderer seam, so no file-level split was approved; no branch
+starts from an ambiguous base.
+
+All five work packages landed: WP-1–WP-4 are merged into `m-7/common` (`7b4cf5e`, `08e8203`,
+`08cdf2a`, `5bfe31b`) and WP-5 landed on `m-7/wp-5` and is merged by the orchestrator before the
+milestone PR opens. All five WP branches started from the latest `origin/m-7/common` in order; no
+parallel wave ran. As-built evidence is in §18.
 
 ## 13. Acceptance criteria
 
@@ -735,13 +754,13 @@ Reviewer-checkable, mapped to the roadmap exit:
    `git diff --check` pass.
 2. **Dependency/public surface.** No new package/project reference (Q1=A1 uses the existing
    Engine↔Render IVT); `Bork2d.Render` still references only Engine + Vulkan; the only public
-   addition is Q2=B1's `FlipX`/`FlipY` unless Q16 approves more; dependency and public-surface
-   tests agree.
+   addition is Q2=B1's `FlipX`/`FlipY` (Q16=P1); dependency and public-surface tests agree.
 3. **Capture.** Every windowed/offscreen completed tick publishes exactly one immutable snapshot
    after `Tick` (including the `Exit` tick, Q4=D1); cameras/sprites are captured with world
    matrices, camera properties, tint, layer bits (invalid ones as-is, Q3=C2), flips, and the agreed
-   fields; detached nodes are absent; no live entity reference escapes; a fixed-count scene
-   allocates nothing in steady state.
+   fields; slot arrays start empty, grow to the high-water mark, and never shrink (Q6=Z1); detached
+   nodes are absent; no live entity reference escapes; a fixed-count scene allocates nothing in
+   steady state.
 4. **Ring and run-ahead.** All eight slot invariants hold under the deterministic stress; run-ahead
    is structurally bounded (`Ready + Rendering <= 3`, `Rendering <= 2`); newest wins and superseded
    `Ready` snapshots are dropped; every slot ends `Free`.
@@ -749,30 +768,32 @@ Reviewer-checkable, mapped to the roadmap exit:
    deadline, `Sleep`, `SpinWait`, or timed polling is added in the normal path; `WithMaxDeltaTime`
    remains the only clamp; the minimized tick loop is capped at 30 Hz while the suspended renderer
    drains without GPU work (Q8/F4); input edges are not lost while waiting; a 10,000-snapshot stress
-   has no deadlock or slot leak (Q20).
+   has no deadlock or slot leak (Q20=T1: deterministic CI fake-fence stress).
 6. **Renderer.** One frame per consumed snapshot (Q7=G1); a `Rendering` slot is held until its GPU
    fence and then freed; the Q8 suspended path takes/frees without a GPU frame; resize/fullscreen/
    minimize/surface-loss complete without deadlock, leak, or use-after-free; stop with frames in
    flight joins cleanly; validation reports zero errors and zero warnings in the validation-enabled
-   GPU runs.
+   GPU runs; both renderer-level and host-level GPU tests cover the handoff (Q19=S3).
 7. **Headless.** Headless runs the K1 loop with no ring/capture/renderer, never calls SDL or the
    Vulkan loader, honors `Exit`, requires a **positive** `ticksPerSecond` (F6; `0` is a `Build()`
    error), reports the synthesized L2 `ITime` (tick 0 = 0/0, tick N >= 1 = `N/rate` and `1/rate`;
    F5), does not clamp (F7), catches up **unbounded** with system time under the M4 strict grid
-   (Q13/F1/F8/Q21), and publishes no snapshot.
+   (Q13/F1/F8), is covered by the internal clock/wait seam plus one small real-time tolerant test
+   (Q21=U1), and publishes no snapshot.
 8. **Errors.** A renderer fatal/stop while the tick is blocked wakes it (Q9=I1) and produces the
    documented failure with no extra tick and no deadlock; `Tick`/capture failures free the slot;
    `Teardown` runs once when `Setup` succeeded; the M2/M6 precedence is preserved.
 9. **AOT.** `dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-x64` is
    zero-warning/zero-trim-diagnostic; published `--headless` (120 ticks by default), `--headless
-   --ticks N`, `--windowed --ticks 120`, and `--offscreen --ticks 120` exit 0; the publish contents
-   are unchanged.
+   --ticks N`, `--windowed --ticks 120`, and `--offscreen --ticks 120` exit 0; the windowed/offscreen
+   runs also assert one `Setup`/`Teardown` and exactly N ticks, with no frame-count or duration
+   assertion (Q22=V1); the publish contents are unchanged.
 10. **Docs and decisions.** Every doc in §11 reflects the as-built behavior/status; the decision log
-    contains the M7 decisions and the supersession markers; the stale M6 statements (Q18) are fixed
-    or tracked; status markers are honest.
-11. **Tests.** The deterministic suite is green in CI; the opt-in GPU tests pass locally and are
-    recorded in the PR with machine/driver/SDK details and zero validation errors when the layer is
-    available; no sleeps/retries hide flakiness.
+    contains the M7 decisions (`D-M7-01…D-M7-27`) and the in-place revisions (Q17=X2); the stale M6
+    statements (Q18) are fixed or tracked; status markers are honest.
+11. **Tests.** The deterministic suite is green in CI; the opt-in renderer-level and host-level GPU
+    tests pass locally (Q19=S3) and are recorded in the PR with machine/driver/SDK details and zero
+    validation errors when the layer is available; no sleeps/retries hide flakiness.
 12. **Process.** Work packages follow the AGENTS.md loop: one branch each, reviewed diff, wave order
     recorded, no direct `develop` commits, no auto-merge.
 
@@ -789,8 +810,8 @@ Reviewer-checkable, mapped to the roadmap exit:
 | `WithHeadless(0)` becomes a `Build()` error (F6) | A previously valid builder call breaks; docs/tests may still show `0` uncapped | The owner approved the public validation change; update the API reference/guide, runtime-lifecycle, overview, and tests in the same change. |
 | The Q2 flip members are captured but unused until M8 | A public API with no visible effect for one milestone | Docs state it; M8 draws them; Pong is unaffected. |
 | Capture cost/allocations in the tick | Frame-time regression; GC pressure | Pooled arrays; no LINQ/boxing; allocation test; measure before/after; M8 owns the large-scene target. |
-| The snapshot model locks M8 into a bad shape | Rework in M8 | Q1/Q2 are answered; Q5 stays open; keep the model value-only and asset-agnostic; M8 can add fields without a public break. |
-| GPU test rewrites lose coverage | Handoff bugs slip | Q19 keeps renderer-level + host-level coverage; PR records the GPU evidence. |
+| The snapshot model locks M8 into a bad shape | Rework in M8 | Q1/Q2/Q5 are answered (A1/B1/E1); keep the model value-only and asset-agnostic; M8 can add fields without a public break. |
+| GPU test rewrites lose coverage | Handoff bugs slip | Q19=S3 keeps renderer-level + host-level coverage; PR records the GPU evidence. |
 | Documentation drift across five docs plus XML | Review friction | §11 checklist, docs link check, same-change rule, Q18. |
 | The milestone is judged on frame counts that handoff makes nondeterministic | Flaky/flat-out wrong tests | Evidence is relationships/counters, not wall-clock or exact frame equality (Q19/Q22). |
 
@@ -809,8 +830,11 @@ Reviewer-checkable, mapped to the roadmap exit:
 
 ### 16.0 Owner answers received (2026-10-31)
 
-Twenty-two answers were given; the rest are still open. These are owner decisions for M7, recorded here
-before WP-1 moves them into the [decision log](../decisions.md) as `D-M7-01…`.
+All twenty-three questions and the eight follow-ups were answered by the owner on 2026-10-31. WP-1
+recorded them in the
+[decision log](../decisions.md#m7-frame-handoff-and-pacing-decisions-approved-2026-10-31) as
+`D-M7-01…D-M7-27`; this table keeps the answered register for traceability, and the decision log is
+the authoritative wording.
 
 | ID | Answer | Recorded detail |
 | --- | --- | --- |
@@ -819,6 +843,7 @@ before WP-1 moves them into the [decision log](../decisions.md) as `D-M7-01…`.
 | Q3 | **C2** — capture, skip at draw | Invalid layers (`0`/multi-bit) are captured as-is; M8 skips them at draw time with the diagnostic. M7 adds no capture-time skip. |
 | Q4 | **D1** — publish the final snapshot | A tick that requests `Exit` still publishes; the renderer may render one final frame. No-publish is reserved for a `Tick`/capture exception. |
 | Q5 | **E1** — Threading §3 camera fields | `CameraSnapshot` is exactly `ZIndex`, world matrix, `Size`, `Viewport`, `CullingMask`, `Clear`, `ClearColor`; M8 derives the view/projection. |
+| Q6 | **Z1** — start empty, grow, never shrink | Each slot's camera/sprite arrays start empty and grow to the high-water mark on first capture; they never shrink. Arrays are slot-private, and steady state allocates nothing. |
 | Q7 | **G1** — one frame per snapshot | One GPU frame per consumed snapshot; the renderer waits when no `Ready` snapshot exists; no repeat/re-present. The window updates at the tick/capture rate; the tick is backpressured by the GPU. |
 | Q8 | **H1 + 30 Hz minimized tick cap** | The renderer keeps consuming/freeing the newest snapshot without GPU work while minimized, and **the windowed tick loop is throttled to 30 Hz while minimized** (F4 = tick-loop only). Ticks continue, at ≤30 Hz. **Recorded interpretation:** the 30 Hz throttle is producer-side and minimized-only; the suspended renderer still drains/frees without a GPU frame, and the wait reuses the F1 primitive (pure `Thread.Sleep`). |
 | Q9 | **I1** — wake and fail | A blocked producer wakes on a renderer fatal/stop/exit signal, returns failure, and the host reports the fatal at that boundary with zero extra ticks, runs `Teardown` once, joins, and rethrows. |
@@ -828,6 +853,14 @@ before WP-1 moves them into the [decision log](../decisions.md) as `D-M7-01…`.
 | Q13 | **M4** — strict grid with catch-up | Absolute deadline grid from the system clock: tick N is due at `start + N × period`; when behind, missed ticks run back-to-back until the synthesized time catches up with the schedule (unbounded, F8). The wait is **pure `Thread.Sleep`** (F1); with L2 every tick's synthetic step advances both `Time` and `DeltaTime`, so F2 is subsumed. |
 | Q14 | **N1** — integer rate | `ticksPerSecond` stays an `int`; F6 requires it to be positive in headless (no fractional public rate, no uncapped `0`). |
 | Q15 | **O2** — `--headless --ticks N` | `Pong.Desktop` gains a headless tick count with a **default of 120** (F3); `--headless --ticks N` overrides. `PongArguments`, usage, and `PongArgumentsTests` change. |
+| Q16 | **P1** — no other public addition | No public addition besides `FlipX`/`FlipY` (Q2=B1): behavior changes and internal counters/logs only; no public diagnostic, frame, or snapshot API. |
+| Q17 | **X2** — amend older entries in place | The M7-affected older decision entries are amended in place to the M7 behavior with a `(revised by D-M7-xx, owner Q17=X2)` note; original IDs and history stay. Owner-approved exception to the append-only rule, recorded as D-M7-17. |
+| Q18 | **R1** — fix in M7's docs work | Fix the stale `IEngine.Time`/`Exit` XML docs and the already-false reference/guide/runtime-lifecycle/overview offscreen statements inside M7's documentation work; no separate docs-fix branch. Headless one-tick statements stay accurate until WP-4/WP-5 land. |
+| Q19 | **S3** — both test levels | Renderer-level opt-in GPU tests with a test-only snapshot source plus host-level `Bork2dApp` handoff tests; relationships only (frames > 0, frames ≤ ticks, zero validation errors, clean shutdown), never wall-clock or exact frame-count equality. |
+| Q20 | **T1** — deterministic 10k stress in CI | A deterministic 10,000-snapshot stress with a fake consumer/fences (slot invariants, max live ≤ 3, no leak, bounded joins) runs in CI; no GPU 10k stress in M7. |
+| Q21 | **U1** — seam plus one real-time test | An internal clock/wait seam drives deterministic headless schedule tests, plus one small real-time tolerant test for the actual pacer; no exact frame counts/durations and no sleeps hidden by retries. |
+| Q22 | **V1** — keep gate commands, assert exit 0 | Keep `--windowed --ticks 120` and `--offscreen --ticks 120`; assert exit 0, one `Setup`/`Teardown`, exactly N ticks, and no validation errors; no frame-count or duration assertions; document the longer runtime. |
+| Q23 | **W1** — the five sequential WPs | Approve the five sequential work packages (docs → snapshot/ring → renderer → host+headless → gate/docs/PR) in merge order WP-1 → WP-5; no parallel wave. |
 | F5 | **First tick 0/0** | Tick 0 reports `Time = DeltaTime = 0`; tick N >= 1 reports `Time = N / rate` and `DeltaTime = 1 / rate`. |
 | F6 | **Positive headless rate** | `ticksPerSecond` must be `> 0` in headless; `0` (and negative) is rejected by `Build()`. **Supersedes D-017's `0` uncapped headless rate.** |
 | F7 | **No clamp** | `WithMaxDeltaTime` does not clamp the synthesized headless `DeltaTime`; the step is exact even below 4 Hz. |
@@ -850,7 +883,7 @@ be positive (F6), `WithMaxDeltaTime` does not clamp (F7), and catch-up is unboun
 | Q3 | Invalid layer at capture or at draw | **C2** | WP-2, §6.3 |
 | Q4 | Final snapshot on `Exit` | **D1** | WP-2/4, §6.5 |
 | Q5 | Camera snapshot field set | **E1** | WP-2, §6.3/M8 |
-| Q6 | Slot array capacity policy | open | WP-2, §6.3/§6.9 |
+| Q6 | Slot array capacity policy | **Z1** | WP-2, §6.3/§6.9 |
 | Q7 | One frame per snapshot vs repeat the newest | **G1** | WP-3, §6.6 |
 | Q8 | Suspended consumption while minimized/recreating | **H1 + 30 Hz tick cap** | WP-3, §6.6 |
 | Q9 | Waking a blocked tick on renderer fatal/stop/exit | **I1** | WP-3/4, §6.8 |
@@ -860,17 +893,19 @@ be positive (F6), `WithMaxDeltaTime` does not clamp (F7), and catch-up is unboun
 | Q13 | Pacing mechanism, accuracy, sleep, interruptibility | **M4 + F1** (F2 subsumed; F8) | WP-4, §6.7 |
 | Q14 | Integer vs fractional `ticksPerSecond` | **N1** | WP-4, §6.7 |
 | Q15 | Pong headless AOT-gate termination | **O2 + F3** | WP-5, §10 |
-| Q16 | Public API additions in M7 | open (Q2=B1 is in) | WP-1/5, §7 |
-| Q17 | Decision-log supersessions and new M7 entries | open | WP-1, §11 |
-| Q18 | Stale M6 statements (XML/reference/guide/overview) | open | WP-1/5, §3.3/§11 |
-| Q19 | GPU test strategy under handoff | open | WP-3/5, §9 |
-| Q20 | 10k-frame stress: deterministic, GPU, or both | open | WP-2/3, §9 |
-| Q21 | Headless pacing test strategy/tolerance | open | WP-4, §9 |
-| Q22 | Windowed/offscreen AOT-gate assertions/duration | open | WP-5, §10 |
-| Q23 | Work-package split/parallelism approval | open | WP plan, §12 |
+| Q16 | Public API additions in M7 | **P1** (Q2=B1 is in) | WP-1/5, §7 |
+| Q17 | Decision-log supersessions and new M7 entries | **X2** | WP-1, §11 |
+| Q18 | Stale M6 statements (XML/reference/guide/overview) | **R1** | WP-1/5, §3.3/§11 |
+| Q19 | GPU test strategy under handoff | **S3** | WP-3/5, §9 |
+| Q20 | 10k-frame stress: deterministic, GPU, or both | **T1** | WP-2/3, §9 |
+| Q21 | Headless pacing test strategy/tolerance | **U1** | WP-4, §9 |
+| Q22 | Windowed/offscreen AOT-gate assertions/duration | **V1** | WP-5, §10 |
+| Q23 | Work-package split/parallelism approval | **W1** | WP plan, §12 |
 
-**Follow-ups F5–F8 are answered** (first tick 0/0, positive rate, no clamp, unbounded catch-up);
-F6 supersedes D-017's `0` uncapped headless rate.
+**All rows are answered.** Follow-ups F5–F8: first tick 0/0, positive rate, no clamp, unbounded
+catch-up; F6 supersedes D-017's `0` uncapped headless rate. The decisions are recorded in the
+[decision log](../decisions.md#m7-frame-handoff-and-pacing-decisions-approved-2026-10-31) as
+`D-M7-01…D-M7-27`.
 
 
 ### A. Snapshot ownership and capture
@@ -920,7 +955,7 @@ matrix, `Size`, `Viewport`, `CullingMask`, `Clear`, `ClearColor`) and M8 derives
 pixel rect for the current framebuffer. (M7 does not draw; the choice shapes the M8 handoff and the
 capture cost.)
 
-**Q6 — Slot array capacity.** Options: **Z1** start empty, grow to the high-water mark, never shrink;
+**Q6 — Slot array capacity.** **Answered 2026-10-31: Z1 — see §16.0.** Options: **Z1** start empty, grow to the high-water mark, never shrink;
 **Z2** preallocate a fixed default (e.g. 64 cameras / 1024 sprites) and grow if exceeded; **Z3** a
 configurable capacity with a hard overflow error (internal option). Requirement: no steady-state
 allocation; the first growth may allocate.
@@ -988,7 +1023,8 @@ unbounded) — see §16.0.** Options: **M1** absolute deadline grid from a monot
 sub-millisecond, rebase after an overrun, `Exit`-interruptible; **M2** relative `Sleep(period)` after
 each tick (drifts by the tick cost); **M3** an OS waitable/periodic timer; **M4** strict grid with
 catch-up bursts. F1 chose pure `Thread.Sleep` (no spin); L2 makes every tick's `Time`/`DeltaTime`
-synthesized, subsuming F2. F8 is answered (unbounded catch-up); Q21 (test tolerance) is open.
+synthesized, subsuming F2. F8 is answered (unbounded catch-up); Q21=U1 answers the test tolerance
+(internal seam plus one small real-time tolerant test).
 
 **Q14 — Rate type.** **Answered 2026-10-31: N1 — see §16.0.**
 **N1** keep `int ticksPerSecond` (`0` uncapped; roadmap §9 default); **N2** add a
@@ -1006,12 +1042,12 @@ runtime for headless (conflicts with Q11).
 
 ### D. Public surface, decisions, docs
 
-**Q16 — Public API additions in M7.** The flips are already approved (Q2=B1), so this question is
+**Q16 — Public API additions in M7.** **Answered 2026-10-31: P1 — see §16.0.** The flips are already approved (Q2=B1), so this question is
 about anything beyond them. Options: **P1** no other public addition (behavior only; internal
 counters/logs); **P2** also add public diagnostic counters or render/frame info; **P3** also add a
 public frame/snapshot info API (otherwise deferred).
 
-**Q17 — Decision-log changes and supersessions.** Answers become `D-M7-01…`. M7 at least revises
+**Q17 — Decision-log changes and supersessions.** **Answered 2026-10-31: X2 — see §16.0.** Answers become `D-M7-01…`. M7 at least revises
 D-M2-01's headless clause (its offscreen clause was already superseded by D-M6-07), D-M6-01
 (continuous decoupled frames), D-M6-12 (offscreen uncapped/GPU-fence), D-028's headless clause,
 D-017's `0` uncapped headless rate (F6), and overview invariant 18. Options: **X1** add new
@@ -1019,7 +1055,7 @@ D-017's `0` uncapped headless rate (F6), and overview invariant 18. Options: **X
 rule); **X2** amend the older entries in place; **X3** add only the new entries and leave the old
 wording with a spec note.
 
-**Q18 — Stale M6 statements.** Fix the `IEngine.Time`/`Exit` XML docs and the outdated
+**Q18 — Stale M6 statements.** **Answered 2026-10-31: R1 — see §16.0.** Fix the `IEngine.Time`/`Exit` XML docs and the outdated
 reference/guide/runtime-lifecycle/overview/README/roadmap wording (§3.3) during M7's docs work, or as
 a separate docs-only change now? Options: **R1** fix in M7's documentation WP (same-change rule);
 **R2** land a separate docs fix before M7; **R3** only the API XML/reference/guide now, defer the rest
@@ -1027,34 +1063,34 @@ to the milestone landing.
 
 ### E. Tests and evidence
 
-**Q19 — GPU test strategy under handoff.** Options: **S1** rewrite the GPU tests at the host level
+**Q19 — GPU test strategy under handoff.** **Answered 2026-10-31: S3 — see §16.0.** Options: **S1** rewrite the GPU tests at the host level
 (real `Bork2dApp` + a test game that ticks/exits) and assert relationships (frames > 0, frames ≤
 ticks, no validation errors, clean shutdown), plus a direct renderer test fed by snapshots; **S2**
 keep renderer-level tests with a test-only snapshot source and add one host-level handoff test;
 **S3** both. No wall-clock or exact frame-count equality; bounded counter waits only.
 
-**Q20 — 10k-frame stress.** **T1** deterministic CI test with a fake consumer/fences (slot
+**Q20 — 10k-frame stress.** **Answered 2026-10-31: T1 — see §16.0.** **T1** deterministic CI test with a fake consumer/fences (slot
 invariants, max live ≤ 3, no leak, joins); **T2** T1 plus an opt-in GPU 10k stress; **T3** GPU-only
 (not CI; likely flaky/slow).
 
-**Q21 — Headless pacing tests.** **U1** an internal clock/wait seam for deterministic schedule tests
+**Q21 — Headless pacing tests.** **Answered 2026-10-31: U1 — see §16.0.** **U1** an internal clock/wait seam for deterministic schedule tests
 plus one small real-time tolerant test; **U2** the deterministic seam only (the real pacer is proven
 by the AOT gate exiting 0); **U3** real-time only with loose tolerances. Include the tolerance and
 whether the test may use real waits.
 
-**Q22 — Windowed/offscreen AOT gate under backpressure.** **V1** keep the commands and assert exit 0,
+**Q22 — Windowed/offscreen AOT gate under backpressure.** **Answered 2026-10-31: V1 — see §16.0.** **V1** keep the commands and assert exit 0,
 one `Setup`/`Teardown`, exactly N ticks, no validation errors; no frame-count or duration
 assertions; document the longer runtime; **V2** reduce the tick counts to keep the gate fast; **V3**
 add frame-count assertions (fragile; not recommended unless deliberately chosen).
 
-**Q23 — Work-package split/parallelism.** **W1** the proposed 5 WPs, sequential (docs → snapshot/ring
+**Q23 — Work-package split/parallelism.** **Answered 2026-10-31: W1 — see §16.0.** **W1** the five WPs, sequential (docs → snapshot/ring
 → renderer → host+headless → gate/docs/PR); **W2** split headless pacing into its own WP after the
 ring and run it in parallel with the renderer WP (needs the file-overlap check; the host loop is
 shared, so likely still sequential); **W3** a different split (owner specifies).
 
 ## 17. Related documents
 
-- [Roadmap](../roadmap.md#5-milestone-detail) — M7 definition, sequence, open decisions, status.
+- [Roadmap](../roadmap.md#5-milestone-detail) — M7 definition, sequence, decisions, status.
 - [Threading](../architecture/threading.md#4-triple-buffer-handoff) — snapshot ring, slots, fences,
   bounded run-ahead.
 - [Rendering](../architecture/rendering.md#9-synchronization-and-presentation) — frame structure,
@@ -1070,8 +1106,188 @@ shared, so likely still sequential); **W3** a different split (owner specifies).
 - [Logging](../architecture/logging.md#5-categories) — categories and M7 events.
 - [API reference](../api/reference.md#12-runtime-surface) — builder/app contract; headless/time.
 - [API guide](../api/guide.md#modes) — modes and game-loop guidance.
-- [Decision log](../decisions.md) — accepted decisions; M7 entries are added by WP-1.
+- [Decision log](../decisions.md) — accepted decisions; the M7 entries `D-M7-01…D-M7-27` were recorded by WP-1.
 - [M6 spec](m6-vulkan-bringup.md#18-as-built-evidence-2026-10-30) — the renderer baseline and its
   as-built evidence.
 - [Pong example spec](pong-example.md#12-as-built-evidence) — the AOT gate and its evidence format.
 - [Contributing](../contributing.md) — gates, tests, docs checklist.
+
+## 18. As-built evidence (2026-10-31)
+
+M7 was implemented on `m-7/common` from the M6-finalized `develop` baseline (`d37c02a`) as the five
+owner-approved sequential work packages (Q23=W1). It is **implemented and ready for review**; the
+milestone PR `m-7/common` → `develop` is opened by the orchestrator and is **not merged**, so this
+section records local evidence, not a merge. The milestone is done only when the §13 checklist is
+reviewed and the human approves the PR.
+
+### 18.1 Work packages and branch history
+
+| WP | Branch | Head | Merged into `m-7/common` | Delivered |
+| --- | --- | --- | --- | --- |
+| WP-1 | `m-7/wp-1` | `5f09167` | `7b4cf5e` | Recorded `D-M7-01…D-M7-27`, the spec status/answers, the README/roadmap in-progress markers, and the already-false M6 offscreen statements (Q18). Docs only. |
+| WP-2 | `m-7/wp-2` | `43241a8` | `08e8203` | Internal `FrameSnapshot`/`CameraSnapshot`/`SpriteSnapshot` and the capture pass, public `FlipX`/`FlipY` (Q2=B1), the three-slot ring in `Bork2d.Render` (Q1=A1), and deterministic ring/stress/capture/allocation tests. |
+| WP-3 | `m-7/wp-3` | `016f9f8` | `08cdf2a` | Renderer consumption: one frame per snapshot (Q7=G1), fence-held slots, suspended minimized drain plus the 30 Hz tick cap (Q8/F4), empty per-frame instance resources (Q10=J1), counters/logs, deterministic and opt-in GPU handoff tests. |
+| WP-4 | `m-7/wp-4` | `97a76e7` | `5bfe31b` | Host acquire/capture/publish for windowed/offscreen, the blocked-wait error matrix (Q9=I1), the paced headless K1 loop with L2 synthesized time and M4/F1 pacing, deterministic host/headless tests, docs. |
+| WP-5 | `m-7/wp-5` | this change | orchestrator merge before the PR opens | Pong `--headless` 120-tick default and `--headless --ticks N` override (Q15=O2/F3), the three-mode AOT evidence (Q22=V1), final status/docs, and the PR evidence draft. |
+
+No parallel wave ran: every WP branch started from the latest `origin/m-7/common` in merge order
+WP-1 → WP-5 and was merged with `--no-ff`. WP-5 changes no engine behavior or public API; it changes
+the Pong CLI/tests and documentation only.
+
+### 18.2 Build, test, and static gates
+
+```powershell
+dotnet build src/Bork2d/Bork2d.slnx -c Debug
+dotnet build src/Bork2d/Bork2d.slnx -c Release
+dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build
+dotnet build examples/pong/Pong.slnx -c Debug
+dotnet build examples/pong/Pong.slnx -c Release
+dotnet test examples/pong/Pong.slnx -c Debug
+dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
+dotnet format examples/pong/Pong.slnx --verify-no-changes --no-restore
+pwsh scripts/check-docs.ps1
+git diff --check
+```
+
+- Engine suite (`src/Bork2d/Bork2d.slnx`): **1158 tests = 1141 deterministic + 17
+  opt-in/conditional** (9 `[WindowFact]`, 3 reparse-point capability, 5 `[GpuFact]`). The Debug run
+  reports `Failed: 0, Passed: 1141, Skipped: 17, Total: 1158`.
+- `Pong.Tests`: **46 tests**, all passing; the lifecycle test supplies an explicit tick limit so the
+  K1 loop terminates (3 ticks), and the linked `PongArgumentsTests` covers the 120-tick default, the
+  override, and the headless malformed/duplicate cases.
+- Debug and Release builds of both solutions: **0 warnings, 0 errors**.
+- `dotnet format --verify-no-changes` (both solutions), `pwsh scripts/check-docs.ps1`, and
+  `git diff --check`: clean.
+- No test sleeps or retries hide flakiness. The single real-time wait is the tolerant pacer test
+  `HeadlessPacingRealTimeTests.RealPacerHonorsTheConfiguredRateWithinATolerantWindow` (Q21=U1); all
+  other timing uses the internal clock/wait seam.
+
+### 18.3 Real-GPU and real-window evidence
+
+Machine: Windows 11 Pro 10.0.26300; AMD Ryzen AI MAX+ 395 w/ Radeon 8060S; GPU **AMD Radeon(TM) 8060S
+Graphics** (integrated, vendor `0x1002`, device `0x1586`), Windows driver **32.0.32015.7029**;
+Vulkan device API **1.4.359**, driver version `2.0.416`; Vulkan loader/SDK **1.4.363.0** with
+`VK_LAYER_KHRONOS_validation` **1.4.363** present; .NET SDK `11.0.100-rc.1.26425.128`.
+
+```powershell
+$env:BORK2D_RUN_GPU_TESTS = '1'
+dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build --filter "Category=Gpu"
+Remove-Item Env:BORK2D_RUN_GPU_TESTS
+# Passed! - Failed: 0, Passed: 5, Skipped: 0, Total: 5
+```
+
+The five `[GpuFact]` tests run with validation enabled and assert zero validation errors and
+warnings:
+
+- `Render.Vulkan.WindowedRendererGpuTests.WindowedRendererConsumesOneSnapshotPerFrameAndStopsCleanly`
+  — a real SDL window/instance/surface, one frame per consumed snapshot, resize/fullscreen/minimize,
+  a bounded stop/join, and zero validation errors/warnings.
+- `Render.Vulkan.OffscreenRendererGpuTests.OffscreenRendererConsumesOneSnapshotPerDiscardedFrameAndStopsCleanly`
+  — a 320×240 sRGB target, one discarded frame per consumed snapshot, no surface/swapchain, and zero
+  validation errors/warnings.
+- `Render.Vulkan.GpuDeviceBootstrapTests.OffscreenInstanceAndDeviceSelectionAreValidationClean` —
+  validation-enabled instance/device selection with the required features and extensions.
+- `Runtime.WindowedAppGpuTests.WindowedAppPresentsPerTickAndStopsTheValidatedRendererCleanly` — the
+  real `Bork2dApp` windowed host publishes per tick through the renderer and stops cleanly.
+- `Runtime.OffscreenAppGpuTests.OffscreenAppPublishesPerTickAndStopsTheValidatedRendererCleanly` —
+  `WithOffscreen(320, 240)` + `WithValidation(true)`, per-tick publication, advanced `ITime`, a
+  joined renderer, and zero validation errors/warnings.
+
+The nine `[WindowFact]` real-window tests and three reparse-point tests remain opt-in/conditional
+and are skipped by default (17 skips above). Release AOT runs leave Vulkan validation off by default;
+the Debug `[GpuFact]` run is the strict validation evidence.
+
+### 18.4 AOT publish and the four published runs
+
+```powershell
+dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-x64 --nologo
+# exit 0; 0 warnings, 0 errors, zero AOT/trim diagnostics
+```
+
+The publish directory contains exactly `Pong.Desktop.exe` (8,243,200 bytes), `assets.pck` (973),
+`SDL2.dll` (1,702,400), `Pong.Desktop.pdb` (38,924,288), `Pong.Common.pdb` (27,172),
+`Bork2d.Engine.pdb` (70,416), `Bork2d.Render.pdb` (48,876), and `Bork2d.Runtime.pdb` (39,424). It
+contains no `vulkan-1.dll` (the system loader), no `Pong.Assets` or `Bork2d.Bake` assembly, and no
+Tomlyn or StbImageSharp assembly. NativeAOT single-file links the managed assemblies;
+`Pong.Common.pdb` is the on-disk proof that the game assembly is in the graph.
+
+| Published run | Result |
+| --- | --- |
+| `--headless` | exit 0; `setup/tick/teardown=1/120/1`, `tickLimit=120`, `entries=7`, paddle 16×96 (6144 raw bytes), ball 64×64 (16384 raw bytes), world detached; ~2.0 s (log `elapsedSeconds=2.006` at 60 Hz). |
+| `--headless --ticks 7` | exit 0; `setup/tick/teardown=1/7/1`, `tickLimit=7`, `entries=7`, same asset chain; ~0.2 s (log `elapsedSeconds=0.124`). |
+| `--windowed --ticks 120` | exit 0; `setup/tick/teardown=1/120/1`, `tickLimit=120`; SDL 2.30.8, 1280×720, `B8G8R8A8Srgb`, FIFO, 3 images; renderer `snapshotsPublished=120`, `snapshotsConsumed=1`, `snapshotsSuperseded=118`, `backpressureWaits=0`, `maxLiveSnapshots=3`, `framesPresented=1`, zero validation errors/warnings; log `elapsedSeconds=0.109`. |
+| `--offscreen --ticks 120` | exit 0; `setup/tick/teardown=1/120/1`, `tickLimit=120`; 1280×720 `R8G8B8A8Srgb`, 2 images, 7,913,472 target bytes; `snapshotsPublished=120`, `snapshotsConsumed=1`, `snapshotsSuperseded=118–119`, `backpressureWaits=0`, `maxLiveSnapshots=2–3`, `framesDiscarded=1`, zero validation errors/warnings; log `elapsedSeconds=0.093`. |
+
+The published `--headless` run logs `mode=Headless`, the 7-entry pack, and no SDL/Vulkan/platform or
+renderer line (`validation=passed` is the builder validation, not Vulkan validation), and the publish
+contains no `vulkan-1.dll`: the headless path never loads the loader. The windowed gate creates the
+window/instance/surface and presents one black clear; the offscreen gate clears/discards one frame.
+Sprites arrive in M8, so the window stays black.
+
+**Known short-run observation (Q22).** The 120-tick windowed/offscreen gates publish exactly 120
+snapshots but only the first is consumed (`snapshotsConsumed=1`; the rest are superseded): the short
+acceptance run calls `Exit` at tick 120 and stops/joins the renderer before it catches up, so
+published-vs-consumed is not a steady-state relationship. No frame count or duration is asserted
+(Q22=V1). Steady-state one-frame-per-snapshot coupling, bounded run-ahead, backpressure, and
+slot-to-fence lifetime are covered by the deterministic ring/consumer tests and the opt-in GPU
+handoff tests (30+ frames), not by the short AOT gate.
+
+### 18.5 Ring, capture, and run-ahead evidence
+
+- `Render.SnapshotRingTests` — the eight slot invariants, newest-wins supersession, `latest` clearing,
+  the producer blocking exactly when `Free == 0`, release at fence observation, and every slot `Free`
+  after stop/fatal.
+- `Render.SnapshotRingStressTests.ScriptedTenThousandSnapshotStressKeepsTheInvariants` and
+  `.ConcurrentTenThousandSnapshotStressHasNoLeakOrLostNewest` — the Q20=T1 10,000-snapshot
+  deterministic stress: bounded run-ahead (`Ready + Rendering <= 3`), no slot leak, no lost newest,
+  bounded joins, clean stop.
+- `Render.SnapshotConsumerTests` and `Render.SnapshotControlWaitTests` — fence-held slot lifetime,
+  the minimized drain without GPU work, the combined snapshot/control wait, and stop/fatal wakes.
+- `Rendering.SnapshotCaptureTests`, `Rendering.FrameSnapshotTests`, `Scene.SpriteFlipTests`, and
+  `Rendering.SnapshotAllocationTests.WarmCapturePublishTakeReleaseAllocatesNothing` — capture fields
+  and world matrices, invalid layers captured as-is (Q3=C2), flips (Q2), the Q6=Z1 high-water
+  capacity, and zero steady-state allocation.
+- `Runtime.HostHandoffTests`, `Runtime.MinimizedTickCapTests`, `Runtime.HeadlessLoopTests`,
+  `Runtime.SynthesizedTimeTests`, and `Runtime.HeadlessPacingRealTimeTests` — acquire → freeze →
+  time → tick → capture → publish order, the blocked-wait error matrix, the minimized-only 30 Hz
+  cap, the K1 loop (`Exit`, Setup-time Exit, error precedence), the L2 synthesized values and F7
+  no-clamp rule, unbounded catch-up (F8), and the tolerant real-pacer check (Q21=U1).
+- `Scene.GameEngineExitTests` and the public-surface/dependency tests confirm `Exit` behavior and no
+  new project/package or public type beyond Q2=B1.
+
+### 18.6 Documentation, decisions, and status
+
+- The M7 decision section was updated from "implementation in progress" to **implemented; PR
+  open/awaiting review** with no decision changes (`D-M7-01…D-M7-27` and the Q17=X2 in-place
+  revisions stand).
+- The spec, `docs/README.md`, `docs/roadmap.md`, `docs/contributing.md`, the Pong spec, and the
+  architecture/API docs now describe the as-built behavior and the honest M7 status
+  (implemented, PR open/awaiting human review, **not merged**). The stale one-tick/uncapped/`0`
+  statements are reconciled, and the intermediate WP-4/WP-5 notes are removed.
+- The API reference/guide and the `IEngine`/`ITime`/`Bork2dApp`/`Bork2dAppBuilder` XML docs carry the
+  final M7 wording; WP-5 changes no behavior or public API.
+- `Pong.Desktop --headless` now defaults to 120 ticks and accepts `--headless --ticks N`; the usage,
+  `PongArguments` XML docs, `PongArgumentsTests`, and the Pong spec as-built section were updated
+  together. `--windowed --ticks 120` and `--offscreen --ticks 120` are unchanged (Q22=V1).
+
+### 18.7 Deviations, risks, and known limitations
+
+- **Minimized 30 Hz cap is the only timer exception** in windowed/offscreen (Q8/F4); the normal
+  windowed/offscreen path has no target rate, deadline, or `Sleep`. Headless pacing is the separate
+  AGENTS §8 headless-timer exception (Q13=M4/F1).
+- **Short AOT gate vs. steady state.** The published 120-tick windowed/offscreen runs consume one
+  snapshot and supersede the rest (see 18.4). This is expected for a short acceptance run and is not
+  hidden as a frame-count assertion; steady-state backpressure is covered deterministically.
+- **Q10=J1 binding-0-only interpretation.** M7 creates the per-frame instance SSBO and frame
+  descriptor set with binding 0 only and no descriptor updates; M8 adds the bindless binding/pages,
+  pipeline, draws, and instance writes.
+- **Q17=X2 in-place amendments.** The affected older decisions (D-003, D-004, D-017, D-M2-01,
+  D-M2-16, D-028, D-032, D-M6-01, D-M6-12, D-M6-18) carry `(revised by D-M7-xx, owner Q17=X2)` notes;
+  no `Superseded by` rows were added for them, as approved.
+- **Release validation is off** in the AOT gate by default; the strict validation evidence is the
+  Debug `[GpuFact]` run (18.3). No GPU/AOT job exists in CI; both are local gates (D-M6-05).
+- **Examples Release build mapping.** `dotnet build examples/pong/Pong.slnx -c Release` builds the
+  external engine project references in Debug (the `.slnx` has no configuration mapping outside
+  `examples/pong`); the direct Release AOT publish is the Release proof.
+- **Known limitations.** The renderer still draws only the opaque-black clear (sprites, sorting, and
+  draws are M8); headless has no renderer; the milestone is pre-merge and awaits human review.

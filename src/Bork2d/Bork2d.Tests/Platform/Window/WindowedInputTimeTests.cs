@@ -164,29 +164,36 @@ public sealed class WindowedInputTimeTests
     }
 
     [Fact]
-    public void HeadlessModeNeverAdvancesTheClock()
+    public void HeadlessFirstTickIsZeroAndLaterTicksUseTheSynthesizedStep()
     {
-        double? time = null;
-        double? delta = null;
+        var clock = new FakeSchedulerClock();
+        var times = new List<double>();
+        var deltas = new List<double>();
         var game = new ScriptedGame<GameLayer>();
         game.OnTick = () =>
         {
             var engine = game.Engine!;
-            time = engine.Time.Time;
-            delta = engine.Time.DeltaTime;
+            times.Add(engine.Time.Time);
+            deltas.Add(engine.Time.DeltaTime);
+            if (game.TickCount == 3)
+            {
+                engine.Exit();
+            }
         };
 
         using var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithoutAssets()
-            .WithHeadless()
+            .WithHeadless(ticksPerSecond: 20)
+            .WithSchedulerClock(clock)
             .WithFakeGraphics()
             .Build();
         app.Run();
 
-        Assert.Equal(0d, time);
-        Assert.Equal(0d, delta);
-        Assert.Equal(1, game.TickCount);
+        Assert.Equal([0d, 0.05d, 0.1d], times);
+        Assert.Equal([0d, 0.05d, 0.05d], deltas);
+        Assert.Equal(1, game.SetupCount);
+        Assert.Equal(3, game.TickCount);
         Assert.Equal(1, game.TeardownCount);
     }
 

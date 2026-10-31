@@ -6,6 +6,9 @@
 > 2026-10-26)**; **M4 (serialization and bake) merged into `develop` (2026-10-27, PR #7), including
 > the D-M4-13 per-source type/location-free revision and the D-M4-14/D-M4-15 multi-pack revision.**
 > **M6 (Vulkan bring-up) merged into `develop` (2026-10-31, PR #11, merge `5de725c`).**
+> **M7 (frame handoff and pacing) is implemented on `m-7/common`; the ready-for-review PR is
+> open/awaiting human review and is not merged.** Evidence:
+> [M7 spec §18](specs/m7-frame-handoff.md#18-as-built-evidence-2026-10-31).
 > The sequence is dependency-ordered.
 > A milestone is done when its exit criterion is demonstrated, not merely when code is merged.
 >
@@ -45,16 +48,16 @@
 | Area | State | Notes |
 | --- | --- | --- |
 | Build | Green | SDK `11.0.100-rc.1`, `net11.0`, zero warnings/errors in Debug and Release; `dotnet format` clean. |
-| `Bork2d.Engine` | Current | Public contract for engine, game, time, window, input, assets, camera, sprite, transform, root, `ZIndex`, `Bork2dException`, `AssetInfo`, `AssetException`/`AssetErrorKind`, the public asset model (`SpriteAsset`, `TextureDescriptor`, `TextureFormat`, `TextureFilter`, `TextureWrap`, `SpriteTopology`, `AssetRef<T>`, `DataRef`), the full `KeyCode` scancode set, and five `MouseButton` members; plus the root-owned unordered scene tree, transforms (degrees normalized), structural/per-object locks, time wrapper, layer validation, MessagePack shape policy, v1 pack reader/writer, canonical paths, base/overlay VFS, one loader thread, and generic pack-time reference validation. Snapshot structs are M7. |
-| `Bork2d.Runtime` | Current (M6) | Builder, validation, app-owned logging, SDL windowed host (window/input/time), Vulkan instance/surface and renderer composition, windowed/offscreen loops, headless one-tick host, `Exit`/`Dispose`/post-shutdown contract, and the app-scoped asset-service lifecycle. |
+| `Bork2d.Engine` | Current | Public contract for engine, game, time, window, input, assets, camera, sprite, transform, root, `ZIndex`, `Bork2dException`, `AssetInfo`, `AssetException`/`AssetErrorKind`, the public asset model (`SpriteAsset`, `TextureDescriptor`, `TextureFormat`, `TextureFilter`, `TextureWrap`, `SpriteTopology`, `AssetRef<T>`, `DataRef`), the full `KeyCode` scancode set, and five `MouseButton` members; plus the root-owned unordered scene tree, transforms (degrees normalized), structural/per-object locks, time wrapper, layer validation, MessagePack shape policy, v1 pack reader/writer, canonical paths, base/overlay VFS, one loader thread, generic pack-time reference validation, and the M7 internal snapshot model/capture plus public `FlipX`/`FlipY` (Q2=B1). |
+| `Bork2d.Runtime` | Current (M6/M7) | Builder, validation, app-owned logging, SDL windowed host (window/input/time), Vulkan instance/surface and renderer composition, windowed/offscreen loops with snapshot acquire/capture/publish and ring backpressure, paced headless host (K1 loop, L2 synthesized clock, M4/F1 strict grid), `Exit`/`Dispose`/post-shutdown contract, and the app-scoped asset-service lifecycle. |
 | `Bork2d.Bake` | Implemented on `task/file-processors` (2026-10-27; D-036/D-037/D-038); merged with the builder by D-041/D-042 | JIT tooling: builder-configured ordered packs, shape-driven Tomlyn binder, processor registry/sidecars, built-in texture processor, reference validation, structural determinism, schema-3 incremental bake, per-pack atomic writes, MSBuild targets. The public builder/processor surface and the internal implementation share the one `Bork2d.Bake` assembly. No descriptor, generated host, host state, or `Bork2d.Bake.Cli`. The Pong example's `CircleProcessor` lives in `Pong.Assets` and uses this surface. |
-| `Bork2d.Render` | Current (M6) | Vulkan packages, the internal renderer seam and SPSC control channel, instance/validation/debug-utils bootstrap, physical/logical device selection, the pure surface-format/present-mode/swapchain policies, the windowed swapchain/clear/present renderer with resize/minimize/fullscreen recreation and surface-loss recovery, and the offscreen target/renderer with clear/discard and fence pacing; counters and validation observation cover both. Sprites/uploads are M8. |
+| `Bork2d.Render` | Current (M6/M7) | Vulkan packages, the internal renderer seam and SPSC control channel, instance/validation/debug-utils bootstrap, physical/logical device selection, the pure surface-format/present-mode/swapchain policies, the windowed swapchain/clear/present renderer with resize/minimize/fullscreen recreation and surface-loss recovery, the offscreen target/renderer with clear/discard, and the M7 three-slot ring/handoff consumer with one frame per consumed snapshot, fence-held slots, suspended minimized drain, and empty per-frame instance resources. Counters and validation observation cover both. Sprites/uploads are M8. |
 | `Bork2d.Editor` | Absent | Not in the solution; the editor is removed from Stage 1 and deferred (M5 removed). |
-| `Bork2d.Tests` | Current | 1028 deterministic xUnit tests plus 16 opt-in/conditional tests (1044 total): ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix/public surfaces, the Q-20 metadata guard, fake-SDL window/input/loop/time, the SDL Vulkan surface seam, pack/VFS/loader, asset references, runtime lifecycle, the builder/processor/sidecar/bake suites, schema-3 incremental rules, the M6 renderer seam/policy/GPU-bootstrap tests, the SPSC control-channel, the windowed/offscreen renderer start-info/lifecycle/GPU tests, the renderer host lifecycle matrix, the platform Vulkan start/posts/surface-replacement tests, and the offscreen factory validation tests. The exploratory smoke/fixture tests were removed by D-043; bake coverage is self-contained. |
-| `examples/pong` (Pong example) | Current (D-043/D-044; merged 2026-10-29, PR #10; M6 offscreen mode) | `Pong.Common` (game/simulation/AI/settings), build-only `Pong.Assets` (circle processor, TOML, pack bake), AOT `Pong.Desktop` (`--headless` acceptance smoke, the interactive `--windowed` example, `--windowed [--ticks N]`, and `--offscreen --ticks N`), and `Pong.Tests` (41 tests, including the linked `PongArgumentsTests`). Builds the pack out of process through `build/Bork2d.Assets.Copy.targets`. |
-| NativeAOT | Current (D-043; merged 2026-10-29, PR #10; M6 three-mode gate) | Libraries use `IsAotCompatible` + trim/AOT analyzers; `Pong.Desktop` is the only `PublishAot` project and publishes/runs locally with zero warnings. The headless run mounts the **baked 7-entry pack** (`art/paddle`, `art/paddle-raw`, `game_settings`, `sprites/ball`, `sprites/paddle`, `textures/ball`, `textures/ball-raw`) and asserts the class-root settings, sprite/descriptor/raw chain, and detached root; `--windowed --ticks 120` runs the same pack and presents a black clear; `--offscreen --ticks 120` runs the same pack through the offscreen renderer and discards frames (count not asserted). No tooling assembly is in the publish and no `vulkan-1.dll` is copied. Local gate only. |
+| `Bork2d.Tests` | Current | 1141 deterministic xUnit tests plus 17 opt-in/conditional tests (1158 total): ownership/GC, root, transforms, camera, builder, logging, concurrency, dependency matrix/public surfaces, the Q-20 metadata guard, fake-SDL window/input/loop/time, the SDL Vulkan surface seam, pack/VFS/loader, asset references, runtime lifecycle, the builder/processor/sidecar/bake suites, schema-3 incremental rules, the M6 renderer seam/policy/GPU-bootstrap tests, the SPSC control-channel, the windowed/offscreen renderer start-info/lifecycle/GPU tests, the renderer host lifecycle matrix, the platform Vulkan start/posts/surface-replacement tests, the offscreen factory validation tests, and the M7 snapshot ring/stress/capture/allocation, host handoff, minimized tick-cap, and headless loop/pacing tests. The exploratory smoke/fixture tests were removed by D-043; bake coverage is self-contained. |
+| `examples/pong` (Pong example) | Current (D-043/D-044; merged 2026-10-29, PR #10; M6 offscreen mode; M7 headless tick gate) | `Pong.Common` (game/simulation/AI/settings), build-only `Pong.Assets` (circle processor, TOML, pack bake), AOT `Pong.Desktop` (`--headless` 120-tick default with `--headless --ticks N`, the interactive `--windowed` example, `--windowed [--ticks N]`, and `--offscreen --ticks N`), and `Pong.Tests` (46 tests, including the linked `PongArgumentsTests`). Builds the pack out of process through `build/Bork2d.Assets.Copy.targets`. |
+| NativeAOT | Current (D-043; merged 2026-10-29, PR #10; M6 three-mode gate; M7 headless tick gate) | Libraries use `IsAotCompatible` + trim/AOT analyzers; `Pong.Desktop` is the only `PublishAot` project and publishes/runs locally with zero warnings. The headless run mounts the **baked 7-entry pack** (`art/paddle`, `art/paddle-raw`, `game_settings`, `sprites/ball`, `sprites/paddle`, `textures/ball`, `textures/ball-raw`) and asserts the class-root settings, sprite/descriptor/raw chain, exactly 120 ticks by default (`--headless --ticks N` overrides), and the detached root; `--windowed --ticks 120` runs the same pack and presents a black clear; `--offscreen --ticks 120` runs the same pack through the offscreen renderer and discards frames (count not asserted). No tooling assembly is in the publish and no `vulkan-1.dll` is copied. Local gate only. |
 | CI | Current | GitHub Actions on PRs to `develop` and pushes to `develop`: restore, format verify, build, test. No AOT or real-window job. |
-| Runnable engine | Partial (windowed/offscreen Vulkan clear + assets; no sprites) | A real window, input, time, an uncapped tick loop, the pack/VFS/loader/CPU descriptor pipeline, and the M6 renderers: windowed presents a continuous black clear; offscreen clears/discards a fixed target and loops until `Exit`. There are no sprites yet (M8), and frame handoff/pacing is M7. |
+| Runnable engine | Partial (windowed/offscreen Vulkan clear with handoff + assets; no sprites) | A real window, input, time, the M7 ring-backpressured tick loop, the pack/VFS/loader/CPU descriptor pipeline, and the M6/M7 renderers: windowed presents a black clear per consumed snapshot; offscreen clears/discards a fixed target and loops until `Exit`; headless runs the paced loop with no SDL/Vulkan. There are no sprites yet (M8). |
 
 ## 3. Sequencing principles
 
@@ -233,22 +236,34 @@ clears and discards; headless initializes neither SDL nor Vulkan; validation rep
 
 ### M7 — Frame handoff and pacing
 
+**Status:** **Implemented (`m-7/common`; ready-for-review PR open/awaiting human review; not
+merged).** WP-1–WP-5 landed sequentially. Evidence is recorded in
+[M7 spec §18](specs/m7-frame-handoff.md#18-as-built-evidence-2026-10-31): engine suite 1158 (1141
+deterministic + 17 opt-in/conditional) and 46 Pong tests; the five `[GpuFact]` tests pass locally
+with zero validation errors/warnings; the 10,000-snapshot deterministic stress and slot invariants
+pass; the AOT publish is zero-warning and the published `--headless` (120 ticks by default),
+`--headless --ticks 7`, `--windowed --ticks 120`, and `--offscreen --ticks 120` runs all exit 0,
+with the headless run reporting exactly its requested tick count.
+
 Goal: bounded run-ahead snapshot ring for windowed/offscreen, plus timer-paced headless.
 
 - Three-slot ring (`Free/Writing/Ready/Rendering`); slots held until the GPU fence; tick waits only
   when full; newest `Ready` wins; older snapshots dropped.
 - No target tick rate/deadline/`Sleep` in windowed/offscreen; the builder's `WithMaxDeltaTime`
-  gameplay clamp only.
-- Headless loop with no ring, paced by `ticksPerSecond` (default 60, `0` uncapped).
+  gameplay clamp only, with the single minimized-only 30 Hz tick-cap exception (Q8/F4).
+- Headless loop with no ring, paced by a positive `ticksPerSecond` (default 60; `0` is a `Build()`
+  error, F6), fully synthesized `ITime` (tick 0 = 0/0, then `N/rate` and `1/rate`), strict absolute
+  grid with pure `Thread.Sleep`, and unbounded catch-up (Q11–Q13/F5–F8). The Pong gate defaults to
+  120 ticks and accepts `--headless --ticks N` (Q15=O2/F3).
 - Capture after `Tick`: unordered traversal into internal value-only `CameraSnapshot` /
   `SpriteSnapshot`, layer flattening, immutable snapshots.
 - Two GPU frames in flight; instance/command resources; resize/close/error handling; shutdown with
   in-flight frames; no per-frame allocations.
 - Stress tests: fake fences, slot invariants, pacing, headless timer.
 
-Exit: tick/render overlap with at most ring-depth run-ahead; no sleeps in windowed/offscreen;
-newest snapshot wins; headless honors its rate; 10k-frame stress has no deadlock/slot leak; AOT
-headless loads a pack, ticks, exits.
+Exit: tick/render overlap with at most ring-depth run-ahead; no sleeps in windowed/offscreen except
+the minimized cap; newest snapshot wins; headless honors its rate; 10k-frame stress has no
+deadlock/slot leak; AOT headless loads a pack, ticks, exits.
 
 ### M8 — Sprite renderer with real assets
 
@@ -349,7 +364,6 @@ approvals; only unresolved choices are listed here.
 
 | Decision | Needed by | Default if unresolved |
 | --- | --- | --- |
-| Headless timer accuracy / fractional rates | M7 | Integer `ticksPerSecond`; `0` uncapped. |
 | Bindless page capacity and overflow policy | M8 | 4096 pages; hard failure on overflow. |
 | Shader compiler/build integration | M8 | `glslangValidator` build target; embedded SPIR-V. |
 | Offscreen readback/capture API | M8/M10 | Internal discard in 0.1; public later. |
@@ -357,7 +371,9 @@ approvals; only unresolved choices are listed here.
 | Multi-GPU / device override | M10 | First suitable device; no override in 0.1. |
 | Packaging: project references vs NuGet | M9 | Project references in the template; NuGet later. |
 
-The M6 allocator, sRGB, and frame-count choices are resolved in D-M6-03, D-M6-04, and D-M6-11.
+The M6 allocator, sRGB, and frame-count choices are resolved in D-M6-03, D-M6-04, and D-M6-11. The
+M7 headless timer/rate choice is resolved by D-M7-14/D-M7-25 (positive integer `ticksPerSecond`; `0`
+is rejected).
 
 ## 10. Progress log
 
@@ -373,7 +389,7 @@ The M6 allocator, sRGB, and frame-count choices are resolved in D-M6-03, D-M6-04
 | Project consolidation | Merged (2026-10-28, PR #9; D-041/D-042) | Five-project engine solution: `Bork2d.Engine` = Api+Common+Assets with `Bork2d.Engine.*` namespaces; `Bork2d.Bake` = Bake+Builder with the public `Bork2d.Bake` namespace; smoke/fixture in `examples/Bork2d.Examples.slnx`; Tests decoupled from the smoke; dependency tests and the Q-20 metadata guard. 942 deterministic + 12 conditional tests (954); Debug/Release zero warnings; both format gates; docs check; AOT headless and `--windowed --ticks 120` exit 0; PR CI run 40563643324 succeeded. [Spec](specs/refactor-projects.md). |
 | Pong example | Merged into `develop` (2026-10-29, PR #10, merge `0273f58`) | Replaces the exploratory examples with `examples/pong` (`Pong.Common`, `Pong.Assets`, `Pong.Desktop`, `Pong.Tests`) and makes `Pong.Desktop` the NativeAOT gate. 20 Pong tests; engine suite 907 passed + 12 skipped (919) after WP-2; Debug/Release, tests, and both format gates zero-warning; AOT publish zero warnings with a 7-entry `assets.pck`, `Pong.Desktop.exe`, `SDL2.dll`, and no `Pong.Assets`/`Bork2d.Bake`/Tomlyn/StbImageSharp assembly; headless and `--windowed --ticks 120` exit 0; docs link check and `git diff --check` clean. [Spec](specs/pong-example.md#12-as-built-evidence). |
 | M6 Vulkan bring-up | Merged into `develop` (2026-10-31, PR #11, merge `5de725c`) | D-M6-01…D-M6-27 recorded in the [decision log](decisions.md#m6-vulkan-bring-up-decisions-approved-2026-10-29). WP-1 recorded the decisions, WP-2 delivered the `Bork2d.Render` foundation (instance/validation/device selection and pure policies), WP-3 delivered the SDL Vulkan surface seam, SPSC control channel, and the windowed renderer (swapchain create/recreate, two frames in flight, dynamic-rendering clear, present, resize/fullscreen/minimize, surface-loss policy, counters, validation observation), WP-4 delivered the offscreen target/renderer (two permanent sRGB images, one allocation each, clear/discard, fence pacing), the Runtime composition (Setup-before-readiness, first-tick gate, offscreen `Exit`/`ITime`, error precedence, instance/surface wiring and surface-recovery request), and the deterministic host/platform tests, and WP-5 delivered the Pong `--offscreen --ticks N` mode and arguments tests, the three-mode AOT publish/run gate, and the final docs. Local evidence: **1044 engine tests** (1028 deterministic + 16 opt-in/conditional) and **41 Pong tests** green; the four `[GpuFact]` tests (windowed present/clear/resize/fullscreen/minimize and offscreen clear/discard/app loop, validation enabled) and nine `[WindowFact]` tests pass with zero validation errors/warnings; AOT publish zero warnings with `Pong.Desktop.exe`, `assets.pck`, `SDL2.dll`, and the engine/runtime/game PDBs (no `vulkan-1.dll`, no tooling assemblies); published `--headless`, `--windowed --ticks 120`, and `--offscreen --ticks 120` exit 0. **Merged** into `develop` (2026-10-31, PR #11, merge `5de725c`). [As-built evidence](specs/m6-vulkan-bringup.md#18-as-built-evidence-2026-10-30). |
-| M7 Frame handoff/pacing | Not started | — |
+| M7 Frame handoff/pacing | Implemented (`m-7/common`; PR open/awaiting human review; not merged) | WP-1–WP-5 landed sequentially: decisions `D-M7-01…D-M7-27`; the Engine snapshot model/capture and public `FlipX`/`FlipY` (Q2=B1); the `Bork2d.Render` three-slot ring, consumer, fence-held slots, suspended minimized drain, and empty instance resources (Q1/Q7/Q8/Q10); the Runtime windowed/offscreen acquire/capture/publish loop with backpressure and the paced headless K1 loop with L2 synthesized time and M4/F1 pacing; and the Pong `--headless` 120-tick default/`--headless --ticks N` gate. Local evidence: **1158 engine tests** (1141 deterministic + 17 opt-in/conditional) and **46 Pong tests** green; Debug/Release zero warnings; both format gates, docs check, and `git diff --check` clean; five `[GpuFact]` tests pass with zero validation errors/warnings; 10,000-snapshot stress and slot invariants pass; AOT publish zero warnings with `Pong.Desktop.exe`, `assets.pck`, `SDL2.dll`, and the engine/runtime/game PDBs (no `vulkan-1.dll`, no tooling assemblies); published `--headless` (1/120/1), `--headless --ticks 7` (1/7/1), `--windowed --ticks 120` (1/120/1), and `--offscreen --ticks 120` (1/120/1) exit 0. **Not merged**; the human reviews the PR. [As-built evidence](specs/m7-frame-handoff.md#18-as-built-evidence-2026-10-31). |
 | M8 Sprite renderer | Not started | — |
 | M9 Template/samples | Partially started (Pong sample merged) | `examples/pong` is the first sample; the solution template, packaging, and the remaining samples are pending. |
 | M10 Hardening/0.1 | Not started | — |

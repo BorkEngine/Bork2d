@@ -14,17 +14,17 @@ namespace Pong.Common;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The game works in the headless one-tick host, the windowed host, and the non-interactive
-/// offscreen host. Headless and offscreen modes never read <c>IInput</c> or <c>IWindow</c> and
-/// advance the simulation with a fixed 1/60 s step; windowed mode reads the player input and the
-/// frame delta, updates the window title when the state changes, and recomputes the court aspect
-/// from the framebuffer so a resize keeps the court proportional. The right paddle is always driven
-/// by <see cref="PongAi"/>.
+/// The game works in the paced headless host, the windowed host, and the non-interactive offscreen
+/// host. Headless and offscreen modes never read <c>IInput</c> or <c>IWindow</c> and advance the
+/// simulation with a fixed 1/60 s step; windowed mode reads the player input and the frame delta,
+/// updates the window title when the state changes, and recomputes the court aspect from the
+/// framebuffer so a resize keeps the court proportional. The right paddle is always driven by
+/// <see cref="PongAi"/>.
 /// </para>
 /// <para>
 /// Scores, pause/resume/reset transitions, and the final teardown are logged at Information. The
 /// title is formatted and compared each tick but assigned only when it changes, and the game never
-/// logs per frame. The exposed read-only properties exist for the headless acceptance smoke.
+/// logs per frame. The exposed read-only properties exist for the headless acceptance run.
 /// </para>
 /// </remarks>
 public sealed class PongGame : IGame<GameLayer>
@@ -63,8 +63,9 @@ public sealed class PongGame : IGame<GameLayer>
     /// fixed step and a 16:9 court.
     /// </param>
     /// <param name="tickLimit">
-    /// The number of completed windowed or offscreen ticks after which the game calls
-    /// <see cref="IEngine{TLayer}.Exit"/>, or <see langword="null"/> for an interactive run.
+    /// The number of completed headless, windowed, or offscreen ticks after which the game calls
+    /// <see cref="IEngine{TLayer}.Exit"/>, or <see langword="null"/> for an interactive windowed run.
+    /// The headless host always supplies a limit (120 by default from the command line).
     /// </param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="tickLimit"/> is less than 1.</exception>
     public PongGame(bool interactive, int? tickLimit = null)

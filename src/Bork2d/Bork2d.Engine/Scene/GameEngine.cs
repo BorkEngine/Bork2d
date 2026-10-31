@@ -2,6 +2,7 @@ using Bork2d.Engine;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Input;
 using Bork2d.Engine.Platform;
+using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -23,7 +24,9 @@ namespace Bork2d.Engine.Scene;
 /// The window and input implementations are injected by the composition root: a windowed app gets
 /// internal proxies that the runtime host attaches to a live platform before <c>Setup</c>, while
 /// headless and offscreen apps get the throwing window stub and no input. The exit flag is a
-/// three-state token so <see cref="Exit"/> becomes a no-op once the host has stopped the run.
+/// three-state token so <see cref="Exit"/> becomes a no-op once the host has stopped the run; the
+/// host may install a wake callback that is invoked once on the active-to-requested transition so a
+/// tick blocked on the snapshot ring returns without starting another tick (M7 Q9=I1).
 /// </para>
 /// </remarks>
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
@@ -36,9 +39,11 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
 
     private readonly Lock _structuralLock = new();
     private readonly SceneRoot _root;
+    private readonly SnapshotCapture<TLayer> _capture;
     private readonly IInput? _input;
     private readonly ILoggerFactory _loggerFactory;
     private int _exitState;
+    private Action? _exitCallback;
 
     internal GameEngine(
         ITime time,
@@ -54,6 +59,7 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
         LayerValidation.Validate<TLayer>();
 
         _root = new SceneRoot(_structuralLock);
+        _capture = new SnapshotCapture<TLayer>(_structuralLock, _root);
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _input = input;
         Time = time;
@@ -79,9 +85,8 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     /// Gets a value indicating whether <see cref="Exit"/> was called while the run is active.
     /// </summary>
     /// <remarks>
-    /// The windowed loop reads this token at each tick boundary. The one-tick modes never read it,
-    /// and it stays <see langword="false"/> after <see cref="MarkStopped"/> so a post-shutdown
-    /// <see cref="Exit"/> is a no-op.
+    /// Every host loop reads this token at each tick boundary. It stays <see langword="false"/>
+    /// after <see cref="MarkStopped"/> so a post-shutdown <see cref="Exit"/> is a no-op.
     /// </remarks>
     internal bool ExitRequested => Volatile.Read(ref _exitState) == ExitRequestedState;
 
@@ -116,14 +121,72 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     {
         // Compare-exchange from Active so a caller racing the end of the run cannot resurrect a
         // request after MarkStopped has moved the token to Stopped.
-        Interlocked.CompareExchange(ref _exitState, ExitRequestedState, ExitActive);
+        if (Interlocked.CompareExchange(ref _exitState, ExitRequestedState, ExitActive) != ExitActive)
+        {
+            return;
+        }
+
+        // The host installs a wake callback for windowed/offscreen runs so a tick blocked on the
+        // snapshot ring returns without starting another tick (M7 Q9=I1). The callback must not
+        // throw; the renderer's WakeSnapshotWait only signals the ring.
+        Volatile.Read(ref _exitCallback)?.Invoke();
     }
+
+    /// <summary>
+    /// Installs the host's exit wake callback, invoked once when <see cref="Exit"/> moves the token
+    /// from active to requested (M7 WP-4).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The windowed and offscreen hosts set this to the renderer's <c>WakeSnapshotWait</c> after the
+    /// renderer is created and before <c>Setup</c>, so a tick blocked in the ring's acquire wakes
+    /// and starts no further tick while a tick that already owns a slot may still publish it
+    /// (Q4=D1, Q9=I1). Headless runs never install one.
+    /// </para>
+    /// <para>
+    /// The callback must not throw and must be safe to invoke on any thread. <see cref="MarkStopped"/>
+    /// clears it, so a post-shutdown <see cref="Exit"/> cannot reach a stopped renderer.
+    /// </para>
+    /// </remarks>
+    /// <param name="callback">The wake callback, or <see langword="null"/> to clear it.</param>
+    internal void SetExitCallback(Action? callback) => Volatile.Write(ref _exitCallback, callback);
 
     /// <summary>
     /// Marks the run as finished so later <see cref="Exit"/> calls are no-ops (D-M2-17).
     /// </summary>
-    /// <remarks>Idempotent; called by the app runtime when a run completes or the app is disposed.</remarks>
-    internal void MarkStopped() => Interlocked.Exchange(ref _exitState, ExitStopped);
+    /// <remarks>
+    /// Idempotent; called by the app runtime when a run completes or the app is disposed. It clears
+    /// the exit wake callback before stopping so no later <see cref="Exit"/> reaches the renderer.
+    /// </remarks>
+    internal void MarkStopped()
+    {
+        Volatile.Write(ref _exitCallback, null);
+        Interlocked.Exchange(ref _exitState, ExitStopped);
+    }
+
+    /// <summary>
+    /// Resets and fills a slot-owned snapshot from the current rooted scene and stamps the tick's
+    /// sequence, <see cref="ITime.Time"/>, and <see cref="ITime.DeltaTime"/> (M7 WP-2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The host calls this on the tick thread after <c>IGame.Tick</c> returns, with every game
+    /// worker joined, after the first tick, and before <c>Teardown</c> starts; the host owns that
+    /// quiescence contract. The caller owns <paramref name="snapshot"/> in the <c>Writing</c> slot
+    /// state and publishes or abandons the slot afterwards.
+    /// </para>
+    /// <para>
+    /// The engine reuses one internal capture object, so a warm capture allocates nothing. The
+    /// traversal is unordered, holds the structural lock, reads per-object properties under their
+    /// own locks, and evaluates world matrices on the calling (tick) thread.
+    /// </para>
+    /// </remarks>
+    /// <param name="snapshot">The slot-owned snapshot to reset and fill.</param>
+    /// <param name="sequence">The monotonic snapshot sequence; the host starts it at <c>1</c>.</param>
+    internal void CaptureSnapshot(FrameSnapshot snapshot, long sequence)
+    {
+        _capture.Capture(snapshot, sequence, Time.Time, Time.DeltaTime);
+    }
 
     private static ISceneNode RequireEngineNode(ITransform parent)
     {

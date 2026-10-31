@@ -1,4 +1,5 @@
 using Bork2d.Render.Diagnostics;
+using Bork2d.Render.Handoff;
 using Microsoft.Extensions.Logging;
 
 namespace Bork2d.Render;
@@ -9,8 +10,11 @@ namespace Bork2d.Render;
 /// <remarks>
 /// <para>
 /// The interface is deliberately free of Vulkan, SDL, and window types: the host passes opaque
-/// <see cref="nint"/> instance/surface handles, posts coalesced window-state changes, and observes
-/// readiness, status, counters, and a one-shot fatal error. Tests inject a fake implementation.
+/// <see cref="nint"/> instance/surface handles, posts coalesced window-state changes, observes
+/// readiness, status, counters, and a one-shot fatal error, and (M7 WP-4) drives the internal
+/// snapshot handoff through <see cref="AcquireSnapshotSlot"/> /
+/// <see cref="PublishSnapshot"/> / <see cref="AbandonSnapshotSlot"/> /
+/// <see cref="WakeSnapshotWait"/>. Tests inject a fake implementation.
 /// </para>
 /// <para>
 /// <see cref="Start"/> starts the renderer thread without waiting for readiness (D-M6-06). The
@@ -58,6 +62,43 @@ internal interface IRenderer
     /// <summary>Posts the latest minimized state; the latest value wins.</summary>
     /// <param name="minimized">Whether the window is minimized.</param>
     void PostMinimized(bool minimized);
+
+    /// <summary>
+    /// Acquires a free snapshot slot for the producer (Q1=A1).
+    /// </summary>
+    /// <remarks>
+    /// Blocks only when all three slots are occupied (bounded run-ahead); the wait is event-based
+    /// with no spin, sleep, or timed polling. Returns <see langword="null"/> when a stop, exit
+    /// signal, or renderer fatal is observed, so the caller starts no further tick; an already
+    /// acquired slot may still be published.
+    /// </remarks>
+    /// <returns>The slot to fill, or <see langword="null"/> on stop/exit.</returns>
+    SnapshotSlot? AcquireSnapshotSlot();
+
+    /// <summary>Publishes a filled slot as the newest snapshot; the previous <c>Ready</c> is dropped.</summary>
+    /// <param name="slot">The slot returned by <see cref="AcquireSnapshotSlot"/>.</param>
+    void PublishSnapshot(SnapshotSlot slot);
+
+    /// <summary>
+    /// Returns an unpublished slot after a <c>Tick</c> or capture failure; nothing is published.
+    /// </summary>
+    /// <param name="slot">The slot returned by <see cref="AcquireSnapshotSlot"/>.</param>
+    void AbandonSnapshotSlot(SnapshotSlot slot);
+
+    /// <summary>
+    /// Wakes a producer blocked in <see cref="AcquireSnapshotSlot"/> on <c>IEngine.Exit()</c>.
+    /// </summary>
+    /// <remarks>
+    /// Consumption continues and a producer that already owns a slot may still publish the Exit
+    /// tick's snapshot (Q4=D1, Q9=I1). The host calls this from its exit path in M7 WP-4.
+    /// </remarks>
+    void WakeSnapshotWait();
+
+    /// <summary>Gets a snapshot of the handoff counters for the stop log and tests.</summary>
+    SnapshotRingCounters SnapshotCounters { get; }
+
+    /// <summary>Gets the number of snapshots drained without GPU work while minimized (Q8).</summary>
+    long SuspendedConsumptions { get; }
 
     /// <summary>Requests a graceful stop; returns immediately.</summary>
     void RequestStop();

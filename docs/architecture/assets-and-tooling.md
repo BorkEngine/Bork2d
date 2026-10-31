@@ -771,8 +771,9 @@ Loader ownership, queueing, enqueue-time resolution, task completion, and shutdo
   packs in v1.
 
 `WithHeadless` supports packs, `LoadData`, `LoadAsset<T>`, `Browse`, and `Exists`; sprites load as
-plain assets but no GPU page exists and nothing renders. `WithOffscreen` currently keeps the
-one-tick path with no GPU; windowless rendering is M6/M8. Neither mode has `IWindow`/`IInput`. See
+plain assets but no GPU page exists and nothing renders. `WithOffscreen` runs the M6 Vulkan renderer
+against a fixed target (`Setup` → `Tick`… → `Teardown` until `Exit`, `ITime` advances, frames are
+discarded); sprites and readback are M8/M10. Neither mode has `IWindow`/`IInput`. See
 [Runtime lifecycle](runtime-lifecycle.md#2-modes).
 
 ## 15. Limits and security

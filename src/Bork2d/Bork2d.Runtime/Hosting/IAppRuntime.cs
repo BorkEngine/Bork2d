@@ -21,6 +21,8 @@ internal interface IAppRuntime : IDisposable
     /// <summary>Gets the logging configuration stored for WP5.</summary>
     Action<ILoggingBuilder>? ConfigureLogging { get; }
 
-    /// <summary>Runs the configured windowed/offscreen loop or the headless one-tick sequence.</summary>
+    /// <summary>
+    /// Runs the configured windowed/offscreen handoff loop or the paced headless loop.
+    /// </summary>
     void Run();
 }

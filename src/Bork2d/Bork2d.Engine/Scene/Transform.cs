@@ -251,6 +251,8 @@ internal class Transform : ITransform, ISceneNode
 
     void ISceneNode.RemoveChildCore(Transform child) => RemoveChildCore(child);
 
+    void ISceneNode.VisitChildrenCore(ISceneNodeVisitor visitor) => VisitChildrenCore(visitor);
+
     private void SetParent(ITransform? parent)
     {
         ISceneNode? newParent;
@@ -341,6 +343,20 @@ internal class Transform : ITransform, ISceneNode
     private void AddChildCore(Transform child)
     {
         (_children ??= new List<Transform>()).Add(child);
+    }
+
+    private void VisitChildrenCore(ISceneNodeVisitor visitor)
+    {
+        var children = _children;
+        if (children is null)
+        {
+            return;
+        }
+
+        for (var index = 0; index < children.Count; index++)
+        {
+            visitor.Visit(children[index]);
+        }
     }
 
     private void RemoveChildCore(Transform child)

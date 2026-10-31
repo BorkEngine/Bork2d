@@ -5,10 +5,13 @@ using Pong.Common;
 namespace Pong.Tests.TestSupport;
 
 /// <summary>
-/// A headless probe game that loads the full baked Pong asset chain and records it for assertions.
+/// A headless probe game that loads the full baked Pong asset chain, records it for assertions, and
+/// requests <see cref="IEngine{TLayer}.Exit"/> after exactly one tick so the K1 loop terminates.
 /// </summary>
 internal sealed class BakedAssetProbeGame : IGame<GameLayer>
 {
+    private IEngine<GameLayer>? _engine;
+
     /// <summary>Gets the number of <c>Setup</c> calls.</summary>
     internal int SetupCount { get; private set; }
 
@@ -46,6 +49,7 @@ internal sealed class BakedAssetProbeGame : IGame<GameLayer>
     public void Setup(IEngine<GameLayer> engine)
     {
         ArgumentNullException.ThrowIfNull(engine);
+        _engine = engine;
         SetupCount++;
         PackEntryCount = engine.Assets.Browse().Count;
         Settings = engine.Assets.LoadAsset<GameSettings>("game_settings").GetAwaiter().GetResult();
@@ -62,7 +66,11 @@ internal sealed class BakedAssetProbeGame : IGame<GameLayer>
     }
 
     /// <inheritdoc/>
-    public void Tick() => TickCount++;
+    public void Tick()
+    {
+        TickCount++;
+        _engine?.Exit();
+    }
 
     /// <inheritdoc/>
     public void Teardown() => TeardownCount++;

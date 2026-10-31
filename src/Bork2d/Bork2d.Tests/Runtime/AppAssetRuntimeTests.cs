@@ -230,7 +230,7 @@ public sealed class AppAssetRuntimeTests
                     "data/overlay-config",
                     new PackTestData { Name = "overlay", Value = 11 });
             });
-        var game = new ScriptedGame<GameLayer>();
+        var game = new ScriptedGame<GameLayer> { ExitAfterFirstTick = true };
         IReadOnlyList<AssetInfo>? browse = null;
         string? packPath = null;
         byte[]? overlayBytes = null;
@@ -370,7 +370,7 @@ public sealed class AppAssetRuntimeTests
         string basePath = directory.WritePack(
             "base.pck",
             builder => builder.AddRaw("data/base", [4, 5, 6]));
-        var game = new ScriptedGame<GameLayer>();
+        var game = new ScriptedGame<GameLayer> { ExitAfterFirstTick = true };
         byte[]? teardownBytes = null;
         AssetService? service = null;
         game.OnSetup = engine => service = Assert.IsType<AssetService>(engine.Assets);
@@ -555,7 +555,7 @@ public sealed class AppAssetRuntimeTests
     [Fact]
     public void DisposeAfterRunDisposesTheStoppedServiceAndNoLoaderRemains()
     {
-        var game = new ScriptedGame<GameLayer>();
+        var game = new ScriptedGame<GameLayer> { ExitAfterFirstTick = true };
         AssetService? service = null;
         game.OnSetup = engine => service = Assert.IsType<AssetService>(engine.Assets);
         var app = new Bork2dAppBuilder<GameLayer>()
@@ -588,7 +588,7 @@ public sealed class AppAssetRuntimeTests
             "overlay.pck",
             builder => builder.AddRaw("data/overlay", [2]));
         var provider = new CapturingLoggerProvider();
-        var game = new ScriptedGame<GameLayer>();
+        var game = new ScriptedGame<GameLayer> { ExitAfterFirstTick = true };
         game.OnSetup = engine =>
         {
             engine.Assets.LoadPack(overlayPath);
@@ -687,11 +687,10 @@ public sealed class AppAssetRuntimeTests
 
     private static void ExitOnFirstTick(string mode, ScriptedGame<GameLayer> game)
     {
-        // Offscreen now runs the windowed-shaped loop until Exit (D-M6-07).
-        if (!IsHeadless(mode))
-        {
-            game.OnTick = () => game.Engine?.Exit();
-        }
+        _ = mode;
+
+        // Every M7 loop, including headless, runs until Exit (Q11=K1); a single-tick test must exit.
+        game.ExitAfterFirstTick = true;
     }
 
     private static AssetErrorKind AssetErrorOf<T>(Task<T> task)
@@ -701,8 +700,6 @@ public sealed class AppAssetRuntimeTests
     }
 
     private static bool IsWindowed(string mode) => ParseMode(mode) == Bork2dAppMode.Windowed;
-
-    private static bool IsHeadless(string mode) => ParseMode(mode) == Bork2dAppMode.Headless;
 
     private static Bork2dAppMode ParseMode(string mode) => mode switch
     {

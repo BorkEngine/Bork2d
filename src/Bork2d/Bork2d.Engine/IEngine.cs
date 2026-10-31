@@ -28,9 +28,11 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     /// Gets the monotonic time/delta snapshot. Readable from any thread.
     /// </summary>
     /// <remarks>
-    /// A windowed app advances the clock once per tick; the first tick reports <c>0</c> for both
-    /// values. Headless and offscreen apps run one tick and never advance the clock, so both values
-    /// stay <c>0</c>. See <see cref="ITime"/> for the clamp and thread-safety rules.
+    /// Windowed and offscreen apps advance the clock once per tick; the first tick reports <c>0</c>
+    /// for both values. Headless apps run a paced loop with a fully synthesized clock: tick <c>0</c>
+    /// reports <c>0</c>/<c>0</c>, tick <c>N &gt;= 1</c> reports <c>N / ticksPerSecond</c> and
+    /// <c>1 / ticksPerSecond</c>, and <c>WithMaxDeltaTime</c> does not clamp it. See
+    /// <see cref="ITime"/> for the clamp and thread-safety rules.
     /// </remarks>
     ITime Time { get; }
 
@@ -120,13 +122,17 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     /// </summary>
     /// <remarks>
     /// <para>
-    /// In windowed mode the current tick finishes and the loop stops before the next freeze; the window
-    /// is destroyed and <c>Bork2dApp.Run()</c> returns normally. A request received during
-    /// <c>Setup</c> skips every tick but still calls <c>Teardown</c> once (D-M2-19).
+    /// The current tick finishes and the loop stops before the next tick, in every mode. A tick that
+    /// requests <c>Exit</c> still captures and publishes its snapshot (windowed/offscreen), so the
+    /// renderer may render one final frame. A request during <c>Setup</c> skips every tick but still
+    /// calls <c>Teardown</c> once (D-M2-19).
     /// </para>
     /// <para>
-    /// Headless and offscreen keep the M1 one-tick behavior and ignore the request. After the run has
-    /// finished or the app has been disposed, this call is a no-op.
+    /// Windowed and offscreen wake a tick that is blocked waiting for a free snapshot slot, so the
+    /// host starts no further tick and joins cleanly. Headless stops before the next scheduled tick;
+    /// a pacing sleep is not interrupted, so shutdown latency is bounded by one tick period. A run
+    /// that never calls this method continues until the process stops. After the run has finished or
+    /// the app has been disposed, this call is a no-op.
     /// </para>
     /// </remarks>
     void Exit();

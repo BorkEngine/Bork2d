@@ -10,18 +10,23 @@ using Xunit;
 namespace Pong.Tests;
 
 /// <summary>
-/// The full <see cref="PongGame"/> headless run on a freshly baked pack: lifecycle counts, the loaded
-/// asset chain, the shared paddle sprite, tints, layers, and teardown detachment.
+/// The full <see cref="PongGame"/> headless run on a freshly baked pack: the explicit tick limit that
+/// ends the K1 loop, lifecycle counts, the loaded asset chain, the shared paddle sprite, tints,
+/// layers, and teardown detachment.
 /// </summary>
 public sealed class PongGameTests
 {
+    private const int TickLimit = 3;
+
     [Fact]
     public async Task HeadlessGameRunsTheFullLifecycleOnTheBakedPack()
     {
         using var project = PongTestProject.Create();
         Assert.Equal(0, await project.BakeAsync());
 
-        var game = new PongGame(interactive: false);
+        // K1: the headless host ticks until IEngine.Exit(), so the game owns the termination: an
+        // explicit limit ends the paced loop after exactly that many completed ticks.
+        var game = new PongGame(interactive: false, TickLimit);
         using (var app = new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithHeadless()
@@ -32,7 +37,7 @@ public sealed class PongGameTests
             app.Run();
 
             Assert.Equal(1, game.SetupCount);
-            Assert.Equal(1, game.TickCount);
+            Assert.Equal(TickLimit, game.TickCount);
             Assert.Equal(1, game.TeardownCount);
             Assert.Equal(7, game.PackEntryCount);
 

@@ -6,7 +6,8 @@ using Semaphore = Silk.NET.Vulkan.Semaphore;
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// One GPU frame's command pool, command buffer, fence, and image-available semaphore (D-M6-11).
+/// One GPU frame's command pool, command buffer, fence, image-available semaphore, and the empty
+/// instance resources (instance SSBO and frame descriptor set, Q10=J1) (D-M6-11).
 /// </summary>
 /// <remarks>
 /// The render thread owns the frame. The fence is created signaled so the first wait succeeds
@@ -29,7 +30,8 @@ internal sealed unsafe class WindowedFrame : IDisposable
         CommandPool pool,
         CommandBuffer commandBuffer,
         Fence fence,
-        Semaphore imageAvailable)
+        Semaphore imageAvailable,
+        FrameInstanceResources instanceResources)
     {
         _vk = vk;
         _device = device;
@@ -38,6 +40,7 @@ internal sealed unsafe class WindowedFrame : IDisposable
         CommandBuffer = commandBuffer;
         Fence = fence;
         ImageAvailable = imageAvailable;
+        InstanceResources = instanceResources;
     }
 
     /// <summary>Gets the frame's command pool.</summary>
@@ -52,17 +55,26 @@ internal sealed unsafe class WindowedFrame : IDisposable
     /// <summary>Gets the image-available semaphore signalled by acquire.</summary>
     internal Semaphore ImageAvailable { get; }
 
+    /// <summary>Gets the empty instance buffer and frame descriptor set (Q10=J1).</summary>
+    internal FrameInstanceResources InstanceResources { get; }
+
     /// <summary>Creates one frame's Vulkan objects.</summary>
     /// <param name="vk">The Vulkan API object.</param>
     /// <param name="device">The logical device.</param>
+    /// <param name="physicalDevice">The physical device used to select instance-buffer memory.</param>
+    /// <param name="frameIndex">The GPU frame index, used for debug names.</param>
     /// <param name="queueFamilyIndex">The graphics queue family.</param>
+    /// <param name="instance">The instance seam used for debug labels; may be <see langword="null"/>.</param>
     /// <param name="logger">The <c>Bork2d.Render</c> logger.</param>
     /// <returns>The created frame.</returns>
     /// <exception cref="Bork2dException">A Vulkan object could not be created.</exception>
     internal static WindowedFrame Create(
         Vk vk,
         Device device,
+        PhysicalDevice physicalDevice,
+        int frameIndex,
         uint queueFamilyIndex,
+        IVulkanInstance? instance,
         ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(logger);
@@ -71,6 +83,7 @@ internal sealed unsafe class WindowedFrame : IDisposable
         var commandBuffer = default(CommandBuffer);
         var fence = default(Fence);
         var imageAvailable = default(Semaphore);
+        FrameInstanceResources? instanceResources = null;
         try
         {
             var poolInfo = new CommandPoolCreateInfo
@@ -120,6 +133,14 @@ internal sealed unsafe class WindowedFrame : IDisposable
                 throw new Bork2dException($"vkCreateSemaphore failed with VkResult {result}.");
             }
 
+            instanceResources = FrameInstanceResources.Create(
+                vk,
+                device,
+                physicalDevice,
+                frameIndex,
+                instance,
+                logger);
+
             return new WindowedFrame(
                 vk,
                 device,
@@ -127,10 +148,12 @@ internal sealed unsafe class WindowedFrame : IDisposable
                 pool,
                 commandBuffer,
                 fence,
-                imageAvailable);
+                imageAvailable,
+                instanceResources);
         }
         catch
         {
+            instanceResources?.Destroy();
             DestroyBestEffort(vk, device, logger, pool, fence, imageAvailable);
             throw;
         }
@@ -147,6 +170,7 @@ internal sealed unsafe class WindowedFrame : IDisposable
             return;
         }
 
+        InstanceResources.Destroy();
         DestroyBestEffort(
             _vk,
             _device,

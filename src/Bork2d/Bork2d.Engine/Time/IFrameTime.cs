@@ -3,12 +3,12 @@ using Bork2d.Engine.Platform;
 namespace Bork2d.Engine.Time;
 
 /// <summary>
-/// The internal clock that the windowed loop advances once per tick.
+/// The internal clock that the windowed/offscreen loop advances once per tick.
 /// </summary>
 /// <remarks>
 /// <see cref="ITime"/> stays the public surface; the host owns the concrete implementation and
-/// calls <see cref="NewFrame"/> on the tick thread. One-tick modes never call it, so their clock
-/// stays at zero.
+/// calls <see cref="NewFrame"/> on the tick thread. Headless mode uses the synthesized
+/// <see cref="IHeadlessTime"/> instead, so this interface is never advanced there.
 /// </remarks>
 internal interface IFrameTime : ITime
 {

@@ -3,7 +3,10 @@
 > **Status:** merged into `develop` (2026-10-29, PR #10, merge `0273f58`). Implementation
 > ran on `task/pong-example/wp-1` … `wp-5` and integrated through `task/pong-example/common`. This
 > document is the scope authority for the task; the owner-approved decisions are D-043 and D-044.
-> As-built evidence is in §12.
+> As-built evidence is in §12. **M7 (frame handoff and pacing) extends the host gates on
+> `m-7/common`: `--headless` now runs 120 ticks by default with `--headless --ticks N` overriding,
+> and the windowed/offscreen runs are ring-backpressured. M7 is implemented; its ready-for-review PR
+> is open/awaiting human review and is not merged.** See §12.5.
 
 ## 1. Goal
 
@@ -248,12 +251,14 @@ reads `IInput` or `IWindow`. `Teardown` logs the final score and detaches the ro
   pack, runs `PongGame(interactive: false, tickLimit: N)` through `WithOffscreen(1280, 720)`, and
   exits 0 after exactly `N` ticks. The offscreen renderer clears a fixed sRGB target and discards
   continuous frames; the frame count is not asserted (D-M6-13).
-- `--headless`: one-tick headless smoke; loads the pack, constructs the game, steps once, asserts
-  setup/tick/teardown, 7 pack entries, settings, sprites, texture dimensions (16×96 and 64×64),
-  raw byte counts (16×96×4 and 64×64×4), tint values, and detached root, then exits 0.
-- `--ticks` requires `--windowed` or `--offscreen`, and is invalid with `--headless`; the three
-  modes are mutually exclusive. Invalid/duplicate/unknown/malformed arguments print usage and
-  return 2.
+- `--headless`: headless acceptance run; loads the pack, constructs the game with a tick limit,
+  runs the paced headless loop for **120 ticks by default**, and `--headless --ticks N` overrides
+  (Q15=O2/F3). It asserts setup/teardown, exactly `N` completed ticks, 7 pack entries, settings,
+  sprites, texture dimensions (16×96 and 64×64), raw byte counts (16×96×4 and 64×64×4), tint
+  values, and detached root, then exits 0.
+- `--ticks N` is valid with `--windowed`, `--offscreen`, and `--headless`; offscreen requires it.
+  The three modes are mutually exclusive. Invalid/duplicate/unknown/malformed arguments print usage
+  and return 2.
 - `PublishAot=true`, `InvariantGlobalization=true`, and the existing narrow
   `IL3000;IL3002` Silk.NET suppression (SDL and Vulkan resolve through the same Silk.NET default
   resolver).
@@ -285,14 +290,17 @@ keep the builder/processor/pipeline/CLI/incremental/texture tests. This is the o
   the public `BakeApplicationBuilder` with `CircleProcessor`, load the pack through a public
   headless `Bork2dAppBuilder` probe, and assert settings, 7 entries, sprite texture refs,
   descriptor dimensions, raw payload lengths, and circle alpha (center opaque, corner transparent);
-- the full `PongGame` headless run (setup/tick/teardown, loaded assets, detached world);
+- the full `PongGame` headless run (setup/tick/teardown, loaded assets, detached world) with an
+  explicit tick limit so the K1 loop terminates;
 - invalid `.circle` input returns a bake failure with a `BK7xxx` diagnostic;
 - command-line parsing (`PongArgumentsTests`, linked from `Pong.Desktop/PongArguments.cs` so the
-  test project does not reference the AOT host): default/windowed/headless/offscreen valid cases,
-  the required offscreen tick limit, headless/windowed/offscreen mutual exclusion, malformed
-  `--ticks` values, and duplicate/unknown arguments.
+  test project does not reference the AOT host): default/windowed/headless/offscreen valid cases
+  (including the 120-tick headless default and an explicit override), the required offscreen tick
+  limit, headless/windowed/offscreen mutual exclusion, malformed `--ticks` values, and
+  duplicate/unknown arguments.
 
-The suite is **41 tests** after M6 (the 20 original Pong tests plus 21 arguments cases).
+The suite is **46 tests** after M7 (the 20 original Pong tests, 26 argument cases, and the
+updated headless lifecycle/bake-load tests).
 
 ## 9. Work packages
 
@@ -321,8 +329,9 @@ Sequential; each branch starts from the latest `origin/task/pong-example/common`
 - AOT publish contains `Pong.Desktop.exe`, `assets.pck`, and `SDL2.dll`, includes the `Pong.Common`
   game assembly (NativeAOT single-file links it; `Pong.Common.pdb` is the on-disk proof), and
   contains no `Pong.Assets`, `Bork2d.Bake`, Tomlyn, or StbImageSharp assembly, and no
-  `vulkan-1.dll`; `--headless`, `--windowed --ticks 120`, and `--offscreen --ticks 120` exit 0
-  (M6 adds the offscreen mode).
+  `vulkan-1.dll`; `--headless` (120 ticks by default), `--headless --ticks N`, `--windowed
+  --ticks 120`, and `--offscreen --ticks 120` exit 0 (M6 adds the offscreen mode; M7 adds the
+  120-tick headless default/override).
 - `scripts/check-docs.ps1`, `git diff --check`, and the dependency/public-surface tests pass.
 - `AGENTS.md` (already updated on `develop`) points the AOT gate and examples policy at
   `examples/pong/Pong.Desktop` and `examples/pong/Pong.slnx`.
@@ -418,3 +427,41 @@ frames. The publish contains `Pong.Desktop.exe`, `assets.pck`, `SDL2.dll`, and t
 engine/runtime/game PDBs, with no `vulkan-1.dll`, `Pong.Assets`, `Bork2d.Bake`, Tomlyn, or
 StbImageSharp assembly. Full machine/GPU/driver/SDK details and the deviations are in the
 [M6 as-built evidence](m6-vulkan-bringup.md#18-as-built-evidence-2026-10-30).
+
+### 12.5 M7 extension: the 120-tick headless gate and the handoff host (2026-10-31)
+
+M7 (frame handoff and pacing; implemented on `m-7/common`, PR open/awaiting review, not merged)
+changes the three-mode gate without changing the Pong game contract:
+
+- **Headless tick gate (Q15=O2/F3).** `Pong.Desktop --headless` now runs the paced K1 headless loop
+  for exactly **120 ticks by default**; `--headless --ticks N` overrides with a positive `N` and the
+  run asserts exactly `N` completed ticks. The usage, `PongArguments` XML docs, and
+  `PongArgumentsTests` changed together: `--headless` defaults `TickLimit` to 120, `--ticks N` is
+  accepted with `--headless`, `--ticks` without a mode is still rejected, and
+  duplicate/malformed/zero/negative values are still rejected. `PongGame` needed no behavior change:
+  it uses the fixed 1/60 simulation step in headless mode and calls `Exit` after the tick limit; the
+  host passes the parsed limit. The run prints
+  `Pong headless run completed: setup/tick/teardown=1/120/1, tickLimit=120, entries=7, ... exit 0.`
+- **Windowed/offscreen handoff (Q22=V1).** `--windowed --ticks 120` and `--offscreen --ticks 120`
+  are unchanged as commands, but the M7 host backpressures the tick through the three-slot ring and
+  the renderer draws one black-clear frame per consumed snapshot. The runs assert exit 0, one
+  `Setup`/`Teardown`, and exactly 120 completed ticks; they do not assert frame counts or duration.
+- **Pong.Tests.** The suite is **46 tests**. The headless lifecycle test supplies an explicit
+  `tickLimit` (3) so the K1 loop terminates and asserts `setup/tick/teardown = 1/3/1`; the
+  bake/load probe game calls `Exit` after its single tick; the linked `PongArgumentsTests` covers the
+  120 default, the override, and the headless malformed/duplicate cases.
+- **AOT evidence.** The publish is zero-warning and contains `Pong.Desktop.exe`, `assets.pck`,
+  `SDL2.dll`, and the engine/runtime/game PDBs, with no `vulkan-1.dll` and no
+  `Pong.Assets`/`Bork2d.Bake`/Tomlyn/StbImageSharp assembly. The four published runs exit 0:
+  `--headless` (`1/120/1`, `tickLimit=120`, 7 entries), `--headless --ticks 7` (`1/7/1`,
+  `tickLimit=7`), `--windowed --ticks 120` (`1/120/1`; SDL 2.30.8, 1280×720, `B8G8R8A8Srgb`, FIFO,
+  3 images; `snapshotsPublished=120`, `snapshotsConsumed=1`, `framesPresented=1`, zero validation
+  errors/warnings), and `--offscreen --ticks 120` (`1/120/1`; 1280×720 `R8G8B8A8Srgb`, 2 images;
+  `snapshotsPublished=120`, `snapshotsConsumed=1`, `framesDiscarded=1`, zero validation
+  errors/warnings).
+- **Known short-run observation.** The 120-tick windowed/offscreen gates publish 120 snapshots but
+  consume only the first: the acceptance run exits and joins the renderer before it catches up, so
+  the published-vs-consumed relationship is not steady state. This is not a frame-count assertion
+  (Q22=V1); steady-state coupling/backpressure is covered by the M7 deterministic ring tests and the
+  opt-in GPU handoff tests. The full M7 evidence is in the
+  [M7 spec as-built section](m7-frame-handoff.md#18-as-built-evidence-2026-10-31).
