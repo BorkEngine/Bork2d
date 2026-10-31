@@ -364,13 +364,20 @@ TL/TR/BR/BL. The raw texture is top-left row-major; there is no vertical flip on
 corner formula is:
 
 ```text
-corners  = { (0,0), (1,0), (1,1), (0,1) }      // TL, TR, BR, BL
+corners  = { (0,0), (1,0), (0,1), (1,1) }      // TL, TR, BL, BR (triangle-strip order)
 c        = corners[gl_VertexIndex]
 sx       = FlipX ? -1 : 1
 sy       = FlipY ? -1 : 1
 local    = ((c.x - pivot.x) * size.x * sx, (pivot.y - c.y) * size.y * sy)
 position = viewProj * vec4(transform * local, 0, 1)
 ```
+
+The strip order is **TL, TR, BL, BR**, not the perimeter order TL, TR, BR, BL: the two strip
+triangles are `TL-TR-BL` and `TR-BL-BR`, which tile the quad along the TR-BL diagonal. The
+perimeter order produces `TL-TR-BR` and `TR-BR-BL`, which overlap on the right and leave the left
+triangle uncovered (the M8 post-review visual defect: every sprite showed a left triangular notch).
+The UV selection follows the same order (vertex 0 = TL, 1 = TR, 2 = BL, 3 = BR); the instance
+record keeps `uv0 = TL,TR` and `uv1 = BR,BL`.
 
 **Flip semantics (approved):** `FlipX`/`FlipY` mirror the **geometry** around the pivot in local
 space; each corner keeps its UV. They do not modify the transform. `FlipX && FlipY` mirrors both
@@ -563,8 +570,9 @@ draw counter equals the number of non-empty cameras.
   no runtime shader I/O or compilation.
 - **Pipeline (as built in WP-2):** one graphics pipeline per output color format (windowed/offscreen
   formats may differ; both sRGB). Dynamic rendering with one sRGB color attachment, no depth/stencil,
-  no vertex input, triangle strip, four vertices per instance, dynamic viewport/scissor, culling and
-  depth test/write disabled, straight alpha `src*a + dst*(1-a)`, color write mask RGBA, sample count 1.
+  no vertex input, triangle strip, four vertices per instance (TL, TR, BL, BR; see §6.4),
+  dynamic viewport/scissor, culling and depth test/write disabled, straight alpha
+  `src*a + dst*(1-a)`, color write mask RGBA, sample count 1.
   `VkPipelineRenderingCreateInfo` carries the color format only. One pipeline layout: push constant
   64 bytes + descriptor set 0. No per-camera descriptor sets. The `SpritePipeline` owns the
   descriptor-set layout (binding 0 storage buffer/vertex, binding 1 variable-count combined image
