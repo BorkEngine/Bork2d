@@ -121,7 +121,7 @@ game code creates its own categories.
 | `Bork2d.Runtime` | builder, modes, lifecycle, windowing |
 | `Bork2d.Engine` | reserved for scene/time/snapshot diagnostics; no current log sites |
 | `Bork2d.Engine.Assets` | pack parsing, decompression, loading |
-| `Bork2d.Render` | Vulkan instance/validation/device selection (M6 WP-2); windowed swapchain create/recreate/minimize and renderer start/stop counters (WP-3); offscreen target/start/stop counters (WP-4); M8 WP-2 adds the shader/pipeline startup identity, WP-3 adds the page/instance startup fields, page capacity/stop counters, and the once-per-failed-path warning, and WP-4 adds the draw counters and throttled draw diagnostics (§5.4) |
+| `Bork2d.Render` | Vulkan instance/validation/device selection (M6 WP-2); windowed swapchain create/recreate/minimize and renderer start/stop counters (WP-3); offscreen target/start/stop counters (WP-4); M8 WP-2 adds the shader/pipeline startup identity, WP-3 adds the page/instance startup fields, page capacity/stop counters, and the once-per-failed-path warning, and WP-4 adds the draw/instance/camera/skipped stop values, instance-growth lines, and throttled draw diagnostics (§5.4) |
 | game-defined | `CreateLogger("MyGame")` or `CreateLogger<T>()` |
 Startup logs use `Bork2d.Runtime` and one structured message after validation:
 
@@ -237,28 +237,31 @@ shutdown and record the counters and frame/consumed relationships. The renderer 
 frame-presented/discarded, handoff, and validation counters once at stop. No line is emitted from
 the acquire/record/present hot path.
 
-### 5.4 Sprite renderer, pages, and stats (M8; WP-2 pipeline and WP-3 page/start-stop fields exist; draw counters/statistics publication WP-4)
+### 5.4 Sprite renderer, pages, and stats (M8 WP-2–WP-4, `Current`)
 
 M8 adds no new category; it extends the `Bork2d.Render` one-shot lines and adds **throttled**
 diagnostics. WP-2 creates the pipeline/layout/samplers with static debug labels. WP-3 extends both
 start lines with the instance capacity, texture page count/capacity, bindless limit, and placeholder
 state, adds the page/growth/failed counters to both stop lines, logs one warning per failed path, and
-logs one information line per capacity growth. The draw/skip/clear diagnostics and per-frame
-`RenderStats` publication land with WP-4. There is still no per-frame, per-sprite, per-draw,
-per-camera, or per-image logging, and `RenderStats`/`CaptureFrameAsync` never log per call.
+logs one information line per page-capacity growth. WP-4 adds the planner diagnostics (invalid
+layer once per renderer, invalid camera once per renderer/reason, non-Quad once per asset path,
+`Clear.Depth` once per renderer), the instance-growth information line, the draw/instance/camera/
+skipped values on the stop lines, and once-per-completed-frame `RenderStats` publication (silent).
+There is still no per-frame, per-sprite, per-draw, per-camera, or per-image logging, and
+`RenderStats`/`CaptureFrameAsync` never log per call.
 
 | Event | Level | Fields |
 | --- | --- | --- |
 | Sprite renderer started (start line extension) | Information | mode, pipeline/shader identity (build-time SPIR-V), page initial capacity, instance capacity (1024), bindless limit (effective `maxPerStage`/`maxDescriptorSet` update-after-bind sampled images), placeholder on/off, validation on/off — `Current` (WP-3) |
 | Page capacity grown | Information | old/new capacity, limit; once per capacity change — `Current` (WP-3) |
-| Instance buffer grown | Debug | frame index, old/new capacity (instances), once per capacity change — WP-4 |
-| Placeholder used for a path | Warning | canonical asset path and the content failure kind; **once per failed path** for the run — `Current` (WP-3; the draw use is WP-4) |
+| Instance buffer grown | Information | frame index, old/new capacity (instances/bytes), limit; once per capacity change — `Current` (WP-4) |
+| Placeholder used for a path | Warning | canonical asset path and the content failure kind; **once per failed path** for the run — `Current` (WP-3) |
 | Texture/page content failure | Warning | path/kind and reason; throttled once per unique path/kind — `Current` (WP-3: one warning per failed path) |
-| Invalid sprite/layer/non-Quad/pending skip | Debug | once per asset path/kind where one exists, otherwise once per renderer; totals live in counters |
-| Invalid camera skipped | Debug | once per renderer (not per camera per frame) |
-| `Clear.Depth` requested | Debug | once per renderer; it behaves like `Clear.None` and never touches depth |
-| Draw/content diagnostic totals | Information | repeated skips are counted and reported on the renderer stop line, not logged per occurrence |
-| Renderer stopped (stop line extension) | Information | frames, draws/instances, cameras/non-empty, pages/capacity/growths, page uploads/failures/placeholder uses, skipped sprites, instance capacity/overflow, validation errors/warnings, stop reason |
+| Invalid sprite/layer/non-Quad skip | Warning | invalid layer once per renderer, non-Quad once per asset path; totals live in counters — `Current` (WP-4) |
+| Invalid camera skipped | Warning | once per renderer per invalid reason (not per camera per frame) — `Current` (WP-4) |
+| `Clear.Depth` requested | Information | once per renderer; it behaves like `Clear.None` and never touches depth — `Current` (WP-4) |
+| Draw/content diagnostic totals | Information | repeated skips are counted and reported on the renderer stop line, not logged per occurrence — `Current` (WP-4) |
+| Renderer stopped (stop line extension) | Information | frames, draws/instances, cameras/non-empty, pages/capacity/growths, page uploads/failures/placeholder uses, skipped sprites, instance capacity/growths, validation errors/warnings, stop reason — `Current` (WP-3/WP-4) |
 | Page/instance capacity at the device limit, malformed sprite, shader/pipeline failure | Error | the exception naming the field/limit; the renderer-fatal path stops the ring and the host rethrows after teardown |
 
 The renderer also logs its final counters once at stop (the values are the same ones published in

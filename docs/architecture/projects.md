@@ -14,14 +14,15 @@
 > Render handoff ring/consumer and the Runtime
 > acquire/publish/headless host add **no** project reference, package, or public type beyond the
 > already-approved `FlipX`/`FlipY` (D-M7-02).
-> **M8 (sprite renderer) is in progress** (WP-1 docs reconciliation, WP-2 shader
-> pipeline/camera math/instance planning, and WP-3 texture pages/`RenderStats` are complete;
-> WP-4–WP-5 remain). The approved target adds
+> **M8 (sprite renderer) is at WP-4** (WP-1 docs reconciliation, WP-2 shader
+> pipeline/camera math/instance planning, WP-3 texture pages/`RenderStats`, and WP-4 draw/statistics/
+> capture integration are complete; WP-5 remains). The approved target adds
 > only a **build-only** `Bork2d.ShaderCompiler` tool
 > (Silk.NET.Shaderc/Silk.NET.Shaderc.Native 2.23.0): no new runtime project, package, or public
-> Render type, and the dependency matrix in §2 is unchanged. WP-3's page subsystem is internal to
-> `Bork2d.Render` and adds no reference; the only new public type is the approved
-> `Bork2d.Engine.Rendering.RenderStats`.
+> Render type, and the dependency matrix in §2 is unchanged. WP-3's page subsystem and WP-4's
+> planner/capture resources are internal to
+> `Bork2d.Render` and add no reference; the only new public types are the approved
+> `Bork2d.Engine.Rendering.RenderStats` and the approved `IEngine<TLayer>.CaptureFrameAsync` member.
 
 ## 1. Current projects
 
@@ -33,7 +34,7 @@ All engine projects target `net11.0` and live in `src/Bork2d/`; the Pong example
 | --- | --- | --- | --- |
 | `Bork2d.Engine` | none (Bork2d) | `Current` | Public contract (`Bork2d.Engine`, `.Scene`, `.Rendering`, `.Input`, `.Platform`, `.Assets`) plus the internal root-owned scene tree, transforms, time, MessagePack shape policy, v1 pack reader/writer, VFS, loader, and asset service. The tooling-only `Bork2d.Engine.Assets.Pack.PackBuilder`/`PackCompressionMode` stay public for pack creation. |
 | `Bork2d.Bake` | `Bork2d.Engine` | `Current` | Public JIT tooling surface (`BakeApplicationBuilder`, `BakeApplication`, `RegisterAsset<T>()`, `UseDefaultAssets()`, `UseDefaultProcessors()`, processor contracts, sidecar policy, output sink, commands) plus the internal implementation (Tomlyn binder, processor registry, texture processor, pack composition, schema-3 incremental planner). |
-| `Bork2d.Render` | `Bork2d.Engine` + `Silk.NET.Vulkan*` | `Current` (M6/M7; M8 WP-2 pipeline + WP-3 pages) | Vulkan instance/validation/debug-utils bootstrap, physical and logical device selection (features, extensions, limits), the internal renderer seam and control channel, the pure surface-format/present-mode/swapchain policies, the windowed renderer (swapchain create/recreate, two frames in flight, dynamic-rendering clear, present, resize/minimize/fullscreen, surface-loss recovery, counters, validation observation), the offscreen renderer (two permanent sRGB targets, one allocation per image, clear/discard), the M7 handoff (three-slot ring, snapshot consumer, combined wait, fence-held slot lifetime, suspended minimized drain), the M8 WP-2 internal `SpritePipeline` (descriptor-set layout, 64-byte push-constant pipeline layout, one pipeline per sRGB format, sampler cache), shared camera projection bridge, and pure sprite sort/filter/quad/96-byte instance layout, and the M8 WP-3 texture-page subsystem (async `IAssets` prefetch, validation, placeholder, pooled images/staging, upload fences, bindless writes, dynamic capacity) with the per-frame binding 0/1 resources. Draw recording, per-frame stats publication, and `CaptureFrameAsync` are M8 WP-4. |
+| `Bork2d.Render` | `Bork2d.Engine` + `Silk.NET.Vulkan*` | `Current` (M6/M7; M8 WP-2 pipeline + WP-3 pages + WP-4 draws) | Vulkan instance/validation/debug-utils bootstrap, physical and logical device selection (features, extensions, limits), the internal renderer seam and control channel, the pure surface-format/present-mode/swapchain policies, the windowed renderer (swapchain create/recreate, two frames in flight, dynamic-rendering passes, present, resize/minimize/fullscreen, surface-loss recovery, counters, validation observation), the offscreen renderer (two permanent sRGB targets, one allocation per image, per-camera passes/discard), the M7 handoff (three-slot ring, snapshot consumer, combined wait, fence-held slot lifetime, suspended minimized drain), the M8 WP-2 internal `SpritePipeline` (descriptor-set layout, 64-byte push-constant pipeline layout, one pipeline per sRGB format, sampler cache), shared camera projection bridge, pure sprite sort/filter/quad/96-byte instance layout, the M8 WP-3 texture-page subsystem (async `IAssets` prefetch, validation, placeholder, pooled images/staging, upload fences, bindless writes, dynamic capacity) with the per-frame binding 0/1 resources, and the WP-4 planner/growable instances/per-camera draws/per-frame stats/capture staging. |
 | `Bork2d.Runtime` | `Bork2d.Engine`, `Bork2d.Render` | `Current` (M6/M7) | Public builder/app, validation, windowed SDL + Vulkan instance/surface host, renderer composition and startup/shutdown ordering, windowed/offscreen snapshot acquire/capture/publish with ring backpressure, the paced headless host, app-owned logging, and the app-scoped asset-service lifecycle. |
 | `Bork2d.Tests` | `Bork2d.Engine`, `Bork2d.Bake`, `Bork2d.Render`, `Bork2d.Runtime` | `Current` | Deterministic xUnit suite, dependency-matrix/public-surface tests, and the Q-20 metadata guard. It references no example project. |
 | `Pong.Common` (examples) | `Bork2d.Engine` | `Current` (D-043/D-044; AOT-compatible) | The game-side runtime library: `GameLayer`, the `[GenerateShape]` `GameSettings` struct root, `PongSide`, the engine-free deterministic `PongSimulation`, `PongAi`, `PongTitle`, and `PongGame` (the `IGame<GameLayer>` implementation, loaded sprite/descriptor chain, title, score logging, resize). |
@@ -157,7 +158,7 @@ The approved M8 public additions are `ICamera<TLayer>.WorldToScreen`/`ScreenToWo
 public `Bork2d.Engine.Rendering.RenderStats` record struct, and `IEngine<TLayer>.RenderStats`/
 `CaptureFrameAsync` (§6.9 of the [M8 spec](../specs/m8-sprite-renderer.md#69-public-api)). The three
 camera members are `Current` (M8 WP-2); `RenderStats`/`IEngine.RenderStats` are `Current` (M8 WP-3);
-`CaptureFrameAsync` remains `Planned` (WP-4). `Bork2d.Render` keeps zero public types.
+`CaptureFrameAsync` is `Current` (M8 WP-4). `Bork2d.Render` keeps zero public types.
 
 The pack writer is the one documented exception to the "implementation types stay internal" rule
 (D-001, D-M3-04): `PackBuilder`/`PackCompressionMode` exist for pack creation, not gameplay. The
@@ -324,7 +325,8 @@ are owned by [asset processors](asset-processors.md#3-project-model).
   7-entry pack, asserts the settings/sprite/descriptor/raw chain, exactly `N` completed ticks, and
   the detached root, exits 0), `--headless --ticks N` (exactly `N` ticks),
   `--windowed --ticks 120` (exit 0 after exactly 120 ticks; creates the window/instance/surface and
-  presents a black clear per consumed snapshot), and `--offscreen --ticks 120` (exit 0 after exactly
+  renders the per-camera sprite passes per consumed snapshot), and `--offscreen --ticks 120` (exit 0
+  after exactly
   120 ticks through the offscreen renderer; frame count not asserted). The publish must contain
   `Pong.Desktop.exe`,
   `assets.pck`, `SDL2.dll`, and the `Pong.Common`/engine PDBs (NativeAOT single-file links the managed
