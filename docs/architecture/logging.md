@@ -21,10 +21,10 @@
 > loop-stop line. M7 adds the handoff fields/counters to the same one-shot renderer start/stop
 > lines (§5.3) and the handoff counters to the windowed/offscreen loop-stop lines and the
 > headless loop-stop line (§5.1). The Pong example (D-043/D-044) owns the game-side title/logging
-> behavior. **M8 (sprite renderer) is in progress** (WP-1 is documentation reconciliation; no M8
-> code is written yet): the approved target adds one-shot pipeline/page/instance startup fields,
-> richer renderer stop counters, and throttled draw/content diagnostics (§5.4) — and still no
-> per-frame, per-sprite, or per-draw logging.
+> behavior. **M8 (sprite renderer) is in progress** (WP-1 docs reconciliation and WP-2
+> pipeline/camera/planning code are complete): the remaining target adds one-shot page/instance
+> startup fields, richer renderer stop counters, and throttled draw/content diagnostics (§5.4) — and
+> still no per-frame, per-sprite, or per-draw logging.
 
 ## 1. Surface
 
@@ -237,10 +237,12 @@ shutdown and record the counters and frame/consumed relationships. The renderer 
 frame-presented/discarded, handoff, and validation counters once at stop. No line is emitted from
 the acquire/record/present hot path.
 
-### 5.4 Sprite renderer, pages, and stats (M8 target, in progress)
+### 5.4 Sprite renderer, pages, and stats (M8; WP-2 pipeline exists, page/draw/stats fields WP-3/WP-4)
 
 M8 adds no new category; it extends the `Bork2d.Render` one-shot lines and adds **throttled**
-diagnostics. There is still no per-frame, per-sprite, per-draw, per-camera, or per-image logging, and
+diagnostics. WP-2 creates the pipeline/layout/samplers with static debug labels and no new log line
+yet; the page/instance startup fields, stop counters, and draw diagnostics below land with WP-3/WP-4.
+There is still no per-frame, per-sprite, per-draw, per-camera, or per-image logging, and
 `RenderStats`/`CaptureFrameAsync` never log per call.
 
 | Event | Level | Fields |

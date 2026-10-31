@@ -21,10 +21,12 @@
 > [decision log](decisions.md#m7-frame-handoff-and-pacing-decisions-approved-2026-10-31) as
 > `D-M7-01…D-M7-27`); as-built evidence is in [M7 spec §18](specs/m7-frame-handoff.md#18-as-built-evidence-2026-10-31).
 > **M8 (sprite renderer) is in progress:** the owner-approved
-> [M8 spec](specs/m8-sprite-renderer.md) (2026-10-31) is the M8 contract; WP-1 reconciled the owning
-> docs with it and **no M8 code is written yet**. The M8 public additions (`ICamera.WorldToScreen`/
-> `ScreenToWorld`, `RenderStats`/`IEngine.RenderStats`, `IEngine.CaptureFrameAsync`) are `Planned`/not
-> declared, and the renderer still draws a black clear until the sprite work lands.
+> [M8 spec](specs/m8-sprite-renderer.md) (2026-10-31) is the M8 contract. WP-1 reconciled the owning
+> docs; WP-2 added the build-only shader compiler + generated SPIR-V, the internal sprite
+> pipeline/layout/sampler cache, the shared camera projection, and the public
+> `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` members (all `Current`). `RenderStats`/
+> `IEngine.RenderStats` and `IEngine.CaptureFrameAsync` remain `Planned` (WP-3/WP-4), and the
+> renderer still draws a black clear until the draw integration lands.
 > Check status markers before treating an API as implemented.
 >
 > The [file-processors spec](specs/file-processors.md) owns implementation scope/acceptance; the
@@ -36,8 +38,8 @@
 > `examples/pong` and is the AOT gate: `Pong.Desktop` publishes with no tooling assembly in the
 > output, loads the 7-entry Pong pack headless, and runs `--headless` (120 ticks by default, or
 > `--headless --ticks N`), `--windowed --ticks 120`, and `--offscreen --ticks 120`. Verification is
-> the local gate set: Debug/Release zero-warning builds, 1141 deterministic plus 17
-> opt-in/conditional tests (1158 total) for the engine and 46 Pong tests, `dotnet format` for both
+> the local gate set: Debug/Release zero-warning builds, 1235 deterministic plus 17
+> opt-in/conditional tests (1252 total) for the engine and 46 Pong tests, `dotnet format` for both
 > solutions, the docs link check, `git diff --check`, and the local AOT publish/run. CI runs on pull
 > requests to `develop` and pushes to `develop`; it does not build the Pong solution.
 

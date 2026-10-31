@@ -11,10 +11,12 @@
 > offscreen loop until `Exit`, both with the snapshot handoff and ring backpressure; headless runs a
 > paced no-GPU loop until `Exit` with a fully synthesized clock. The base pack (or the
 > `WithoutAssets()` empty filesystem) opens before the window and `Setup`. Sprites are the approved
-> M8 target and **M8 is in progress** (WP-1 is documentation reconciliation; no M8 code is written
-> yet); M7 still shows a black clear. The approved M8 public additions are
-> `ICamera.WorldToScreen`/`ScreenToWorld`, `IEngine.RenderStats`, and `IEngine.CaptureFrameAsync`
-> (all `Planned`/not declared). See the [API reference](reference.md#12-runtime-surface).
+> M8 target and **M8 is in progress**: WP-1 reconciled the docs and WP-2 added the shader
+> tool/pipeline, the shared camera projection, and the public
+> `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` members (all three are `Current`); the renderer
+> still shows a black clear until the draw integration lands (WP-4). `IEngine.RenderStats` and
+> `IEngine.CaptureFrameAsync` remain `Planned` (WP-3/WP-4). See the
+> [API reference](reference.md#12-runtime-surface).
 >
 > Assets/processors are configured in a build-time `MyGame.Assets` executable with
 > `BakeApplicationBuilder`; the project descriptor and generated host are removed, data types are
@@ -267,19 +269,23 @@ camera.ZIndex = 0;                         // ascending order; higher applies la
   non-finite or non-positive viewport, an empty rounded rect, an unknown `ClearKind`, a non-finite
   `ClearColor`, a singular camera matrix, or a non-unit camera scale skips the whole camera
   (including its clear) with a throttled diagnostic. The setters do not validate.
-- **Screen/world helpers** are the approved M8 additions (`Planned`; not declared yet).
+- **Screen/world helpers** are `Current` (M8 WP-2):
   `WorldToScreen` returns global framebuffer pixels (the viewport offset is included) and uses the
-  same camera inverse, `Size`, rounded viewport/aspect, and Y-flip as the renderer. Both helpers
-  throw `ArgumentOutOfRangeException` for non-finite input and `InvalidOperationException` for an
-  invalid camera; they never return NaN silently.
-- Multiple cameras are supported; each non-empty camera issues exactly one draw inside its own pass,
-  and a camera's mask (`CullingMask`) selects the layers it sees.
+  same camera inverse, `Size`, rounded viewport/aspect, and Y-flip as the renderer.
+  `ScreenToWorld` is the inverse mapping (points outside the viewport extrapolate).
+  `WorldSize` returns the visible world `(2 * Size * aspect, 2 * Size)`. All three read the engine
+  window's `IWindow.Size` (framebuffer physical pixels), so they throw
+  `InvalidOperationException` in headless/offscreen apps and for an invalid camera; non-finite input
+  throws `ArgumentOutOfRangeException`. They never return NaN silently.
+- Multiple cameras are supported; each non-empty camera issues exactly one draw inside its own pass
+  (WP-4), and a camera's mask (`CullingMask`) selects the layers it sees.
 
 For example:
 
 ```csharp
 Vector2 pixel = camera.WorldToScreen(worldPoint);   // framebuffer pixels, top-left origin
 Vector2 world = camera.ScreenToWorld(mousePixel);   // inverse; outside-viewport points extrapolate
+Vector2 visible = camera.WorldSize;                 // visible world width/height
 ```
 
 ## 6. Sprites and transforms
@@ -311,7 +317,8 @@ sprite.LocalScale = new Vector2(2, 2);
 - `FlipX`/`FlipY` mirror the **geometry** around the pivot in local space, each corner keeping its
   UV; the transform is untouched, `FlipX && FlipY` mirrors both axes, and a negative `LocalScale`
   composes with them. Both default to `false`. They are `Current` for storage and M7 frame-snapshot
-  capture; the M8 renderer applies them at draw time, so nothing is visibly mirrored in M7.
+  capture; WP-2 resolves the mirrored geometry in the instance layout, and the renderer applies it at
+  draw time (WP-4), so nothing is visibly mirrored in M7.
 - **Fatal content (approved M8).** Malformed sprite fields are a fatal renderer error
   (`Bork2dException` naming the field and texture reference): null/short/non-finite UVs,
   `Scale <= 0`/non-finite, a non-finite pivot or one outside `[0,1]`, an unknown topology, or

@@ -10,8 +10,8 @@
 > backpressure, the paced headless loop, and the Pong `--headless` 120-tick gate
 > (`--headless --ticks N` overrides). The
 > warning/style/format/AOT gates and the docs link check are active. **M8 (sprite renderer) is in
-> progress** (WP-1 is documentation reconciliation; no M8 code is written yet): it adds the
-> build-time `Bork2d.ShaderCompiler` tool, sprite GPU tests, and the 50,000-sprite benchmark
+> progress** (WP-1 docs reconciliation and WP-2 shader pipeline/camera math/instance planning are
+> complete): the remaining work adds texture pages, sprite GPU tests, and the 50,000-sprite benchmark
 > (§2.1/§6). CI runs the docs link
 > check, build, tests, and format verification on PRs to `develop` and pushes to `develop`; the
 > NativeAOT publish/run gate (`Pong.Desktop` headless, windowed, and offscreen) is a required
@@ -164,7 +164,8 @@ and the detached world all pass. The `--windowed --ticks 120` and `--offscreen -
 load the same pack and assert one `Setup`, exactly 120 completed ticks, and one `Teardown`; the
 backpressured runs are short by design and assert no frame count or duration (Q22=V1). The
 interactive `--windowed` run is the manual visibility/input check (the window shows the M7
-one-frame-per-snapshot black clear; sprites arrive in M8; the title carries the score/state). Inspect
+one-frame-per-snapshot black clear; the M8 WP-2 shader pipeline is created but no draw is recorded
+until WP-4; the title carries the score/state). Inspect
 the publish directory: it is a NativeAOT single-file output plus PDBs, so the
 managed assemblies are linked in. It must contain `Pong.Desktop.exe`, `assets.pck`, `SDL2.dll`, and
 the engine/runtime/`Pong.Common` PDBs (`Pong.Common.pdb` is the on-disk proof that the game assembly
@@ -180,11 +181,18 @@ The M8 sprite renderer compiles shaders at **build time**, not at runtime:
 - The build-only JIT tool `build/Bork2d.ShaderCompiler` pins `Silk.NET.Shaderc` **2.23.0** and
   `Silk.NET.Shaderc.Native` **2.23.0** (build-only; they never enter the runtime or AOT publish
   graph). No runtime project references them.
-- An MSBuild target builds the tool, compiles the checked-in GLSL
+- An MSBuild target (`build/Bork2d.ShaderCompiler.targets`, imported by `Bork2d.Render`) restores
+  and builds the tool out of process (with `RemoveProperties` so the consumer's RID/publish settings
+  do not leak), compiles the checked-in GLSL
   (`src/Bork2d/Bork2d.Render/Shaders/sprite.vert`, `sprite.frag`) to SPIR-V (Vulkan 1.3 target;
-  debug info in Debug, optimization in Release), and emits a generated C# file with the SPIR-V byte
-  arrays into `Bork2d.Render`'s compilation. The generated code is linked into the app; the publish
-  contains no loose `.spv` and no shaderc assembly.
+  debug info in Debug, optimization in Release), and emits
+  `obj/<Configuration>/<TFM>/ShaderCompiler/SpriteShaders.g.cs` with the SPIR-V byte arrays into
+  `Bork2d.Render`'s compilation before `CoreCompile`. The generated file is not committed and is never
+  a loose publish file; the code is linked into the app and the publish contains no `.spv` and no
+  shaderc assembly. The target also runs for design-time/format builds, so the clean-clone CI sequence
+  (`dotnet restore` → `dotnet format --no-restore` → `dotnet build --no-restore`) works without a
+  prior build. The tool project is **not** in `src/Bork2d/Bork2d.slnx` and is never referenced by a
+  runtime project.
 - **No Vulkan SDK is required.** `glslangValidator`, `glslc`, and `spirv-val` are not build
   dependencies; installing the SDK is still useful for the validation-layer GPU evidence.
 - Do not add runtime shader compilation, shader file I/O, or a runtime shaderc dependency.

@@ -14,11 +14,11 @@
 > lifetime, the combined snapshot/control wait, and the suspended minimized drain are `Current` (M7
 > WP-3); the host acquire/capture/publish wiring, the blocked-producer wake paths, the minimized
 > 30 Hz tick cap, and the paced headless loop are `Current` (M7, §5.3/§7). The engine has no
-> debug-only tick-active, structural, or slot-state checks. The suite is 1158 tests: 1141
-> deterministic plus 17 opt-in/conditional. **M8 (sprite renderer) is in progress:** the approved
-> target adds render-thread `IAssets` calls, the public stats/capture bridge, and page/instance
-> resources, and it does **not** change the frame snapshot. No M8 code is written yet (WP-1 is
-> documentation reconciliation).
+> debug-only tick-active, structural, or slot-state checks. The suite is 1252 tests: 1235
+> deterministic plus 17 opt-in/conditional. **M8 (sprite renderer) is in progress:** WP-2 added the
+> pure camera/planning/instance-layout code (no new thread) and the renderer-owned sprite pipeline;
+> the approved target's render-thread `IAssets` calls, public stats/capture bridge, and page/instance
+> resources remain WP-3/WP-4, and M8 does **not** change the frame snapshot.
 
 ## 1. Threads by mode
 
@@ -26,7 +26,7 @@
 | --- | :-: | :-: | :-: | --- |
 | **Tick** | yes | yes | yes | Windowed/offscreen loop (slot acquire, time, `IGame.Setup/Tick/Teardown`, input freeze/text dispatch, tick scope, scene/asset requests, snapshot capture, publish, shutdown); headless paced loop with the synthesized clock. May be any host thread. |
 | **OS/window** | yes | no | no | SDL video/events and window operations; public `IWindow` calls are marshaled here. |
-| **Render** | yes | yes | no | Vulkan device, swapchain (windowed) or offscreen targets, frames/fences, the snapshot ring and consumer, dynamic-rendering clear, present/discard. Started by the host before `Setup`; no `Tick` runs until it is ready. The approved M8 target adds uploads, sprite resolution through `IAssets`, sorting, per-camera passes, instance filling, and the stats/capture bridge (in progress; no M8 code yet). |
+| **Render** | yes | yes | no | Vulkan device, swapchain (windowed) or offscreen targets, frames/fences, the snapshot ring and consumer, dynamic-rendering clear, present/discard. Started by the host before `Setup`; no `Tick` runs until it is ready. M8 WP-2 adds the render-thread-owned sprite pipeline/layout/samplers (created after the color format is known). The approved M8 target adds uploads, sprite resolution through `IAssets`, per-camera passes, instance filling, and the stats/capture bridge (WP-3/WP-4, not written yet). |
 | **Asset loader** | yes | yes | yes | One per app: pack reads, decompression, and MessagePack deserialization. It caches no resolved assets and never touches SDL, Vulkan, or game entities. |
 | **Game workers** | yes | yes | yes | Game-spawned threads on distinct entities; the game joins them before `Tick` returns. |
 
@@ -349,7 +349,7 @@ thread never invokes a game callback.
 ## 6. Asset and pack coordination
 
 `Current (M3/D-035)` for the loader and pack-time reference validation. The renderer/GPU integration
-is the approved M8 target, in progress (no M8 code yet).
+(uploads/pages and render-thread `IAssets` calls) is the approved M8 target (WP-3, not written yet).
 
 - The internal asset service owns **one** dedicated loader thread per app and an unbounded FIFO
   request queue. There is no priority, no parallelism, and no cancellation token in the public API.

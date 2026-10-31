@@ -23,8 +23,9 @@
 > Pong desktop app builds the assets executable out of process through
 > `build/Bork2d.Assets.Copy.targets`; see [asset processors](asset-processors.md).
 >
-> **M8 (sprite renderer) is in progress** (WP-1 is documentation reconciliation; no M8 code is
-> written yet). The approved target adds a second build-time-only tool, `Bork2d.ShaderCompiler`
+> **M8 (sprite renderer) is in progress** (WP-1 docs reconciliation and WP-2 shader
+> pipeline/camera math/instance planning are complete; WP-3–WP-5 remain). The approved target adds a
+> second build-time-only tool, `Bork2d.ShaderCompiler`
 > (Silk.NET.Shaderc/Silk.NET.Shaderc.Native 2.23.0), which compiles checked-in GLSL to SPIR-V and
 > emits generated C# linked into `Bork2d.Render`. The tool and its packages never enter the runtime
 > or AOT publish graph; there is no runtime shader I/O, compiler, or Vulkan SDK requirement.
@@ -34,13 +35,13 @@
 | Component | NativeAOT required? | Why |
 | --- | --- | --- |
 | `Bork2d.Engine` | Yes | Public contract plus the runtime scene, transforms, time, snapshot policy, generated shapes, pack parsing, decompression, MessagePack decoding, and pack-time reference validation. |
-| `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. M6 adds the instance/validation/device-selection foundation, the windowed swapchain/clear/present renderer, and the offscreen target/renderer with the Runtime host wiring. The approved M8 target adds the texture pages/uploader, per-camera passes, and the generated-SPIR-V sprite pipeline (in progress; no M8 code yet). The renderer is never constructed on the headless path. |
+| `Bork2d.Render` | Yes | Vulkan renderer and GPU uploads. M6 adds the instance/validation/device-selection foundation, the windowed swapchain/clear/present renderer, and the offscreen target/renderer with the Runtime host wiring. M8 WP-2 adds the generated-SPIR-V sprite pipeline/layout/samplers and the camera-projection bridge; texture pages/uploader and per-camera draws remain WP-3/WP-4. The renderer is never constructed on the headless path. |
 | `Bork2d.Runtime` | Yes | Builder, host, and app-owned logging. |
 | `Pong.Desktop` | Yes | The AOT desktop example and the local gate, published with `PublishAot`. It references `Bork2d.Engine`/`Bork2d.Runtime` plus the game-side `Pong.Common` and loads the baked 7-entry Pong pack for `--headless` (120 ticks by default; `--headless --ticks N` overrides) or runs the same pack windowed (`--windowed [--ticks N]`) or offscreen (`--offscreen --ticks N`). |
 | `Pong.Common` | Yes | Game-side runtime library: `GameSettings` (a `[GenerateShape]` struct root with sprite references), `PongGame`, `PongSimulation`, `PongAi`, and `PongTitle`; it references `Bork2d.Engine` only. |
 | `Bork2d.Editor` | No (JIT) | Avalonia desktop tool; may reflect over the game model. Not in Stage 1 (M5 removed). |
 | Asset baker / pack tool (`Bork2d.Bake`) | No (JIT) | Build-time tools; use explicit `RegisterAsset<T>()` registrations and TOML. No generated host, no reflection, and no `Bork2d.Bake.Cli` or `generate-host`. |
-| `Bork2d.ShaderCompiler` (build-only) | No (JIT) | Build-time tool that compiles checked-in GLSL to SPIR-V with Silk.NET.Shaderc 2.23.0 and emits generated C# linked into `Bork2d.Render`. M8 target (in progress); never in the runtime or AOT publish graph, and no Vulkan SDK is required. |
+| `Bork2d.ShaderCompiler` (build-only) | No (JIT) | Build-time tool that compiles checked-in GLSL to SPIR-V with Silk.NET.Shaderc 2.23.0 and emits generated C# linked into `Bork2d.Render`. `Current` (M8 WP-2); never in the runtime or AOT publish graph, and no Vulkan SDK is required. |
 | `MyGame.Assets` / `Pong.Assets` | No (JIT) | Game/build-time executables that own source roots, processors, and builder configuration; they bake packs when built and are never referenced by the runtime/AOT publish. Runtime data types remain in the AOT-safe `Pong.Common`. |
 | Tests | Mixed | Unit tests run JIT; `Pong.Desktop` is the one AOT publish/run gate. |
 
@@ -204,13 +205,17 @@ for determinism and a possible future AOT editor, not a current AOT requirement.
   ticks by default), `--headless --ticks N`, `--windowed --ticks 120`, and `--offscreen --ticks
   120` runs; the existing two-code suppression
   covers the shared resolver and no custom resolver or broader suppression was needed.
-- **No runtime shader compilation.** The approved M8 target (in progress) uses a build-time
-  `Bork2d.ShaderCompiler` tool (Silk.NET.Shaderc 2.23.0, Vulkan 1.3 target) that compiles the
-  checked-in GLSL (`Bork2d.Render/Shaders/sprite.vert`, `sprite.frag`) and emits a generated C# file
-  with the SPIR-V byte arrays into `Bork2d.Render`'s compilation. The generated SPIR-V is linked into
-  the single-file executable; the publish contains no loose `.spv` files, no shaderc assemblies, and
-  no shader I/O or compiler at runtime. The Vulkan SDK is **not** a build requirement; a locally
-  installed `glslangValidator`/`glslc`/`spirv-val` is not used by the build.
+- **No runtime shader compilation (as built in M8 WP-2).** A build-time
+  `Bork2d.ShaderCompiler` tool (Silk.NET.Shaderc 2.23.0, Vulkan 1.3 target) compiles the checked-in
+  GLSL (`Bork2d.Render/Shaders/sprite.vert`, `sprite.frag`) and emits a generated C# file with the
+  SPIR-V byte arrays into `Bork2d.Render`'s compilation. The generated SPIR-V is linked into the
+  single-file executable; the publish contains no loose `.spv` files, no shaderc assemblies, and no
+  shader I/O or compiler at runtime. The tool is restored/built out of process by
+  `build/Bork2d.ShaderCompiler.targets` (with `RemoveProperties` so RID/publish settings do not leak),
+  is not in `Bork2d.slnx`, and never enters the runtime/AOT graph. The Vulkan SDK is **not** a build
+  requirement; a locally installed `glslangValidator`/`glslc`/`spirv-val` is not used by the build.
+  WP-2's required AOT publish has no `Bork2d.ShaderCompiler`/Silk.NET.Shaderc assembly and no loose
+  `.spv`, and the published headless/offscreen/windowed runs exit 0.
 - The headless server must not initialize SDL or Vulkan; `WithHeadless(...)` must not load or
   call the graphics/windowing paths.
 
@@ -229,7 +234,7 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    There is no generated host and no host build step. The publish output must contain no
    `Pong.Assets`, `Bork2d.Bake`, Tomlyn, or StbImageSharp assembly (`Pong.Common` is the expected
    game-side assembly), must contain `assets.pck` and `SDL2.dll`, and must not contain
-   `vulkan-1.dll` (the system loader). The M8 target additionally requires no
+   `vulkan-1.dll` (the system loader). M8 (verified in WP-2) additionally requires no
    `Bork2d.ShaderCompiler`/`Silk.NET.Shaderc` assembly and no loose `.spv` in the publish: the
    generated SPIR-V C# is compiled into the app. The NativeAOT output is a single-file executable
    plus PDBs, so the managed assemblies are linked in; `Pong.Common.pdb` is the remaining on-disk
@@ -247,8 +252,8 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    frame per snapshot in M7 (the short run consumes the first and supersedes the rest), and joining
    the renderer; `Pong.Desktop.exe --offscreen --ticks 120` must exit `0` after exactly 120 ticks
    with one `Setup`/`Teardown`, a 1280×720 sRGB offscreen target, and a joined renderer (frame count
-   not asserted, D-M6-13/Q22=V1). The M8 target instead draws the three sprites with their tints and
-   asserts the approved `RenderStats` relationships (`Cameras >= 1`, `NonEmptyCameras >= 1`,
+   not asserted, D-M6-13/Q22=V1). Once WP-4 lands, the M8 target draws the three sprites with their
+   tints and asserts the approved `RenderStats` relationships (`Cameras >= 1`, `NonEmptyCameras >= 1`,
    `DrawCalls >= 1`, `Instances >= 3`, `TexturePages >= 3`; manual visual check, no pixel
    assertion). The interactive `--windowed` run reads W/S/Space/R/Escape, and exits on
    Escape/close; the title/logs carry the score and state.
