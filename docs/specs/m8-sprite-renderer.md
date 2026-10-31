@@ -1,11 +1,11 @@
 # M8 — Sprite Renderer with Real Assets (spec)
 
-> **Status: Approved for implementation (2026-10-31); WP-1 through WP-4 are complete.** This spec
-> is the owner-approved M8 contract. Per the owner's decision, the answers are recorded directly here:
-> there is no separate M8 decision-register section, no `D-M8-xx` entries are added to
-> [decisions.md](../decisions.md), and the previous question history is intentionally not preserved.
-> This is an explicit owner exception to the usual decision-log process; the implementation docs
-> still change in the same work packages.
+> **Status: implementation complete through WP-5; the milestone PR is open for review and is not
+> merged.** This spec is the owner-approved M8 contract. Per the owner's decision, the answers are
+> recorded directly here: there is no separate M8 decision-register section, no `D-M8-xx` entries
+> are added to [decisions.md](../decisions.md), and the previous question history is intentionally
+> not preserved. This is an explicit owner exception to the usual decision-log process; the
+> implementation docs still change in the same work packages.
 >
 > As built: WP-1 reconciled the owning docs; WP-2 added the build-time shader compiler/tool, the
 > checked-in GLSL and generated SPIR-V, the sprite pipeline/layout/samplers, the shared camera
@@ -17,8 +17,10 @@
 > `IEngine<T>.RenderStats` with a host-installed, allocation-free source. WP-4 added the draw
 > integration (one plan for both targets, per-camera passes/draws, growable mapped instance buffers,
 > per-frame `RenderStats` publication, and public `IEngine<T>.CaptureFrameAsync` with pooled staging)
-> plus deterministic and opt-in GPU coverage. WP-5 (the 165 FPS benchmark, Pong/AOT presentation gate,
-> final docs, and milestone PR) remains planned.
+> plus deterministic and opt-in GPU coverage. WP-5 added the explicit short-vs-long Pong/AOT
+> presentation gate (no `TexturePages` conditional bypass), the opt-in 50,000-sprite 165 FPS
+> benchmark and its zero-allocation evidence, the manual `CaptureFrameAsync` visual artifact, the
+> final as-built docs, and the milestone PR evidence.
 >
 > M7 is merged into `develop` (2026-10-31, PR #12, merge `5de5ac3`) and supplies the immutable frame
 > snapshot, the three-slot ring, the one-frame-per-snapshot renderer, and the empty per-frame
@@ -81,7 +83,8 @@ and supersede the older wording; the owning docs are updated in the implementati
 | Malformed sprite fields | A malformed `SpriteAsset` field is a **fatal renderer error** naming the field and texture reference. Non-`Quad` topology stays non-fatal and is skipped with a diagnostic. | The "no runtime checks at all" ambiguity; Stage 1 still has no bake/load validation. |
 | Texture loading | Renderer reads through the app's `IAssets` seam, prefetches asynchronously, uploads via a separate submit + fence, uses one page per descriptor path, pools GPU memory, and grows page capacity dynamically. | The per-resource allocator and fixed-capacity defaults. |
 | Shaders | Build-time **Silk.NET.Shaderc 2.23.0** tool compiles checked-in GLSL; SPIR-V is generated C#/embedded for the runtime. No runtime compilation and no Vulkan SDK requirement. | The `glslangValidator` build-target default and committed-SPIR-V alternatives. |
-| Performance gate | 50,000 sprites, one camera, 1920×1080, median **≥165 FPS** in the opt-in offscreen benchmark. | The provisional "under ~2 ms / 165 Hz as a goal" wording. |
+| Performance gate | 50,000 sprites, one camera, 1920×1080, median **≥165 FPS** in the opt-in offscreen benchmark. The benchmark is measured in **Release**; Debug runs skip it because unoptimized code generation is not a performance measurement. | The provisional "under ~2 ms / 165 Hz as a goal" wording. |
+| Pong/AOT presentation gate | **Split by an explicit 1,000-tick threshold:** the 120-tick runs assert exit/lifecycle/tick count/content/validation and print stats; the documented 20,000-tick runs assert every draw/statistics relationship. The unpaced M7 loop is unchanged. | The original single 120-tick draw/instance/page assertion, which is impossible before the asynchronous pages are drawable. |
 | GPU CI | GPU tests stay **local-only**; CI is unchanged. | The roadmap "GPU runner from M8" line. |
 | Work packages | Five **sequential** WPs (`m-8/wp-1`…`m-8/wp-5`). | No prior M8 plan. |
 
@@ -93,8 +96,8 @@ M6/M7 are merged. The current tree contains:
 
 | Area | Current state | M8 consequence |
 | --- | --- | --- |
-| Engine suite | **1158** tests at spec time = 1141 deterministic + 17 opt-in/conditional (9 `[WindowFact]`, 3 reparse-point, 5 `[GpuFact]`). WP-2 raised the suite to **1252** = 1235 deterministic + 17 conditional; WP-3 raised it to **1310** = 1293 deterministic + 17 conditional; WP-4 raises it to **1360** = 1334 deterministic + 26 conditional (9 `[WindowFact]`, 3 reparse-point, 14 `[GpuFact]`). | M8 adds deterministic plan/math/page/public-API tests and opt-in GPU rendering tests. |
-| `Pong.Tests` | **46** tests. | Pong already builds a camera and three sprites; M8 changes what is drawn and what the gate can assert. |
+| Engine suite | **1158** tests at spec time = 1141 deterministic + 17 opt-in/conditional (9 `[WindowFact]`, 3 reparse-point, 5 `[GpuFact]`). WP-2 raised the suite to **1252** = 1235 deterministic + 17 conditional; WP-3 raised it to **1310** = 1293 deterministic + 17 conditional; WP-4 raised it to **1360** = 1334 deterministic + 26 conditional (9 `[WindowFact]`, 3 reparse-point, 14 `[GpuFact]`); WP-5 adds the 50,000-sprite plan-allocation test and the benchmark, for **1362 = 1335 deterministic + 27 conditional** (9 `[WindowFact]`, 3 reparse-point, 15 `[GpuFact]`). | M8 adds deterministic plan/math/page/public-API tests and opt-in GPU rendering tests. |
+| `Pong.Tests` | **46** tests at spec time; WP-5 adds 12 linked `PongAcceptanceGateTests` cases, for **58**. | Pong already builds a camera and three sprites; M8 changes what is drawn and what the gate can assert. |
 | Scene | `Camera<TLayer>`/`SpriteRender<TLayer>` store raw values with no validation or clamping. `Viewport`, `Size`, `ClearColor`, `Tint`, `Layer`, `ZIndex`, and `FlipX/Y` are settable without range checks. WP-2 adds the shared projection helper and the public `ICamera` screen/world/`WorldSize` members; the renderer still handles invalid values at draw time (cameras skip; malformed sprites are fatal) and the setters stay unchanged. | M8 handles invalid values at draw time (cameras skip; malformed sprites are fatal); setters stay unchanged. |
 | Snapshot | M7 `FrameSnapshot`/`CameraSnapshot`/`SpriteSnapshot` are internal, immutable after publication, and value-only except the loaded `SpriteAsset?`. Exact fields are in [Threading §3](../architecture/threading.md#3-frame-snapshot). Capture copies raw camera/sprite values; invalid layers are preserved as `uint`. | The snapshot stays asset-agnostic. The renderer reads `IAssets` directly and resolves textures; no snapshot change. |
 | `Bork2d.Render` | Internal `IRenderer` seam, SPSC control channel, windowed and offscreen renderers, three-slot handoff consumer, fence-held slots, suspended minimized drain, counters, validation observation. WP-2 adds the internal `SpritePipeline` (layout/samplers/pipeline-per-format) created at renderer startup, the shared camera-projection bridge, and the pure sprite planner/quad/96-byte instance layout. | M8 adds the page cache/uploader, bindless descriptor set, instance filling, per-camera passes, public stats/capture plumbing, and counters; no public Render type. |
@@ -107,7 +110,7 @@ M6/M7 are merged. The current tree contains:
 | GPU tests | 5 `[GpuFact]` tests, skipped unless `BORK2D_RUN_GPU_TESTS=1`; serialized `RealGpu` collection; bounded joins; validation enabled. | M8 adds rendering/benchmark tests in the same local-only pattern. |
 | Pong game | `Setup` loads settings/sprites/descriptors/raw bytes, creates one camera (`Size=9`, `Clear.Color`, mask `Court|Paddles|Ball`, `ZIndex=0`), one world transform, two paddle sprites, and one ball sprite. Assets use full-rect UVs, `scale=64`, center pivot, `quad`. The baked pack has 7 entries. | After M8 the same scene draws three sprites; the gate asserts render stats and AOT behavior. |
 | Host | Windowed/offscreen publish one snapshot per completed tick; the renderer consumes one for a free frame and holds the slot to the fence. Headless has no renderer/capture. WP-4 installs the renderer capture source before `Setup`, the headless `NotSupportedException` source at `Run` start, and disposes the capture lifecycle when `Run` returns. | M8 keeps the loop/handoff; the host passes `IAssets` to the renderer and wires public stats/capture. |
-| Docs status | WP-1 reconciled the owning docs; WP-4 updates them as-built for the draw/capture/stats work. The M7 black-clear statements are superseded by per-camera passes; the WP-5 benchmark/Pong presentation gate remains open. | M8 updates them in its documentation WP. |
+| Docs status | WP-1 reconciled the owning docs; WP-4 updated them as-built for the draw/capture/stats work; WP-5 finalized them with the benchmark, split Pong gate, and manual visual evidence. The M7 black-clear statements are superseded by per-camera passes. | M8 updates them in its documentation WP. |
 
 ### 3.2 Environment facts
 
@@ -801,7 +804,10 @@ frame or per sprite) and one information line per capacity growth; `FrameInstanc
 information line per instance-buffer capacity change. `SpriteFramePlanner` logs invalid-layer and
 `Clear.Depth` diagnostics once per renderer, invalid-camera diagnostics once per renderer per reason,
 and non-Quad diagnostics once per asset path. `RenderStats` is not logged per frame; there is no
-per-frame/per-sprite/per-draw/per-camera logging.
+per-frame/per-sprite/per-draw/per-camera logging. **Deviation (as built):** separate "Plan CPU" and
+"upload CPU" counters were not added, because that would put per-frame timing into the render hot
+path for a benchmark-only metric; the opt-in benchmark instead measures the end-to-end wall-clock
+publish→completed-frame interval and reports that render-thread attribution is unavailable.
 
 ### 6.11 Allocation and performance
 
@@ -817,11 +823,15 @@ per-frame/per-sprite/per-draw/per-camera logging.
   M6 machine (vsync off, offscreen discard, 10-second measurement window after warm-up, p50/p95
   reported, zero steady-state allocations). The benchmark is local-only; CI is unchanged.
 
-**As built (WP-4).** A deterministic test asserts that 200 warm `SpriteFramePlanner.Plan` calls over
-a fixed snapshot allocate 0 bytes, and the GPU instance-growth test grows a frame from 1024 to 2048
-records for 1500 sprites. `CaptureFrameAsync` allocates one `byte[]` per request on the frame-fence
-completion path, never inside the tick or per-frame record path; page/instance growth remains the
-only capacity change. The 50,000-sprite benchmark is WP-5.
+**As built (WP-4/WP-5).** A deterministic test asserts that 200 warm `SpriteFramePlanner.Plan` calls
+over a fixed snapshot allocate 0 bytes, and WP-5 adds a 50,000-sprite warmed plan assertion (10
+plans, 0 allocated bytes). The GPU instance-growth test grows a frame from 1024 to 2048 records for
+1500 sprites. `CaptureFrameAsync` allocates one `byte[]` per request on the frame-fence completion
+path, never inside the tick or per-frame record path; page/instance growth remains the only capacity
+change. The opt-in Release benchmark measures the 50,000-sprite plan/build/draw path at a median
+**177.3 FPS** (p50 5.640 ms; p95 6.562 ms; 1,744 frames / 10.003 s) with one draw, 50,000 instances,
+one non-empty camera, validation `0/0`, and 0 benchmark-thread and process-wide allocated bytes over
+the measured window (see §8.4).
 
 ### 6.12 Startup, shutdown, and error matrix
 
@@ -977,15 +987,34 @@ ball, tints, clear) recorded in the PR. This supersedes the roadmap "golden test
 
 ### 8.4 Benchmark
 
-An opt-in `[GpuFact]` benchmark in `Bork2d.Tests`, local-only:
+An opt-in Release-mode `[GpuFact]` benchmark in `Bork2d.Tests`, local-only:
 
-- Offscreen 1920×1080, one camera, 50,000 sprites (generated textures), 10-second measurement window
-  after warm-up, no artificial cap/sleep, vsync off (no present).
-- Report p50/p95/max frame time, FPS, render-thread CPU, allocations, machine/GPU/driver/SDK.
-- Pass criterion: **median ≥165 FPS** (p50 frame time ≤ ~6.06 ms); report p95 as the stability
-  metric. Zero steady-state allocations in the measured path.
+- Offscreen 1920×1080, one camera, 50,000 sprites (one generated 4×4 texture/page), 10-second
+  measurement window after a 2-second warm-up, no artificial cap/sleep, vsync off (no present).
+- Report p50/p95/max frame time, FPS, allocations, machine/GPU/driver/SDK. Workload: 50,000 sorted
+  (`ZIndex` 0…49,999) sprites in a 500×100 grid, one instanced draw; frame time is the wall-clock
+  publish→completed-frame interval including snapshot fill, planning, recording, submit, and the
+  two-frame fence backpressure. There is no per-frame render-thread timing counter, so CPU
+  attribution is reported as unavailable rather than invented.
+- Pass criterion: **median ≥165 FPS** (p50 frame time ≤ ~6.06 ms); p95 is reported as the stability
+  metric. Zero steady-state allocations in the measured path: the benchmark thread and the
+  process-wide delta are both measured over the window, and a deterministic warmed 50,000-sprite
+  `SpriteFramePlanner.Plan` test asserts 0 allocated bytes.
+- The benchmark is a **Release** gate: unoptimized Debug code generation is not a performance
+  measurement, so the test skips with an explicit message in Debug and the documented command uses
+  `-c Release`. The 165 FPS target is unchanged.
 - The benchmark is not CI; the PR records the machine and evidence. If the target cannot be met,
   stop and report; do not lower the target without the owner.
+- **As built (2026-10-31, AOT Release solution, AMD Radeon 8060S, driver 32.0.32015.7029, Vulkan
+  loader 1.4.363.0, .NET SDK 11.0.100-rc.1.26425.128):** median **177.3 FPS** (p50 5.640 ms), p95
+  **152.4 FPS** (6.562 ms), max 10.312 ms, mean 174.3 FPS, 1,744 frames / 10.003 s;
+  `instanceCapacity=65536`; one draw, 50,000 instances, one non-empty camera, `TexturePages=2`
+  (placeholder + the one benchmark page), validation `0/0`; benchmark-thread and process-wide
+  allocation deltas **0 bytes**. Repeated runs measured 177.6, 177.9, and 178.6 FPS median (p50
+  5.630, 5.620, and 5.601 ms), and a later full-suite run measured **217.2 FPS** (p50 4.605 ms, p95
+  188.0 FPS, 2,140 frames/10.001 s, still zero allocations and validation `0/0`). The spread
+  reflects machine load; the conservative 177.3 FPS run is reported as the gate margin, and every
+  run is above the 165 FPS target.
 
 ### 8.5 CI
 
@@ -1032,32 +1061,54 @@ two paddles and the ball with their tints.
 - **Game code:** no new engine API is required for drawing. `PongGame` captures
   `engine.RenderStats` in `Teardown` into a public `RenderStats` property and exposes
   `RefreshRenderStats()` so the desktop host can re-read the completed run's counters after `Run`;
-  `Pong.Desktop` prints and validates the §10 relationships for `--offscreen --ticks N` and
-  `--windowed --ticks N`.
-- **Windowed/offscreen gate:** exit 0, one `Setup`/`Teardown`, exactly N ticks, validation zero
-  (when enabled), and `RenderStats` relationships: `Cameras >= 1`, `NonEmptyCameras >= 1`,
-  `DrawCalls >= 1`, `Instances >= 3`, `TexturePages >= 3` (placeholder + paddle + ball). No frame
-  count/duration assertion; no pixel assertion. The manual visual check is recorded in the PR.
-- **As-built timing note (WP-4).** The M7 windowed/offscreen tick loop is unpaced: the automated
-  `--ticks 120` run can complete all 120 ticks in ~20 ms after renderer readiness, before the renderer
-  has consumed the 3 frames the asynchronous page upload needs (`EnsurePage` → upload submit →
-  fence-ready). Such a run still exits 0; `Pong.Desktop` prints a diagnostic note and skips the
-  draw/instance relationship assertions when the run ended before the two pages were drawable (it
-  reports `texturePages=1`, `drawCalls=0`, `instances=0`, `skippedSprites=3`). A longer run (for
-  example `--windowed --ticks 20000`) draws the three sprites with `drawCalls=1`, `instances=3`,
-  `texturePages=3`, validation zero. The final presentation gate remains WP-5; changing the
-  windowed/offscreen tick loop or the acceptance-run semantics to make the 120-tick run draw is
-  escalated, not silently worked around.
+  `Pong.Desktop` prints the observed stats and validates the short-vs-long rule for
+  `--offscreen --ticks N` and `--windowed --ticks N`.
+- **Windowed/offscreen gate — approved split (WP-5).** The M7 windowed/offscreen tick loop is
+  unpaced and is **not changed**: a 120-tick automated run can finish in ~20 ms after readiness,
+  before the renderer has consumed the three frames the asynchronous texture-page upload needs
+  (`EnsurePage` → upload submit → fence-ready). The owner approved splitting the gate with an
+  explicit, compiled-in threshold (`PongAcceptanceGate.LongRunTickThreshold = 1000`); there is no
+  runtime `TexturePages < 3` bypass:
+  - **Short runs** (fewer than 1000 completed ticks, including `--windowed --ticks 120` and
+    `--offscreen --ticks 120`): assert exit 0, exactly one `Setup` and one `Teardown`, exactly `N`
+    completed ticks, cumulative validation `0/0`, and the loaded pack/content (the seven-entry pack,
+    the settings sprite references, both sprites/descriptors/raw payloads, and the paddle tints).
+    They print the observed stats (for example `texturePages=1`, `drawCalls=0`, `instances=0`,
+    `skippedSprites=3`) and assert **no** draw/instance/page relationship.
+  - **Long runs** (at or above the threshold; the documented evidence run is
+    `--offscreen --ticks 20000`, with `--windowed --ticks 20000` as the windowed proof):
+    unconditionally assert `Cameras >= 1`, `NonEmptyCameras >= 1`, `DrawCalls >= 1`,
+    `Instances >= 3`, `TexturePages >= 3` (placeholder + paddle + ball),
+    `DrawCalls == NonEmptyCameras <= Cameras`, and validation `0/0`; fail otherwise.
+  No frame-count/duration assertion and no pixel assertion. The manual visual check remains the
+  recorded frame (§8.3); the engine tests do not assert pixels.
+- **Why the split (as built).** The alternative — pacing the acceptance loop or sleeping until the
+  pages are ready — would change the M7 handoff/pacing contract solely for a test, and the 120-tick
+  short run still proves setup/teardown, exact tick count, pack/content, and a validation-clean
+  renderer. The long run is the presentation gate because it gives the renderer the wall-clock time
+  the unpaced host needs; it is fast offscreen (the 20,000-tick AOT run completed in seconds) and is
+  also the windowed proof.
+- **As-built evidence (2026-10-31, AOT Release win-x64).** `--headless` → `1/120/1` and the full
+  seven-entry content chain, exit 0; `--offscreen --ticks 120` → `1/120/1`, `exit 0`, stats
+  `texturePages=1/256`, `drawCalls=0`, `instances=0`, validation `0/0` (short rule); `--windowed
+  --ticks 120` → `1/120/1`, exit 0, same short-rule stats; `--offscreen --ticks 20000` →
+  `1/20000/1`, `drawCalls=1`, `instances=3`, `texturePages=3/256`, `cameras=1`,
+  `nonEmptyCameras=1`, `skippedSprites=0`, validation `0/0`, exit 0 (19747 consumed frames);
+  `--windowed --ticks 20000` → `1/20000/1` with the same draw/instance/page relationships, exit 0.
+  The manual capture through `IEngine.CaptureFrameAsync` produced a 1280×720 RGBA8 frame of the Pong
+  scene (dark clear, red left paddle, blue right paddle, white ball) at
+  `artifacts/m8-pong-capture.rgba`; it is untracked.
 - **Headless gate:** unchanged; no renderer, no stats/capture (defaults/`NotSupportedException`);
   120 ticks by default or `--headless --ticks N`.
 - **AOT publish:** zero AOT/trim warnings; single-file exe; `assets.pck`, `SDL2.dll`; no
   `vulkan-1.dll`, no tooling assemblies, no `Bork2d.ShaderCompiler`/Silk.NET.Shaderc assemblies, no
   loose `.spv`; generated SPIR-V is linked in.
 - **Published runs:** `--headless`, `--headless --ticks N`, `--windowed --ticks 120`, and
-  `--offscreen --ticks 120` exit 0. Since WP-3 each windowed/offscreen publish creates and uploads the
-  placeholder page at startup; WP-4 draws the Pong sprites once the two texture pages are ready
-  (observed on longer runs; see the timing note above). The start/stop logs report the page, instance,
-  draw, camera, skipped, and validation counters.
+  `--offscreen --ticks 120` exit 0; the short runs assert lifecycle/content/validation only, and the
+  long runs assert the draw/statistics contract. Since WP-3 each windowed/offscreen publish creates
+  and uploads the placeholder page at startup; WP-4 draws the Pong sprites once the two texture
+  pages are ready. The start/stop logs report the page, instance, draw, camera, skipped, and
+  validation counters.
 
 ## 11. Documentation changes
 
@@ -1091,12 +1142,13 @@ The owner approved five sequential work packages. Each is one branch under `m-8/
 | WP-2 | `m-8/wp-2` | (Complete) Shader compiler tool + Silk.NET.Shaderc 2.23.0 + GLSL/pipeline/layout/samplers; camera projection/rounding; public `WorldToScreen`/`ScreenToWorld`/`WorldSize`; deterministic math/plan/instance-layout tests. | Zero-warning build; pipeline path compiles; public helper tests; format/docs. |
 | WP-3 | `m-8/wp-3` | (Complete) `RendererStartInfo.Assets`; texture page cache/prefetch/pool/placeholder/upload fence/dynamic capacity/bindless; public `RenderStats` type/`IEngine.RenderStats`; fake-`IAssets` tests. | Page state machine/placeholder/growth/limit tests; no public Render type; no leak. |
 | WP-4 | `m-8/wp-4` | Draw integration: per-camera passes, sort/filter/validity/flips, growable instance buffers, stats publishing, public `CaptureFrameAsync`, GPU rendering/readback-contract tests. | One draw per non-empty camera; no safety pass; validation zero; readback contract; allocation tests. |
-| WP-5 | `m-8/wp-5` | Pong/AOT gate, 165 FPS benchmark, manual visual evidence, final docs, full gates, PR. | AOT zero warnings/runs; benchmark evidence; PR; docs. |
+| WP-5 | `m-8/wp-5` | (Complete) Pong/AOT gate with the explicit short-vs-long rule, 165 FPS benchmark, manual visual evidence, final docs, full gates, PR. | AOT zero warnings/runs; benchmark evidence; visual artifact; PR; docs. |
 
 Dependencies: WP-1 → WP-2 → WP-3 → WP-4 → WP-5. Shared Vulkan/docs files rule out parallel waves.
 
-**As-built status (2026-10-31):** WP-1 (`m-8/wp-1`), WP-2 (`m-8/wp-2`), WP-3 (`m-8/wp-3`), and WP-4
-(`m-8/wp-4`) are complete. WP-2 landed the build-only shader compiler and MSBuild integration, the
+**As-built status (2026-10-31):** WP-1 (`m-8/wp-1`), WP-2 (`m-8/wp-2`), WP-3 (`m-8/wp-3`),
+WP-4 (`m-8/wp-4`), and WP-5 (`m-8/wp-5`) are implementation-complete; the milestone PR is open for
+review and is not merged. WP-2 landed the build-only shader compiler and MSBuild integration, the
 GLSL/SPIR-V modules, the internal sprite pipeline (descriptor-set layout, 64-byte push-constant
 pipeline layout, pipeline-per-sRGB-format, and sampler cache) created/destroyed by both renderers, the
 shared camera projection/rounding helper, the public `WorldToScreen`/`ScreenToWorld`/`WorldSize`
@@ -1115,9 +1167,16 @@ per-camera passes and one instanced draw per non-empty camera in both renderers,
 `RenderStats` publication, the public `IEngine<T>.CaptureFrameAsync` with its renderer queue/pooled
 staging/BGRA swizzle, Pong render-stats capture, deterministic plan/growth/stats/capture tests, and
 opt-in GPU drawing/paging/capture tests (including the extended windowed resize/fullscreen/minimize/
-stop test). Local suite: **1360 = 1334 deterministic + 26 conditional** (9 `[WindowFact]`, 3 reparse,
-14 `[GpuFact]`); all 14 GPU tests pass with zero validation errors/warnings. WP-5 (the 165 FPS
-benchmark, Pong presentation gate, final docs, and milestone PR) remains pending.
+stop test). WP-5 added `PongAcceptanceGate` with the explicit 1,000-tick short-vs-long rule and the
+unconditional long-run draw/statistics assertions (no `TexturePages` bypass), the linked
+`PongAcceptanceGateTests`, the opt-in Release 50,000-sprite benchmark (median 177.3 FPS, p50
+5.640 ms, p95 6.562 ms, 0 measured allocations, validation 0/0) with the warmed 50,000-sprite plan
+allocation test, the manual `CaptureFrameAsync` visual artifact, the long AOT evidence (offscreen
+and windowed 20,000-tick runs with `drawCalls=1`, `instances=3`, `texturePages=3`, validation
+0/0), and the final docs. Local suite: **1362 = 1335 deterministic + 27 conditional** (9
+`[WindowFact]`, 3 reparse, 15 `[GpuFact]`); all 15 GPU tests pass in Release with zero validation
+errors/warnings, and the benchmark skips in Debug with an explicit Release-mode message. Pong.Tests
+is **58** tests.
 
 ## 13. Acceptance criteria
 
@@ -1152,13 +1211,20 @@ benchmark, Pong presentation gate, final docs, and milestone PR) remains pending
     shutdown behavior, no tick block; no pixel/golden tests.
 11. **Windowed/offscreen parity.** Same plan/draws/instances/clears for the same snapshot; both
     validation-clean; offscreen discard by default and capture on request.
-12. **Performance.** Opt-in benchmark: 50,000 sprites, one camera, 1920×1080, median ≥165 FPS,
-    zero steady-state allocations, p50/p95/machine evidence; no artificial cap/sleep.
+12. **Performance.** Opt-in Release-mode benchmark: 50,000 sprites, one camera, 1920×1080,
+    median ≥165 FPS, zero steady-state allocations, p50/p95/machine evidence; no artificial cap/sleep.
+    As built (2026-10-31): median **177.3 FPS** (p50 5.640 ms), p95 152.4 FPS (6.562 ms), max
+    10.312 ms over 1,744 frames/10.003 s on the M6 machine; benchmark-thread and process-wide
+    allocation deltas 0 bytes; one draw, 50,000 instances, one non-empty camera, validation `0/0`.
 13. **GPU evidence.** Opt-in GPU tests cover rendering/passes/placeholder/fatal/paging/windowed/
     readback contract with zero validation errors; warnings per D-M6-21; GPU tests local-only.
 14. **Pong/AOT.** Zero-warning publish and approved content; `--headless`/`--windowed --ticks 120`/
-    `--offscreen --ticks 120` exit 0 with one Setup/Teardown and exactly N ticks; Pong draws three
-    sprites; `RenderStats` relationships; manual visual evidence.
+    `--offscreen --ticks 120` exit 0 with one Setup/Teardown, exactly N ticks, validation `0/0`, and
+    the loaded pack/content (short-rule assertions); the documented long runs
+    (`--offscreen --ticks 20000`, `--windowed --ticks 20000`) exit 0 with one Setup/Teardown,
+    exactly 20000 ticks, and the full draw/statistics relationships (long-rule assertions);
+    `PongAcceptanceGate.LongRunTickThreshold = 1000` decides the rule explicitly, with no
+    `TexturePages < 3` bypass; manual visual evidence is recorded.
 15. **Docs/process.** Every §11 doc reflects the decisions/as-built behavior; no decisions.md entry;
     five sequential WPs; no direct `develop` commits; no auto-merge.
 
@@ -1166,7 +1232,9 @@ benchmark, Pong presentation gate, final docs, and milestone PR) remains pending
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| 165 FPS at 50k on the integrated GPU is not achievable | Milestone exit fails | The owner set the target; measure early in WP-4/WP-5 and report; do not lower it silently. |
+| 165 FPS at 50k on the integrated GPU is not achievable | Milestone exit fails | The owner set the target; measured before closing the milestone: median 177.3 FPS (p50 5.640 ms; p95 6.562 ms) in Release on the M6 machine; repeated runs 177.9/178.6 FPS. The target was not lowered. Release-only measurement is documented; Debug is not a performance build. |
+| Benchmark variance near the target | A slower run could dip below 165 median | The benchmark uses a 10-second window after warm-up, reports p50/p95/max, and repeated runs stayed 177–179 FPS median (≈7% margin). Any future regression below 165 fails the benchmark; p95 is reported, not relaxed. |
+| The unpaced 120-tick Pong run finishes before async pages are drawable | The original one-run gate is unsatisfiable without pacing | Owner-approved explicit split (`PongAcceptanceGate.LongRunTickThreshold = 1000`): short runs assert lifecycle/content/validation and print stats; 20,000-tick runs assert every draw/statistics relationship. The M7 loop is unchanged; no bypass on `TexturePages`. |
 | Per-camera passes/no safety clear leave undefined content | Visual artifacts when there is no `Clear.Color` camera | Documented behavior; tests for zero-camera/clear-only; use a full-screen `Clear.Color` camera in samples; no hidden safety pass. |
 | Dynamic page growth + descriptor-set recreation | Hitches, descriptor state loss, validation errors | Grow between frames with idle device; rewrite all page descriptors; GPU tests; log growth; fail at the device limit. |
 | Pool/suballocator bugs | Corruption/leaks | Small, tested allocator; image granularity/alignment; shutdown destroy tests; no VMA. |

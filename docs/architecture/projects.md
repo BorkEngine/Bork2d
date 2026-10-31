@@ -14,15 +14,18 @@
 > Render handoff ring/consumer and the Runtime
 > acquire/publish/headless host add **no** project reference, package, or public type beyond the
 > already-approved `FlipX`/`FlipY` (D-M7-02).
-> **M8 (sprite renderer) is at WP-4** (WP-1 docs reconciliation, WP-2 shader
-> pipeline/camera math/instance planning, WP-3 texture pages/`RenderStats`, and WP-4 draw/statistics/
-> capture integration are complete; WP-5 remains). The approved target adds
+> **M8 (sprite renderer) is implementation-complete through WP-5; the milestone PR is open for
+> review and is not merged.** WP-1 reconciled the docs, WP-2 added the shader
+> pipeline/camera math/instance planning, WP-3 added the texture pages/`RenderStats`, WP-4 added
+> the draw/statistics/capture integration, and WP-5 added the benchmark/Pong gate and final docs.
+> The approved target adds
 > only a **build-only** `Bork2d.ShaderCompiler` tool
 > (Silk.NET.Shaderc/Silk.NET.Shaderc.Native 2.23.0): no new runtime project, package, or public
 > Render type, and the dependency matrix in §2 is unchanged. WP-3's page subsystem and WP-4's
 > planner/capture resources are internal to
 > `Bork2d.Render` and add no reference; the only new public types are the approved
 > `Bork2d.Engine.Rendering.RenderStats` and the approved `IEngine<TLayer>.CaptureFrameAsync` member.
+> WP-5 adds no project or package.
 
 ## 1. Current projects
 

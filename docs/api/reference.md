@@ -15,12 +15,14 @@
 > app-scoped asset service in every mode, opening
 > the base pack (or the `WithoutAssets()` empty filesystem) before the window and `Setup`.
 > The sprite renderer, camera helpers, `RenderStats`, and `CaptureFrameAsync` are `Current` (M8
-> WP-2–WP-4); the M8 benchmark and final Pong presentation gate (WP-5) remain open. WP-1 reconciled
+> WP-2–WP-5); M8 is implementation-complete through WP-5 and the milestone PR is open for review,
+> not merged. WP-1 reconciled
 > the owning docs, WP-2 added the build-time shader tool/pipeline, the shared camera projection, and
 > the public `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` helpers, WP-3 added the internal
 > texture pages/placeholder/bindless resources plus the public `RenderStats` and
-> `IEngine.RenderStats`, and WP-4 added per-camera passes/draws, per-frame stats publication, and the
-> public `IEngine.CaptureFrameAsync`. See the
+> `IEngine.RenderStats`, WP-4 added per-camera passes/draws, per-frame stats publication, and the
+> public `IEngine.CaptureFrameAsync`, and WP-5 added the benchmark and Pong presentation evidence
+> without changing the public surface. See the
 > [roadmap](../roadmap.md). The current milestone spec and
 > the accepted decisions define the contract; this reference records the implemented surface. If this
 > document and the code disagree, treat it as a defect and reconcile it in the owning docs

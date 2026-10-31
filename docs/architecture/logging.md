@@ -12,8 +12,8 @@
 > `Bork2d.Render`, and the asset service logs start/overlay/error/stop events; there is no per-frame
 > or per-asset-per-tick logging. Configuration is identical in all modes, and the default path runs in
 > the AOT gate (`Pong.Desktop`, headless with the baked pack for 120 ticks by default or
-> `--headless --ticks N`). The suite is 1158 tests (1141
-> deterministic plus 17 opt-in/conditional). The project-consolidation refactor (D-041/D-042) renamed
+> `--headless --ticks N`). The suite is 1362 tests (1335
+> deterministic plus 27 opt-in/conditional). The project-consolidation refactor (D-041/D-042) renamed
 > the engine categories to `Bork2d.Engine` and `Bork2d.Engine.Assets`; `Bork2d.Runtime` and
 > `Bork2d.Render` are unchanged. M6 makes the `Bork2d.Render` category current for instance,
 > validation, and device-selection events (§5.3), the windowed swapchain/clear/present and
@@ -21,10 +21,12 @@
 > loop-stop line. M7 adds the handoff fields/counters to the same one-shot renderer start/stop
 > lines (§5.3) and the handoff counters to the windowed/offscreen loop-stop lines and the
 > headless loop-stop line (§5.1). The Pong example (D-043/D-044) owns the game-side title/logging
-> behavior. **M8 (sprite renderer) is in progress** (WP-1 docs reconciliation, WP-2
-> pipeline/camera/planning code, and WP-3 page/start-stop fields are complete): the remaining target
-> adds the draw counters/statistics publication and throttled draw/content diagnostics (§5.4) — and
-> still no per-frame, per-sprite, or per-draw logging.
+> behavior. **M8 (sprite renderer) is implementation-complete through WP-5; the milestone PR is open
+> for review and is not merged.** WP-1 reconciled the docs, WP-2 added the
+> pipeline/camera/planning code, WP-3 added the page/start-stop fields, WP-4 added the draw
+> counters/statistics publication and throttled draw/content diagnostics (§5.4), and WP-5 adds no
+> logging change (the benchmark measures without per-frame logs). The rule remains: no per-frame,
+> per-sprite, or per-draw logging.
 
 ## 1. Surface
 

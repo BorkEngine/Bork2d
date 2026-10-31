@@ -23,15 +23,17 @@
 > Pong desktop app builds the assets executable out of process through
 > `build/Bork2d.Assets.Copy.targets`; see [asset processors](asset-processors.md).
 >
-> **M8 (sprite renderer) is at WP-4** (WP-1 docs reconciliation, WP-2 shader
-> pipeline/camera math/instance planning, WP-3 texture pages/`RenderStats`, and WP-4 draw/statistics/
-> capture integration are complete; WP-5 remains). The approved target adds a
+> **M8 (sprite renderer) is implementation-complete through WP-5; the milestone PR is open for
+> review and is not merged.** WP-1 reconciled the docs, WP-2 added the shader pipeline/camera
+> math/instance planning, WP-3 added the texture pages/`RenderStats`, WP-4 added the draw/statistics/
+> capture integration, and WP-5 added the explicit short-vs-long Pong/AOT presentation gate, the
+> Release benchmark, the manual visual artifact, and the final docs. The approved target adds a
 > second build-time-only tool, `Bork2d.ShaderCompiler`
 > (Silk.NET.Shaderc/Silk.NET.Shaderc.Native 2.23.0), which compiles checked-in GLSL to SPIR-V and
 > emits generated C# linked into `Bork2d.Render`. The tool and its packages never enter the runtime
-> or AOT publish graph; there is no runtime shader I/O, compiler, or Vulkan SDK requirement. WP-3
+> or AOT publish graph; there is no runtime shader I/O, compiler, or Vulkan SDK requirement. WP-3/WP-4
 > added no package and no runtime project reference (the page subsystem is internal to
-> `Bork2d.Render`); WP-4 adds no public package or project reference either.
+> `Bork2d.Render`); WP-5 adds no public package or project reference either.
 
 ## 1. Scope
 
@@ -237,7 +239,7 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    There is no generated host and no host build step. The publish output must contain no
    `Pong.Assets`, `Bork2d.Bake`, Tomlyn, or StbImageSharp assembly (`Pong.Common` is the expected
    game-side assembly), must contain `assets.pck` and `SDL2.dll`, and must not contain
-   `vulkan-1.dll` (the system loader). M8 (verified in WP-2; unchanged by WP-3) additionally
+   `vulkan-1.dll` (the system loader). M8 (verified in WP-2; unchanged through WP-5) additionally
    requires no
    `Bork2d.ShaderCompiler`/`Silk.NET.Shaderc` assembly and no loose `.spv` in the publish: the
    generated SPIR-V C# is compiled into the app. The NativeAOT output is a single-file executable
@@ -251,26 +253,34 @@ incompatibly with AOT, isolate it behind an adapter and record the workaround.
    payload, the red/blue tints), detached root, exit `0`. The success line reports the tick count
    and `tickLimit`.
 5. Run the AOT-published windowed and offscreen examples locally on a desktop session with a
-   Vulkan 1.3 device: `Pong.Desktop.exe --windowed --ticks 120` must exit `0` after exactly 120
-   ticks with one `Setup` and one `Teardown`, loading the same pack, consuming one black-clear
-   frame per snapshot in M7 (the short run consumes the first and supersedes the rest), and joining
-   the renderer; `Pong.Desktop.exe --offscreen --ticks 120` must exit `0` after exactly 120 ticks
-   with one `Setup`/`Teardown`, a 1280×720 sRGB offscreen target, and a joined renderer (frame count
-   not asserted, D-M6-13/Q22=V1). Since WP-3 each windowed/offscreen run creates and uploads the
-   placeholder page at startup (`texturePages=1`, `texturePageCapacity=256`, `bindlessLimit` logged)
-   with no extra publish content. WP-4 draws the three sprites with their
-   tints once the two texture pages are ready and reports the approved `RenderStats` relationships
-   (`Cameras >= 1`, `NonEmptyCameras >= 1`,
-   `DrawCalls >= 1`, `Instances >= 3`, `TexturePages >= 3`; manual visual check, no pixel
-   assertion). Note the unpaced 120-tick run can end before the asynchronous uploads are drawable;
-   a longer run demonstrates the drawing relationships (WP-5 owns the final presentation gate). The interactive `--windowed` run reads W/S/Space/R/Escape, and exits on
-   Escape/close; the title/logs carry the score and state.
-6. The **three-mode AOT gate** runs the AOT-published app on a GPU machine: `--headless` (120 ticks
-   by default, or `--headless --ticks N`) stays GPU-free, `--windowed --ticks 120` creates the SDL
-   window/instance/surface and presents one frame per consumed snapshot, and `--offscreen
-   --ticks 120` runs the offscreen renderer until `Exit` (D-M6-13). All four runs exit 0; the
-   publish is zero-warning; and the published app runs with the narrow two-code Silk.NET
-   suppression.
+   Vulkan 1.3 device. The approved M8 gate is split by the explicit
+   `PongAcceptanceGate.LongRunTickThreshold = 1000`:
+   - **Short runs** (`--windowed --ticks 120`, `--offscreen --ticks 120`) must exit `0` after
+     exactly 120 ticks with one `Setup`/`Teardown`, the same pack, validation `0/0`, and the loaded
+     content; they print the observed stats but do **not** assert draw counters. The unpaced M7 loop
+     can finish 120 ticks before the asynchronous texture pages are drawable, so the short run
+     reports `texturePages=1`, `drawCalls=0`, `instances=0`, `skippedSprites=3` and is not the
+     presentation proof.
+   - **Long presentation runs** (`--offscreen --ticks 20000`, `--windowed --ticks 20000`) must exit
+     `0` after exactly 20,000 ticks with one `Setup`/`Teardown` and assert `Cameras >= 1`,
+     `NonEmptyCameras >= 1`, `DrawCalls >= 1`, `Instances >= 3`, `TexturePages >= 3`,
+     `DrawCalls == NonEmptyCameras <= Cameras`, and validation `0/0`. As built (2026-10-31):
+     offscreen `1/20000/1`, `drawCalls=1`, `instances=3`, `texturePages=3/256`,
+     `validation=0/0`, plus `skippedSprites=0`, exit 0; windowed `1/20000/1` with the same
+     relationships and 8,334 presented frames, exit 0. No pacing, sleep, or host-loop change is
+     involved.
+   - The placeholder page is created and uploaded at startup (`texturePages=1`,
+     `texturePageCapacity=256`, `bindlessLimit` logged) with no extra publish content; WP-4 draws
+     the three sprites with their tints once the two texture pages are ready. Visual acceptance is a
+     manual capture through `IEngine.CaptureFrameAsync` (raw RGBA under the untracked `artifacts/`),
+     not a pixel assertion. The interactive `--windowed` run reads W/S/Space/R/Escape and exits on
+     Escape/close; the title/logs carry the score and state.
+6. The **AOT gate** runs the AOT-published app on a GPU machine: `--headless` (120 ticks by default,
+   or `--headless --ticks N`) stays GPU-free; the short `--windowed --ticks 120` creates the SDL
+   window/instance/surface and presents one frame per consumed snapshot; the short `--offscreen
+   --ticks 120` runs the offscreen renderer until `Exit` (D-M6-13). The long windowed/offscreen
+   20,000-tick runs assert the draw/statistics relationships. All six runs exit 0; the publish is
+   zero-warning; and the published app runs with the narrow two-code Silk.NET suppression.
 7. `Pong.Desktop` loads the baked pack produced by the same tooling a game uses; the constrained
    `IShapeable<T>` contract makes a missing shape a compile-time error. `GameSettings` is a
    `readonly record struct` root with `AssetRef<SpriteAsset>` members, so it proves the D-M4-11

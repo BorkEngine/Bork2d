@@ -26,12 +26,14 @@
 > [asset processors](asset-processors.md) own the current bake design.
 >
 > The editor is **removed from Stage 1** (M5 was dropped). `IEngine.Assets` returns the real service
-> in every mode, including the `WithoutAssets()` empty filesystem. **M8 (sprite renderer) is at
-> WP-4:** the renderer resolves `SpriteAsset.Texture`/
+> in every mode, including the `WithoutAssets()` empty filesystem. **M8 (sprite renderer) is
+> implementation-complete through WP-5; the milestone PR is open for review and is not merged.**
+> The renderer resolves `SpriteAsset.Texture`/
 > `TextureDescriptor.Payload` through `IAssets` and owns the GPU page cache. M8 WP-2 added the shader
 > pipeline and the pure sprite field/quad/instance planning; WP-3 added the internal texture-page
 > cache (async prefetch, validation, generated placeholder, pooled uploads with fences, dynamic
-> capacity); WP-4 resolves the page per candidate sprite in the plan pre-pass and draws it. `IAssets`
+> capacity); WP-4 resolves the page per candidate sprite in the plan pre-pass and draws it; WP-5
+> adds no asset contract change. `IAssets`
 > member contracts and errors are owned by the
 > [API reference](../api/reference.md#7-iassets); this document owns the pack/VFS/asset model and
 > the bake pipeline.
@@ -68,7 +70,7 @@ assets.pck (+ overlays) → VFS (NativeAOT) → loader thread → deserialized a
 - Textures are raw bytes (RGBA8 now, KTX2 later); sprites carry UVs, pivot, topology, optional
   indices, and a pixels-per-unit scale, with no vertices array.
 - The renderer never reads the scene tree: it consumes the tick snapshot and resolves sprite texture
-  links through `IAssets` at draw time (approved M8 target, in progress). It loads the descriptor and
+  links through `IAssets` at draw time (`Current` in M8 WP-4). It loads the descriptor and
   then the raw payload on the render thread through the one loader thread; the loader itself remains
   deserialize-only.
 

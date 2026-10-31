@@ -12,13 +12,16 @@
 > `Thread.Sleep` wait, unbounded catch-up, and no SDL, Vulkan, renderer, ring, or capture (Q11=K1,
 > Q12=L2, Q13=M4/F1, F5–F8). `Setup` runs before renderer readiness and the first `Tick` waits for it
 > (D-M6-06); a renderer failure around `Setup` still runs `Setup`, attempts `Teardown`, and reports
-> from `Run()` (D-M6-14). M8 WP-1–WP-4 are complete: WP-1 reconciled the docs, WP-2 added the shader
-> pipeline/camera math/instance planning, WP-3 added the texture pages/`RenderStats`, and WP-4 added
-> the draw integration, per-frame stats publication, and `CaptureFrameAsync`. The host-side M8
+> from `Run()` (D-M6-14). M8 is implementation-complete through WP-5; the milestone PR is open for
+> review and is not merged. WP-1 reconciled the docs, WP-2 added the shader
+> pipeline/camera math/instance planning, WP-3 added the texture pages/`RenderStats`, WP-4 added
+> the draw integration, per-frame stats publication, and `CaptureFrameAsync`, and WP-5 added the
+> explicit short-vs-long Pong/AOT gate, the Release benchmark, and the final docs. The host-side M8
 > additions are an internal `RendererStartInfo.Assets` member plus the public stats/capture bridges
 > described in §1 and §6. The suite is
-> 1360 tests: 1334 deterministic tests in CI plus 26 opt-in/conditional tests (9 real-window, 3
-> reparse-point, 14 real-GPU). WP-5 (benchmark/final Pong gate) remains.
+> 1362 tests: 1335 deterministic tests in CI plus 27 opt-in/conditional tests (9 real-window, 3
+> reparse-point, 15 real-GPU). The 120-tick windowed/offscreen runs assert lifecycle/content/
+> validation; the 20,000-tick runs assert the draw/statistics relationships.
 
 ## 1. Public startup contract
 
@@ -108,8 +111,8 @@ app.Run();
 
 | Mode | Builder | Current behavior | Target |
 | --- | --- | --- | --- |
-| **Windowed** (default) | normal options | Visible SDL window on an OS/window thread; Vulkan 1.3 instance/surface created there; render thread owns device/swapchain, consumes one snapshot per frame, and presents the M8 per-camera sprite passes; real `IWindow`/`IInput`, advanced `ITime`, ring-backpressured loop until exit/close/fatal; base pack + overlays + loads work | M8 benchmark/final Pong gate (WP-5) |
-| **Offscreen** | `WithOffscreen(w, h)` | Vulkan 1.3 render thread with a fixed sRGB target and two frames in flight; `Setup` → `Tick`… → `Teardown` until `IEngine.Exit()`, ring-backpressured ticks, `ITime` advanced, one frame per consumed snapshot (discarded unless captured); no SDL, window, input, surface, or swapchain | M8 benchmark/final Pong gate (WP-5) |
+| **Windowed** (default) | normal options | Visible SDL window on an OS/window thread; Vulkan 1.3 instance/surface created there; render thread owns device/swapchain, consumes one snapshot per frame, and presents the M8 per-camera sprite passes; real `IWindow`/`IInput`, advanced `ITime`, ring-backpressured loop until exit/close/fatal; base pack + overlays + loads work | M8 presentation gate: 120-tick short run asserts lifecycle/content/validation; 20,000-tick long run asserts draw/statistics |
+| **Offscreen** | `WithOffscreen(w, h)` | Vulkan 1.3 render thread with a fixed sRGB target and two frames in flight; `Setup` → `Tick`… → `Teardown` until `IEngine.Exit()`, ring-backpressured ticks, `ITime` advanced, one frame per consumed snapshot (discarded unless captured); no SDL, window, input, surface, or swapchain | M8 presentation gate: 120-tick short run asserts lifecycle/content/validation; 20,000-tick long run asserts draw/statistics; the 165 FPS benchmark uses this mode |
 | **Headless** | `WithHeadless(ticksPerSecond = 60)` | Paced `Setup` → `Tick`… → `Teardown` loop until `IEngine.Exit()`; the rate must be positive; fully synthesized `ITime` (tick 0 = 0/0, then `N/rate` and `1/rate`, no clamp); strict absolute grid with pure `Thread.Sleep` and unbounded catch-up; no SDL, window, input, renderer, ring, capture, or Vulkan loader | Pong gate: 120 ticks by default, `--headless --ticks N` overrides (Q15=O2/F3) |
 | **`WithoutAssets()`** | modifier in any mode | Empty VFS; no base pack required; `LoadPack` may mount overlays; one loader thread still starts | Unchanged |
 
@@ -163,7 +166,7 @@ column marks options that remain stored-only.
 | `WithFullscreen(bool)` | `false` | `Current` (windowed) | Borderless desktop fullscreen on the primary monitor. |
 | `WithVSync(bool)` | `true` | `Current` (M6) | Windowed present-mode preference: FIFO when `true`; MAILBOX → IMMEDIATE → FIFO when `false` (D-M6-17). Logged with the actual mode. |
 | `WithHeadless(int ticksPerSecond = 60)` | `60` | `Current (M7)` | Paced loop until `Exit` (K1); the rate must be **positive** (`0` and negative are `Build()` errors, F6); the synthesized clock uses `Time = tickIndex / rate` and `DeltaTime = 1 / rate` (L2/F5) with no clamp (F7). |
-| `WithOffscreen(int width, int height)` | — | `Current` (M6/M7/M8 WP-4) | Windowless Vulkan target; the sizes are validated and fixed, one frame per consumed snapshot (discarded unless captured), and the loop runs until `Exit` (D-M6-07) with ring backpressure. `CaptureFrameAsync` on request has no screenshot-file API. |
+| `WithOffscreen(int width, int height)` | — | `Current` (M6/M7/M8) | Windowless Vulkan target; the sizes are validated and fixed, one frame per consumed snapshot (discarded unless captured), and the loop runs until `Exit` (D-M6-07) with ring backpressure. `CaptureFrameAsync` on request has no screenshot-file API. |
 | `WithMaxDeltaTime(double)` | `0.25` s | `Current` | Gameplay clamp for the windowed/offscreen `ITime.DeltaTime`; not a pacing delay. It does **not** clamp the synthesized headless step (F7). |
 | `WithValidation(bool)` | `true` in Debug, `false` in Release | `Current` (M6) | Requests `VK_LAYER_KHRONOS_validation` and `VK_EXT_debug_utils`; a missing layer logs a warning and the run continues (D-M6-20). |
 | `Build()` | — | `Current` | Validates and creates the app object. |

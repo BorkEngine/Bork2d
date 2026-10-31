@@ -15,9 +15,10 @@
 > tool/pipeline, the shared camera projection, and the public
 > `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` members, WP-3 added the internal texture
 > pages (placeholder, bindless descriptors, dynamic capacity) and the public `RenderStats` /
-> `IEngine.RenderStats`, and WP-4 added per-camera sprite passes/draws, per-frame stats publication,
-> and `IEngine.CaptureFrameAsync`. All are `Current`; the M8 benchmark and final Pong presentation
-> gate (WP-5) remain open. See the
+> `IEngine.RenderStats`, WP-4 added per-camera sprite passes/draws, per-frame stats publication,
+> and `IEngine.CaptureFrameAsync`, and WP-5 added the Release 50,000-sprite benchmark and the
+> explicit short-vs-long Pong presentation gate. All are `Current`; M8 is implementation-complete
+> through WP-5 and the milestone PR is open for review, not merged. See the
 > [API reference](reference.md#12-runtime-surface).
 >
 > Assets/processors are configured in a build-time `MyGame.Assets` executable with
@@ -95,8 +96,8 @@ app.Run();
 
 | Mode | Selection | Current behavior | Target |
 | --- | --- | --- | --- |
-| Windowed (default) | `WithTitle`/`WithSize`/`WithVSync` | Visible SDL window, Vulkan instance/surface, input, time, a ring-backpressured loop until exit/close, one snapshot published/presented per tick, and the M8 per-camera sprite passes. Ticks are capped at 30 Hz only while minimized. | Pong presentation gate/benchmark (M8 WP-5). |
-| Offscreen | `WithOffscreen(width, height)` | Vulkan renderer with a fixed sRGB target; `Setup` → `Tick`… → `Teardown` until `Exit`, `ITime` advances, ring-backpressured ticks with one frame per snapshot (discarded unless captured); no window, input, SDL, or surface. | None for M8; `CaptureFrameAsync` readback on request (no screenshot files). |
+| Windowed (default) | `WithTitle`/`WithSize`/`WithVSync` | Visible SDL window, Vulkan instance/surface, input, time, a ring-backpressured loop until exit/close, one snapshot published/presented per tick, and the M8 per-camera sprite passes. Ticks are capped at 30 Hz only while minimized. | M8 presentation gate: the 120-tick short run asserts lifecycle/content/validation; the 20,000-tick run asserts draw/statistics. |
+| Offscreen | `WithOffscreen(width, height)` | Vulkan renderer with a fixed sRGB target; `Setup` → `Tick`… → `Teardown` until `Exit`, `ITime` advances, ring-backpressured ticks with one frame per snapshot (discarded unless captured); no window, input, SDL, or surface. | M8 presentation gate (short/long) and the opt-in 165 FPS benchmark; `CaptureFrameAsync` readback on request (no screenshot files). |
 | Headless | `WithHeadless(ticksPerSecond = 60)` | Paced loop until `Exit`; the rate must be positive (`WithHeadless(0)` is a `Build()` error); fully synthesized `ITime` (tick 0 = 0/0, then `N/rate` and `1/rate`, no clamp); strict grid, pure `Thread.Sleep`, unbounded catch-up; no window, input, SDL, Vulkan, renderer, or ring. | Pong gate: 120 ticks by default, `--headless --ticks N` (Q15=O2/F3). |
 
 The modes are mutually exclusive, and window-only options are rejected in headless/offscreen.
@@ -150,11 +151,12 @@ $pong = 'examples/pong/Pong.Desktop/bin/Release/net11.0/win-x64/publish/Pong.Des
   `Pong - 11 : 7 - Left wins - R to restart, Esc to quit`); scores, pause, match end, and setup are
   logged at Information, never per frame.
 - **Rendering (M8):** the renderer draws the three Pong sprites with one instanced draw for the
-  full-screen camera; the WP-3 texture pages/placeholder feed the bindless set. The gate asserts the
-  `RenderStats` relationships and a manual visual check, with offscreen frames discarded unless
-  `CaptureFrameAsync` is requested. Note that the unpaced `--ticks 120` run may finish before the
-  asynchronous texture uploads become drawable; a longer windowed/offscreen run shows
-  `drawCalls=1`, `instances=3`, `texturePages=3` (WP-5 owns the final presentation gate).
+  full-screen camera; the WP-3 texture pages/placeholder feed the bindless set. The gate is split:
+  the 120-tick runs assert lifecycle/content/validation and print the observed stats (the unpaced
+  loop can finish before the asynchronous texture uploads become drawable), while the 20,000-tick
+  `--offscreen`/`--windowed` runs assert `drawCalls=1`, `instances=3`, `texturePages=3`, and the
+  `RenderStats` relationships. The manual visual check captures a completed frame through
+  `IEngine.CaptureFrameAsync`; offscreen frames are discarded unless a capture is requested.
 
 ## 3. Write a game
 
