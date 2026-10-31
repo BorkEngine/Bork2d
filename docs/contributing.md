@@ -164,11 +164,6 @@ managed assemblies are linked in. It must contain `Pong.Desktop.exe`, `assets.pc
 the engine/runtime/`Pong.Common` PDBs (`Pong.Common.pdb` is the on-disk proof that the game assembly
 is in the graph), and must not contain a `Pong.Assets`, `Bork2d.Bake`, `Tomlyn`, or `StbImageSharp`
 assembly.
-publish directory: it is a NativeAOT single-file output plus PDBs, so the
-managed assemblies are linked in. It must contain `Pong.Desktop.exe`, `assets.pck`, `SDL2.dll`, and
-the engine/runtime/`Pong.Common` PDBs (`Pong.Common.pdb` is the on-disk proof that the game assembly
-is in the graph), and must not contain a `Pong.Assets`, `Bork2d.Bake`, `Tomlyn`, or `StbImageSharp`
-assembly.
 `dotnet clean src/Bork2d/Bork2d.slnx` and `dotnet clean examples/pong/Pong.slnx` remove the packs and
 the incremental state under the assets project's `obj/bork2d/bake`.
 
