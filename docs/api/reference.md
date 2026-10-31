@@ -14,9 +14,11 @@
 > headless runs a paced no-GPU loop with a fully synthesized clock. `IEngine.Assets` is the real
 > app-scoped asset service in every mode, opening
 > the base pack (or the `WithoutAssets()` empty filesystem) before the window and `Setup`.
-> Renderer pixels/sprites are the approved M8 target; **M8 is in progress** (WP-1 is documentation
-> reconciliation; no M8 code is written yet), so the M8 public additions below are marked
-> `Planned` (not declared). See the [roadmap](../roadmap.md). The current milestone spec and
+> Renderer pixels/sprites are the approved M8 target; **M8 is in progress**. WP-1 reconciled the
+> owning docs and WP-2 added the build-time shader tool/pipeline, the shared camera projection, and
+> the public `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` helpers (all three are `Current`).
+> `IEngine.RenderStats`/`CaptureFrameAsync` remain `Planned` (WP-3/WP-4). See the
+> [roadmap](../roadmap.md). The current milestone spec and
 > the accepted decisions define the contract; this reference records the implemented surface. If this
 > document and the code disagree, treat it as a defect and reconcile it in the owning docs
 > ([AGENTS.md §10](../../AGENTS.md)) instead of assuming the code is automatically right.
@@ -112,10 +114,11 @@ status marker should be read as "declared but stubbed".
 
 The approved M8 public additions (§6.9 of the [M8 spec](../specs/m8-sprite-renderer.md#69-public-api))
 are the only public changes in M8. All live in `Bork2d.Engine`/`Bork2d.Engine.Rendering`; every one
-is currently `Planned` (not declared): `ICamera<TLayer>.WorldToScreen`/`ScreenToWorld`, the
-`RenderStats` readonly record struct, `IEngine<TLayer>.RenderStats`, and
-`IEngine<TLayer>.CaptureFrameAsync`. §2.1 and §8 document their approved semantics, errors, and
-lifetime; `Bork2d.Render` gains no public type.
+is declared and `Current` for the camera members. `ICamera<TLayer>.WorldToScreen`/`ScreenToWorld`/
+`WorldSize` are implemented and tested by WP-2 (including the owner-approved `WorldSize` and the
+`IWindow` framebuffer source). `RenderStats`, `IEngine<TLayer>.RenderStats`, and
+`IEngine<TLayer>.CaptureFrameAsync` remain `Planned` (WP-3/WP-4). §2.1 and §8 document their approved
+semantics, errors, and lifetime; `Bork2d.Render` gains no public type.
 
 ### 1.5 Namespaces
 
@@ -553,9 +556,10 @@ the runtime has no TOML parser, reflection serializer, or bake reference.
 
 ## 8. `ICamera<TLayer>`
 
-`Status: Partial.` The properties are `Current` for storage; renderer and helper semantics are the
-approved M8 target (`Planned`, in progress; no M8 code yet). No validation runs in the setters or in
-M7 capture. Approved target semantics:
+`Status: Partial.` The properties are `Current` for storage; the renderer's per-camera draw/clear
+semantics are the approved M8 target (`Planned`, WP-4). `WorldToScreen`, `ScreenToWorld`, and
+`WorldSize` are `Current` (M8 WP-2). No validation runs in the setters or in M7 capture. Approved
+and implemented semantics:
 
 | Member | Semantics |
 | --- | --- |
@@ -565,8 +569,9 @@ M7 capture. Approved target semantics:
 | `ClearKind Clear { get; set; }` | `Color` clears this camera's rect (`loadOp=CLEAR`); `None` preserves earlier content (`LOAD`); `Depth` is reserved, never touches depth, logs once, and behaves like `None`. |
 | `Color ClearColor { get; set; }` | Linear RGBA for `Clear.Color`; a non-finite value makes the camera invalid. |
 | `int ZIndex { get; set; }` | Camera order: ascending, higher applies later, default `0`; ties are unspecified. |
-| `Vector2 WorldToScreen(Vector2 world)` | `Planned` (not declared, M8): framebuffer pixels, top-left origin, in global framebuffer coordinates (viewport offset included), using the same camera inverse, `Size`, rounded viewport/aspect, and Y-flip as the renderer. Non-finite input throws `ArgumentOutOfRangeException`; an invalid camera throws `InvalidOperationException`. |
-| `Vector2 ScreenToWorld(Vector2 screen)` | `Planned` (not declared, M8): the inverse mapping with the same rounding and throws; a point outside the viewport extrapolates (it is not clamped). |
+| `Vector2 WorldToScreen(Vector2 world)` | `Current` (M8 WP-2): framebuffer pixels, top-left origin, in global framebuffer coordinates (viewport offset included), using the same camera inverse, `Size`, rounded viewport/aspect, and Y-flip as the renderer. Non-finite input throws `ArgumentOutOfRangeException`; an invalid camera throws `InvalidOperationException`. |
+| `Vector2 ScreenToWorld(Vector2 screen)` | `Current` (M8 WP-2): the inverse mapping with the same rounding and throws; a point outside the viewport extrapolates (it is not clamped). |
+| `Vector2 WorldSize { get; }` | `Current` (M8 WP-2; owner-approved addition): the visible world `(2 * Size * a, 2 * Size)` where `a` is the rounded pixel-viewport aspect. Read-only; follows the same invalid-camera/no-framebuffer rules. |
 
 - **Invalid camera (approved draw-time skip).** The whole camera, including its clear, is skipped
   with a throttled diagnostic when: `Size <= 0`/NaN/infinite; `Viewport` is non-finite or its
@@ -574,9 +579,15 @@ M7 capture. Approved target semantics:
   `Clear.Color` has a non-finite `ClearColor`; the camera world matrix is singular; or the camera
   world matrix has a non-unit scale. The helpers throw `InvalidOperationException` for the same
   conditions instead of returning NaN. There is no validation in the setters or in M7 capture.
+- **Framebuffer source (M8 WP-2; owner-approved addition).** `GameEngine.CreateCamera` passes the
+  engine's `IWindow` to the camera. `WorldToScreen`/`ScreenToWorld`/`WorldSize` read `IWindow.Size`
+  (framebuffer physical pixels). A headless/offscreen stub throws `NotSupportedException`, surfaced as
+  `InvalidOperationException` with a clear message; a disposed windowed window may propagate
+  `ObjectDisposedException`.
 - **Projection.** World is +X right/+Y up; `view = inverse(cameraWorldMatrix)`; `Size` is the half
   visible height and the rounded viewport aspect gives the width. Only the view-space Y is negated
-  for Vulkan's Y-down clip space. Scale is not zoom (a non-unit camera scale is invalid).
+  for Vulkan's Y-down clip space. Scale is not zoom (a non-unit camera scale is invalid). The shared
+  pure `CameraProjection` helper is used by both the camera and the renderer.
 - **Clears and passes.** Each camera is its own dynamic-rendering pass; there is no frame-level
   safety clear. A camera's `Clear.Color` clears only its rect; areas outside every camera rect are
   not cleared; a frame with zero cameras records no pass. An empty `Clear.Color` camera records a
@@ -589,8 +600,9 @@ M7 capture. Approved target semantics:
 ## 9. `ISpriteRender<TLayer>`
 
 `Status: Partial.` The properties (including `FlipX`/`FlipY`) are `Current` for storage and M7
-frame-snapshot capture; drawing is the approved M8 target (`Planned`, in progress; no M8 code yet).
-No validation runs in the setters. Approved draw-time semantics:
+frame-snapshot capture. WP-2 adds the pure quad/flip resolution and instance layout; the draw itself
+is the approved M8 target (`Planned`, WP-4). No validation runs in the setters. Approved draw-time
+semantics:
 
 | Member | Semantics |
 | --- | --- |
@@ -732,8 +744,9 @@ do not serialize them; an undefined value is a safe query that returns `false`. 
 The builder, windowed/offscreen Vulkan hosts with
 the snapshot handoff, the paced headless loop, validation, app-owned logging, window/input proxies,
 time, and the asset-service lifecycle are implemented. Windowed and offscreen require Vulkan 1.3; the renderer is
-composed internally and adds no public builder member (D-M6-24). Sprites, `RenderStats`, and
-`CaptureFrameAsync` are the approved M8 target (`Planned`, in progress; no M8 code yet). The
+composed internally and adds no public builder member (D-M6-24). Sprites are the approved M8 target;
+the WP-2 camera helpers are `Current`, while the draw path, `RenderStats`, and `CaptureFrameAsync`
+remain `Planned` (WP-3/WP-4). The
 internal renderer start info gains a required `IAssets Assets` member supplied after the asset
 service starts, and `Bork2d.Runtime` installs the internal stats/capture bridge; neither adds a
 public type or a Render/Vulkan type in a public signature.
@@ -926,8 +939,9 @@ builder.Write("assets.pck");   // overwrites; relative to the current directory
 | Empty `AssetRef<T>`/`DataRef` passed to a load overload | `ArgumentException`; an absent (`null`) reference is not a load request. |
 | After the asset service stops | Every `IAssets` member throws `ObjectDisposedException`; pending load tasks complete as canceled. The `IEngine.Assets` getter never throws and keeps returning the disposed service. |
 | Malformed sprite field at draw time (M8, `Planned`) | Fatal `Bork2dException` naming the field and texture reference (`Uvs` null/!= 4/non-finite, `Scale <= 0`/non-finite, non-finite or out-of-`[0,1]` `Pivot`, unknown topology, `Indices` on a `Quad`); the renderer-fatal path tears down once and rethrows. |
-| Invalid camera at draw time (M8, `Planned`) | The camera, including its clear, is skipped with a throttled diagnostic; the app continues. `WorldToScreen`/`ScreenToWorld` throw `InvalidOperationException` instead of returning NaN. |
-| `WorldToScreen`/`ScreenToWorld` with non-finite input (M8, `Planned`) | `ArgumentOutOfRangeException`. |
+| Invalid camera at draw time (M8, `Planned`, WP-4) | The camera, including its clear, is skipped with a throttled diagnostic; the app continues. `WorldToScreen`/`ScreenToWorld`/`WorldSize` throw `InvalidOperationException` instead of returning NaN (M8 WP-2, `Current`). |
+| `WorldToScreen`/`ScreenToWorld` with non-finite input (M8 WP-2, `Current`) | `ArgumentOutOfRangeException`. |
+| `WorldToScreen`/`ScreenToWorld`/`WorldSize` with an invalid camera or no framebuffer (M8 WP-2, `Current`) | `InvalidOperationException` (the headless/offscreen `IWindow` stub's `NotSupportedException` is wrapped); a disposed windowed window may propagate `ObjectDisposedException`. |
 | `RenderStats` before the first frame, in headless, or after shutdown (M8, `Planned`) | Returns defaults/zero (or the last published values); never throws. |
 | `CaptureFrameAsync` before `Run()` / after `Run()`/`Dispose()` / headless (M8, `Planned`) | `InvalidOperationException` / `ObjectDisposedException` / `NotSupportedException`; a canceled request faults with `OperationCanceledException`; a renderer fatal/stop faults pending requests. |
 

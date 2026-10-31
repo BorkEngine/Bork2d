@@ -12,10 +12,10 @@
 > `Thread.Sleep` wait, unbounded catch-up, and no SDL, Vulkan, renderer, ring, or capture (Q11=K1,
 > Q12=L2, Q13=M4/F1, F5–F8). `Setup` runs before renderer readiness and the first `Tick` waits for it
 > (D-M6-06); a renderer failure around `Setup` still runs `Setup`, attempts `Teardown`, and reports
-> from `Run()` (D-M6-14). Sprites are the approved M8 target: **M8 is in progress** (WP-1 is
-> documentation reconciliation; no M8 code is written yet), and the host-side M8 additions are an
-> internal `RendererStartInfo.Assets` member plus the public stats/capture bridge described in §1 and
-> §6. The suite is 1158 tests: 1141 deterministic tests in CI
+> from `Run()` (D-M6-14). Sprites are the approved M8 target: **M8 is in progress** (WP-1 docs
+> reconciliation and WP-2 shader pipeline/camera math/instance planning are complete), and the
+> host-side M8 additions are an internal `RendererStartInfo.Assets` member plus the public
+> stats/capture bridge described in §1 and §6. The suite is 1252 tests: 1235 deterministic tests in CI
 > plus 17 opt-in/conditional tests (9 real-window, 3 reparse-point, 5 real-GPU).
 
 ## 1. Public startup contract
@@ -62,7 +62,7 @@ app.Run();
   the surface/instance/window and before the assets stop. A failed run still counts as the one call;
   a second call throws `InvalidOperationException`, and `Run()` after `Dispose()` throws
   `ObjectDisposedException`.
-- **Renderer input seam and stats/capture (approved M8 target, in progress; no M8 code yet).** The
+- **Renderer input seam and stats/capture (approved M8 target; WP-3/WP-4, not written yet).** The
   internal `RendererStartInfo` gains a required `IAssets Assets` member, supplied after
   `assetService.Start()` and before the renderer is created, so the render thread can resolve
   descriptors/payloads without a `Bork2d.Runtime` reference. The host installs the internal

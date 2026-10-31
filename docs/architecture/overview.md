@@ -11,7 +11,8 @@
 > presented/discarded frame per consumed snapshot with the slot held to its fence; the
 > tick is backpressured by the ring and the only timer is the minimized-only 30 Hz tick cap. Headless
 > runs the K1 paced loop with the L2 synthesized clock, the M4/F1 strict grid, and unbounded catch-up
-> (Q11–Q13, F5–F8). The sprite renderer (M8) is `Planned`. The windowed/offscreen AOT/Pong gate is
+> (Q11–Q13, F5–F8). The sprite renderer (M8) is **in progress** (WP-2 pipeline/camera helpers/instance
+> planning are in place; draws are pending). The windowed/offscreen AOT/Pong gate is
 > proven through M6 and re-proven for M7 with the 120-tick headless default and `--headless --ticks
 > N` (Q15=O2/F3), `--windowed --ticks 120`, and `--offscreen --ticks 120`. Status detail is in
 > [the roadmap](../roadmap.md). The

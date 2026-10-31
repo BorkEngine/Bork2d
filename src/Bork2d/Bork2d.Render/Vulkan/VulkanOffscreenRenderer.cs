@@ -53,6 +53,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
 
     private OffscreenFrame?[] _frames = [];
     private OffscreenTarget? _target;
+    private SpritePipeline? _spritePipeline;
     private Thread? _thread;
     private VulkanDevice? _device;
     private IVulkanInstance? _instance;
@@ -136,6 +137,9 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             return true;
         }
     }
+
+    /// <summary>Gets a value indicating whether the sprite pipeline was created at startup.</summary>
+    internal bool HasSpritePipeline => _spritePipeline is not null;
 
     /// <inheritdoc/>
     public SnapshotSlot? AcquireSnapshotSlot() => _consumer.Ring.Acquire();
@@ -373,6 +377,8 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 ColorImages,
                 _instance,
                 _logger);
+            _spritePipeline = SpritePipeline.Create(_device, _instance, _logger);
+            _spritePipeline.GetOrCreatePipeline(format);
             if (_control.IsStopRequested)
             {
                 SetStopReason(RendererStopReason.Requested);
@@ -780,6 +786,9 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             _frames[index]?.Dispose();
             _frames[index] = null;
         }
+
+        _spritePipeline?.Destroy();
+        _spritePipeline = null;
 
         _device?.Destroy();
         _device = null;

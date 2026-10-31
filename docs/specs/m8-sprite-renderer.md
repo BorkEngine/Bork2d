@@ -1,11 +1,18 @@
 # M8 — Sprite Renderer with Real Assets (spec)
 
-> **Status: Approved for implementation (2026-10-31); no M8 code has been written.** This spec is
+> **Status: Approved for implementation (2026-10-31); WP-1 and WP-2 are complete.** This spec is
 > the owner-approved M8 contract. Per the owner's decision, the answers are recorded directly here:
 > there is no separate M8 decision-register section, no `D-M8-xx` entries are added to
 > [decisions.md](../decisions.md), and the previous question history is intentionally not preserved.
 > This is an explicit owner exception to the usual decision-log process; the implementation docs
 > still change in the same work packages.
+>
+> As built: WP-1 reconciled the owning docs; WP-2 added the build-time shader compiler/tool, the
+> checked-in GLSL and generated SPIR-V, the sprite pipeline/layout/samplers, the shared camera
+> projection/rounding helper, the public `WorldToScreen`/`ScreenToWorld`/`WorldSize` members, and the
+> pure sprite planning/quad/96-byte instance layout with deterministic tests. WP-3 (texture pages,
+> `RenderStats`), WP-4 (draw integration, `CaptureFrameAsync`), and WP-5 (Pong/AOT gate, benchmark,
+> final docs) remain planned.
 >
 > M7 is merged into `develop` (2026-10-31, PR #12, merge `5de5ac3`) and supplies the immutable frame
 > snapshot, the three-slot ring, the one-frame-per-snapshot renderer, and the empty per-frame
@@ -25,8 +32,8 @@ M8 turns the M6/M7 clear-only renderer into a sprite renderer:
 - draw the documented sprite state (transform, layer, `ZIndex`, tint, `FlipX`/`FlipY`) and handle
   invalid content explicitly: malformed sprite fields fail the renderer; missing/broken textures
   draw a generated placeholder;
-- add the approved public API: `ICamera.WorldToScreen`/`ScreenToWorld`, `IEngine.RenderStats`, and
-  `IEngine.CaptureFrameAsync`;
+- add the approved public API: `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize`,
+  `IEngine.RenderStats`, and `IEngine.CaptureFrameAsync`;
 - keep the M7 handoff/fence/pacing behavior unchanged, keep windowed and offscreen parity, and add
   zero steady-state allocations in the frame path;
 - add internal counters/logging, deterministic planning/math tests, opt-in GPU tests, and the
@@ -62,7 +69,7 @@ and supersede the older wording; the owning docs are updated in the implementati
 | Area | Approved M8 decision | Supersedes |
 | --- | --- | --- |
 | Render pass structure | **One dynamic-rendering pass per camera**, over that camera's pixel viewport; `loadOp=CLEAR` for `Clear.Color`, `LOAD` for `Clear.None`/`Clear.Depth`. **No frame-level safety-clear pass.** Areas outside all camera viewports are not cleared. | The one-pass-per-frame and safety-black statements in [Rendering §3.1/§8](../architecture/rendering.md#31-windowed). |
-| Public API | Add `ICamera.WorldToScreen`/`ScreenToWorld`, `IEngine.RenderStats`, and `IEngine.CaptureFrameAsync`. | The "no public readback in 0.1" and "no screen/world helpers yet" statements. |
+| Public API | Add `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize`, `IEngine.RenderStats`, and `IEngine.CaptureFrameAsync`. | The "no public readback in 0.1" and "no screen/world helpers yet" statements. |
 | Visual tests | **No golden/pixel tests.** GPU tests assert counters, validation, lifecycle, and the readback API contract; visual correctness is a manual windowed check. | The roadmap "golden tests" bullet and the "no readback" ambiguity. |
 | Texture failure | Missing/malformed/unsupported textures mark the path unloadable and draw a generated **magenta/black checkerboard placeholder**; they do not skip the sprite. | The "missing texture is simply non-drawable" wording for M8. |
 | Malformed sprite fields | A malformed `SpriteAsset` field is a **fatal renderer error** naming the field and texture reference. Non-`Quad` topology stays non-fatal and is skipped with a diagnostic. | The "no runtime checks at all" ambiguity; Stage 1 still has no bake/load validation. |
@@ -80,14 +87,14 @@ M6/M7 are merged. The current tree contains:
 
 | Area | Current state | M8 consequence |
 | --- | --- | --- |
-| Engine suite | **1158** tests = 1141 deterministic + 17 opt-in/conditional (9 `[WindowFact]`, 3 reparse-point, 5 `[GpuFact]`). | M8 adds deterministic plan/math/page/public-API tests and opt-in GPU rendering tests. |
+| Engine suite | **1158** tests at spec time = 1141 deterministic + 17 opt-in/conditional (9 `[WindowFact]`, 3 reparse-point, 5 `[GpuFact]`). WP-2 raises the suite to **1252** = 1235 deterministic + 17 conditional. | M8 adds deterministic plan/math/page/public-API tests and opt-in GPU rendering tests. |
 | `Pong.Tests` | **46** tests. | Pong already builds a camera and three sprites; M8 changes what is drawn and what the gate can assert. |
-| Scene | `Camera<TLayer>`/`SpriteRender<TLayer>` store raw values with no validation or clamping. `Viewport`, `Size`, `ClearColor`, `Tint`, `Layer`, `ZIndex`, and `FlipX/Y` are settable without range checks. | M8 handles invalid values at draw time (cameras skip; malformed sprites are fatal); setters stay unchanged. |
+| Scene | `Camera<TLayer>`/`SpriteRender<TLayer>` store raw values with no validation or clamping. `Viewport`, `Size`, `ClearColor`, `Tint`, `Layer`, `ZIndex`, and `FlipX/Y` are settable without range checks. WP-2 adds the shared projection helper and the public `ICamera` screen/world/`WorldSize` members; the renderer still handles invalid values at draw time (cameras skip; malformed sprites are fatal) and the setters stay unchanged. | M8 handles invalid values at draw time (cameras skip; malformed sprites are fatal); setters stay unchanged. |
 | Snapshot | M7 `FrameSnapshot`/`CameraSnapshot`/`SpriteSnapshot` are internal, immutable after publication, and value-only except the loaded `SpriteAsset?`. Exact fields are in [Threading §3](../architecture/threading.md#3-frame-snapshot). Capture copies raw camera/sprite values; invalid layers are preserved as `uint`. | The snapshot stays asset-agnostic. The renderer reads `IAssets` directly and resolves textures; no snapshot change. |
-| `Bork2d.Render` | Internal `IRenderer` seam, SPSC control channel, windowed and offscreen renderers, three-slot handoff consumer, fence-held slots, suspended minimized drain, counters, validation observation. | M8 adds the shader tool/pipeline, page cache/uploader, bindless descriptor set, instance builder/writer, per-camera passes, public stats/capture plumbing, and counters; no public Render type. |
+| `Bork2d.Render` | Internal `IRenderer` seam, SPSC control channel, windowed and offscreen renderers, three-slot handoff consumer, fence-held slots, suspended minimized drain, counters, validation observation. WP-2 adds the internal `SpritePipeline` (layout/samplers/pipeline-per-format) created at renderer startup, the shared camera-projection bridge, and the pure sprite planner/quad/96-byte instance layout. | M8 adds the page cache/uploader, bindless descriptor set, instance filling, per-camera passes, public stats/capture plumbing, and counters; no public Render type. |
 | Per-frame GPU resources | `FrameInstanceResources` creates a **4096-byte host-visible coherent** instance SSBO and a descriptor-set layout/pool/set with **binding 0 only** (storage buffer, vertex stage). It is never written, bound, or drawn. | M8 replaces the provisional capacity with a growable per-frame instance buffer, adds binding 1 (bindless sampler array), and fills/writes/binds them. |
 | Bindless readiness | Device selection already requires Vulkan 1.3, dynamic rendering, synchronization 2, and the six descriptor-indexing features (`D-M6-08`), and logs/validates `maxPerStageDescriptorUpdateAfterBindSampledImages` for M8 capacity planning. | M8 uses a variable-descriptor-count bindless binding and grows capacity up to the device limit. |
-| Shaders/pipeline | **No shader files, SPIR-V, pipeline, or sampler exist** in the repository. | M8 adds checked-in GLSL, a build-time Silk.NET.Shaderc tool, generated SPIR-V, and the sprite pipeline. |
+| Shaders/pipeline | WP-2 adds the checked-in GLSL (`Bork2d.Render/Shaders/sprite.vert`, `sprite.frag`), the build-only `build/Bork2d.ShaderCompiler` tool and MSBuild targets, generated SPIR-V C#, and the internal `SpritePipeline` (descriptor-set layout, pipeline layout with a 64-byte push constant, one graphics pipeline per sRGB output format, and a `(filter, wrap)` sampler cache). Both renderer startups create it after the color format is known and destroy it in cleanup; no draw is recorded yet. | M8 adds checked-in GLSL, a build-time Silk.NET.Shaderc tool, generated SPIR-V, and the sprite pipeline; WP-3/WP-4 write descriptors and record draws. |
 | Texture upload | No GPU upload path exists. `TextureDescriptor` is a public MessagePack model; `IAssets.LoadData` returns decompressed bytes on the loader thread. No Render→asset seam exists. | M8 passes `IAssets` through `RendererStartInfo` and adds the page cache/uploader. |
 | Readback | Offscreen rendering discards; there is no readback, screenshot, or pixel assertion. | M8 adds the public `IEngine.CaptureFrameAsync` readback path; the engine's own tests still do not assert pixels. |
 | GPU tests | 5 `[GpuFact]` tests, skipped unless `BORK2D_RUN_GPU_TESTS=1`; serialized `RealGpu` collection; bounded joins; validation enabled. | M8 adds rendering/benchmark tests in the same local-only pattern. |
@@ -121,7 +128,7 @@ These documentation/spec defects are resolved by this spec and fixed in the impl
 | Location | Old statement | M8 resolution |
 | --- | --- | --- |
 | [Rendering §4](../architecture/rendering.md#4-snapshot-to-instances) | The indexed non-Quad path is "M8 work." | **Not M8.** Draw `Quad` only; preserve non-Quad assets for the future indexed path; skip non-Quad with a diagnostic. The rendering sentence is corrected. |
-| [Roadmap M8](../roadmap.md#5-milestone-detail) | "screen/world helpers" are listed. | **Added in M8:** `ICamera.WorldToScreen`/`ScreenToWorld` with the semantics in [§6.9](#69-public-api). |
+| [Roadmap M8](../roadmap.md#5-milestone-detail) | "screen/world helpers" are listed. | **Added in M8:** `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize` with the semantics in [§6.9](#69-public-api). |
 | [Roadmap M8](../roadmap.md#5-milestone-detail) | "golden tests" are listed. | **Dropped for M8.** No pixel/golden tests; GPU evidence is structural plus a manual visual check. The roadmap bullet is corrected. |
 | [Assets and tooling §9](../architecture/assets-and-tooling.md#9-sprite-assets), [API reference §11](../api/reference.md#11-value-types) | Sprite field validation belongs to M5. | M5 is removed. There is **no** bake/load validation in Stage 1; the renderer's defensive draw rules in [§6.4](#64-sprites-validity-and-flips) apply. |
 | [Roadmap §6](../roadmap.md#6-cross-cutting-work) | "GPU runner from M8." | **GPU tests stay local-only;** CI is unchanged. |
@@ -173,8 +180,8 @@ assembly and no `vulkan-1.dll`.
   generated SPIR-V, pipeline/layout/descriptor set, push constants, samplers, blending, and draws.
 - **Instance storage:** growable per-frame host-visible instance buffers, 96-byte records, camera
   ranges/`firstInstance`, and the one-draw contract.
-- **Public API:** `ICamera.WorldToScreen`/`ScreenToWorld`, the immutable `RenderStats` snapshot on
-  `IEngine`, and `IEngine.CaptureFrameAsync`.
+- **Public API:** `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize`, the immutable `RenderStats`
+  snapshot on `IEngine`, and `IEngine.CaptureFrameAsync`.
 - **Diagnostics:** internal counters, throttled logs, validation observation, and static debug
   labels for the new objects; no per-frame/per-sprite logging.
 - **Evidence:** deterministic plan/math/page/public-API tests; opt-in GPU rendering tests; the
@@ -268,6 +275,13 @@ state it.
   negation is the only Y-up → Vulkan Y-down conversion.
 - `Viewport` is normalized `(x, y, width, height)` with a top-left origin and defaults to
   `(0,0,1,1)`.
+- **Framebuffer source.** The windowed renderer's framebuffer is its swapchain extent; the offscreen
+  renderer's is its fixed target extent. The public camera helpers read the engine window's
+  `IWindow.Size`, which is the framebuffer size in physical pixels (owner-approved M8 addition; the
+  helpers therefore throw `InvalidOperationException` in headless/offscreen apps, where the stub has
+  no framebuffer).
+- **Visible world size (owner-approved M8 addition).** `ICamera<TLayer>.WorldSize` returns
+  `(2 * Size * a, 2 * Size)` using the same rounded pixel-viewport aspect `a` as the projection.
 - Camera scale is not zoom. A non-unit camera scale is unsupported.
 - v1 culls by layer only; off-viewport sprites are still instanced and clipped by the GPU.
 - Cameras apply in ascending `ZIndex`; ties are unspecified.
@@ -301,8 +315,13 @@ clear, is skipped with a throttled diagnostic when:
 - the camera world matrix is singular/non-invertible;
 - the camera world matrix has a non-unit scale (within a small implementation epsilon).
 
-There is no validation in the public setters or in M7 capture. `WorldToScreen`/`ScreenToWorld` throw
-`InvalidOperationException` for an invalid camera (see §6.9).
+There is no validation in the public setters or in M7 capture. `WorldToScreen`/`ScreenToWorld`/
+`WorldSize` throw `InvalidOperationException` for an invalid camera (see §6.9).
+
+**As built (WP-2).** The pure helper lives in `Bork2d.Engine.Rendering.CameraProjection`; both
+`Camera<TLayer>` and the renderer's `SpriteCameraProjection` bridge call it, so the public helpers and
+the GPU projection share one rounding/aspect/Y-flip implementation. The renderer records no
+per-camera pass yet (WP-4).
 
 ### 6.4 Sprites, validity, and flips
 
@@ -447,6 +466,14 @@ struct Instance {          // 6 x vec4 = 96 bytes
 
 `flags` is reserved for future use and is zero in M8. The four UVs preserve arbitrary corner UVs,
 not just a min/max rectangle. The CPU writes the same layout; a unit test asserts the stride/offsets.
+`FlipX`/`FlipY` are encoded as the sign of `sizeX`/`sizeY`, which is algebraically identical to the
+approved `size * sx`/`size * sy` formula in §6.4 and keeps `flags` zero; the writer also asserts that
+zero.
+
+WP-2 adds the internal `SpriteInstance` record, the mapped-memory writer, the pure
+`(Layer, ZIndex)` index sort, the per-camera mask filter with null/invalid-layer/non-Quad/pending
+skips, the fatal malformed-field checks, and the quad size/pivot/flip resolver, all with deterministic
+tests. The per-frame growable buffers and ranges remain WP-4.
 
 **Per-frame buffer (approved: grow at frame fences, host-visible coherent).** Each GPU frame owns one
 host-visible coherent instance buffer. The initial capacity is 1024 instances; when a frame's total
@@ -467,22 +494,36 @@ draw counter equals the number of non-empty cameras.
 
 - **Sources:** `src/Bork2d/Bork2d.Render/Shaders/sprite.vert` and `sprite.frag` (GLSL 450/460),
   checked in.
-- **Build-time compiler (approved):** a new build-only JIT tool `build/Bork2d.ShaderCompiler`
-  references `Silk.NET.Shaderc` **2.23.0** and `Silk.NET.Shaderc.Native` **2.23.0**. An MSBuild
-  target builds the tool, compiles the GLSL to SPIR-V (Vulkan 1.3 target; debug info in Debug,
-  optimization in Release), and emits a generated C# file with the SPIR-V byte arrays into
-  `Bork2d.Render`'s compilation. No Vulkan SDK is required. The tool and packages are never in the
-  runtime/AOT publish graph; no runtime shader I/O or compilation.
-- **Pipeline:** one graphics pipeline per output color format (windowed/offscreen formats may
-  differ; both sRGB). Dynamic rendering with one sRGB color attachment, no depth/stencil, no vertex
-  input, triangle strip, four vertices per instance, dynamic viewport/scissor, culling and depth
-  test/write disabled, straight alpha `src*a + dst*(1-a)`, color write mask RGBA, sample count 1.
+- **Build-time compiler (approved, as built in WP-2):** a build-only JIT tool
+  `build/Bork2d.ShaderCompiler` references `Silk.NET.Shaderc` **2.23.0** and
+  `Silk.NET.Shaderc.Native` **2.23.0**. An MSBuild target
+  (`build/Bork2d.ShaderCompiler.targets`, imported by `Bork2d.Render`) restores and builds the tool out
+  of process, compiles the GLSL to SPIR-V (Vulkan 1.3 target; debug info in Debug, optimization in
+  Release), and emits `obj/<Configuration>/<TFM>/ShaderCompiler/SpriteShaders.g.cs` with the SPIR-V
+  byte arrays into `Bork2d.Render`'s compilation before `CoreCompile`. The generated file is neither
+  committed nor published as a loose file. The target also runs for design-time/format builds so the
+  clean-clone CI sequence (solution restore → `dotnet format --no-restore` → build) sees the type;
+  the out-of-process restore/build uses `RemoveProperties` so RID/publish settings do not leak into the
+  tool. No Vulkan SDK is required. The tool and packages are never in the runtime/AOT publish graph;
+  no runtime shader I/O or compilation.
+- **Pipeline (as built in WP-2):** one graphics pipeline per output color format (windowed/offscreen
+  formats may differ; both sRGB). Dynamic rendering with one sRGB color attachment, no depth/stencil,
+  no vertex input, triangle strip, four vertices per instance, dynamic viewport/scissor, culling and
+  depth test/write disabled, straight alpha `src*a + dst*(1-a)`, color write mask RGBA, sample count 1.
   `VkPipelineRenderingCreateInfo` carries the color format only. One pipeline layout: push constant
-  64 bytes + descriptor set 0. No per-camera descriptor sets.
+  64 bytes + descriptor set 0. No per-camera descriptor sets. The `SpritePipeline` owns the
+  descriptor-set layout (binding 0 storage buffer/vertex, binding 1 variable-count combined image
+  sampler array/fragment with `PARTIALLY_BOUND | UPDATE_AFTER_BIND | VARIABLE_DESCRIPTOR_COUNT`), the
+  pipeline layout, and the `(filter, wrap)` sampler cache (`maxLod = 0`, no anisotropy/mipmaps). Both
+  renderer startups create it after the color format is known and destroy it in cleanup; creation
+  failure is a clean renderer startup failure (D-M6-14). Static debug labels only. No draw or bind is
+  recorded in WP-2.
 - **Shaders:** `sprite.vert` fetches `Instance` by `gl_InstanceIndex`, generates the corners with the
   pivot/flip formula, applies the world transform and view-projection. `sprite.frag` samples
   `textures[textureIndex]` and multiplies the linear tint. The shader assumes the approved 96-byte
-  layout and the `R8G8B8A8_SRGB` page format.
+  layout and the `R8G8B8A8_SRGB` page format. The checked-in sources are GLSL `#version 460`; the
+  generated modules are SPIR-V 1.3+ and a deterministic test asserts the SPIR-V magic/version and that
+  the build integration linked them.
 - **Failure:** shader/tool/pipeline/layout creation failure is fatal before the first tick, reported
   through the renderer-error path (Setup still runs, zero ticks, Teardown attempted, renderer joined,
   `Bork2dException` rethrown; D-M6-14).
@@ -533,11 +574,12 @@ are unspecified; use distinct keys.
 The owner-approved additions are the only public changes in M8. All live in `Bork2d.Engine` /
 `Bork2d.Engine.Rendering`; `Bork2d.Render` stays internal.
 
-#### `ICamera<TLayer>` — screen/world helpers
+#### `ICamera<TLayer>` — screen/world helpers and visible world size
 
 ```csharp
 Vector2 WorldToScreen(Vector2 world);
 Vector2 ScreenToWorld(Vector2 screen);
+Vector2 WorldSize { get; }
 ```
 
 - `WorldToScreen` returns **framebuffer pixels**, top-left origin, in global framebuffer coordinates
@@ -546,13 +588,24 @@ Vector2 ScreenToWorld(Vector2 screen);
 - `ScreenToWorld` is the inverse mapping; a point outside the camera viewport extrapolates (it is not
   clamped to the viewport).
 - Both use the rounded pixel rect from §6.3; the projection uses the rounded aspect.
+- **Owner-approved M8 addition:** `WorldSize` returns the visible world `(2 * Size * a, 2 * Size)`
+  where `a` is the rounded pixel-viewport aspect from §6.3. It is read-only, has no setter, and
+  follows the same invalid-camera/no-framebuffer rules as the two helpers.
+- **Framebuffer source (owner-approved M8 addition):** the helpers read the engine window's
+  `IWindow.Size`, the framebuffer size in physical pixels, because `GameEngine.CreateCamera` passes
+  the engine's `IWindow` to `Camera<TLayer>`. In headless/offscreen apps the window stub throws
+  `NotSupportedException`, surfaced as `InvalidOperationException` with a clear message; a disposed
+  windowed app may propagate `ObjectDisposedException`.
 - Non-finite input throws `ArgumentOutOfRangeException`.
 - An invalid camera (same criteria as §6.3, including a non-unit camera scale) throws
   `InvalidOperationException`; no silent NaN result.
 - The camera's scale is not zoom; the helpers do not add a zoom parameter. Rotation is supported
   through the camera world matrix.
-- The helper implementations live in `Camera<TLayer>`; the public XML docs, API reference, guide, and
-  deterministic tests update in the same change.
+- The helper implementations live in `Camera<TLayer>` and delegate to the shared pure
+  `Bork2d.Engine.Rendering.CameraProjection` helper (also used by the renderer). The public XML docs,
+  API reference, guide, and deterministic tests update in the same change.
+- **Status (as built in WP-2):** `WorldToScreen`, `ScreenToWorld`, and `WorldSize` are `Current` and
+  tested. `RenderStats`/`CaptureFrameAsync` below are still `Planned` (WP-3/WP-4).
 
 #### `IEngine<TLayer>.RenderStats`
 
@@ -733,8 +786,8 @@ BCL exceptions.
     slot/fence lifetime is unchanged.
 12. `CaptureFrameAsync` returns RGBA8 of a completed frame, never blocks the tick, and never
     affects rendering when unused; `RenderStats` describes the last completed frame consistently.
-13. `WorldToScreen`/`ScreenToWorld` use the same projection/viewport as the renderer and throw for
-    invalid cameras.
+13. `WorldToScreen`/`ScreenToWorld`/`WorldSize` use the same projection/viewport as the renderer and
+    throw for invalid cameras.
 14. Validation reports zero errors in M8 GPU runs; warnings follow D-M6-21.
 15. Shutdown with pages/uploads/frames in flight is clean: no leaked Vulkan object, no
     use-after-free, no surviving render thread.
@@ -746,23 +799,25 @@ BCL exceptions.
 
 ### 8.1 Deterministic tests (no GPU)
 
-- **Camera math:** view/projection for translation/rotation/scale, `Size`, rounded viewport/aspect,
-  split-screen, Y-up→Vulkan-Y-down, half-up rounding/clamping/seams, zero/invalid viewport, singular
-  matrix, non-unit scale, invalid camera skip.
-- **Screen/world helpers:** round-trip within tolerance, viewport offsets, split-screen cameras,
-  points outside the viewport, invalid camera throws, non-finite input throws.
-- **Sort/filter:** layer numeric order, `ZIndex`, equal-key ties (not asserted as stable), mask `0`,
-  multi-bit/zero layers, null sprites, non-Quad, pending/placeholder pages.
-- **Sprite validity:** fatal fields (null/short/non-finite UVs, bad Scale/Pivot, unknown topology,
-  indices on Quad), allowed UVs outside `[0,1]`, null sprite/layer/non-Quad skip, flips/pivot math,
-  negative `LocalScale` composition.
+- **Camera math (WP-2, as built):** view/projection for translation/rotation, `Size`, rounded
+  viewport/aspect, split-screen, Y-up→Vulkan-Y-down, half-up rounding/clamping/seams, zero/invalid
+  viewport, singular matrix, non-unit scale, invalid camera reasons, `WorldSize`, and the shared
+  renderer bridge.
+- **Screen/world helpers (WP-2, as built):** round-trip within tolerance, viewport offsets,
+  split-screen cameras, points outside the viewport, invalid camera throws, non-finite input throws,
+  headless no-framebuffer throws, disposed-window propagation, cross-thread consistency.
+- **Sort/filter (WP-2, as built):** layer numeric order, `ZIndex`, equal-key ties (not asserted as
+  stable), mask `0`, multi-bit/zero layers, null sprites, non-Quad, pending classification.
+- **Sprite validity (WP-2, as built):** fatal fields (null/short/non-finite UVs, bad Scale/Pivot,
+  unknown topology, indices on Quad), allowed UVs outside `[0,1]`, null sprite/layer/non-Quad skip,
+  flips/pivot math, signed-size flip encoding, negative `LocalScale` composition.
 - **Texture page state machine:** fake `IAssets`; descriptor/payload readiness, fault-once, page-key
   dedupe, placeholder on each content failure, pending skip, pool/capacity growth, device-limit
   failure, no-repeat-load.
 - **Frame plan/passes:** per-camera pass order, `Clear.Color`/`None`/`Depth`, empty clear-only pass,
   zero-camera no-pass, one draw per non-empty camera, ranges/`firstInstance`, instance total.
-- **Instance buffer:** layout offsets/stride, growth at a free fence, capacity doubling, limit fatal,
-  no per-frame allocation after warm-up.
+- **Instance buffer (WP-2 layout, as built):** layout offsets/stride (96 bytes), mapped-memory writer,
+  builder field order, zero `flags`; growth/capacity tests remain WP-4.
 - **Public API:** `RenderStats` defaults/headless/after-shutdown/consistency, `CaptureFrameAsync`
   length/cancellation/headless/shutdown behavior (no pixel assertions), full public-surface test.
 - **Allocation:** warm plan/build with fixed counts allocates 0 bytes
@@ -877,7 +932,7 @@ instruction); this spec is the M8 record.
 | [NativeAOT](../architecture/nativeaot.md) | Silk.NET.Shaderc build-time tool, generated SPIR-V, publish content, no runtime shader I/O. |
 | [Projects](../architecture/projects.md) | Build-only `Bork2d.ShaderCompiler` project/tool, no new runtime dependency; dependency matrix unchanged. |
 | [Logging](../architecture/logging.md) | M8 counters/events, throttled diagnostics, no per-frame logging; stats/capture. |
-| [API reference](../api/reference.md) | `WorldToScreen`/`ScreenToWorld`, `RenderStats`, `CaptureFrameAsync`; camera/sprite statuses/validity; readback/stats errors; windowed/offscreen behavior. |
+| [API reference](../api/reference.md) | `WorldToScreen`/`ScreenToWorld`/`WorldSize`, `RenderStats`, `CaptureFrameAsync`; camera/sprite statuses/validity; readback/stats errors; windowed/offscreen behavior. |
 | [API guide](../api/guide.md) | Camera/sprite draw semantics, flips, placeholder/fatal content, screen/world helpers, stats/readback examples. |
 | [Contributing](../contributing.md) | Shader compiler/package, no Vulkan SDK requirement, GPU/benchmark commands, M8 gates. |
 | [Roadmap](../roadmap.md) | M8 status/evidence; remove the golden-test/GPU-runner/one-pass assumptions where they conflict; progress log. |
@@ -892,25 +947,34 @@ The owner approved five sequential work packages. Each is one branch under `m-8/
 | WP | Branch | Scope | Acceptance |
 | --- | --- | --- | --- |
 | WP-1 | `m-8/wp-1` | Documentation/status reconciliation with this spec: rendering/assets/API/guide/threading/nativeaot/projects/logging/contributing/roadmap/README; mark M8 in progress. No code. | Docs check; all conflicting statements fixed; no code. |
-| WP-2 | `m-8/wp-2` | Shader compiler tool + Silk.NET.Shaderc 2.23.0 + GLSL/pipeline/layout/samplers; camera projection/rounding; public `WorldToScreen`/`ScreenToWorld`; deterministic math/plan/instance-layout tests. | Zero-warning build; pipeline path compiles; public helper tests; format/docs. |
+| WP-2 | `m-8/wp-2` | (Complete) Shader compiler tool + Silk.NET.Shaderc 2.23.0 + GLSL/pipeline/layout/samplers; camera projection/rounding; public `WorldToScreen`/`ScreenToWorld`/`WorldSize`; deterministic math/plan/instance-layout tests. | Zero-warning build; pipeline path compiles; public helper tests; format/docs. |
 | WP-3 | `m-8/wp-3` | `RendererStartInfo.Assets`; texture page cache/prefetch/pool/placeholder/upload fence/dynamic capacity/bindless; public `RenderStats` type/`IEngine.RenderStats`; fake-`IAssets` tests. | Page state machine/placeholder/growth/limit tests; no public Render type; no leak. |
 | WP-4 | `m-8/wp-4` | Draw integration: per-camera passes, sort/filter/validity/flips, growable instance buffers, stats publishing, public `CaptureFrameAsync`, GPU rendering/readback-contract tests. | One draw per non-empty camera; no safety pass; validation zero; readback contract; allocation tests. |
 | WP-5 | `m-8/wp-5` | Pong/AOT gate, 165 FPS benchmark, manual visual evidence, final docs, full gates, PR. | AOT zero warnings/runs; benchmark evidence; PR; docs. |
 
 Dependencies: WP-1 → WP-2 → WP-3 → WP-4 → WP-5. Shared Vulkan/docs files rule out parallel waves.
 
+**As-built status (2026-10-31):** WP-1 (`m-8/wp-1`) and WP-2 (`m-8/wp-2`) are complete. WP-2 landed
+the build-only shader compiler and MSBuild integration, the GLSL/SPIR-V modules, the internal sprite
+pipeline (descriptor-set layout, 64-byte push-constant pipeline layout, pipeline-per-sRGB-format, and
+sampler cache) created/destroyed by both renderers, the shared camera projection/rounding helper, the
+public `WorldToScreen`/`ScreenToWorld`/`WorldSize` members, and the pure sprite planner/quad/96-byte
+instance layout with deterministic tests. It records no descriptor writes, passes, or draws
+(WP-3/WP-4). WP-3–WP-5 remain pending.
+
 ## 13. Acceptance criteria
 
 1. **Build/static gates.** Debug/Release builds of `src/Bork2d/Bork2d.slnx` are zero-warning; tests
    pass; `dotnet format --verify-no-changes`, `pwsh scripts/check-docs.ps1`, and `git diff --check`
    pass.
-2. **Public API.** Only the §6.9 additions: `ICamera.WorldToScreen`/`ScreenToWorld`,
+2. **Public API.** Only the §6.9 additions: `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize`,
    `IEngine.RenderStats`, `IEngine.CaptureFrameAsync`; public-surface/dependency tests agree; no
-   public Render type; no other public member.
+   public Render type; no other public member. WP-2 makes the three camera members `Current`;
+   `RenderStats`/`CaptureFrameAsync` remain `Planned`.
 3. **Cameras.** Projection/viewport/aspect/Y orientation are correct; half-up rounding/clamping;
    invalid cameras skip the whole camera with diagnostics; split-screen and camera order match §6.8.
-4. **Screen/world helpers.** Round-trip/viewport/offset/rotation behavior, invalid-camera throw,
-   non-finite-input throw; tests/docs.
+4. **Screen/world helpers.** Round-trip/viewport/offset/rotation behavior, `WorldSize`, invalid-camera
+   throw, non-finite-input throw, headless/disposed-window behavior; tests/docs.
 5. **Sprites.** Size/pivot/UV/tint/transform/flips are correct; malformed fields fatal; non-Quad/
    null/invalid-layer skip; pending pages skip; failed pages draw the placeholder.
 6. **Texture pages.** `IAssets` seam works; async prefetch never blocks the render thread; separate

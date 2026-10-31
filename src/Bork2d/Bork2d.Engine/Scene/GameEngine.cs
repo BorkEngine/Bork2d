@@ -104,7 +104,7 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     public ICamera<TLayer> CreateCamera(ITransform parent)
     {
         var parentNode = RequireEngineNode(parent);
-        var camera = new Camera<TLayer>(_structuralLock);
+        var camera = new Camera<TLayer>(_structuralLock, Window);
         camera.AttachAsNewChild(parentNode);
         return camera;
     }

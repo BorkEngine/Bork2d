@@ -53,6 +53,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
     private Thread? _thread;
     private VulkanDevice? _device;
     private WindowedSwapchain? _swapchain;
+    private SpritePipeline? _spritePipeline;
     private KhrSurface? _surfaceApi;
     private KhrSwapchain? _swapchainApi;
     private IVulkanInstance? _instance;
@@ -146,6 +147,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             return true;
         }
     }
+
+    /// <summary>Gets a value indicating whether the sprite pipeline was created at startup.</summary>
+    internal bool HasSpritePipeline => _spritePipeline is not null;
 
     /// <inheritdoc/>
     public SnapshotSlot? AcquireSnapshotSlot() => _consumer.Ring.Acquire();
@@ -865,12 +869,29 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         _requestedExtent = new WindowExtent((int)created.Extent.Width, (int)created.Extent.Height);
 
         old?.Dispose();
+
+        // The sprite pipeline needs the final swapchain color format; a recreation that selects a
+        // different format creates that format's pipeline lazily. Creation failure is fatal and the
+        // new swapchain is already the current one, so cleanup owns it.
+        EnsureSpritePipeline();
+
         _lastResult = Result.Success;
         if (reason is not null)
         {
             Interlocked.Increment(ref _swapchainRecreations);
             SignalProgress();
         }
+    }
+
+    /// <summary>
+    /// Creates the sprite pipeline owner on first use and the pipeline for the current swapchain
+    /// format. Failure propagates as a renderer startup/recreation failure (D-M6-14).
+    /// </summary>
+    private void EnsureSpritePipeline()
+    {
+        SpritePipeline pipeline = _spritePipeline
+            ??= SpritePipeline.Create(_device!, _instance, _logger);
+        pipeline.GetOrCreatePipeline(_swapchain!.Format);
     }
 
     private void Recreate(SwapchainRecreateReason reason)
@@ -1142,6 +1163,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             _frames[index]?.Dispose();
             _frames[index] = null;
         }
+
+        _spritePipeline?.Destroy();
+        _spritePipeline = null;
 
         _device?.Destroy();
         _device = null;

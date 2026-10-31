@@ -40,6 +40,56 @@ public interface ICamera<TLayer> : ITransform where TLayer : struct, Enum
     Color ClearColor { get; set; }
 
     /// <summary>
+    /// Gets the visible world width and height for this camera's current framebuffer.
+    /// </summary>
+    /// <value>
+    /// <c>(2 * Size * aspect, 2 * Size)</c>, where the aspect is the rounded pixel-viewport width
+    /// divided by its height from the engine window's framebuffer size (physical pixels).
+    /// </value>
+    /// <exception cref="InvalidOperationException">
+    /// The camera is invalid, or the app is headless or offscreen so it has no framebuffer.
+    /// </exception>
+    Vector2 WorldSize { get; }
+
+    /// <summary>
+    /// Maps a world-space point to global framebuffer pixels (top-left origin).
+    /// </summary>
+    /// <remarks>
+    /// The returned point includes the camera viewport offset and uses the same camera inverse,
+    /// <see cref="Size"/>, rounded viewport/aspect, and Y flip as the renderer. A point outside the
+    /// camera viewport extrapolates; it is not clamped. The camera viewport is rounded half-up and
+    /// clamped to the framebuffer before use.
+    /// </remarks>
+    /// <param name="world">The world-space point, in world units.</param>
+    /// <returns>The framebuffer-pixel position.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// A component of <paramref name="world"/> is NaN or infinite.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The camera is invalid, or the app is headless or offscreen so it has no framebuffer.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The windowed app has shut down.</exception>
+    Vector2 WorldToScreen(Vector2 world);
+
+    /// <summary>
+    /// Maps a global framebuffer-pixel point (top-left origin) back to world space.
+    /// </summary>
+    /// <remarks>
+    /// This is the inverse of <see cref="WorldToScreen"/> with the same rounding and exceptions. A
+    /// point outside the camera viewport extrapolates; it is not clamped.
+    /// </remarks>
+    /// <param name="screen">The framebuffer-pixel position, in physical pixels.</param>
+    /// <returns>The world-space point, in world units.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// A component of <paramref name="screen"/> is NaN or infinite.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The camera is invalid, or the app is headless or offscreen so it has no framebuffer.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The windowed app has shut down.</exception>
+    Vector2 ScreenToWorld(Vector2 screen);
+
+    /// <summary>
     /// Gets or sets the draw order between cameras; higher values apply later and draw on top.
     /// </summary>
     /// <value>

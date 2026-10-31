@@ -23,4 +23,8 @@
         <InternalsVisibleTo Include="Bork2d.Tests" />
     </ItemGroup>
 
+    <!-- Build-time GLSL -> SPIR-V -> generated C#. The tool is JIT and build-only; it never enters
+         this project's references, output, or publish graph, and no Vulkan SDK is required. -->
+    <Import Project="..\..\..\build\Bork2d.ShaderCompiler.targets" />
+
 </Project>

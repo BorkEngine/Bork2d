@@ -28,8 +28,9 @@
 > The editor is **removed from Stage 1** (M5 was dropped). `IEngine.Assets` returns the real service
 > in every mode, including the `WithoutAssets()` empty filesystem. **M8 (sprite renderer) is in
 > progress:** the approved target has the renderer resolve `SpriteAsset.Texture`/
-> `TextureDescriptor.Payload` through `IAssets` and own the GPU page cache, but no M8 code is written
-> yet (WP-1 is documentation reconciliation). `IAssets` member contracts and errors are owned by the
+> `TextureDescriptor.Payload` through `IAssets` and own the GPU page cache. M8 WP-2 added the shader
+> pipeline and the pure sprite field/quad/instance planning; the page cache/upload path is WP-3 and
+> is not written yet. `IAssets` member contracts and errors are owned by the
 > [API reference](../api/reference.md#7-iassets); this document owns the pack/VFS/asset model and
 > the bake pipeline.
 
@@ -264,7 +265,7 @@ loads complete asynchronously. Do not call `Browse` in `Tick`; v1 has no unload.
 ## 7. Loading, pack validation, and failure
 
 `Status: loader and pack-build reference validation Current (M3/D-035); the GPU readiness/page/
-placeholder path is the approved M8 target, in progress (no M8 code yet).`
+placeholder path is the approved M8 target (WP-3, not written yet).`
 
 Thread ownership, enqueue-time snapshotting, task completion, and shutdown are owned by
 [Threading §6](threading.md#6-asset-and-pack-coordination); `IAssets` error kinds are owned by the
@@ -309,8 +310,8 @@ Thread ownership, enqueue-time snapshotting, task completion, and shutdown are o
 ## 8. Texture descriptors
 
 `Status: public model Current (D-035); texture import and descriptor field validation Current (the
-built-in texture processor, D-036); GPU upload is the approved M8 target (in progress; no M8 code
-yet); KTX2 is deferred.`
+built-in texture processor, D-036); GPU upload is the approved M8 target (WP-3, not written yet);
+KTX2 is deferred.`
 
 A texture is a MessagePack **descriptor** plus a **raw payload**: `art/player` and
 `art/player-raw` (the descriptor path plus `-raw`).
@@ -356,7 +357,7 @@ missing sidecars are valid and take the builder's texture defaults
 
 `Status: public model Current (D-035); the bake emits SpriteAsset as ordinary custom data (no sprite
 field validation); there is no bake/load field validation in Stage 1 (M5 is removed); GPU/draw is
-the approved M8 target, in progress (no M8 code yet).`
+the approved M8 target (WP-3/WP-4, not written yet).`
 
 A sprite is a MessagePack asset (for example `sprites/player/idle`) describing a textured quad:
 
@@ -778,7 +779,7 @@ multi-project workspaces in v1.
 ## 14. Threading
 
 `Status: loader and pack-build reference validation Current (M3/D-035); the renderer/GPU
-integration is the approved M8 target, in progress (no M8 code yet).`
+integration is the approved M8 target (WP-3/WP-4, not written yet).`
 
 Loader ownership, queueing, enqueue-time resolution, task completion, and shutdown are owned by
 [Threading §6](threading.md#6-asset-and-pack-coordination). Pack-specific points:
@@ -830,8 +831,8 @@ that in exchange for no arbitrary caps, and fails cleanly rather than reading ou
 | --- | --- |
 | `Bork2d.Engine` | `Current` (M3/D-035): v1 pack reader/writer, structural validation, canonical paths, public `Bork2d.Engine.Assets.Pack.PackBuilder`/`PackCompressionMode`, the internal base/overlay VFS with `LoadPack`/`Browse`/`Exists`, the app-scoped service (one thread, FIFO queue, `LoadData`/`LoadAsset<T>`, cancellation/join, `AssetException`), and generic pack-time reference validation |
 | `assets.pck` reader/writer | `Current` (M3): v1 format reader and writer; the VFS, overlays, `Browse`/`Exists`, and the loader are wired through `IEngine.Assets` |
-| Texture descriptors and raw RGBA8 payloads | `Current` (M3/D-035; texture import D-036): public `TextureDescriptor` model with a `DataRef` payload; the built-in texture processor (`Required` sidecar, `png`/`jpg`/`jpeg`/`bmp`/`tga`) decodes from anywhere under the asset root to straight-alpha RGBA8, emits the descriptor + `<descriptor>-raw` payload, and validates dimensions, format/filter/wrap, and payload size. GPU payload read/upload is the approved M8 target (in progress); KTX2 is deferred |
-| Sprite assets (UVs/scale/pivot/topology/indices) | `Current` (M3/D-035; data bake D-036): public `SpriteAsset` model with an `AssetRef<TextureDescriptor>` link, loaded via `LoadAsset<SpriteAsset>` and baked as ordinary custom data when a TOML declares its type in `[bork2d]`. No runtime or bake-time field validation; there is no sprite field validation or slicing in Stage 1 (M5 removed), so the M8 renderer's draw-time fatal/skip rules apply. Drawing is the approved M8 target (in progress) |
+| Texture descriptors and raw RGBA8 payloads | `Current` (M3/D-035; texture import D-036): public `TextureDescriptor` model with a `DataRef` payload; the built-in texture processor (`Required` sidecar, `png`/`jpg`/`jpeg`/`bmp`/`tga`) decodes from anywhere under the asset root to straight-alpha RGBA8, emits the descriptor + `<descriptor>-raw` payload, and validates dimensions, format/filter/wrap, and payload size. GPU payload read/upload is the approved M8 target (WP-3, not written yet); KTX2 is deferred |
+| Sprite assets (UVs/scale/pivot/topology/indices) | `Current` (M3/D-035; data bake D-036): public `SpriteAsset` model with an `AssetRef<TextureDescriptor>` link, loaded via `LoadAsset<SpriteAsset>` and baked as ordinary custom data when a TOML declares its type in `[bork2d]`. No runtime or bake-time field validation; there is no sprite field validation or slicing in Stage 1 (M5 removed), so the M8 renderer's draw-time fatal/skip rules apply. Drawing is the approved M8 target (WP-4, not written yet) |
 | CPU resource table (descriptors/sprites) | Removed by D-035; the loader caches no resolved sprite/texture resources |
 | Runtime asset lifecycle | `Current` (M3): `WithoutAssets()`, base pack at `Run()` before the window/`Setup`, start/stop/error order, post-shutdown `ObjectDisposedException`, app disposal |
 | TOML model, baker, deterministic bake | `Current` (D-036/D-037/D-038): builder-configured ordered packs, per-source `[bork2d].type`, explicit `RegisterAsset<T>()` registrations, processor discovery/sidecars, shape-driven Tomlyn DOM binder, built-in texture processor, local + main cross-pack reference validation, structural determinism, schema-3 incremental manifest, atomic per-pack writes, CLI, and MSBuild targets. No project descriptor or generated host. No sprite field validation/slicing in Stage 1 |
