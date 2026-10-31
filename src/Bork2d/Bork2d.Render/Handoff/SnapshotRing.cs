@@ -89,12 +89,16 @@ internal sealed class SnapshotRing : IDisposable
     internal bool IsExitSignalled => Volatile.Read(ref _exitSignalled) != 0;
 
     /// <summary>
-    /// Gets the event the ring sets when a snapshot becomes <see cref="SnapshotSlotState.Ready"/>,
-    /// a slot is superseded or released, or the ring stops.
+    /// Gets the event the ring sets when a new snapshot is published as
+    /// <see cref="SnapshotSlotState.Ready"/> or when the ring stops.
     /// </summary>
     /// <remarks>
-    /// Exposed so the renderer can combine the ring wake with the control-channel wake in one
-    /// event-based wait (M7 WP-3). The ring owns the event; callers may reset it and wait on its
+    /// This is the render-side wake: <see cref="Publish"/> signals it after the new slot becomes
+    /// <c>Ready</c> and <see cref="Stop"/> signals it so a blocked renderer wakes. Slot release,
+    /// abandonment, supersession, and the suspended discard signal the producer wake instead (a
+    /// blocked producer may proceed); the renderer's combined wait re-checks the ring state after
+    /// every wake. Exposed so the renderer can combine this wake with the control-channel wake in
+    /// one event-based wait (M7 WP-3). The ring owns the event; callers may reset it and wait on its
     /// handle but never dispose it.
     /// </remarks>
     internal ManualResetEventSlim ConsumerWake => _consumerWake;
