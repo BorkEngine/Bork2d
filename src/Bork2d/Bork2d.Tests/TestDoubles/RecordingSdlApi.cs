@@ -88,6 +88,18 @@ internal sealed class RecordingSdlApi : ISdlApi
 
     public SdlMouseState GetMouseState() => _inner.GetMouseState();
 
+    public void VulkanLoadLibrary()
+    {
+        Record("VulkanLoadLibrary");
+        _inner.VulkanLoadLibrary();
+    }
+
+    public void VulkanUnloadLibrary()
+    {
+        Record("VulkanUnloadLibrary");
+        _inner.VulkanUnloadLibrary();
+    }
+
     public void Dispose()
     {
         if (_disposed)

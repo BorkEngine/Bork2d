@@ -30,6 +30,7 @@ internal sealed class FakeSdlApi : ISdlApi
     private readonly byte[] _keyboardState = new byte[512];
     private int _nextUserEventType = 0x8000;
     private volatile bool _videoInitialized;
+    private volatile bool _vulkanLoaded;
     private volatile bool _disposed;
 
     /// <summary>Gets the windows created through <see cref="CreateWindow"/> in creation order.</summary>
@@ -110,6 +111,21 @@ internal sealed class FakeSdlApi : ISdlApi
     /// <summary>Gets or sets the message <see cref="CreateWindow"/> fails with.</summary>
     internal string? CreateWindowFailure { get; set; }
 
+    /// <summary>Gets or sets a callback that configures each created window before it is returned.</summary>
+    internal Action<FakeSdlWindow>? OnWindowCreated { get; set; }
+
+    /// <summary>Gets or sets the message <see cref="VulkanLoadLibrary"/> fails with.</summary>
+    internal string? VulkanLoadFailure { get; set; }
+
+    /// <summary>Gets a value indicating whether the Vulkan loader is loaded through SDL.</summary>
+    internal bool VulkanLibraryLoaded => _vulkanLoaded;
+
+    /// <summary>Gets the number of successful <see cref="VulkanLoadLibrary"/> calls.</summary>
+    internal int VulkanLoadCount { get; private set; }
+
+    /// <summary>Gets the number of <see cref="VulkanUnloadLibrary"/> calls that unloaded.</summary>
+    internal int VulkanUnloadCount { get; private set; }
+
     /// <inheritdoc/>
     public string VideoDriver => VideoDriverName;
 
@@ -183,9 +199,43 @@ internal sealed class FakeSdlApi : ISdlApi
             new SdlWindowSize(width, height),
             WindowScale,
             initialFlags,
-            RecordCall);
+            RecordCall,
+            () => _vulkanLoaded);
+        OnWindowCreated?.Invoke(window);
         Windows.Add(window);
         return window;
+    }
+
+    /// <inheritdoc/>
+    public void VulkanLoadLibrary()
+    {
+        ThrowIfDisposed();
+        RecordCall("VulkanLoadLibrary");
+        if (VulkanLoadFailure is not null)
+        {
+            throw new Bork2dException(VulkanLoadFailure);
+        }
+
+        if (_vulkanLoaded)
+        {
+            return;
+        }
+
+        _vulkanLoaded = true;
+        VulkanLoadCount++;
+    }
+
+    /// <inheritdoc/>
+    public void VulkanUnloadLibrary()
+    {
+        if (_disposed || !_vulkanLoaded)
+        {
+            return;
+        }
+
+        RecordCall("VulkanUnloadLibrary");
+        _vulkanLoaded = false;
+        VulkanUnloadCount++;
     }
 
     /// <inheritdoc/>
@@ -298,6 +348,7 @@ internal sealed class FakeSdlApi : ISdlApi
         }
 
         DisposeThreadId = Environment.CurrentManagedThreadId;
+        VulkanUnloadLibrary();
         Quit();
         lock (_gate)
         {

@@ -29,6 +29,7 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
 
     private readonly SilkNet.Sdl _sdl;
     private bool _videoInitialized;
+    private bool _vulkanLoaded;
     private bool _disposed;
 
     /// <summary>Initializes a new instance of the <see cref="SilkSdlApi"/> class.</summary>
@@ -232,10 +233,50 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
         return new SdlMouseState(x, y, buttons);
     }
 
+    /// <inheritdoc/>
+    public void VulkanLoadLibrary()
+    {
+        ThrowIfDisposed();
+        if (_vulkanLoaded)
+        {
+            return;
+        }
+
+        // SDL_Vulkan_LoadLibrary(NULL) resolves the platform's Vulkan loader (vulkan-1.dll).
+        if (_sdl.VulkanLoadLibrary((byte*)null) < 0)
+        {
+            throw SdlError.Create(_sdl, "SDL_Vulkan_LoadLibrary");
+        }
+
+        _vulkanLoaded = true;
+    }
+
+    /// <inheritdoc/>
+    public void VulkanUnloadLibrary()
+    {
+        if (_disposed || !_vulkanLoaded)
+        {
+            return;
+        }
+
+        _vulkanLoaded = false;
+        try
+        {
+            _sdl.VulkanUnloadLibrary();
+        }
+        catch (Exception exception)
+            when (exception is DllNotFoundException or EntryPointNotFoundException
+                or BadImageFormatException or SymbolLoadingException)
+        {
+            // The loader is already gone; shutdown must not fail because of it.
+        }
+    }
+
     /// <summary>Quits SDL, frees the native handle, and rejects further use.</summary>
     /// <remarks>
     /// Every window created by this api must be destroyed first. The call is idempotent: only the
-    /// first disposal quits SDL and disposes the <see cref="Silk.NET.SDL.Sdl"/> instance and its native context.
+    /// first disposal unloads the Vulkan loader, quits SDL, and disposes the
+    /// <see cref="Silk.NET.SDL.Sdl"/> instance and its native context.
     /// </remarks>
     public void Dispose()
     {
@@ -244,6 +285,7 @@ internal sealed unsafe class SilkSdlApi : ISdlApi
             return;
         }
 
+        VulkanUnloadLibrary();
         Quit();
         _sdl.Dispose();
         _disposed = true;

@@ -4,6 +4,8 @@ using Bork2d.Engine.Input;
 using Bork2d.Engine.Platform;
 using Bork2d.Engine.Scene;
 using Bork2d.Engine.Time;
+using Bork2d.Render;
+using Bork2d.Render.Vulkan;
 using Bork2d.Runtime.Hosting;
 using Bork2d.Runtime.Input;
 using Bork2d.Runtime.Sdl;
@@ -261,6 +263,42 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     {
         ArgumentNullException.ThrowIfNull(factory);
         _options.SdlApiFactory = factory;
+        return this;
+    }
+
+    /// <summary>
+    /// Supplies an internal test seam for the renderer factory. Not part of the public API.
+    /// </summary>
+    /// <param name="factory">Creates the renderer for windowed/offscreen runs.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <remarks>
+    /// <see cref="Build"/> never invokes the factory. A windowed or offscreen <c>Run</c> creates the
+    /// renderer through it; headless never constructs or invokes it. Tests use this to drive the
+    /// real host lifecycle with a deterministic fake renderer.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    internal Bork2dAppBuilder<TLayer> WithRendererFactory(IRendererFactory factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        _options.RendererFactory = factory;
+        return this;
+    }
+
+    /// <summary>
+    /// Supplies an internal test seam for the Vulkan instance factory. Not part of the public API.
+    /// </summary>
+    /// <param name="factory">Creates the platform/offscreen Vulkan instance.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <remarks>
+    /// <see cref="Build"/> never invokes the factory and never loads Vulkan. A windowed or offscreen
+    /// <c>Run</c> uses it lazily; headless never constructs it. Tests inject a fake so windowed runs
+    /// do not need a Vulkan loader or GPU.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    internal Bork2dAppBuilder<TLayer> WithVulkanInstanceFactory(IVulkanInstanceFactory factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        _options.VulkanInstanceFactory = factory;
         return this;
     }
 

@@ -1,5 +1,6 @@
 using System.Runtime.ExceptionServices;
 using Bork2d.Runtime;
+using Bork2d.Tests.TestDoubles;
 
 namespace Bork2d.Tests.TestSupport;
 
@@ -54,5 +55,31 @@ internal static class AppTestSupport
         {
             ExceptionDispatchInfo.Capture(failure).Throw();
         }
+    }
+
+    /// <summary>
+    /// Injects the deterministic renderer and Vulkan instance seams so a windowed/offscreen run
+    /// never loads Vulkan or SDL.
+    /// </summary>
+    /// <typeparam name="TLayer">The game layer type.</typeparam>
+    /// <param name="builder">The builder to configure.</param>
+    /// <param name="rendererFactory">
+    /// The fake renderer factory, or <see langword="null"/> for a fresh auto-ready fake.
+    /// </param>
+    /// <param name="instanceFactory">
+    /// The fake Vulkan instance factory, or <see langword="null"/> for a fresh fake.
+    /// </param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    internal static Bork2dAppBuilder<TLayer> WithFakeGraphics<TLayer>(
+        this Bork2dAppBuilder<TLayer> builder,
+        FakeRendererFactory? rendererFactory = null,
+        FakeVulkanInstanceFactory? instanceFactory = null)
+        where TLayer : struct, Enum
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        return builder
+            .WithRendererFactory(
+                rendererFactory ?? new FakeRendererFactory(new FakeRenderer { AutoReady = true }))
+            .WithVulkanInstanceFactory(instanceFactory ?? new FakeVulkanInstanceFactory());
     }
 }

@@ -1,16 +1,21 @@
 # Logging
 
-> **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4). The builder creates an
-> app-owned Microsoft.Extensions.Logging factory, installs a plain-text ZLogger console provider by
-> default, logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`.
-> The windowed platform logs startup/stop/commands/failures, the runtime host logs the loop stop
-> with ticks and elapsed time, and the asset service logs start/overlay/error/stop events; there is
-> no per-frame or per-asset-per-tick logging. Configuration is identical in all modes, and the
-> default path runs in the AOT gate (`Pong.Desktop`, headless with the baked pack and `--windowed`)
-> with zero trim/AOT warnings. The suite is 919 tests (907 deterministic plus 12 opt-in/conditional).
-> The project-consolidation refactor (D-041/D-042) renamed the engine categories to `Bork2d.Engine` and
-> `Bork2d.Engine.Assets`; `Bork2d.Runtime` and `Bork2d.Render` are unchanged. The Pong example
-> (D-043/D-044) owns the game-side title/logging behavior.
+> **Status:** `Current` through M3 (merged into `develop` 2026-10-26, PR #4) and M6 (Vulkan
+> bring-up; implemented 2026-10-30, final PR pending human review). The builder creates an app-owned
+> Microsoft.Extensions.Logging factory, installs a plain-text ZLogger console provider by default,
+> logs startup mode/validation, and exposes the factory through `IEngine.LoggerFactory`. The
+> windowed platform logs startup/stop/commands/failures, the runtime host logs the windowed and
+> offscreen loop stops with ticks and elapsed time, the renderer logs instance/device/swapchain/
+> offscreen target and start/stop counters from `Bork2d.Render`, and the asset service logs
+> start/overlay/error/stop events; there is no per-frame or per-asset-per-tick logging.
+> Configuration is identical in all modes, and the default path runs in the AOT gate
+> (`Pong.Desktop`, headless with the baked pack). The suite is 1044 tests (1028 deterministic plus
+> 16 opt-in/conditional). The project-consolidation refactor (D-041/D-042) renamed the engine
+> categories to `Bork2d.Engine` and `Bork2d.Engine.Assets`; `Bork2d.Runtime` and `Bork2d.Render` are
+> unchanged. M6 WP-2 makes the `Bork2d.Render` category current for instance, validation, and
+> device-selection events (§5.3); WP-3 adds the windowed swapchain/clear/present and start/stop
+> counter lines; WP-4 adds the offscreen target/start/stop lines and the offscreen loop-stop line.
+> The Pong example (D-043/D-044) owns the game-side title/logging behavior.
 
 ## 1. Surface
 
@@ -107,7 +112,7 @@ game code creates its own categories.
 | `Bork2d.Runtime` | builder, modes, lifecycle, windowing |
 | `Bork2d.Engine` | reserved for scene/time/snapshot diagnostics; no current log sites |
 | `Bork2d.Engine.Assets` | pack parsing, decompression, loading |
-| `Bork2d.Render` | target renderer diagnostics (M6/M8); no current log sites |
+| `Bork2d.Render` | Vulkan instance/validation/device selection (M6 WP-2); windowed swapchain create/recreate/minimize and renderer start/stop counters (WP-3); offscreen target/start/stop counters (WP-4) |
 | game-defined | `CreateLogger("MyGame")` or `CreateLogger<T>()` |
 Startup logs use `Bork2d.Runtime` and one structured message after validation:
 
@@ -127,12 +132,14 @@ per-key, or per-mouse-move logging.
 
 | Event | Level | Fields |
 | --- | --- | --- |
-| Windowed platform started | Information | `mode=Windowed`, `sdlVersion` (the `SDL_GetVersion` the loaded binary reports), `videoDriver`, `windowPoints`, `framebufferPixels`, `scale`, `fullscreen`, `resizable`, `vsync` (stored builder value, not applied in M2). |
+| Windowed platform started | Information | `mode=Windowed`, `sdlVersion` (the `SDL_GetVersion` the loaded binary reports), `videoDriver`, `windowPoints`, `framebufferPixels`, `scale`, `fullscreen`, `resizable`, `vsync`, `vulkanValidation` (`on`/`off`), `vulkanSurface` (opaque handle). |
 | Window command applied | Debug | `command` (`Title`/`Size`/`Fullscreen`/`CursorVisible`), `confirmed` value. |
 | Focus gained/lost, minimized/restored/maximized, DPI scale changed | Debug | the new state, plus points/framebuffer for a scale change. |
 | `IWindow.Size` ignored while fullscreen, or deferred while minimized | Debug | the requested framebuffer size. |
 | SDL failure (startup or after startup) | Error | the SDL operation and the `SDL_GetError` text; the exception also carries the failure. |
+| Vulkan surface replaced after surface loss | Warning | old/new surface handle and the new extent (D-M6-16). |
 | Windowed loop stopped (runtime host) | Information | `reason` (`Exit`/`Close`/`Error`), `ticks` (completed ticks), `elapsedSeconds` (Setup through Teardown, rounded to milliseconds), `finalFramebuffer` (pixels). |
+| Offscreen loop stopped (runtime host) | Information | `reason` (`Exit`/`Error`/`Stop`), `ticks`, `elapsedSeconds`. |
 | Windowed platform stopped | Information | `reason` (`Exit`/`Close`/`Error`), `finalFramebuffer` pixels. |
 
 The startup and loop-stop lines at 150% display scaling look like:
@@ -173,6 +180,40 @@ A default headless run with a five-entry pack looks like:
 The `WithoutAssets()` mode logs `mode Empty` with zero entries and the same start/stop lines. Pong's
 headless AOT run exercises these lines through the default logging path without trim/AOT warnings,
 and its `PongGame` category logs setup/teardown and score/state transitions at Information.
+
+### 5.3 Renderer (M6 WP-2/WP-3)
+
+The M6 renderer logs from `Bork2d.Render`. WP-2 covers the instance/validation/device foundation;
+WP-3 adds the windowed swapchain, frames, clear/present, recreation, and renderer start/stop
+counters. Every event is one-shot: physical-device candidates are enumerated once at startup, the
+selected device is logged once, the swapchain is logged when it is created (Information) or
+recreated/minimized (Debug), and validation messages are emitted only when the layer reports them.
+There is no per-frame, per-draw, or per-image logging. The offscreen target/frame lines are WP-4.
+
+| Event | Level | Fields |
+| --- | --- | --- |
+| Vulkan loader version | Debug | the API version the loader reports |
+| Instance created | Information | `apiVersion`, `validation` on/off, enabled layers/extensions |
+| Validation layer requested but missing | Warning | the requested layer; the run continues without validation (D-M6-20) |
+| Debug utils unavailable while validation is on | Warning | the missing extension; no messenger/labels |
+| Physical-device candidate | Debug | name, type, API version, driver version, queue families, extension count, accepted/rejected reason |
+| Device selected | Information | name, type, vendor/device id, API/driver version, queue family, enabled extensions/features, attachment/image/framebuffer limits, `maxPerStageDescriptorUpdateAfterBindSampledImages` |
+| Swapchain created | Information | format, color space, requested/actual present mode, extent, image count |
+| Swapchain recreated | Debug | reason (`Resize`/`Fullscreen`/`OutOfDate`/`Suboptimal`/`SurfaceLost`), old/new extent, format, present mode, image count |
+| Minimized / zero extent | Debug | skipped acquire/present and the last extent |
+| Offscreen target created (renderer start line) | Information | extent, format, image count, frames in flight, total memory bytes, validation on/off, counters |
+| Renderer started | Information | mode, extent, format, color space/present mode (windowed), image count, frames in flight, validation on/off, counters |
+| Surface lost and recovered | Warning | `VkResult`, attempt number, new extent, present mode |
+| Renderer stopped | Information | mode, reason, frames presented, frames discarded, swapchain recreations, validation errors/warnings, last frame number, last present result |
+| Fatal renderer failure | Error | the exception (Vulkan operation/result or validation detail); the host rethrows it after teardown |
+| Validation message | Warning/Error (Info/Verbose at Debug) | severity, type, message id/name, objects, message; errors are fatal only with validation enabled (D-M6-21) |
+| Surface destruction or debug-messenger/device cleanup failure | Error/Warning | the operation and result; normal shutdown keeps its existing outcome (D-M6-27) |
+
+A validation-enabled startup ends with the loader/instance/device lines followed by one selected
+device line, the swapchain-created (windowed) or target line (offscreen), and the renderer-started
+line. The `[GpuFact]` windowed and offscreen tests assert zero validation errors/warnings at clean
+shutdown and record the counters. The renderer logs frame-presented/discarded/recreation/validation
+counters once at stop. No line is emitted from the acquire/record/present hot path.
 
 ## 6. NativeAOT
 

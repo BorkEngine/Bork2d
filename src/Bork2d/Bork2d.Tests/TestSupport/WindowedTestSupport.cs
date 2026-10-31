@@ -19,14 +19,25 @@ internal static class WindowedTestSupport
     /// <summary>Creates a windowed builder wired to the fake SDL seam and a fixed title.</summary>
     /// <param name="sdl">The fake SDL seam the OS thread uses.</param>
     /// <param name="game">The scripted game instance.</param>
+    /// <param name="rendererFactory">
+    /// The fake renderer factory, or <see langword="null"/> for a fresh auto-ready fake.
+    /// </param>
+    /// <param name="instanceFactory">
+    /// The fake Vulkan instance factory, or <see langword="null"/> for a fresh fake.
+    /// </param>
     /// <returns>The configured builder.</returns>
     internal static Bork2dAppBuilder<GameLayer> Builder(
         FakeSdlApi sdl,
-        ScriptedGame<GameLayer> game)
+        ScriptedGame<GameLayer> game,
+        FakeRendererFactory? rendererFactory = null,
+        FakeVulkanInstanceFactory? instanceFactory = null)
         => new Bork2dAppBuilder<GameLayer>()
             .WithGame(game)
             .WithTitle("Loop test")
             .WithSdlApiFactory(() => sdl)
+            .WithRendererFactory(
+                rendererFactory ?? new FakeRendererFactory(new FakeRenderer { AutoReady = true }))
+            .WithVulkanInstanceFactory(instanceFactory ?? new FakeVulkanInstanceFactory())
             .WithoutAssets();
 
     /// <summary>Blocks until the OS thread has applied a synchronizing title change.</summary>

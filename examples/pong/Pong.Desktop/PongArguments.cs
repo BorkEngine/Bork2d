@@ -7,17 +7,20 @@ namespace Pong.Desktop;
 /// </summary>
 /// <remarks>
 /// The default invocation (no arguments) and <c>--windowed</c> run the interactive windowed
-/// example. <c>--ticks N</c> is valid only together with <c>--windowed</c> and turns the run into
-/// the automated acceptance run that exits after exactly <c>N</c> completed ticks. <c>--headless</c>
-/// runs the one-tick acceptance smoke and cannot be combined with <c>--ticks</c>. Parsing is strict:
-/// an unknown, duplicated, or malformed argument prints the usage and exits with code 2.
+/// example. <c>--ticks N</c> is valid with <c>--windowed</c> and turns the run into the automated
+/// acceptance run that exits after exactly <c>N</c> completed ticks. <c>--headless</c> runs the
+/// one-tick acceptance smoke and cannot be combined with <c>--ticks</c>. <c>--offscreen</c> runs the
+/// non-interactive offscreen acceptance run and requires <c>--ticks N</c>. The three modes are
+/// mutually exclusive. Parsing is strict: an unknown, duplicated, or malformed argument prints the
+/// usage and exits with code 2.
 /// </remarks>
 internal sealed class PongArguments
 {
-    private PongArguments(bool headless, bool windowed, int? tickLimit)
+    private PongArguments(bool headless, bool windowed, bool offscreen, int? tickLimit)
     {
         Headless = headless;
         Windowed = windowed;
+        Offscreen = offscreen;
         TickLimit = tickLimit;
     }
 
@@ -26,6 +29,9 @@ internal sealed class PongArguments
 
     /// <summary>Gets a value indicating whether windowed mode was selected explicitly.</summary>
     internal bool Windowed { get; }
+
+    /// <summary>Gets a value indicating whether the non-interactive offscreen run was selected.</summary>
+    internal bool Offscreen { get; }
 
     /// <summary>Gets the automated tick limit, or <see langword="null"/> for an interactive run.</summary>
     internal int? TickLimit { get; }
@@ -43,10 +49,11 @@ internal sealed class PongArguments
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        arguments = new PongArguments(headless: false, windowed: false, tickLimit: null);
+        arguments = new PongArguments(headless: false, windowed: false, offscreen: false, tickLimit: null);
         error = string.Empty;
         var headless = false;
         var windowed = false;
+        var offscreen = false;
         int? tickLimit = null;
 
         for (var i = 0; i < args.Length; i++)
@@ -71,6 +78,16 @@ internal sealed class PongArguments
                     }
 
                     windowed = true;
+                    break;
+
+                case "--offscreen":
+                    if (offscreen)
+                    {
+                        error = "--offscreen may be specified only once.";
+                        return false;
+                    }
+
+                    offscreen = true;
                     break;
 
                 case "--ticks":
@@ -113,19 +130,37 @@ internal sealed class PongArguments
             return false;
         }
 
+        if (headless && offscreen)
+        {
+            error = "--headless and --offscreen are mutually exclusive.";
+            return false;
+        }
+
+        if (windowed && offscreen)
+        {
+            error = "--windowed and --offscreen are mutually exclusive.";
+            return false;
+        }
+
         if (headless && tickLimit is not null)
         {
             error = "--ticks cannot be combined with --headless.";
             return false;
         }
 
-        if (tickLimit is not null && !windowed)
+        if (offscreen && tickLimit is null)
         {
-            error = "--ticks requires --windowed.";
+            error = "--offscreen requires --ticks N.";
             return false;
         }
 
-        arguments = new PongArguments(headless, windowed, tickLimit);
+        if (tickLimit is not null && !windowed && !offscreen)
+        {
+            error = "--ticks requires --windowed or --offscreen.";
+            return false;
+        }
+
+        arguments = new PongArguments(headless, windowed, offscreen, tickLimit);
         return true;
     }
 }

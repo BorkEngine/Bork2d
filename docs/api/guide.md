@@ -1,13 +1,14 @@
 # API Guide
 
 > **Status:** implemented through M4, the D-036/D-037/D-038 asset-processor task merged into
-> `develop` (2026-10-27, PR #8), and the Pong example (D-043/D-044; merged 2026-10-29, PR #10).
-> M1 (foundation), M2 (SDL windowed host), and M3 (pack, VFS,
-> runtime integration) exist in `Bork2d.Runtime`/`Bork2d.Engine` and are merged into `develop`.
-> `Build()` validates and `Run()` runs the uncapped windowed loop (window, input, time) or the
-> one-tick headless/offscreen sequence, opening the base pack (or the `WithoutAssets()` empty
-> filesystem) before the window and `Setup`. The renderer is M8. See the
-> [API reference](reference.md#12-runtime-surface).
+> `develop` (2026-10-27, PR #8), the Pong example (D-043/D-044; merged 2026-10-29, PR #10), and
+> M6 (Vulkan bring-up; implemented 2026-10-30, final PR pending human review). M1 (foundation), M2 (SDL
+> windowed host), and M3 (pack, VFS, runtime integration) exist in
+> `Bork2d.Runtime`/`Bork2d.Engine` and are merged into `develop`.
+> `Build()` validates and `Run()` runs the Vulkan-backed windowed loop (window, input, time) or the
+> offscreen loop until `Exit`; headless keeps the one-tick no-GPU path. The base pack (or the
+> `WithoutAssets()` empty filesystem) opens before the window and `Setup`. Sprites are M8; the
+> window shows a black clear. See the [API reference](reference.md#12-runtime-surface).
 >
 > Assets/processors are configured in a build-time `MyGame.Assets` executable with
 > `BakeApplicationBuilder`; the project descriptor and generated host are removed, data types are
@@ -64,10 +65,13 @@ app.Run();
   There is no parameterless-constructor or reflection requirement. The game must stay alive through
   `Run()`.
 - `Build()` validates the configuration. `Run()` blocks until shutdown. Windowed mode creates one
-  visible window and runs an uncapped `Tick` loop until `IEngine.Exit()`, the close button, or a
-  fatal error; headless/offscreen call `Setup`, exactly one `Tick`, and `Teardown`, then return.
-  There is no GPU work or render thread yet; the base pack is opened by `Run()` (M3), and the
-  windowed loop has no frame limiter.
+  visible window and a Vulkan instance/surface, runs an uncapped `Tick` loop until
+  `IEngine.Exit()`, the close button, or a fatal error, and presents a continuous black clear.
+  Offscreen mode runs the windowed-shaped loop against a fixed Vulkan target until
+  `IEngine.Exit()` and advances `ITime` per tick. Headless calls `Setup`, exactly one `Tick`, and
+  `Teardown`, then returns. Windowed and offscreen require Vulkan 1.3; headless needs no GPU and
+  never loads Vulkan/SDL. The base pack is opened by `Run()` (M3). No loop has a frame limiter
+  (M7); the window is black until sprites arrive in M8.
 - `using`/`Dispose()` detaches the root's direct children and the window/input proxies and disposes
   the app-owned logger factory. It never calls `Teardown` again. `Dispose()` while `Run()` is active
   throws `InvalidOperationException`; call `IEngine.Exit()` or close the window first.
@@ -76,15 +80,17 @@ app.Run();
 
 ### Modes
 
-| Mode | Selection | M2 behavior | Target |
+| Mode | Selection | M6 behavior | Target |
 | --- | --- | --- | --- |
-| Windowed (default) | `WithTitle`/`WithSize`/`WithVSync` | Visible SDL window, input, time, and an uncapped loop until exit/close. | Renderer (M8). |
-| Offscreen | `WithOffscreen(width, height)` | One-tick `Setup`/`Tick`/`Teardown`; no window, input, SDL, or clock advance. | Windowless rendering (M6/M8). |
-| Headless | `WithHeadless(ticksPerSecond = 60)` | One-tick `Setup`/`Tick`/`Teardown`; no window, input, SDL, or clock advance. | Paced loop at the rate, `0` = uncapped (M7). |
+| Windowed (default) | `WithTitle`/`WithSize`/`WithVSync` | Visible SDL window, Vulkan instance/surface, input, time, an uncapped loop until exit/close, and a continuous black clear. | Snapshot handoff/pacing (M7), sprites (M8). |
+| Offscreen | `WithOffscreen(width, height)` | Vulkan renderer with a fixed sRGB target; `Setup` → `Tick`… → `Teardown` until `Exit`, `ITime` advances, frames discarded; no window, input, SDL, surface, or readback. | Pacing (M7), sprites/readback (M8/M10). |
+| Headless | `WithHeadless(ticksPerSecond = 60)` | One-tick `Setup`/`Tick`/`Teardown`; no window, input, SDL, Vulkan, or clock advance. | Paced loop at the rate, `0` = uncapped (M7). |
 
 The modes are mutually exclusive, and window-only options are rejected in headless/offscreen.
 They are separate hosts, not three modes in one process. In headless/offscreen `IWindow` members
-and the `IInput` getter throw `NotSupportedException` and `ITime` stays `0`. See
+and the `IInput` getter throw `NotSupportedException`; headless `ITime` stays `0`, while offscreen
+advances it per tick. Windowed and offscreen require Vulkan 1.3 (a missing loader/device is a
+`Bork2dException`; a missing validation layer only warns). See
 [Runtime lifecycle](../architecture/runtime-lifecycle.md#2-modes).
 
 ### Logging
@@ -122,8 +128,9 @@ dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-
   (`Pong - 3 : 2 - Serving...`, `Pong - 3 : 2 - Paused - Space to resume`,
   `Pong - 11 : 7 - Left wins - R to restart, Esc to quit`); scores, pause, match end, and setup are
   logged at Information, never per frame.
-- **Rendering is still M8:** the window is intentionally black. Sprites, camera, and layers are
-  wired, so the example becomes visibly rendered when the renderer lands.
+- **Rendering is still M8:** the window is deliberately a black clear. Sprites, camera, and layers
+  are wired, so the example becomes visibly rendered when the sprite renderer lands; offscreen
+  frames are discarded with no readback.
 
 ## 3. Write a game
 
@@ -193,8 +200,8 @@ public sealed class MyGame : IGame<GameLayer>
 
 Target label: `LoadAsset<SpriteAsset>` is real (the sprite asset is a normal public MessagePack
 asset), and rendering requires M8, so nothing draws yet. The camera/transform code is `Current`;
-time is `Current` in windowed mode and stays `0` in the one-tick modes. `Setup` is synchronous, so
-the example starts the load and assigns the asset in `Tick` when it completes; blocking startup on
+time is `Current` in windowed and offscreen modes and stays `0` in headless. `Setup` is synchronous,
+so the example starts the load and assigns the asset in `Tick` when it completes; blocking startup on
 the load is also acceptable when a scene must be complete before the first tick.
 
 ## 4. Layers
@@ -269,8 +276,8 @@ sprite.LocalScale = new Vector2(2, 2);
 ## 7. Input
 
 `Status: Current (M2, windowed).` The windowed host freezes physical input once per tick, advances
-the clock, dispatches queued text, then calls `Tick`. Headless/offscreen have no input: the
-`IEngine.Input` getter throws `NotSupportedException`.
+the clock, dispatches queued text, then calls `Tick`. Offscreen runs no input; headless/offscreen
+have no input at all: the `IEngine.Input` getter throws `NotSupportedException`.
 
 ```csharp
 public void Tick()
@@ -323,20 +330,21 @@ var dt = (float)_engine.Time.DeltaTime; // seconds, clamped by the builder's Wit
 var now = _engine.Time.Time;            // raw seconds since the first tick
 ```
 
-- `Status: Current (M2, windowed).` The first tick publishes `Time = 0` and `DeltaTime = 0`;
-  afterwards `Time` is raw monotonic seconds (never clamped) and `DeltaTime` is the interval
-  between tick starts clamped by the builder's `WithMaxDeltaTime` (default 0.25 s).
-- In headless/offscreen the one-tick host never advances the clock, so both values stay `0` until
-  M7. Do not assume a non-zero delta or a tick count.
-- Variable timestep; no accumulator, fixed step, or render interpolation. The windowed loop is
-  uncapped in M2 (M7 adds frame-handoff backpressure); headless pacing is M7.
+- `Status: Current (M2/M6, windowed/offscreen).` The first tick publishes `Time = 0` and
+  `DeltaTime = 0`; afterwards `Time` is raw monotonic seconds (never clamped) and `DeltaTime` is the
+  interval between tick starts clamped by the builder's `WithMaxDeltaTime` (default 0.25 s).
+- In headless the one-tick host never advances the clock, so both values stay `0` until M7. Do not
+  assume a non-zero delta or a tick count there. Offscreen advances `ITime` per tick like windowed.
+- Variable timestep; no accumulator, fixed step, or render interpolation. The windowed/offscreen
+  loops are uncapped (M7 adds frame-handoff backpressure); headless pacing is M7.
 - For deterministic simulation, run your own fixed-step accumulator inside `Tick`. See
   [Threading](../architecture/threading.md).
 
 ## 9. Window
 
-`Status: Current (M2, windowed).` In windowed mode the window is created visible before `Setup` and
-destroyed after `Teardown`. `IEngine.Window` always returns an object; in headless/offscreen its
+`Status: Current (M2, windowed).` In windowed mode the SDL window (plus the Vulkan instance/surface)
+is created visible before `Setup` and destroyed after `Teardown`; windowed/offscreen require Vulkan
+1.3. `IEngine.Window` always returns an object; in headless/offscreen its
 members throw `NotSupportedException`, and after a windowed run retained references throw
 `ObjectDisposedException`.
 
@@ -723,8 +731,8 @@ builder.Write("assets.pck"); // overwrites; relative paths resolve against the c
 - The runtime libraries are `IsAotCompatible`; AOT publish/run is a required local gate.
   `Pong.Desktop --headless` loads the baked 7-entry pack (the `GameSettings` struct root with
   `AssetRef<SpriteAsset>` links, the paddle/ball sprites and descriptors, exact raw payloads, and the
-  tints) and exits 0; `--windowed --ticks 120` runs the same pack and exits 0. The window stays black
-  until the M8 renderer.
+  tints) and exits 0; `--windowed --ticks 120` runs the same pack and exits 0 (it needs a GPU from
+  M6); the window shows a black clear until sprites arrive in M8.
 
 See [NativeAOT](../architecture/nativeaot.md).
 

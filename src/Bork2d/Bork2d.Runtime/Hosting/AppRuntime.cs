@@ -4,6 +4,8 @@ using Bork2d.Engine;
 using Bork2d.Engine.Assets.Loading;
 using Bork2d.Engine.Scene;
 using Bork2d.Engine.Time;
+using Bork2d.Render;
+using Bork2d.Render.Vulkan;
 using Bork2d.Runtime.Input;
 using Bork2d.Runtime.Sdl;
 using Bork2d.Runtime.Window;
@@ -17,16 +19,22 @@ namespace Bork2d.Runtime.Hosting;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Windowed apps run an uncapped <c>Setup</c> → <c>Tick</c>… → <c>Teardown</c> loop on the <c>Run</c>
-/// caller thread until <see cref="IEngine{TLayer}.Exit"/>, a window close/<c>SDL_QUIT</c>, or a fatal
-/// platform error. The loop never calls SDL: it freezes input and advances the clock before each
-/// tick, dispatches text, and calls the game.
+/// Windowed apps start the renderer thread without waiting for readiness, run <c>Setup</c>
+/// immediately (D-M6-06), wait for readiness before the first tick, then run an uncapped
+/// <c>Tick</c> loop until <see cref="IEngine{TLayer}.Exit"/>, a window close/<c>SDL_QUIT</c>, a
+/// renderer fatal error, or a fatal platform error. Offscreen apps start the renderer the same way
+/// and run the windowed-shaped loop without a window, input, or SDL until
+/// <see cref="IEngine{TLayer}.Exit"/> (D-M6-07). Headless keeps the M1 one-tick sequence and never
+/// constructs a renderer or platform and never loads Vulkan.
 /// </para>
 /// <para>
-/// Headless and offscreen apps keep the M1 one-tick sequence on the caller thread with no platform
-/// and no clock advance. Both drivers share the M1 error precedence: a <c>Setup</c> failure runs no
-/// <c>Teardown</c>; a <c>Tick</c> (or text-handler) failure still tears down; two failures are
-/// aggregated; a window start failure happens before <c>Setup</c> and tears nothing down.
+/// Error precedence follows the M2/M6 rules: a platform start failure happens before <c>Setup</c>;
+/// a renderer factory/start/readiness failure still lets <c>Setup</c> finish, runs zero ticks,
+/// attempts <c>Teardown</c>, joins the renderer, and is rethrown (D-M6-14); a <c>Setup</c> failure
+/// wins over a renderer failure and runs no <c>Teardown</c>; a <c>Tick</c>/text/<c>Teardown</c>
+/// failure keeps the M2 precedence. A renderer fatal after the first tick stops the loop at the next
+/// boundary. Renderer cleanup failures during normal shutdown are logged and do not change the
+/// run's outcome (D-M6-27).
 /// </para>
 /// <para>
 /// The asset service is app-owned: the constructed service is unstarted until <c>Run</c>, which
@@ -94,13 +102,19 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
     {
         try
         {
-            if (_options.Mode == Bork2dAppMode.Windowed)
+            switch (_options.Mode)
             {
-                RunWindowed();
-            }
-            else
-            {
-                RunOneTick();
+                case Bork2dAppMode.Windowed:
+                    RunWindowed();
+                    break;
+
+                case Bork2dAppMode.Offscreen:
+                    RunOffscreen();
+                    break;
+
+                default:
+                    RunOneTick();
+                    break;
             }
         }
         finally
@@ -150,10 +164,11 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
     /// <c>Teardown</c>, stop assets.
     /// </summary>
     /// <remarks>
-    /// The clock is not advanced and no platform exists. <c>Setup</c> is intentionally outside the
-    /// tick/teardown pair: if it throws there is nothing to tear down and the original exception must
-    /// reach the caller. The asset service is stopped on every path after a successful start,
-    /// including a <c>Setup</c> failure; a failed start has already cleaned its own partial state up.
+    /// The clock is not advanced, <c>Exit</c> is ignored, and no platform or renderer exists.
+    /// <c>Setup</c> is intentionally outside the tick/teardown pair: if it throws there is nothing to
+    /// tear down and the original exception must reach the caller. The asset service is stopped on
+    /// every path after a successful start, including a <c>Setup</c> failure; a failed start has
+    /// already cleaned its own partial state up.
     /// </remarks>
     private void RunOneTick()
     {
@@ -207,9 +222,10 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
     }
 
     /// <summary>
-    /// The windowed driver: start assets, start the platform, attach the proxies, run the uncapped
-    /// loop, tear down the game while the window and assets are still alive, then shut the platform
-    /// and the asset service down.
+    /// The windowed driver: start assets, start the platform (SDL window/instance/surface), start
+    /// the renderer without waiting, run <c>Setup</c>, wait for renderer readiness before the first
+    /// tick, run the uncapped loop, tear the game down, then join the renderer before the platform
+    /// destroys the surface/instance/window (D-M6-09).
     /// </summary>
     private void RunWindowed()
     {
@@ -238,12 +254,14 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         using var platform = new SdlWindowPlatform(
             CreatePlatformOptions(),
             _sdlApiFactory,
-            _logger);
+            _options.VulkanInstanceFactory ?? new VulkanInstanceFactory(),
+            _loggerFactory);
 
         try
         {
-            // Start blocks until the window exists or startup failed; on failure it has already
-            // joined the OS thread and released SDL.
+            // Start blocks until the window, instance, and surface exist or startup failed; on
+            // failure it has already joined the OS thread, destroyed the partial Vulkan objects,
+            // and released SDL.
             platform.Start();
         }
         catch
@@ -256,15 +274,36 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
             throw;
         }
 
-        Exception? gameFailure = null;
+        IRenderer? renderer = null;
+        Exception? setupFailure = null;
+        Exception? loopFailure = null;
         Exception? teardownFailure = null;
+        Exception? rendererFailure = null;
         var setupSucceeded = false;
         long ticks = 0;
         var stopwatch = Stopwatch.StartNew();
 
         try
         {
-            // Attach before Setup so the game sees the live window/input immediately.
+            // D-M6-06: Start returns without waiting for device/swapchain readiness. A synchronous
+            // factory/start failure is recorded but never prevents Setup from running.
+            try
+            {
+                renderer = CreateRenderer(RendererMode.Windowed, platform);
+                renderer.Start();
+            }
+            catch (Exception exception)
+            {
+                rendererFailure = NormalizeRendererFailure(exception);
+            }
+
+            // Attach before Setup so the game sees the live window/input immediately. The platform
+            // posts the confirmed state (extent/fullscreen/minimized) from its OS thread.
+            if (renderer is not null)
+            {
+                platform.AttachRenderer(renderer);
+            }
+
             windowProxy.Attach(platform);
             inputProxy.Attach(platform);
 
@@ -273,22 +312,57 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
                 // Exit/close received during startup mean no Setup and therefore no Tick/Teardown.
                 if (!_engine.ExitRequested && !platform.ExitRequested)
                 {
-                    _game.Setup(_engine);
-                    setupSucceeded = true;
+                    try
+                    {
+                        _game.Setup(_engine);
+                        setupSucceeded = true;
+                    }
+                    catch (Exception exception)
+                    {
+                        setupFailure = exception;
+                    }
                 }
 
-                while (!_engine.ExitRequested && !platform.ExitRequested)
+                // D-M6-06: the first Tick waits for readiness; Exit/close during Setup skips the
+                // wait. Setup is never interrupted by, and never skipped because of, renderer state.
+                if (setupFailure is null
+                    && setupSucceeded
+                    && rendererFailure is null
+                    && !_engine.ExitRequested
+                    && !platform.ExitRequested)
                 {
-                    inputProxy.Freeze();
-                    _time.NewFrame();
-                    inputProxy.DispatchText();
-                    _game.Tick();
-                    ticks++;
+                    renderer!.WaitForReady();
+                    if (renderer.FatalException is { } readinessFatal)
+                    {
+                        rendererFailure = NormalizeRendererFailure(readinessFatal);
+                    }
+                }
+
+                if (setupFailure is null
+                    && setupSucceeded
+                    && rendererFailure is null
+                    && !_engine.ExitRequested
+                    && !platform.ExitRequested)
+                {
+                    while (!_engine.ExitRequested && !platform.ExitRequested)
+                    {
+                        if (renderer!.FatalException is { } fatal)
+                        {
+                            rendererFailure = NormalizeRendererFailure(fatal);
+                            break;
+                        }
+
+                        inputProxy.Freeze();
+                        _time.NewFrame();
+                        inputProxy.DispatchText();
+                        _game.Tick();
+                        ticks++;
+                    }
                 }
             }
             catch (Exception exception)
             {
-                gameFailure = exception;
+                loopFailure = exception;
             }
             finally
             {
@@ -310,15 +384,220 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
         finally
         {
             stopwatch.Stop();
+
+            // D-M6-09: the renderer is stopped and joined before the platform destroys the surface,
+            // instance, and window. A renderer cleanup failure is logged and does not change the
+            // run's outcome (D-M6-27).
+            StopAndJoinRenderer(renderer);
+            if (rendererFailure is null && renderer?.FatalException is { } lateFatal)
+            {
+                rendererFailure = NormalizeRendererFailure(lateFatal);
+            }
+
             platform.Shutdown();
             _assetService.Stop();
             windowProxy.Detach();
             inputProxy.Detach();
         }
 
-        var fatalException = platform.FatalException;
+        Exception? platformFatal = platform.FatalException;
         LogLoopStopped(platform, ticks, stopwatch.Elapsed.TotalSeconds);
-        ThrowFailures(gameFailure, fatalException, teardownFailure);
+        ThrowWindowedFailures(
+            setupFailure,
+            loopFailure,
+            rendererFailure,
+            platformFatal,
+            teardownFailure);
+    }
+
+    /// <summary>
+    /// The offscreen driver: start assets, start the renderer without waiting, run <c>Setup</c>,
+    /// wait for readiness before the first tick, run the windowed-shaped loop without window/input
+    /// until <c>Exit</c> (D-M6-07), tear down, then stop/join the renderer.
+    /// </summary>
+    private void RunOffscreen()
+    {
+        _assetService.Start();
+
+        IRenderer? renderer = null;
+        Exception? setupFailure = null;
+        Exception? loopFailure = null;
+        Exception? teardownFailure = null;
+        Exception? rendererFailure = null;
+        var setupSucceeded = false;
+        long ticks = 0;
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            try
+            {
+                renderer = CreateRenderer(RendererMode.Offscreen, platform: null);
+                renderer.Start();
+            }
+            catch (Exception exception)
+            {
+                rendererFailure = NormalizeRendererFailure(exception);
+            }
+
+            // D-M6-06/D-M6-14: Setup runs immediately (even when the renderer already failed) and
+            // may call Exit() without the host having waited for readiness.
+            if (!_engine.ExitRequested)
+            {
+                try
+                {
+                    _game.Setup(_engine);
+                    setupSucceeded = true;
+                }
+                catch (Exception exception)
+                {
+                    setupFailure = exception;
+                }
+            }
+
+            if (setupFailure is null
+                && setupSucceeded
+                && rendererFailure is null
+                && !_engine.ExitRequested)
+            {
+                renderer!.WaitForReady();
+                if (renderer.FatalException is { } readinessFatal)
+                {
+                    rendererFailure = NormalizeRendererFailure(readinessFatal);
+                }
+            }
+
+            if (setupFailure is null
+                && setupSucceeded
+                && rendererFailure is null
+                && !_engine.ExitRequested)
+            {
+                try
+                {
+                    while (!_engine.ExitRequested)
+                    {
+                        if (renderer!.FatalException is { } fatal)
+                        {
+                            rendererFailure = NormalizeRendererFailure(fatal);
+                            break;
+                        }
+
+                        _time.NewFrame();
+                        _game.Tick();
+                        ticks++;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    loopFailure = exception;
+                }
+            }
+        }
+        finally
+        {
+            stopwatch.Stop();
+            if (setupSucceeded)
+            {
+                try
+                {
+                    _game.Teardown();
+                }
+                catch (Exception exception)
+                {
+                    teardownFailure = exception;
+                }
+            }
+
+            StopAndJoinRenderer(renderer);
+            if (rendererFailure is null && renderer?.FatalException is { } lateFatal)
+            {
+                rendererFailure = NormalizeRendererFailure(lateFatal);
+            }
+
+            _assetService.Stop();
+        }
+
+        _logger.LogInformation(
+            "Bork2d offscreen loop stopped: reason={Reason}, ticks={Ticks}, "
+                + "elapsedSeconds={ElapsedSeconds:0.###}",
+            _engine.ExitRequested ? "Exit" : rendererFailure is not null ? "Error" : "Stop",
+            ticks,
+            stopwatch.Elapsed.TotalSeconds);
+
+        ThrowOffscreenFailures(setupFailure, loopFailure, rendererFailure, teardownFailure);
+    }
+
+    private IRenderer CreateRenderer(RendererMode mode, SdlWindowPlatform? platform)
+    {
+        VulkanWindowSnapshot? snapshot = platform?.VulkanWindow;
+        if (mode == RendererMode.Windowed && snapshot is null)
+        {
+            throw new Bork2dException(
+                "The windowed platform did not publish a Vulkan instance and surface.");
+        }
+
+        IVulkanInstanceFactory instanceFactory =
+            _options.VulkanInstanceFactory ?? new VulkanInstanceFactory();
+        IRendererFactory factory = _options.RendererFactory
+            ?? new VulkanRendererFactory(instanceFactory);
+
+        int width;
+        int height;
+        if (mode == RendererMode.Windowed)
+        {
+            VulkanWindowSnapshot window = snapshot!;
+            width = window.DrawableSize.Width;
+            height = window.DrawableSize.Height;
+        }
+        else
+        {
+            width = _options.OffscreenWidth;
+            height = _options.OffscreenHeight;
+        }
+
+        var startInfo = new RendererStartInfo
+        {
+            Mode = mode,
+            Instance = snapshot?.Instance,
+            InstanceHandle = snapshot?.Instance.Handle ?? 0,
+            SurfaceHandle = snapshot?.SurfaceHandle ?? 0,
+            Width = width,
+            Height = height,
+            VSync = _options.VSync,
+            ValidationRequested = _options.Validation,
+            LoggerFactory = _loggerFactory,
+            CreateReplacementSurface = platform is null
+                ? null
+                : platform.CreateReplacementSurface,
+        };
+
+        return factory.Create(startInfo);
+    }
+
+    private void StopAndJoinRenderer(IRenderer? renderer)
+    {
+        if (renderer is null)
+        {
+            return;
+        }
+
+        try
+        {
+            renderer.RequestStop();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "The renderer stop request failed during shutdown.");
+        }
+
+        try
+        {
+            renderer.Join();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "The renderer join failed during shutdown.");
+        }
     }
 
     private WindowPlatformOptions CreatePlatformOptions()
@@ -328,7 +607,8 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
             _options.Height,
             _options.Resizable,
             _options.Fullscreen,
-            _options.VSync);
+            _options.VSync,
+            _options.Validation);
 
     private void LogLoopStopped(SdlWindowPlatform platform, long ticks, double elapsedSeconds)
     {
@@ -343,27 +623,81 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
             framebuffer.Height);
     }
 
-    private static void ThrowFailures(
-        Exception? gameFailure,
-        Exception? fatalException,
+    private static Exception NormalizeRendererFailure(Exception exception)
+        => exception is Bork2dException
+            ? exception
+            : new Bork2dException(
+                "The Vulkan renderer failed: " + exception.Message,
+                exception);
+
+    private static void ThrowWindowedFailures(
+        Exception? setupFailure,
+        Exception? loopFailure,
+        Exception? rendererFailure,
+        Exception? platformFatal,
         Exception? teardownFailure)
     {
+        if (setupFailure is not null)
+        {
+            // A Setup exception wins over a renderer failure (D-M6-14); a concurrent platform fatal
+            // keeps the M2 aggregate behavior.
+            var setupErrors = new List<Exception>(capacity: 2) { setupFailure };
+            if (platformFatal is not null && !ReferenceEquals(platformFatal, setupFailure))
+            {
+                setupErrors.Add(platformFatal);
+            }
+
+            Throw(setupErrors, "The windowed run failed during Setup; the original exceptions are inner.");
+            return;
+        }
+
+        var errors = new List<Exception>(capacity: 4);
+        Add(errors, rendererFailure);
+        Add(errors, loopFailure);
+        Add(errors, platformFatal);
+        Add(errors, teardownFailure);
+        Throw(errors, "The windowed run failed; the original exceptions are inner.");
+    }
+
+    private static void ThrowOffscreenFailures(
+        Exception? setupFailure,
+        Exception? loopFailure,
+        Exception? rendererFailure,
+        Exception? teardownFailure)
+    {
+        if (setupFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(setupFailure).Throw();
+            return;
+        }
+
         var errors = new List<Exception>(capacity: 3);
-        if (gameFailure is not null)
+        Add(errors, rendererFailure);
+        Add(errors, loopFailure);
+        Add(errors, teardownFailure);
+        Throw(errors, "The offscreen run failed; the original exceptions are inner.");
+    }
+
+    private static void Add(List<Exception> errors, Exception? exception)
+    {
+        if (exception is null)
         {
-            errors.Add(gameFailure);
+            return;
         }
 
-        if (fatalException is not null)
+        foreach (Exception existing in errors)
         {
-            errors.Add(fatalException);
+            if (ReferenceEquals(existing, exception))
+            {
+                return;
+            }
         }
 
-        if (teardownFailure is not null)
-        {
-            errors.Add(teardownFailure);
-        }
+        errors.Add(exception);
+    }
 
+    private static void Throw(List<Exception> errors, string message)
+    {
         if (errors.Count == 0)
         {
             return;
@@ -375,8 +709,6 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
             return;
         }
 
-        throw new AggregateException(
-            "The windowed run failed; the original exceptions are inner.",
-            errors);
+        throw new AggregateException(message, errors);
     }
 }

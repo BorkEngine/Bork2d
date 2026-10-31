@@ -1,15 +1,14 @@
 # M6 — Vulkan Bring-Up (spec)
 
-> **Status:** **spec only; no implementation.** This file defines the scope, semantics, evidence,
-> work packages, and decision register for M6 (Vulkan bring-up). It does not start M6 and does not
-> authorize code: the roadmap progress log stays "Not started" until implementation begins.
+> **Status:** **Implemented (2026-10-30); final PR pending human review.** This
+> file defines the scope, semantics, evidence, work packages, and decision register for M6 (Vulkan
+> bring-up); the roadmap progress log tracks implementation.
 >
 > Twenty-seven owner decisions (the original five gating questions plus nine follow-ups and thirteen
-> final answers, all on 2026-10-29) are recorded in §3. They are approved decisions and must be
-> entered verbatim in the [decision log](../decisions.md) by the first implementation work package
-> (WP-1); this spec-only change deliberately does not edit `decisions.md`. **No owner decision is
-> open**: §16 is kept as the answered decision register for traceability, and implementation details
-> are left to the work packages. Do not treat a "proposed" note as a decision.
+> final answers, all on 2026-10-29) are recorded in §3. They are approved decisions and are recorded
+> verbatim in the [decision log](../decisions.md) by WP-1. **No owner decision is open**: §16 is kept
+> as the answered decision register for traceability, and implementation details are left to the work
+> packages. Do not treat a "proposed" note as a decision.
 >
 > M6 is roadmap [M6 — Vulkan bring-up](../roadmap.md#5-milestone-detail): a Vulkan 1.3 render thread
 > that clears a window or an offscreen target. Frame handoff and pacing are M7; sprites and texture
@@ -842,3 +841,140 @@ All 22 questions are answered; the register is kept for traceability. Each row n
 - [Decision log](../decisions.md) — accepted decisions; M6 entries are added by WP-1.
 - [Pong example spec](pong-example.md#12-as-built-evidence) — the AOT gate and its evidence format.
 - [Contributing](../contributing.md) — gates, tests, docs checklist.
+
+## 18. As-built evidence (2026-10-30)
+
+**Implementation status:** implemented on `m-6/wp-5`; the final milestone PR is pending human
+review (the orchestrator opens it, and this branch does not merge). §1–§17 remain the spec of
+record; §3 is unchanged and no owner decision was reopened.
+
+### 18.1 Work packages and merge order
+
+| WP | Branch | Delivered | Merge into `m-6/common` |
+| --- | --- | --- | --- |
+| WP-1 | `m-6/wp-1` | D-M6-01…D-M6-27 in the [decision log](../decisions.md#m6-vulkan-bring-up-decisions-approved-2026-10-29), the spec link, and the roadmap status. | `8515c5d` |
+| WP-2 | `m-6/wp-2` | `Bork2d.Render` foundation: packages/unsafe, instance/validation/debug-utils bootstrap, device/feature selection and logging, pure policies, deterministic tests, dependency/docs. | `777ea98` |
+| WP-3 | `m-6/wp-3` | SDL Vulkan surface seam, SPSC control channel, windowed swapchain/clear/present, resize/fullscreen/minimize, surface-loss policy, counters, validation, opt-in GPU test. | `e1536e1` |
+| WP-4 | `m-6/wp-4` | Offscreen target/renderer (two sRGB images, clear/discard, fence pacing), Runtime composition (Setup-before-readiness, first-tick gate, offscreen `Exit`/`ITime`, error precedence), host/platform tests, docs. | `49f4777` |
+| WP-5 | `m-6/wp-5` | Pong `--offscreen --ticks N` (D-M6-13), linked `PongArgumentsTests`, three-mode AOT publish/run evidence, final docs, full gates. | pending |
+
+WP-5 is based on `49f4777` (`origin/m-6/common` after WP-4). WP-1–WP-5 were sequential; WP-3 and
+WP-4 were not parallel because both touch `Bork2d.Render` and the Runtime host.
+
+### 18.2 Test counts
+
+- Engine suite `src/Bork2d/Bork2d.slnx`: **1044** = **1028 deterministic** (CI) + **16
+  opt-in/conditional** (9 `[WindowFact]`, 3 reparse-point capability, 4 `[GpuFact]`). The Debug
+  run is 1028 passed, 16 skipped, 0 failed.
+- `Pong.Tests`: **41** = the 20 pre-M6 Pong tests + 21 `PongArgumentsTests` cases, all passing.
+- No test was removed, weakened, retried, or given a sleep.
+
+### 18.3 Real GPU and real-window evidence
+
+Machine: Windows 11 Pro 10.0.26300; AMD Ryzen AI MAX+ 395 w/ Radeon 8060S; GPU **AMD Radeon(TM)
+8060S Graphics** (integrated, vendor `0x1002`, device `0x1586`), driver **32.0.32015.7029**
+(2026-10-18), Vulkan device API **1.4.359**, driverInfo **26.10.1 (LLPC)**, conformance
+**1.4.3.3**; Vulkan loader/SDK **1.4.363.0**, `VK_LAYER_KHRONOS_validation` **1.4.363** present;
+.NET SDK `11.0.100-rc.1.26425.128`.
+
+```powershell
+$env:BORK2D_RUN_GPU_TESTS = '1'
+dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build --filter "Category=Gpu"
+# Passed! - Failed: 0, Passed: 4, Skipped: 0, Total: 4
+```
+
+The four `[GpuFact]` tests run with validation enabled and assert zero validation errors and
+warnings:
+
+- `GpuDeviceBootstrapTests.OffscreenInstanceAndDeviceSelectionAreValidationClean` — instance and
+  device selection with the validation layer and the required features/extensions.
+- `WindowedRendererGpuTests.WindowedRendererPresentsClearsResizesMinimizesAndStopsCleanly` — a real
+  SDL window/instance/surface, 30+ frames presented, resize/fullscreen/minimize, at least one
+  swapchain recreation, a bounded stop/join, and zero validation errors/warnings.
+- `OffscreenRendererGpuTests.OffscreenRendererClearsDiscardsAndStopsCleanlyWithoutSurfaceOrSwapchain`
+  — a 320×240 sRGB target, 30+ discarded frames, no surface/swapchain, and zero validation
+  errors/warnings.
+- `OffscreenAppGpuTests.OffscreenAppLoopsUntilExitAndStopsTheValidatedRenderer` —
+  `WithOffscreen(320, 240)` + `WithValidation(true)`, `Setup` → 2 ticks → `Teardown`, advanced
+  `ITime`, at least one discarded frame, and zero validation errors/warnings.
+
+```powershell
+$env:BORK2D_RUN_WINDOW_TESTS = '1'
+dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build
+# Passed! - Failed: 0, Passed: 1037, Skipped: 7, Total: 1044
+```
+
+The 9 `[WindowFact]` real-window tests ran and passed; the 7 skips are the 3 reparse-point
+capability tests and the 4 opt-in GPU tests (the GPU gate ran separately above).
+
+### 18.4 AOT publish and the three published runs (D-M6-13)
+
+```powershell
+dotnet publish examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Release -r win-x64 --nologo
+# exit 0; 0 warnings, 0 errors
+```
+
+The publish directory contains exactly `Pong.Desktop.exe` (8,181,760 bytes), `assets.pck` (973),
+`SDL2.dll` (1,702,400), and the PDBs `Pong.Desktop.pdb`, `Pong.Common.pdb`, `Bork2d.Engine.pdb`,
+`Bork2d.Render.pdb`, `Bork2d.Runtime.pdb`. It contains no `vulkan-1.dll` (the system loader is
+used), no `Pong.Assets`, no `Bork2d.Bake`, and no Tomlyn or StbImageSharp assembly. `Pong.Desktop`
+remains the only `PublishAot` project.
+
+The narrow `Pong.Desktop` `NoWarn` remains exactly `IL3000;IL3002`, now justified for both SDL and
+Vulkan: a diagnostic publish with `NoWarn` cleared reports only those two codes, from
+`Silk.NET.Core.Loader.DefaultPathResolver` (shared by `Sdl.GetApi()` and the Vulkan `Vk.GetApi()`
+entry points). That satisfies D-M6-10; no custom resolver or broader suppression was added, and the
+zero-warning publish plus the running app prove the suppression.
+
+Run from the publish directory so the app finds `assets.pck`:
+
+```powershell
+& .\Pong.Desktop.exe --headless                 # exit 0
+& .\Pong.Desktop.exe --windowed --ticks 120     # exit 0
+& .\Pong.Desktop.exe --offscreen --ticks 120    # exit 0
+```
+
+1. **Headless.** `mode=Headless`, 7-entry pack, setup/tick/teardown 1/1/1, detached world,
+   `validation=passed` (the headless path has no renderer), and no Vulkan/SDL line. Printed
+   `Pong headless smoke passed: ... exit 0.`
+2. **Windowed.** `mode=Windowed`, 1280×720 framebuffer, SDL 2.30.8, instance/device/swapchain
+   created (device AMD Radeon(TM) 8060S Graphics, `B8G8R8A8Srgb`, FIFO, 3 images), one `Setup`,
+   exactly 120 ticks, one `Teardown`, a presented black clear (`framesPresented=1`), zero
+   validation errors/warnings (Release validation is off by default), window destroyed, renderer
+   joined. Printed
+   `Pong windowed run completed: setup/tick/teardown=1/120/1, tickLimit=120, window destroyed, exit 0.`
+3. **Offscreen.** `mode=Offscreen`, a 1280×720 `R8G8B8A8Srgb` target with two images, one `Setup`,
+   exactly 120 ticks, one `Teardown`, renderer joined cleanly, zero validation errors/warnings.
+   Printed
+   `Pong offscreen run completed: setup/tick/teardown=1/120/1, tickLimit=120, exit 0.`
+   The gate's counters report `framesDiscarded=0`: the 120 uncapped ticks and teardown finish
+   before the renderer's first fence-paced frame. D-M6-13 and §10 do not assert the continuous
+   frame count, and the offscreen discard path is proven by the `[GpuFact]` tests above (30+
+   discarded frames; the app test observes at least one).
+
+### 18.5 Deviations and risks
+
+- **AOT offscreen gate frame count.** The published `--offscreen --ticks 120` run usually reports
+  `framesDiscarded=0` because the uncapped 120-tick loop and teardown complete before the first
+  frame is submitted. This follows D-M6-13 (frame count not asserted); the renderer/discard
+  evidence comes from the GPU tests. A longer interactive offscreen run would discard frames, but
+  M6 has no pacing.
+- **Release validation is off.** The AOT gate runs with validation off by default; the strict
+  validation evidence is the Debug `[GpuFact]` run with `VK_LAYER_KHRONOS_validation` present
+  (zero errors and warnings).
+- **Initial-minimized startup edge.** The platform posts the last non-minimized drawable extent
+  and posts `minimized=true`; a window that is already minimized when the surface is created has no
+  prior extent. Steady minimize/restore is exercised by the windowed GPU test; a launch-minimized
+  startup is not exercised on this machine and remains a known edge.
+- **Surface-loss recovery is policy/fake-tested, not triggerable here.** No real
+  `VK_ERROR_SURFACE_LOST_KHR` was produced; the one-attempt recovery state machine and the
+  OS-thread replacement-surface path are covered deterministically. The replacement wait is
+  bounded, so a stopped pump fails the recovery fatally instead of hanging.
+- **No GPU in CI.** The GPU/windowed gates and the AOT publish/run remain local-only (D-M6-05);
+  CI still runs only restore, format, build, and deterministic tests on PRs/pushes to `develop`.
+- **Examples Release build mapping.** `dotnet build examples/pong/Pong.slnx -c Release` still
+  builds the external engine project references in Debug because the `.slnx` has no configuration
+  mapping outside `examples/pong`; the direct Release AOT publish is the Release proof.
+- **No API or dependency change.** WP-5 adds no public API, package, or project reference; the
+  only AOT change is the clarified justification on the existing `IL3000;IL3002` suppression, and
+  `Pong.Desktop` is still the only `PublishAot` project.
