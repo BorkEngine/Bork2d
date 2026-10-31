@@ -40,8 +40,8 @@
 > `examples/pong` and is the AOT gate: `Pong.Desktop` publishes with no tooling assembly in the
 > output, loads the 7-entry Pong pack headless, and runs `--headless` (120 ticks by default, or
 > `--headless --ticks N`), `--windowed --ticks 120`, and `--offscreen --ticks 120`. Verification is
-> the local gate set: Debug/Release zero-warning builds, 1329 deterministic plus 24
-> opt-in/conditional tests (1353 total) for the engine and the Pong tests, `dotnet format` for both
+> the local gate set: Debug/Release zero-warning builds, 1334 deterministic plus 26
+> opt-in/conditional tests (1360 total) for the engine and the Pong tests, `dotnet format` for both
 > solutions, the docs link check, `git diff --check`, and the local AOT publish/run. CI runs on pull
 > requests to `develop` and pushes to `develop`; it does not build the Pong solution.
 

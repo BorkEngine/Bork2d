@@ -154,6 +154,32 @@ public sealed class SpriteFramePlannerTests
     }
 
     [Fact]
+    public void MalformedFieldsAreFatalEvenWhileThePageIsPending()
+    {
+        using var fixture = new PlanningFixture();
+
+        // The page never loads: the malformed-field rule is unconditional and must run before the
+        // pending skip.
+        AssertFatal(fixture, Sprite("tex/pending-bad", scale: 0f), "Scale");
+        AssertFatal(
+            fixture,
+            Sprite("tex/pending-bad", pivot: new Vector2(-0.1f, 0.5f)),
+            "Pivot");
+        SpriteAsset nullUvs = Sprite("tex/pending-bad");
+        nullUvs.Uvs = null;
+        AssertFatal(fixture, nullUvs, "Uvs");
+        AssertFatal(fixture, Sprite("tex/pending-bad", indices: [0, 1, 2]), "Indices");
+
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(snapshot, Sprite("tex/pending-bad"), layer: 1u);
+
+        SpriteFramePlan validPending = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
+        Assert.Equal(1, validPending.SkippedSprites);
+        Assert.Equal(0, validPending.InstanceCount);
+    }
+
+    [Fact]
     public void FailedTextureDrawsThePlaceholderWithItsDeclaredSizeAndAbsentTextureUsesEightByEight()
     {
         using var fixture = new PlanningFixture();

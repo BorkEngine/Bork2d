@@ -734,6 +734,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
         RecordFrame(frame, imageIndex, swapchain, device, plan);
         Submit(frame, imageIndex, swapchain, device);
         frame.InstanceResources.MarkSubmitted();
+        frame.Capture.MarkSubmitted();
         _consumer.AttachToFrame(_frameIndex, slot);
 
         Result present = Present(imageIndex, device, swapchain);

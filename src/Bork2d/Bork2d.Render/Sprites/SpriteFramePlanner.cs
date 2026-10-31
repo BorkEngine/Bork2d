@@ -269,21 +269,20 @@ internal sealed class SpriteFramePlanner
 
         SpriteAsset asset = sprite.Sprite!;
         lookup = _pages.EnsurePage(asset.Texture.Path);
-        if (lookup.Kind == TexturePageLookupKind.Pending)
-        {
-            return SpriteSkipReason.Pending;
-        }
+        bool pending = lookup.Kind == TexturePageLookupKind.Pending;
 
-        // A ready page reports the descriptor dimensions; a placeholder reports the failed
-        // descriptor's declared dimensions when they are valid, or the placeholder's own 8x8
-        // (M8 §6.4).
+        // Validate the fields before the pending skip: the spec's malformed-field rule is
+        // unconditional, so a malformed sprite is fatal even while its page is still loading. A
+        // pending lookup reports 0x0, so the resolved geometry is discarded by the skip below; a
+        // ready page reports the descriptor dimensions and a placeholder reports the failed
+        // descriptor's declared dimensions when valid (or the placeholder's own 8x8, M8 §6.4).
         quad = SpriteQuad.Resolve(
             asset,
             (uint)lookup.Width,
             (uint)lookup.Height,
             sprite.FlipX,
             sprite.FlipY);
-        return SpriteSkipReason.None;
+        return pending ? SpriteSkipReason.Pending : SpriteSkipReason.None;
     }
 
     private void LogInvalidLayer(uint layer)

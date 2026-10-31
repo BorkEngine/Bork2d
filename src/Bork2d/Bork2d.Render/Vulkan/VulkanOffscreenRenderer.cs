@@ -599,6 +599,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer, IBindlessPageW
             RecordFrame(frame, _frameIndex, plan);
             Submit(frame);
             frame.InstanceResources.MarkSubmitted();
+            frame.Capture.MarkSubmitted();
             _consumer.AttachToFrame(_frameIndex, slot);
             Interlocked.Increment(ref _lastFrameNumber);
             Interlocked.Increment(ref _framesDiscarded);

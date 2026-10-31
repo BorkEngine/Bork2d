@@ -14,8 +14,8 @@
 > lifetime, the combined snapshot/control wait, and the suspended minimized drain are `Current` (M7
 > WP-3); the host acquire/capture/publish wiring, the blocked-producer wake paths, the minimized
 > 30 Hz tick cap, and the paced headless loop are `Current` (M7, §5.3/§7). The engine has no
-> debug-only tick-active, structural, or slot-state checks. The suite is 1353 tests: 1329
-> deterministic plus 24 opt-in/conditional. **M8 (sprite renderer) is WP-4:** WP-2 added the
+> debug-only tick-active, structural, or slot-state checks. The suite is 1360 tests: 1334
+> deterministic plus 26 opt-in/conditional. **M8 (sprite renderer) is WP-4:** WP-2 added the
 > pure camera/planning/instance-layout code (no new thread) and the renderer-owned sprite pipeline;
 > WP-3 added the render-thread texture-page subsystem (async `IAssets` calls polled from the render
 > thread, per-page upload fences, pooled memory) and the public `RenderStats` bridge; WP-4 adds the
@@ -509,8 +509,8 @@ plus one small real-time tolerant pacer test, and the host-level windowed/offscr
 tests (Q19=S3). The suite is 1158 tests: 1141 deterministic tests in CI plus 17 opt-in/conditional
 (9 real-window, 3 reparse-point, 5 real-GPU).
 
-The suite is 1353 tests: 1329 deterministic tests in CI plus 24 opt-in/conditional (9 real-window,
-3 reparse-point, 12 real-GPU). WP-3 added the fake-`IAssets` page-state tests (pending/uploading
+The suite is 1360 tests: 1334 deterministic tests in CI plus 26 opt-in/conditional (9 real-window,
+3 reparse-point, 14 real-GPU). WP-3 added the fake-`IAssets` page-state tests (pending/uploading
 skip, one load per path, placeholder mapping with the declared-dimension sizing, no-repeat-load,
 growth/limit failure, allocation-free steady lookup) and the `RenderStats` bridge tests (any-thread
 consistent reads, defaults before the source and in headless, a throwing source, allocation-free

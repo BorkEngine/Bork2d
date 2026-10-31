@@ -39,7 +39,7 @@ internal sealed unsafe class FrameCapture
     private int _width;
     private int _height;
     private Format _format;
-    private bool _recorded;
+    private FrameCaptureState _state;
     private int _destroyed;
 
     /// <summary>Initializes a new instance of the <see cref="FrameCapture"/> class.</summary>
@@ -118,20 +118,30 @@ internal sealed unsafe class FrameCapture
         _width = width;
         _height = height;
         _format = format;
-        _recorded = false;
+        _state.Begin();
         return true;
     }
 
     /// <summary>Marks that the image-to-buffer copy was recorded into this frame's command buffer.</summary>
-    internal void MarkRecorded() => _recorded = true;
+    internal void MarkRecorded() => _state.MarkRecorded();
+
+    /// <summary>
+    /// Marks that the frame command buffer was submitted successfully.
+    /// </summary>
+    /// <remarks>
+    /// The renderer calls this only after <c>vkQueueSubmit2</c> returns success. A frame that
+    /// recorded a copy but never reached submission must fault its requests on cleanup instead of
+    /// copying staging bytes the GPU never wrote.
+    /// </remarks>
+    internal void MarkSubmitted() => _state.MarkSubmitted();
 
     /// <summary>
     /// Completes every attached request from the fence-observed staging bytes.
     /// </summary>
     /// <remarks>
     /// The renderer calls this once the frame's fence has signaled (frame reuse or shutdown). A
-    /// request whose frame never recorded a copy is faulted instead of returning uninitialized
-    /// bytes.
+    /// request whose frame never recorded a copy, or recorded one but was never submitted, is
+    /// faulted instead of returning uninitialized bytes.
     /// </remarks>
     internal void Complete()
     {
@@ -140,13 +150,16 @@ internal sealed unsafe class FrameCapture
             return;
         }
 
-        if (!_recorded)
+        if (!_state.CanComplete)
         {
-            FaultAll(
-                new ObjectDisposedException(
-                    nameof(FrameCapture),
-                    "The renderer stopped before the frame copy was recorded."));
-            _recorded = false;
+            string reason = _state.RecordedButNotSubmitted
+                ? "The frame capture was recorded but the frame was never submitted, so its "
+                    + "staging bytes were not written by the GPU."
+                : "The renderer stopped before the frame copy was recorded.";
+            FaultAll(new ObjectDisposedException(nameof(FrameCapture), reason));
+            _state.Reset();
+            _width = 0;
+            _height = 0;
             return;
         }
 
@@ -164,7 +177,7 @@ internal sealed unsafe class FrameCapture
         }
 
         _requests.Clear();
-        _recorded = false;
+        _state.Reset();
         _width = 0;
         _height = 0;
     }
@@ -175,6 +188,7 @@ internal sealed unsafe class FrameCapture
     {
         ArgumentNullException.ThrowIfNull(exception);
         FaultAll(exception);
+        _state.Reset();
     }
 
     /// <summary>Unmaps and frees the staging buffer; idempotent and never throws.</summary>
@@ -189,6 +203,7 @@ internal sealed unsafe class FrameCapture
             new ObjectDisposedException(
                 nameof(FrameCapture),
                 "The renderer stopped before the capture frame completed."));
+        _state.Reset();
 
         if (_mapped is not null && _memory.Handle != 0)
         {

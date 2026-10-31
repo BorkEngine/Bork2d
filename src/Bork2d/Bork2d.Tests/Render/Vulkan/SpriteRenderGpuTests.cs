@@ -441,6 +441,66 @@ public sealed class SpriteRenderGpuTests
         }
     }
 
+    [GpuFact]
+    public async Task ACaptureRequestPendingAcrossAFatalFaultsInsteadOfReturningBytes()
+    {
+        var assets = new GeneratedTextureAssets();
+        SpriteAsset malformed = MakeSprite(texture: null, scale: 0f);
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, 32, 16, loggerFactory);
+            var producer = new Producer(renderer);
+
+            Task<byte[]> pending = renderer.CaptureFrameAsync();
+            producer.Publish(snapshot =>
+            {
+                AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
+                AddSprite(snapshot, malformed, layer: 1u);
+            });
+
+            await Assert.ThrowsAsync<Bork2dException>(() => pending.WaitAsync(_timeout));
+            Assert.True(
+                renderer.WaitForProgress(() => renderer.FatalException is not null, _timeout),
+                "The renderer did not observe the malformed-sprite fatal.");
+            renderer.RequestStop();
+            Assert.True(renderer.Join(_joinTimeout), "The faulted renderer did not join.");
+            Assert.Equal(RendererStatus.Faulted, renderer.Status);
+            Assert.Equal(RendererStopReason.Fatal, renderer.StopReason);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    [GpuFact]
+    public async Task ACaptureRequestPendingAtStopFaultsInsteadOfReturningBytes()
+    {
+        var assets = new GeneratedTextureAssets();
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, 32, 16, loggerFactory);
+
+            Task<byte[]> pending = renderer.CaptureFrameAsync();
+            renderer.RequestStop();
+            Assert.True(renderer.Join(_joinTimeout), "The renderer did not join.");
+
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => pending.WaitAsync(_timeout));
+            Assert.Equal(RendererStatus.Stopped, renderer.Status);
+            Assert.Equal(RendererStopReason.Requested, renderer.StopReason);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
     private static ILoggerFactory CreateLoggerFactory(out CapturingLoggerProvider provider)
     {
         var created = new CapturingLoggerProvider();

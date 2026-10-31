@@ -17,8 +17,8 @@
 > the draw integration, per-frame stats publication, and `CaptureFrameAsync`. The host-side M8
 > additions are an internal `RendererStartInfo.Assets` member plus the public stats/capture bridges
 > described in §1 and §6. The suite is
-> 1353 tests: 1329 deterministic tests in CI plus 24 opt-in/conditional tests (9 real-window, 3
-> reparse-point, 12 real-GPU). WP-5 (benchmark/final Pong gate) remains.
+> 1360 tests: 1334 deterministic tests in CI plus 26 opt-in/conditional tests (9 real-window, 3
+> reparse-point, 14 real-GPU). WP-5 (benchmark/final Pong gate) remains.
 
 ## 1. Public startup contract
 

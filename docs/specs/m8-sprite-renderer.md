@@ -93,7 +93,7 @@ M6/M7 are merged. The current tree contains:
 
 | Area | Current state | M8 consequence |
 | --- | --- | --- |
-| Engine suite | **1158** tests at spec time = 1141 deterministic + 17 opt-in/conditional (9 `[WindowFact]`, 3 reparse-point, 5 `[GpuFact]`). WP-2 raised the suite to **1252** = 1235 deterministic + 17 conditional; WP-3 raised it to **1310** = 1293 deterministic + 17 conditional; WP-4 raises it to **1353** = 1329 deterministic + 24 conditional (9 `[WindowFact]`, 3 reparse-point, 12 `[GpuFact]`). | M8 adds deterministic plan/math/page/public-API tests and opt-in GPU rendering tests. |
+| Engine suite | **1158** tests at spec time = 1141 deterministic + 17 opt-in/conditional (9 `[WindowFact]`, 3 reparse-point, 5 `[GpuFact]`). WP-2 raised the suite to **1252** = 1235 deterministic + 17 conditional; WP-3 raised it to **1310** = 1293 deterministic + 17 conditional; WP-4 raises it to **1360** = 1334 deterministic + 26 conditional (9 `[WindowFact]`, 3 reparse-point, 14 `[GpuFact]`). | M8 adds deterministic plan/math/page/public-API tests and opt-in GPU rendering tests. |
 | `Pong.Tests` | **46** tests. | Pong already builds a camera and three sprites; M8 changes what is drawn and what the gate can assert. |
 | Scene | `Camera<TLayer>`/`SpriteRender<TLayer>` store raw values with no validation or clamping. `Viewport`, `Size`, `ClearColor`, `Tint`, `Layer`, `ZIndex`, and `FlipX/Y` are settable without range checks. WP-2 adds the shared projection helper and the public `ICamera` screen/world/`WorldSize` members; the renderer still handles invalid values at draw time (cameras skip; malformed sprites are fatal) and the setters stay unchanged. | M8 handles invalid values at draw time (cameras skip; malformed sprites are fatal); setters stay unchanged. |
 | Snapshot | M7 `FrameSnapshot`/`CameraSnapshot`/`SpriteSnapshot` are internal, immutable after publication, and value-only except the loaded `SpriteAsset?`. Exact fields are in [Threading §3](../architecture/threading.md#3-frame-snapshot). Capture copies raw camera/sprite values; invalid layers are preserved as `uint`. | The snapshot stays asset-agnostic. The renderer reads `IAssets` directly and resolves textures; no snapshot change. |
@@ -392,6 +392,10 @@ There is no bake/load-time field validation in Stage 1; the renderer's checks ar
 rules and do not change the `LoadAsset<SpriteAsset>` contract. A fatal error on the render thread is
 reported through the existing renderer-fatal path (host runs `Teardown` once, joins, and rethrows a
 `Bork2dException`; D-M6-14/M7).
+
+**As built (WP-4).** The plan pre-pass validates the fields through `SpriteQuad.Resolve` **before** it
+applies the pending-page skip, so a malformed sprite is fatal even while its texture page is still
+loading (the pending lookup passes 0×0 only to discard the resolved geometry).
 
 ### 6.5 Texture pages, uploads, and bindless
 
@@ -741,7 +745,11 @@ after renderer creation; headless installs `SetCaptureUnsupported()` at `Run` st
 thread-safe `CaptureRequestQueue` and one lazily created, pooled host-visible staging buffer per GPU
 frame (`FrameCapture`); the render thread records the image-to-buffer copy after the last camera pass
 and before present/discard (BGRA→RGBA swizzle on the host after the fence), and completes the tasks
-when that frame's fence is observed at reuse/shutdown. Requests that arrive while a frame is recorded
+when that frame's fence is observed at reuse/shutdown. A frame whose copy was recorded but which was
+never submitted (a fatal during recording or a failed `vkQueueSubmit2`) faults its attached requests
+instead of copying staging bytes the GPU never wrote; the pure `FrameCaptureState`
+(`Recorded`/`Submitted`, `CanComplete`) drives that decision. Requests that arrive while a frame is
+recorded
 wait for the next completed frame; a stop/fatal drains and faults them. The public-surface test pins
 the exact signature.
 
@@ -1107,8 +1115,8 @@ per-camera passes and one instanced draw per non-empty camera in both renderers,
 `RenderStats` publication, the public `IEngine<T>.CaptureFrameAsync` with its renderer queue/pooled
 staging/BGRA swizzle, Pong render-stats capture, deterministic plan/growth/stats/capture tests, and
 opt-in GPU drawing/paging/capture tests (including the extended windowed resize/fullscreen/minimize/
-stop test). Local suite: **1353 = 1329 deterministic + 24 conditional** (9 `[WindowFact]`, 3 reparse,
-12 `[GpuFact]`); all 12 GPU tests pass with zero validation errors/warnings. WP-5 (the 165 FPS
+stop test). Local suite: **1360 = 1334 deterministic + 26 conditional** (9 `[WindowFact]`, 3 reparse,
+14 `[GpuFact]`); all 14 GPU tests pass with zero validation errors/warnings. WP-5 (the 165 FPS
 benchmark, Pong presentation gate, final docs, and milestone PR) remains pending.
 
 ## 13. Acceptance criteria
