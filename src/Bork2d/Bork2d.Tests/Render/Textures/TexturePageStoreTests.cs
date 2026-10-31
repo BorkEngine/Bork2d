@@ -474,6 +474,43 @@ public sealed class TexturePageStoreTests
         Assert.Equal(1, harness.Store.TexturePageCount);
     }
 
+    [Fact]
+    public void DestroyObservesAFaultedCompletedLoadThatPumpNeverAdvanced()
+    {
+        Harness harness = CreateHarness();
+        Assert.Equal(TexturePageLookupKind.Pending, harness.Store.EnsurePage("textures/faulted").Kind);
+
+        // The load completes with a fault between frames; Pump never advances it, so the page and
+        // its completed-faulted task are still pending when Destroy runs.
+        harness.Assets.DescriptorSource("textures/faulted").SetException(
+            new InvalidOperationException("load faulted"));
+        Assert.Equal(1, harness.Store.PendingLoadCount);
+        Assert.Equal(0, harness.Store.ObservedTeardownFaults);
+
+        harness.Store.Destroy();
+
+        Assert.Equal(1, harness.Store.ObservedTeardownFaults);
+        Assert.Equal(0, harness.Store.PendingLoadCount);
+    }
+
+    [Fact]
+    public void DestroyDoesNotCountSuccessfulOrInFlightLoadsAsTeardownFaults()
+    {
+        Harness harness = CreateHarness();
+        harness.Store.EnsurePage("textures/in-flight");
+        harness.Store.EnsurePage("textures/completed");
+        harness.Assets.CompleteDescriptor(
+            "textures/completed",
+            Descriptor(2, 2, "textures/completed-raw"));
+        Assert.Equal(2, harness.Store.PendingLoadCount);
+
+        harness.Store.Destroy();
+
+        // One load is still in flight (a continuation is attached) and one completed
+        // successfully; neither is a teardown fault.
+        Assert.Equal(0, harness.Store.ObservedTeardownFaults);
+    }
+
     private static Harness CreateHarness(
         int limit = DefaultLimit,
         int maxDimension = DefaultMaxDimension)

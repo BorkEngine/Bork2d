@@ -101,6 +101,17 @@ internal sealed class TexturePageStore
     /// <summary>Gets the number of capacity growths this run.</summary>
     internal int GrowthCount => _growths;
 
+    /// <summary>
+    /// Gets the number of completed faulted loads the store observed while shutting down.
+    /// </summary>
+    /// <remarks>
+    /// A teardown diagnostic: a load that completes with a fault between frames but is never
+    /// advanced by <see cref="Pump"/> is still observed at <see cref="Destroy"/>, so the runtime
+    /// never raises <c>UnobservedTaskException</c> for a page the renderer stopped consuming. The
+    /// runtime never reads the value; tests assert the teardown path observed the fault.
+    /// </remarks>
+    internal int ObservedTeardownFaults { get; private set; }
+
     /// <summary>Gets a value indicating whether the placeholder page is resident and ready.</summary>
     internal bool IsPlaceholderReady => _placeholderReady;
 
@@ -218,10 +229,24 @@ internal sealed class TexturePageStore
         _gpu.Destroy();
     }
 
-    private static void ObserveFault(Task? task)
+    private void ObserveFault(Task? task)
     {
-        if (task is null || task.IsCompleted)
+        if (task is null)
         {
+            return;
+        }
+
+        if (task.IsCompleted)
+        {
+            // The load completed between frames but Pump never advanced it, so the task may be
+            // faulted and unobserved. Reading Exception marks it observed, which keeps teardown
+            // from raising UnobservedTaskException for a page the renderer no longer consumes.
+            _ = task.Exception;
+            if (task.IsFaulted)
+            {
+                ObservedTeardownFaults++;
+            }
+
             return;
         }
 

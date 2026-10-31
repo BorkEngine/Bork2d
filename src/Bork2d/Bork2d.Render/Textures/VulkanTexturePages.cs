@@ -319,22 +319,49 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
         Vk vk = _device.Api;
         Device logicalDevice = _device.Device;
 
+        // Shutdown must never free an image the GPU may still reference. The renderer already
+        // waited for device idle, but each upload fence is waited without a timeout as the local
+        // invariant; a wait failure (for example device loss) leaves the device state undefined, so
+        // the in-flight resources are leaked rather than freed under a maybe-live copy.
+        var uploadsIdle = true;
         foreach (PendingUpload pending in _pending.Values)
         {
             Fence fence = pending.Command.Fence;
             try
             {
-                _ = vk.WaitForFences(
+                Result result = vk.WaitForFences(
                     logicalDevice,
                     1,
                     &fence,
                     true,
-                    UploadFenceTimeoutNanoseconds);
+                    ulong.MaxValue);
+                if (result != Result.Success)
+                {
+                    uploadsIdle = false;
+                    _logger.LogError(
+                        "Vulkan texture page upload fence wait failed with {Result} during "
+                            + "shutdown; the page resources are not freed.",
+                        result);
+                }
             }
             catch (Exception exception)
             {
-                _logger.LogError(exception, "Vulkan texture page upload fence wait failed.");
+                uploadsIdle = false;
+                _logger.LogError(
+                    exception,
+                    "Vulkan texture page upload fence wait failed during shutdown; the page "
+                        + "resources are not freed.");
             }
+        }
+
+        if (!uploadsIdle)
+        {
+            // Freeing a view, image, block, staging buffer, or command pool here could use memory
+            // the GPU still reads. Leaking the page resources on this fatal path is the safe
+            // choice; Destroy is idempotent, so there is no later retry.
+            _pending.Clear();
+            _resident.Clear();
+            return;
         }
 
         // Views before images; both before the blocks and the pool.

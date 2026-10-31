@@ -414,7 +414,10 @@ Thread-specific rules:
   destroys the per-frame pools/sets, the page images/views/staging/upload pool, the pipeline, and the
   device, then joins; only afterwards does the host stop the asset service, so the `IAssets` instance
   passed in `RendererStartInfo` outlives the renderer. Pending page-load tasks are observed and
-  ignored. `CaptureFrameAsync` drain/faulting is WP-4.
+  ignored (including a load that completed with a fault between frames and was never pumped), and
+  every submitted upload fence is waited without a timeout before its resources are freed: a wait
+  failure (device loss) is logged and the in-flight page resources are deliberately not freed, so
+  no live copy can read freed memory. `CaptureFrameAsync` drain/faulting is WP-4.
 - **Shutdown with frames in flight.** `RequestStop` stops the ring (waking a blocked producer) and
   the control channel (waking a blocked consumer); a renderer fatal does the same before the host
   observes it at the next boundary (Q9=I1). The render thread waits its frame fences and

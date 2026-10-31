@@ -480,8 +480,11 @@ placeholder before readiness. `EnsurePage(string?)` is the WP-4 entry point and 
 descriptor's dimensions); the steady-state lookup is a dictionary read returning a value struct. A
 page becomes ready in the pump after its upload fence signals; the store then writes its descriptor
 into both per-frame sets through the renderer's `IBindlessPageWriter`. Pending loads are observed
-and ignored at shutdown. Default (256) and grown capacities are validated against the effective
-limit at startup and on growth.
+and ignored at shutdown (including a load that completed with a fault between frames and was never
+pumped). Teardown waits every submitted upload fence without a timeout; if a wait fails (for example
+after device loss) it logs the failure and does not free the in-flight page resources rather than
+freeing memory the GPU may still read. Default (256) and grown capacities are validated against the
+effective limit at startup and on growth.
 
 ### 6.6 Instances and the one-draw contract
 
