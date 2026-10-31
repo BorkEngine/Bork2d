@@ -5,7 +5,9 @@
 > swapchain/clear/present path, and offscreen targets plus the windowed/offscreen host wiring are
 > `Current` in M6 (merged 2026-10-31, PR #11). A windowed game run now presents a
 > continuous opaque-black clear; offscreen loops until `Exit`, discards frames, and advances
-> `ITime`. Frame handoff/pacing is M7, and sprite rendering is M8. Everything below about pixels is
+> `ITime`. The internal value-only snapshot model, the capture pass, and the three-slot ring state
+> machine are `Current` (M7 WP-2); renderer consumption, the host wiring, and pacing are M7
+> WP-3/WP-4, and sprite rendering is M8. Everything below about pixels is
 > `Planned` unless [Current status](#11-current-status) says otherwise.
 ## 1. Scope
 
@@ -76,12 +78,17 @@ camera: an empty camera clears but does not draw, the whole framebuffer is one p
 viewport/scissor regions, and a debug counter enforces at most `C` draws for `C` cameras.
 ## 4. Snapshot to instances
 
-The render thread owns this work; the tick thread supplies immutable snapshots only.
+The render thread owns this work; the tick thread supplies immutable snapshots only. The M7
+snapshot is already value-only: each `SpriteSnapshot` carries the loaded `SpriteAsset?`, the
+`(Layer, ZIndex)` sort keys, the world matrix, the tint, and the `FlipX`/`FlipY` flags (Q2=B1).
+Everything that derives quad size, pivot, UVs, and a texture index from the asset, and everything
+that draws, is M8.
 
 1. Take the immutable snapshot of loaded sprite assets.
 2. Sort `SpriteSnapshot`s once by `(Layer, ZIndex)` ascending; all cameras share the order, filtering
    preserves it, and ties are unspecified.
-3. Per camera: filter `(CullingMask & Layer) != 0`; skip a null `SpriteAsset`; resolve
+3. Per camera: filter `(CullingMask & Layer) != 0`; skip a null `SpriteAsset`; skip the invalid
+   layer values that M7 captured as-is (`0`/multi-bit, Q3=C2) with the diagnostic; resolve
    `SpriteAsset.Texture` (`AssetRef<TextureDescriptor>`) and `TextureDescriptor.Payload`
    (`DataRef`) to loaded values/GPU pages; skip until every part and the GPU page are ready; for
    `Quad`, append one instance to the camera's contiguous range.
@@ -203,8 +210,13 @@ ascending `ZIndex` (default `0`); ties are unspecified. A later `Clear.Color` wi
   buffer/pool, a fence, and an image-available semaphore, and each swapchain image owns its
   render-finished semaphore (M6 WP-3). Each offscreen frame owns a command buffer/pool and a fence
   (M6 WP-4). The snapshot slot's instance buffer and descriptor set are M7/M8.
-- **M7:** a **snapshot slot is held until the GPU frame fence**, not just until instances are
-  copied: this bounds run-ahead to the ring, and the GPU never dereferences snapshot memory.
+- **M7 handoff status (WP-2).** The internal value-only snapshot model, the capture pass, and the
+  three-slot ring state machine are `Current` (`Bork2d.Engine.Rendering`,
+  `Bork2d.Render.Handoff`). The renderer does not consume snapshots yet: taking a slot per frame,
+  holding it to the fence, one frame per snapshot, and the suspended minimized drain are WP-3; the
+  host acquire/capture/publish wiring is WP-4. M7 adds no draw.
+- **M7 target:** a **snapshot slot is held until the GPU frame fence**, not just until instances
+  are copied: this bounds run-ahead to the ring, and the GPU never dereferences snapshot memory.
 - Wait on the frame fence before reusing that frame's command buffer/fence/image-available
   semaphore. Windowed: `imageAvailable` waits at `COLOR_ATTACHMENT_OUTPUT`; `renderFinished`
   (per swapchain image) is signalled after submission and awaited by present. Layouts
@@ -272,8 +284,9 @@ Provisional targets (validated in M8, not commitments):
 | Vulkan instance/validation bootstrap and device/queue/feature logging | `Current` M6 WP-2 |
 | Windowed swapchain, acquire/present, dynamic-rendering clear, resize/minimize/fullscreen recreation, surface-loss recovery, counters | `Current` M6 WP-3, host-wired in WP-4 |
 | Offscreen targets, dynamic-rendering clear, discard, and the offscreen loop | `Current` M6 WP-4 |
-| Snapshot consumption, frame handoff, bounded run-ahead | `Planned` M7 |
-| Sprite pipeline, bindless pages, shader build, asset upload | `Planned` M8 |
+| Snapshot model/capture and the internal three-slot ring state machine | `Current` M7 WP-2 (internal; no draw, no host wiring) |
+| Snapshot consumption, frame handoff, bounded run-ahead, instance resources | `Planned` M7 WP-3/WP-4 |
+| Sprite pipeline, bindless pages, shader build, asset upload, flips at draw time | `Planned` M8 |
 | Headless | `Current` for the asset/tick path with no SDL/Vulkan/renderer; the renderer is intentionally absent because headless has no GPU work |
 
 ## 12. Related documents
