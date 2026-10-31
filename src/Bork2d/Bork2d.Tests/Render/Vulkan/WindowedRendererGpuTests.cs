@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using Bork2d.Engine;
 using Bork2d.Render;
 using Bork2d.Render.Diagnostics;
+using Bork2d.Render.Handoff;
 using Bork2d.Render.Vulkan;
 using Bork2d.Runtime.Sdl;
 using Bork2d.Tests.TestDoubles;
@@ -14,14 +15,16 @@ using Xunit.Sdk;
 namespace Bork2d.Tests.Render.Vulkan;
 
 /// <summary>
-/// Opt-in real-GPU proof for the windowed renderer: SDL window and surface, device and swapchain,
-/// clears presented continuously, resize/fullscreen/minimize, and a bounded stop.
+/// Opt-in real-GPU proof for the windowed renderer's M7 handoff: a test producer publishes one
+/// snapshot at a time, the renderer records exactly one presented frame per consumed snapshot, a
+/// snapshot slot stays held until its frame fence, resize/fullscreen/minimize drain and resume, a
+/// stop with a frame in flight joins cleanly, every slot ends Free, and validation is clean.
 /// </summary>
 /// <remarks>
-/// The test thread acts as the OS/window thread: it creates the SDL window, the instance, and the
-/// surface, then starts the renderer and observes its counters with event-based bounded waits. It
-/// skips (rather than fails) when the Vulkan loader, desktop session, device, or validation layer
-/// is unavailable (D-M6-05, D-M6-20). No sleep, no spin, no readback (D-M6-23).
+/// The test thread acts as the OS/window thread. Frame/snapshot progress is observed through the
+/// renderer's event-based bounded waits; there is no sleep, spin, or exact frame-equality assertion
+/// (nodes: relationships only, Q19=S3). It skips when the Vulkan loader, desktop session, device,
+/// or validation layer is unavailable.
 /// </remarks>
 [Collection(RealGpuCollection.Name)]
 [Trait("Category", "Gpu")]
@@ -40,7 +43,7 @@ public sealed class WindowedRendererGpuTests
     }
 
     [GpuFact]
-    public void WindowedRendererPresentsClearsResizesMinimizesAndStopsCleanly()
+    public void WindowedRendererConsumesOneSnapshotPerFrameAndStopsCleanly()
     {
         if (!NativeLibrary.TryLoad("vulkan-1.dll", out nint loaderHandle))
         {
@@ -139,8 +142,7 @@ public sealed class WindowedRendererGpuTests
                     "SDL_Vulkan_GetDrawableSize reported a zero extent for a visible window.");
             }
 
-            _output.WriteLine(
-                $"window={window.Size}, drawable={drawable}, validation=on");
+            _output.WriteLine($"window={window.Size}, drawable={drawable}, validation=on");
 
             var startInfo = new RendererStartInfo
             {
@@ -180,17 +182,47 @@ public sealed class WindowedRendererGpuTests
             }
 
             Assert.Equal(RendererStatus.Ready, renderer.Status);
-            WaitFor(
-                renderer,
-                counters => counters.FramesPresented >= 30,
-                "The renderer presented fewer than 30 frames",
-                _timeout);
-            _output.WriteLine($"after 30+ frames: {Describe(renderer.Counters)}");
+            Assert.True(
+                renderer.HasInstanceResources,
+                "The renderer did not create the per-frame instance SSBO/descriptor set (Q10=J1).");
 
-            Resize(window, renderer);
+            var producer = new TestSnapshotProducer(renderer);
+            const int initialSnapshots = 5;
+            for (var index = 0; index < initialSnapshots; index++)
+            {
+                producer.PublishOne();
+                WaitFor(
+                    renderer,
+                    () => renderer.Counters.FramesPresented >= producer.Published,
+                    "A published snapshot did not present its frame",
+                    _timeout);
+            }
+
+            Assert.Equal((long)initialSnapshots, renderer.SnapshotCounters.Published);
+            Assert.Equal((long)initialSnapshots, renderer.SnapshotCounters.Consumed);
+            Assert.True(
+                renderer.Counters.FramesPresented >= initialSnapshots,
+                $"Only {renderer.Counters.FramesPresented} frames were presented for "
+                    + $"{initialSnapshots} consumed snapshots.");
+            Assert.True(
+                renderer.Counters.FramesPresented <= renderer.SnapshotCounters.Consumed,
+                "A frame must correspond to a consumed snapshot (Q7=G1).");
+
+            // The just-submitted frame still holds its snapshot slot: it is released only when that
+            // GPU frame index is reused after its fence, or during the stop drain.
+            int held = CountRenderingSlots(renderer);
+            Assert.InRange(held, 1, 2);
+            Assert.Equal(0, CountReadySlots(renderer));
+            _output.WriteLine(
+                $"after {initialSnapshots} snapshots: {Describe(renderer.Counters)}; "
+                    + $"ring={DescribeRing(renderer)}");
+
+            Resize(window, renderer, producer);
             Fullscreen(window, renderer);
-            Minimize(window, renderer);
+            Minimize(window, renderer, producer);
 
+            // Stop with a frame in flight: publish and stop immediately, then join.
+            producer.PublishOne();
             long framesAtStop = renderer.Counters.FramesPresented;
             renderer.RequestStop();
             rendererJoined = renderer.Join(_joinTimeout);
@@ -202,11 +234,14 @@ public sealed class WindowedRendererGpuTests
             Assert.Equal(RendererStopReason.Requested, renderer.StopReason);
             Assert.Null(renderer.FatalException);
             Assert.True(
-                renderer.Counters.FramesPresented >= 30,
-                $"Only {renderer.Counters.FramesPresented} frames were presented.");
-            Assert.True(
                 renderer.Counters.FramesPresented >= framesAtStop,
                 "Stop must not reduce the presented-frame counter.");
+            Assert.True(
+                renderer.Counters.FramesPresented <= renderer.SnapshotCounters.Consumed,
+                "Presented frames must never exceed consumed snapshots (Q7=G1).");
+            Assert.True(
+                renderer.SnapshotCounters.Consumed <= renderer.SnapshotCounters.Published,
+                "Consumed snapshots must never exceed published snapshots.");
             Assert.True(
                 renderer.Counters.SwapchainRecreations >= 1,
                 "At least one swapchain recreation was expected after resize/fullscreen.");
@@ -215,7 +250,18 @@ public sealed class WindowedRendererGpuTests
             Assert.Equal(0, instance.ValidationErrorCount);
             Assert.Equal(0, instance.ValidationWarningCount);
 
+            // Join is the quiescent point: every slot is Free, including a slot published after the
+            // renderer's cleanup.
+            AssertAllSlotsFree(renderer);
+
             _output.WriteLine($"final counters: {Describe(renderer.Counters)}");
+            _output.WriteLine(
+                $"final ring: published={renderer.SnapshotCounters.Published}, "
+                    + $"consumed={renderer.SnapshotCounters.Consumed}, "
+                    + $"superseded={renderer.SnapshotCounters.Superseded}, "
+                    + $"backpressureWaits={renderer.SnapshotCounters.BackpressureWaits}, "
+                    + $"maxLive={renderer.SnapshotCounters.MaxLive}, "
+                    + $"suspended={renderer.SuspendedConsumptions}");
             _output.WriteLine(
                 $"instance validation counters: errors={instance.ValidationErrorCount}, "
                     + $"warnings={instance.ValidationWarningCount}");
@@ -261,7 +307,7 @@ public sealed class WindowedRendererGpuTests
         }
     }
 
-    private void Resize(ISdlWindow window, VulkanRenderer renderer)
+    private void Resize(ISdlWindow window, VulkanRenderer renderer, TestSnapshotProducer producer)
     {
         long recreationsBefore = renderer.Counters.SwapchainRecreations;
         long framesBefore = renderer.Counters.FramesPresented;
@@ -298,7 +344,7 @@ public sealed class WindowedRendererGpuTests
                     drawable.Height > 128 ? drawable.Height - 64 : drawable.Height + 64));
             WaitFor(
                 renderer,
-                counters => counters.SwapchainRecreations > recreationsBefore,
+                () => renderer.Counters.SwapchainRecreations > recreationsBefore,
                 "Resize did not recreate the swapchain",
                 _timeout);
         }
@@ -307,9 +353,10 @@ public sealed class WindowedRendererGpuTests
             _output.WriteLine($"after resize (bounded wait): {Describe(renderer.Counters)}");
         }
 
+        producer.PublishOne();
         WaitFor(
             renderer,
-            counters => counters.FramesPresented > framesBefore,
+            () => renderer.Counters.FramesPresented > framesBefore,
             "Presentation did not resume after resize",
             _timeout);
         _output.WriteLine($"after resize: {Describe(renderer.Counters)}");
@@ -318,7 +365,7 @@ public sealed class WindowedRendererGpuTests
     private void Fullscreen(ISdlWindow window, VulkanRenderer renderer)
     {
         long recreationsBefore = renderer.Counters.SwapchainRecreations;
-        bool entered;
+        var entered = false;
         try
         {
             window.SetFullscreen(true);
@@ -342,7 +389,7 @@ public sealed class WindowedRendererGpuTests
 
             WaitFor(
                 renderer,
-                counters => counters.SwapchainRecreations > recreationsBefore,
+                () => renderer.Counters.SwapchainRecreations > recreationsBefore,
                 "Entering fullscreen did not recreate the swapchain",
                 _timeout);
 
@@ -357,7 +404,7 @@ public sealed class WindowedRendererGpuTests
 
             WaitFor(
                 renderer,
-                counters => counters.SwapchainRecreations > recreationsBefore,
+                () => renderer.Counters.SwapchainRecreations > recreationsBefore,
                 "Leaving fullscreen did not recreate the swapchain",
                 _timeout);
             _output.WriteLine($"after fullscreen: {Describe(renderer.Counters)}");
@@ -378,17 +425,34 @@ public sealed class WindowedRendererGpuTests
         }
     }
 
-    private void Minimize(ISdlWindow window, VulkanRenderer renderer)
+    private void Minimize(
+        ISdlWindow window,
+        VulkanRenderer renderer,
+        TestSnapshotProducer producer)
     {
-        long skipsBefore = renderer.MinimizedSkips;
+        long suspendedBefore = renderer.SuspendedConsumptions;
         long framesBefore = renderer.Counters.FramesPresented;
+        long consumedBefore = renderer.SnapshotCounters.Consumed;
 
         renderer.PostMinimized(true);
-        WaitFor(
-            renderer,
-            _ => renderer.MinimizedSkips > skipsBefore,
-            "The renderer did not observe the minimized state",
-            _timeout);
+
+        // The suspended consumer drains the newest snapshot without a GPU frame.
+        for (var index = 0; index < 3; index++)
+        {
+            producer.PublishOne();
+            long expected = suspendedBefore + index + 1;
+            WaitFor(
+                renderer,
+                () => renderer.SuspendedConsumptions >= expected,
+                "The renderer did not drain a snapshot while minimized",
+                _timeout);
+        }
+
+        Assert.Equal(framesBefore, renderer.Counters.FramesPresented);
+        Assert.Equal(consumedBefore, renderer.SnapshotCounters.Consumed);
+        Assert.True(
+            renderer.SuspendedConsumptions >= suspendedBefore + 3,
+            "The suspended drain must count each dropped snapshot (Q8=H1).");
 
         renderer.PostMinimized(false);
         SdlWindowSize drawable = window.GetVulkanDrawableSize();
@@ -397,17 +461,23 @@ public sealed class WindowedRendererGpuTests
             renderer.PostWindowExtent(new WindowExtent(drawable.Width, drawable.Height));
         }
 
+        producer.PublishOne();
         WaitFor(
             renderer,
-            counters => counters.FramesPresented > framesBefore,
+            () => renderer.Counters.FramesPresented > framesBefore,
             "Presentation did not resume after restoring the window",
             _timeout);
-        _output.WriteLine($"after minimize/restore: {Describe(renderer.Counters)}");
+        Assert.True(
+            renderer.SnapshotCounters.Consumed > consumedBefore,
+            "Restoring the window must resume one frame per snapshot.");
+        _output.WriteLine(
+            $"after minimize/restore: {Describe(renderer.Counters)}; "
+                + $"suspended={renderer.SuspendedConsumptions}");
     }
 
     private void WaitFor(
         VulkanRenderer renderer,
-        Func<RendererCounters, bool> predicate,
+        Func<bool> predicate,
         string message,
         TimeSpan timeout)
     {
@@ -424,8 +494,53 @@ public sealed class WindowedRendererGpuTests
         }
 
         throw new TimeoutException(
-            $"{message} within {timeout.TotalSeconds:0} s. {Describe(renderer.Counters)}.");
+            $"{message} within {timeout.TotalSeconds:0} s. {Describe(renderer.Counters)}; "
+                + $"ring={DescribeRing(renderer)}.");
     }
+
+    private static int CountRenderingSlots(VulkanRenderer renderer)
+    {
+        var count = 0;
+        foreach (var slot in renderer.SnapshotRing.Slots)
+        {
+            if (slot.State == SnapshotSlotState.Rendering)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static int CountReadySlots(VulkanRenderer renderer)
+    {
+        var count = 0;
+        foreach (var slot in renderer.SnapshotRing.Slots)
+        {
+            if (slot.State == SnapshotSlotState.Ready)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static void AssertAllSlotsFree(VulkanRenderer renderer)
+    {
+        foreach (var slot in renderer.SnapshotRing.Slots)
+        {
+            Assert.Equal(SnapshotSlotState.Free, slot.State);
+        }
+
+        Assert.Equal(-1, renderer.SnapshotRing.LatestIndex);
+    }
+
+    private static string DescribeRing(VulkanRenderer renderer)
+        => $"slots=[{string.Join(
+            ", ",
+            renderer.SnapshotRing.Slots.ToArray().Select(slot => slot.State.ToString()))}], "
+            + $"latest={renderer.SnapshotRing.LatestIndex}";
 
     private void WriteRendererLog(CapturingLoggerProvider provider)
     {
@@ -458,5 +573,34 @@ public sealed class WindowedRendererGpuTests
             || message.Contains(
                 "maxPerStageDescriptorUpdateAfterBindSampledImages=0",
                 StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The test producer: fills one slot through the renderer's internal slot API and publishes it.
+    /// </summary>
+    private sealed class TestSnapshotProducer
+    {
+        private readonly VulkanRenderer _renderer;
+        private long _published;
+
+        internal TestSnapshotProducer(VulkanRenderer renderer) => _renderer = renderer;
+
+        internal long Published => _published;
+
+        internal void PublishOne()
+        {
+            SnapshotSlot? slot = _renderer.AcquireSnapshotSlot();
+            if (slot is null)
+            {
+                throw new InvalidOperationException(
+                    "The renderer stopped consuming; the test producer cannot publish.");
+            }
+
+            slot.Snapshot.Reset();
+            slot.Snapshot.Sequence = ++_published;
+            slot.Snapshot.Time = _published * 0.016;
+            slot.Snapshot.DeltaTime = 0.016;
+            _renderer.PublishSnapshot(slot);
+        }
     }
 }

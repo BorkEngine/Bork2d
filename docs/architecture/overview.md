@@ -5,10 +5,14 @@
 > bring-up) is merged (2026-10-31, PR #11, merge `5de725c`), so the builder,
 > windowed/offscreen Vulkan hosts, headless one-tick host, scene graph, logging, asset pipeline,
 > builder-configured bake, and AOT baseline are `Current`. Windowed and offscreen run a real render
-> thread that clears an opaque-black sRGB target (windowed presents; offscreen discards and loops
-> until `Exit`); frame handoff/pacing (M7) and the sprite renderer (M8) are `Planned`. The
-> windowed/offscreen AOT/Pong gate is proven. Status detail is in [the roadmap](../roadmap.md). The engine suite is 1044 tests
-> (1028 deterministic + 16 opt-in/conditional).
+> thread that clears an opaque-black sRGB target; the M7 snapshot model/capture/ring (WP-2) and
+> renderer consumption (WP-3: one presented/discarded frame per consumed snapshot, fence-held slot
+> lifetime, suspended minimized drain, empty instance resources) are `Current`. The host
+> acquire/capture/publish wiring, pacing, and the headless loop (M7 WP-4) and the sprite renderer
+> (M8) are `Planned`; until WP-4 lands a windowed/offscreen run has no snapshot to consume and
+> records no frame. The windowed/offscreen AOT/Pong gate is proven. Status detail is in
+> [the roadmap](../roadmap.md). The engine suite is 1121 tests (1105 deterministic + 16
+> opt-in/conditional).
 >
 > Source file types are registered asset processors with `[GenerateShape]` sidecars when settings are
 > required; the built-in texture importer is one processor. Data types are registered explicitly with
@@ -68,9 +72,9 @@ there is no descriptor and no generated host. See [asset processors](asset-proce
   pack writer is the public tooling exception in `Bork2d.Engine`; it validates references at pack
   build.
 - **Headless and offscreen modes.** Servers run with no window, GPU, renderer, or Vulkan loader;
-  headless is one tick today and becomes timer-paced at a configured rate in M7. Offscreen runs a
-  real Vulkan render thread against a fixed sRGB target, discards frames, and loops until `Exit`
-  (M6); pacing/handoff and readback are M7/M8/M10.
+  headless is one tick today and becomes timer-paced at a configured rate in M7 (WP-4). Offscreen
+  runs a real Vulkan render thread against a fixed sRGB target and records one discarded frame per
+  consumed snapshot (M7 WP-3); the host publishing wiring and readback are M7 WP-4/M8/M10.
 - **Diagnostics and quality.** Microsoft.Extensions.Logging/ZLogger, `IEngine.LoggerFactory`;
   warnings and style violations are build errors.
 - **A short, composable startup API** through a builder in `Bork2d.Runtime`.
@@ -115,19 +119,21 @@ Game code never references an engine project directly. Exact rules: [Projects](p
 
 The engine invokes game callbacks on its tick thread, which may be any host thread; there is no
 process-main-thread affinity. Windowed mode owns one OS/window thread (SDL, Vulkan instance/surface,
-window commands, event pump) and one render thread (device, swapchain, clear, present) started by the
-host; the game loop runs on the caller's tick thread. Offscreen mode owns the same render thread but
-no OS/window thread; headless owns neither. Every mode owns one app-scoped asset loader thread.
-The host starts the renderer without waiting for readiness, runs `Setup` immediately, and waits for
-readiness only before the first tick (D-M6-06). Windowed/offscreen render frames are continuous and
-decoupled from ticks (D-M6-01); the snapshot ring and handoff are M7. No thread touches another
-thread's domain (SDL, Vulkan, or game objects).
+window commands, event pump) and one render thread (device, swapchain, snapshot ring, clear, present)
+started by the host; the game loop runs on the caller's tick thread. Offscreen mode owns the same
+render thread but no OS/window thread; headless owns neither. Every mode owns one app-scoped asset
+loader thread. The host starts the renderer without waiting for readiness, runs `Setup` immediately,
+and waits for readiness only before the first tick (D-M6-06). The renderer records exactly one GPU
+frame per consumed snapshot and waits when none is `Ready` (Q7=G1, M7 WP-3); it holds the snapshot
+slot until that frame's fence. The tick-side acquire/capture/publish wiring and pacing are M7 WP-4,
+so until then the host publishes nothing and the renderer records no frame. No thread touches
+another thread's domain (SDL, Vulkan, or game objects).
 
 | Mode | Tick | OS/window thread | Render thread | SDL | Vulkan | Pacing (current) |
 | --- | :-: | :-: | :-: | :-: | :-: | --- |
-| Windowed | yes | yes | yes | yes | yes | uncapped ticks; continuous present (M7 handoff) |
-| Offscreen | yes | no | yes | no | yes | uncapped ticks; GPU-fence-paced discard (M7 handoff) |
-| Headless | yes | no | no | no | no | one tick (timer-paced M7) |
+| Windowed | yes | yes | yes | yes | yes | uncapped ticks; renderer waits for a snapshot (host wiring WP-4) |
+| Offscreen | yes | no | yes | no | yes | uncapped ticks; renderer waits for a snapshot (host wiring WP-4) |
+| Headless | yes | no | no | no | no | one tick (timer-paced M7 WP-4) |
 
 All three modes are selected and validated by the builder. Windowed and offscreen run the real
 renderer and the tick loop until `Exit`/close/fatal; the window is visible from `Run()` start and
@@ -167,7 +173,9 @@ Source file types are registered processors (D-036).
 18. **Headless never calls SDL or the Vulkan loader**, creates no instance/device/platform/renderer, and remains one-tick.
 19. **Windowed and offscreen require Vulkan 1.3**: the OS/window thread owns the windowed instance/surface; the render thread owns the device, swapchain, offscreen targets, frames, and recording. No renderer thread outlives `Run()`.
 20. **`Setup` runs before renderer readiness and is never skipped because the renderer failed**; no `Tick` runs before readiness (D-M6-06/D-M6-14).
-21. **Every frame starts with an opaque-black clear and has no depth**; M6 has no snapshot, camera, draw, pacing, or readback.
+21. **Every frame starts with an opaque-black clear and has no depth**; the M7 renderer records one
+    frame per consumed snapshot and adds no camera, draw, or readback. The host publishing wiring
+    that feeds those snapshots is WP-4.
 
 ## 7. Read next
 

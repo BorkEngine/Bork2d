@@ -88,6 +88,31 @@ internal sealed class SnapshotRing : IDisposable
     /// <summary>Gets a value indicating whether an exit signal was raised.</summary>
     internal bool IsExitSignalled => Volatile.Read(ref _exitSignalled) != 0;
 
+    /// <summary>
+    /// Gets the event the ring sets when a new snapshot is published as
+    /// <see cref="SnapshotSlotState.Ready"/> or when the ring stops.
+    /// </summary>
+    /// <remarks>
+    /// This is the render-side wake: <see cref="Publish"/> signals it after the new slot becomes
+    /// <c>Ready</c> and <see cref="Stop"/> signals it so a blocked renderer wakes. Slot release,
+    /// abandonment, supersession, and the suspended discard signal the producer wake instead (a
+    /// blocked producer may proceed); the renderer's combined wait re-checks the ring state after
+    /// every wake. Exposed so the renderer can combine this wake with the control-channel wake in
+    /// one event-based wait (M7 WP-3). The ring owns the event; callers may reset it and wait on its
+    /// handle but never dispose it.
+    /// </remarks>
+    internal ManualResetEventSlim ConsumerWake => _consumerWake;
+
+    /// <summary>Gets a value indicating whether a <see cref="SnapshotSlotState.Ready"/> snapshot exists.</summary>
+    internal bool HasReadySnapshot
+    {
+        get
+        {
+            var index = Volatile.Read(ref _latest);
+            return index != NoLatest && _slots[index].State == SnapshotSlotState.Ready;
+        }
+    }
+
     /// <summary>Gets a snapshot of the handoff counters.</summary>
     internal SnapshotRingCounters Counters => new(
         Interlocked.Read(ref _published),
@@ -263,6 +288,36 @@ internal sealed class SnapshotRing : IDisposable
     }
 
     /// <summary>
+    /// Frees the newest <see cref="SnapshotSlotState.Ready"/> snapshot without taking it into
+    /// <see cref="SnapshotSlotState.Rendering"/>.
+    /// </summary>
+    /// <remarks>
+    /// The suspended consumer uses this while the window is minimized or the extent is zero (Q8=H1):
+    /// the dropped snapshot never becomes a GPU frame, no fence participates, and the slot returns
+    /// to <see cref="SnapshotSlotState.Free"/> immediately. It is not counted as consumed, which
+    /// counts only slots taken for a submitted frame; the renderer counts suspended consumptions.
+    /// </remarks>
+    /// <returns><see langword="true"/> when a Ready snapshot was freed.</returns>
+    internal bool DiscardLatest()
+    {
+        var index = Volatile.Read(ref _latest);
+        if (index == NoLatest)
+        {
+            return false;
+        }
+
+        var slot = _slots[index];
+        if (!slot.TryTransition(SnapshotSlotState.Ready, SnapshotSlotState.Free))
+        {
+            return false;
+        }
+
+        Interlocked.CompareExchange(ref _latest, NoLatest, index);
+        _producerWake.Set();
+        return true;
+    }
+
+    /// <summary>
     /// Frees a <see cref="SnapshotSlotState.Rendering"/> slot once its GPU frame fence has signaled.
     /// </summary>
     /// <remarks>This is the only producer wake for a rendering slot; it never frees a slot the producer owns.</remarks>
@@ -298,7 +353,7 @@ internal sealed class SnapshotRing : IDisposable
                 return false;
             }
 
-            if (HasReadySnapshot())
+            if (HasReadySnapshot)
             {
                 return true;
             }
@@ -311,7 +366,7 @@ internal sealed class SnapshotRing : IDisposable
                 return false;
             }
 
-            if (HasReadySnapshot())
+            if (HasReadySnapshot)
             {
                 return true;
             }
@@ -414,12 +469,6 @@ internal sealed class SnapshotRing : IDisposable
         {
             // The events were already released by a racing stop path.
         }
-    }
-
-    private bool HasReadySnapshot()
-    {
-        var index = Volatile.Read(ref _latest);
-        return index != NoLatest && _slots[index].State == SnapshotSlotState.Ready;
     }
 
     private bool TryAcquireFree(out SnapshotSlot? slot)
