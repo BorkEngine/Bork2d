@@ -1,7 +1,7 @@
 # M8 — Sprite Renderer with Real Assets (spec)
 
-> **Status: Approved for implementation (2026-10-31); WP-1 and WP-2 are complete.** This spec is
-> the owner-approved M8 contract. Per the owner's decision, the answers are recorded directly here:
+> **Status: Approved for implementation (2026-10-31); WP-1, WP-2, and WP-3 are complete.** This spec
+> is the owner-approved M8 contract. Per the owner's decision, the answers are recorded directly here:
 > there is no separate M8 decision-register section, no `D-M8-xx` entries are added to
 > [decisions.md](../decisions.md), and the previous question history is intentionally not preserved.
 > This is an explicit owner exception to the usual decision-log process; the implementation docs
@@ -10,9 +10,13 @@
 > As built: WP-1 reconciled the owning docs; WP-2 added the build-time shader compiler/tool, the
 > checked-in GLSL and generated SPIR-V, the sprite pipeline/layout/samplers, the shared camera
 > projection/rounding helper, the public `WorldToScreen`/`ScreenToWorld`/`WorldSize` members, and the
-> pure sprite planning/quad/96-byte instance layout with deterministic tests. WP-3 (texture pages,
-> `RenderStats`), WP-4 (draw integration, `CaptureFrameAsync`), and WP-5 (Pong/AOT gate, benchmark,
-> final docs) remain planned.
+> pure sprite planning/quad/96-byte instance layout with deterministic tests. WP-3 added the internal
+> texture-page cache (async `IAssets` prefetch, content validation, generated placeholder, device-local
+> image pool, staging pool, per-page upload fence, bindless descriptors, dynamic capacity), the
+> required internal `RendererStartInfo.Assets` seam, and the public `RenderStats` type plus
+> `IEngine<T>.RenderStats` with a host-installed, allocation-free source. WP-4 (draw integration,
+> per-frame publication, `CaptureFrameAsync`) and WP-5 (Pong/AOT gate, benchmark, final docs) remain
+> planned.
 >
 > M7 is merged into `develop` (2026-10-31, PR #12, merge `5de5ac3`) and supplies the immutable frame
 > snapshot, the three-slot ring, the one-frame-per-snapshot renderer, and the empty per-frame
@@ -87,16 +91,17 @@ M6/M7 are merged. The current tree contains:
 
 | Area | Current state | M8 consequence |
 | --- | --- | --- |
-| Engine suite | **1158** tests at spec time = 1141 deterministic + 17 opt-in/conditional (9 `[WindowFact]`, 3 reparse-point, 5 `[GpuFact]`). WP-2 raises the suite to **1252** = 1235 deterministic + 17 conditional. | M8 adds deterministic plan/math/page/public-API tests and opt-in GPU rendering tests. |
+| Engine suite | **1158** tests at spec time = 1141 deterministic + 17 opt-in/conditional (9 `[WindowFact]`, 3 reparse-point, 5 `[GpuFact]`). WP-2 raised the suite to **1252** = 1235 deterministic + 17 conditional; WP-3 raises it to **1310** = 1293 deterministic + 17 conditional. | M8 adds deterministic plan/math/page/public-API tests and opt-in GPU rendering tests. |
 | `Pong.Tests` | **46** tests. | Pong already builds a camera and three sprites; M8 changes what is drawn and what the gate can assert. |
 | Scene | `Camera<TLayer>`/`SpriteRender<TLayer>` store raw values with no validation or clamping. `Viewport`, `Size`, `ClearColor`, `Tint`, `Layer`, `ZIndex`, and `FlipX/Y` are settable without range checks. WP-2 adds the shared projection helper and the public `ICamera` screen/world/`WorldSize` members; the renderer still handles invalid values at draw time (cameras skip; malformed sprites are fatal) and the setters stay unchanged. | M8 handles invalid values at draw time (cameras skip; malformed sprites are fatal); setters stay unchanged. |
 | Snapshot | M7 `FrameSnapshot`/`CameraSnapshot`/`SpriteSnapshot` are internal, immutable after publication, and value-only except the loaded `SpriteAsset?`. Exact fields are in [Threading §3](../architecture/threading.md#3-frame-snapshot). Capture copies raw camera/sprite values; invalid layers are preserved as `uint`. | The snapshot stays asset-agnostic. The renderer reads `IAssets` directly and resolves textures; no snapshot change. |
 | `Bork2d.Render` | Internal `IRenderer` seam, SPSC control channel, windowed and offscreen renderers, three-slot handoff consumer, fence-held slots, suspended minimized drain, counters, validation observation. WP-2 adds the internal `SpritePipeline` (layout/samplers/pipeline-per-format) created at renderer startup, the shared camera-projection bridge, and the pure sprite planner/quad/96-byte instance layout. | M8 adds the page cache/uploader, bindless descriptor set, instance filling, per-camera passes, public stats/capture plumbing, and counters; no public Render type. |
-| Per-frame GPU resources | `FrameInstanceResources` creates a **4096-byte host-visible coherent** instance SSBO and a descriptor-set layout/pool/set with **binding 0 only** (storage buffer, vertex stage). It is never written, bound, or drawn. | M8 replaces the provisional capacity with a growable per-frame instance buffer, adds binding 1 (bindless sampler array), and fills/writes/binds them. |
-| Bindless readiness | Device selection already requires Vulkan 1.3, dynamic rendering, synchronization 2, and the six descriptor-indexing features (`D-M6-08`), and logs/validates `maxPerStageDescriptorUpdateAfterBindSampledImages` for M8 capacity planning. | M8 uses a variable-descriptor-count bindless binding and grows capacity up to the device limit. |
+| Per-frame GPU resources | WP-3 replaces the provisional M7 resources: each frame owns a 1024-record (96-byte) host-visible coherent instance SSBO (binding 0) and a bindless descriptor pool/set (binding 1, variable count = current page capacity, `UPDATE_AFTER_BIND`). Nothing is drawn yet. | WP-4 grows the instance buffer, fills it, and records the per-camera draws. |
+| Bindless readiness | Device selection already requires Vulkan 1.3, dynamic rendering, synchronization 2, and the six descriptor-indexing features (`D-M6-08`). WP-3 adds `maxDescriptorSetUpdateAfterBindSampledImages` and `maxStorageBufferRange` to `VulkanDeviceLimits`, validates the initial page capacity, and uses the smaller of the per-stage/per-set update-after-bind sampled-image limits as the layout maximum (saturated to a documented 1,048,576-entry cap when the device reports an unbounded `UINT32_MAX`). | WP-4 uses the bindless pages in the draw; capacity still grows to that effective limit. |
+| Texture pages | WP-3 adds the internal `Bork2d.Render.Textures` subsystem: one page per canonical descriptor path, async `IAssets` prefetch with polled completion, content validation, the generated 8×8 placeholder at index 0 (uploaded at startup with a fence wait), a device-local image suballocator, a host-visible staging pool, per-page one-time upload command buffers/fences, bindless descriptor writes, and dynamic capacity with `vkDeviceWaitIdle` growth. No page is loaded in WP-3 because no draw path calls `EnsurePage` yet. | WP-4 calls `EnsurePage` per candidate sprite and adds cross-page content tests/diagnostics. |
 | Shaders/pipeline | WP-2 adds the checked-in GLSL (`Bork2d.Render/Shaders/sprite.vert`, `sprite.frag`), the build-only `build/Bork2d.ShaderCompiler` tool and MSBuild targets, generated SPIR-V C#, and the internal `SpritePipeline` (descriptor-set layout, pipeline layout with a 64-byte push constant, one graphics pipeline per sRGB output format, and a `(filter, wrap)` sampler cache). Both renderer startups create it after the color format is known and destroy it in cleanup; no draw is recorded yet. | M8 adds checked-in GLSL, a build-time Silk.NET.Shaderc tool, generated SPIR-V, and the sprite pipeline; WP-3/WP-4 write descriptors and record draws. |
-| Texture upload | No GPU upload path exists. `TextureDescriptor` is a public MessagePack model; `IAssets.LoadData` returns decompressed bytes on the loader thread. No Render→asset seam exists. | M8 passes `IAssets` through `RendererStartInfo` and adds the page cache/uploader. |
-| Readback | Offscreen rendering discards; there is no readback, screenshot, or pixel assertion. | M8 adds the public `IEngine.CaptureFrameAsync` readback path; the engine's own tests still do not assert pixels. |
+| Texture upload | `TextureDescriptor` is a public MessagePack model; `IAssets.LoadData` returns decompressed bytes on the loader thread. WP-3 adds the required internal `RendererStartInfo.Assets` seam, the async prefetch (descriptor then payload), content validation, the placeholder, the pooled GPU upload path with per-page fences, and capacity growth. | WP-4 resolves pages per candidate sprite in the draw/plan path. |
+| Readback | Offscreen rendering discards; there is no readback, screenshot, or pixel assertion. | M8 adds the public `IEngine.CaptureFrameAsync` readback path (WP-4); the engine's own tests still do not assert pixels. |
 | GPU tests | 5 `[GpuFact]` tests, skipped unless `BORK2D_RUN_GPU_TESTS=1`; serialized `RealGpu` collection; bounded joins; validation enabled. | M8 adds rendering/benchmark tests in the same local-only pattern. |
 | Pong game | `Setup` loads settings/sprites/descriptors/raw bytes, creates one camera (`Size=9`, `Clear.Color`, mask `Court|Paddles|Ball`, `ZIndex=0`), one world transform, two paddle sprites, and one ball sprite. Assets use full-rect UVs, `scale=64`, center pivot, `quad`. The baked pack has 7 entries. | After M8 the same scene draws three sprites; the gate asserts render stats and AOT behavior. |
 | Host | Windowed/offscreen publish one snapshot per completed tick; the renderer consumes one for a free frame and holds the slot to the fence. Headless has no renderer/capture. | M8 keeps the loop/handoff; the host passes `IAssets` to the renderer and wires public stats/capture. |
@@ -330,6 +335,14 @@ per-camera pass yet (WP-4).
 (`DataRef`) → raw bytes → page. A sprite draws only when every part exists and the page is ready; a
 `null` sprite draws nothing.
 
+**Placeholder sizing (owner-approved).** A sprite that draws the placeholder because its texture is
+absent or failed uses the **descriptor's declared `Width`/`Height`** when the descriptor loaded and
+those dimensions are valid, even if the payload was missing, malformed, or unsupported; a format or
+payload failure therefore keeps the intended quad size. When no descriptor loaded, or its dimensions
+are zero/over `maxImageDimension2D`, the placeholder's own **8×8** extent is used. There is no other
+fallback. The internal page lookup carries the resolved width/height so the draw path (WP-4) needs no
+second rule.
+
 **Size and geometry** ([Assets §9](../architecture/assets-and-tooling.md#9-sprite-assets)):
 
 ```text
@@ -394,24 +407,32 @@ paths are not retried, even if a later overlay would provide them.
 
 **Placeholder (approved).** A single generated **8×8 magenta/black checkerboard** page, index `0`,
 nearest filter, clamp wrap, one mip, generated from CPU bytes at renderer startup. It is always
-resident. Any failed/absent texture maps to it; the sprite draws with the placeholder and its tint.
-Placeholder creation failure is a renderer startup failure. The placeholder occupies index `0` and is
-included in `RenderStats.TexturePages`/`TexturePageCapacity`; it is not a content page.
+resident. Any failed/absent texture maps to it; the sprite draws with the placeholder and its tint,
+using the owner-approved sizing rule in §6.4. Placeholder creation failure is a renderer startup
+failure. The placeholder occupies index `0` and is included in
+`RenderStats.TexturePages`/`TexturePageCapacity`; it is not a content page.
 
-**Page table and dynamic capacity.** Page indices: `0` = placeholder; `1..N` = real pages. Initial
+**Capacity and the effective limit.** Page indices are `0` = placeholder; `1..N` = real pages. Initial
 total capacity is 256 entries (255 real pages). When a new real page is needed and the table is
-full, the renderer grows by doubling the capacity, up to
-`maxPerStageDescriptorUpdateAfterBindSampledImages` (and the descriptor-set/pool limits). Growth
-happens on the render thread between frames with all in-flight frames idle (`vkDeviceWaitIdle`);
-the per-frame descriptor sets/pools are recreated with the new variable descriptor count and every
-resident page descriptor is rewritten. If the device limit is reached, the renderer fails with a
-`Bork2dException` naming the limit and the requested capacity. No VMA; no hard-coded 4096 cap.
+full, the renderer grows by doubling the capacity, up to the **effective limit**: the smaller of
+`maxPerStageDescriptorUpdateAfterBindSampledImages` and
+`maxDescriptorSetUpdateAfterBindSampledImages` (and a valid pool/set allocation). A driver that
+reports either limit as `UINT32_MAX` ("unbounded") is saturated to the documented implementation cap
+of **1,048,576** entries so the capacity and the layout maximum stay representable and match the
+largest per-stage update-after-bind sampled-image count real devices report; an allocation failure
+below that cap is a fatal `Bork2dException`. The layout's binding-1 descriptor count is that same
+effective limit, so growth never recreates the pipeline layout. Growth happens on the render thread
+between frames with all in-flight frames idle (`vkDeviceWaitIdle`); the per-frame descriptor
+sets/pools are recreated with the new variable descriptor count and every resident page descriptor
+is rewritten. If the limit is reached, the renderer fails with a `Bork2dException` naming the limit
+and the requested capacity. No VMA; no arbitrary hard-coded page cap.
 
 **Memory.** Page images and staging buffers use a **pool/suballocator**: a small number of
-device-local heap allocations for images (aligned, non-overlapping ranges) and a host-visible
-staging ring. No per-page `vkAllocateMemory`; no VMA. Pool growth allocates a new block; all blocks
-are destroyed after `vkDeviceWaitIdle` at shutdown. Exact block size/alignment is an implementation
-detail constrained by `vkGetImageMemoryRequirements`/`vkGetBufferMemoryRequirements`.
+device-local heap allocations for images (aligned, non-overlapping ranges; 4 MiB blocks by default in
+WP-3) and a host-visible staging pool leased per upload. No per-page `vkAllocateMemory`; no VMA.
+Pool growth allocates a new block; all blocks are destroyed after `vkDeviceWaitIdle` at shutdown.
+Exact block size/alignment is an implementation detail constrained by
+`vkGetImageMemoryRequirements`/`vkGetBufferMemoryRequirements`.
 
 **Upload path (approved: separate submit + fence).**
 
@@ -449,6 +470,22 @@ startup failure; growth stops at the device limit and fails explicitly.
 Vulkan resource/queue/device failures are fatal `Bork2dException`s (the renderer-fatal path). A
 missing payload entry is a content failure; an OOM allocating the upload buffer is fatal.
 
+**As built (WP-3, internal `Bork2d.Render.Textures`).** `TexturePageStore` owns the logical state
+machine and capacity policy; `IAssets` is called on the render thread but the loads run on the asset
+loader thread and are polled without waiting. Both renderers create a `VulkanTexturePages` (images,
+`TextureImagePool` device-local blocks, `StagingBufferPool` leases, per-page upload command
+buffers/fences) plus a `TexturePageStore` after the frame resources exist, and upload/wait the
+placeholder before readiness. `EnsurePage(string?)` is the WP-4 entry point and returns
+`Placeholder` (index 0 plus the resolved quad width/height), `Pending`, or `Ready` (index and the
+descriptor's dimensions); the steady-state lookup is a dictionary read returning a value struct. A
+page becomes ready in the pump after its upload fence signals; the store then writes its descriptor
+into both per-frame sets through the renderer's `IBindlessPageWriter`. Pending loads are observed
+and ignored at shutdown (including a load that completed with a fault between frames and was never
+pumped). Teardown waits every submitted upload fence without a timeout; if a wait fails (for example
+after device loss) it logs the failure and does not free the in-flight page resources rather than
+freeing memory the GPU may still read. Default (256) and grown capacities are validated against the
+effective limit at startup and on growth.
+
 ### 6.6 Instances and the one-draw contract
 
 **Instance record (fixed 96-byte std430 ABI):**
@@ -473,15 +510,18 @@ zero.
 WP-2 adds the internal `SpriteInstance` record, the mapped-memory writer, the pure
 `(Layer, ZIndex)` index sort, the per-camera mask filter with null/invalid-layer/non-Quad/pending
 skips, the fatal malformed-field checks, and the quad size/pivot/flip resolver, all with deterministic
-tests. The per-frame growable buffers and ranges remain WP-4.
+tests. WP-3 allocates a fixed 1024-record (96-byte) instance buffer per frame and writes binding 0;
+the per-frame growable buffers, filling, and camera ranges remain WP-4.
 
 **Per-frame buffer (approved: grow at frame fences, host-visible coherent).** Each GPU frame owns one
-host-visible coherent instance buffer. The initial capacity is 1024 instances; when a frame's total
+host-visible coherent instance buffer. WP-3 allocates the approved initial capacity of 1024 instances
+(96-byte records) and writes binding 0; WP-4 makes it growable. Then, when a frame's total
 instance count exceeds its buffer capacity (the frame's fence is already signaled before reuse), the
 buffer is destroyed and recreated at `max(required, capacity * 2)`, rounded to a power of two, and
 binding 0 of that frame's descriptor set is updated. No growth occurs while the frame is in flight.
 Growth is logged once per capacity change and counted. Allocation failure or exceeding
-`maxStorageBufferRange` is fatal. There is no CPU frame array and no staging copy.
+`maxStorageBufferRange` is fatal (WP-3 validates the 1024-record size at startup). There is no CPU
+frame array and no staging copy.
 
 **Ranges and draws.** Instances are built once per snapshot in `(Layer, ZIndex)` order, filtered per
 camera, and appended into contiguous per-camera ranges in the frame buffer. Overlapping cameras get
@@ -605,7 +645,7 @@ Vector2 WorldSize { get; }
   `Bork2d.Engine.Rendering.CameraProjection` helper (also used by the renderer). The public XML docs,
   API reference, guide, and deterministic tests update in the same change.
 - **Status (as built in WP-2):** `WorldToScreen`, `ScreenToWorld`, and `WorldSize` are `Current` and
-  tested. `RenderStats`/`CaptureFrameAsync` below are still `Planned` (WP-3/WP-4).
+  tested. `RenderStats` is `Current` since WP-3 (§6.9); `CaptureFrameAsync` remains `Planned` (WP-4).
 
 #### `IEngine<TLayer>.RenderStats`
 
@@ -642,6 +682,17 @@ public readonly record struct RenderStats(
   never blocks on the GPU and never allocates. The renderer publishes once per completed frame; the
   host copies it into the engine's bridge.
 - No per-frame logging; the values are also logged once at renderer stop.
+
+**As built (WP-3).** The public `RenderStats` record struct and `IEngine<TLayer>.RenderStats` are
+`Current`. `GameEngine` keeps the last snapshot under a `System.Threading.Lock` and exposes an
+internal `SetRenderStatsSource(Func<RenderStats>?)` seam; `Bork2d.Runtime` installs
+`() => renderer.RenderStats` right after the renderer is created, and headless never installs one, so
+the getter returns `default` there and before a source exists. The getter invokes the source inside a
+`try`/`catch`, keeps the last observed value if the source throws, allocates nothing, and never
+blocks on the GPU. Both renderers own a thread-safe `RenderStatsBoard`; WP-3 never publishes to it,
+so a game observes `default` while a WP-3 run executes — per-frame publication is WP-4.
+`RenderStats` is the only WP-3 public addition besides the property; `CaptureFrameAsync` remains
+`Planned` (WP-4).
 
 #### `IEngine<TLayer>.CaptureFrameAsync`
 
@@ -706,6 +757,13 @@ Logging:
   `[GpuFact]` (D-M6-21). Release without validation logs only.
 - Static debug labels for the new Vulkan objects; no per-draw/per-camera label churn.
 
+**As built (WP-3).** Both renderer start lines log `instanceCapacity=1024`, `texturePages`,
+`texturePageCapacity`, `bindlessLimit`, and `placeholder=on`; both stop lines add `texturePages`,
+`texturePageCapacity`, `pageGrowths`, and `failedPages`. The page store logs one warning per failed
+path (never per frame or per sprite) and one information line per capacity growth. `RenderStats` is
+not logged per frame; the remaining §6.10 counters (draws/instances/cameras/skipped/plan CPU) land
+with the WP-4 frame work.
+
 ### 6.11 Allocation and performance
 
 - No steady-state allocations in the plan/build/draw path after warm-up: sorted candidates and
@@ -758,6 +816,11 @@ BCL exceptions.
 - The renderer joins before the asset service stops and before the platform destroys the
   surface/instance/window. No render thread survives `Join()`.
 - No public API gains thread affinity; the existing any-thread rules hold.
+- **As built (WP-3):** the render thread starts descriptor/payload loads through `IAssets` and polls
+  the returned tasks in the per-frame pump; no render-thread wait exists for a page load. The only
+  upload wait is the startup placeholder fence. The `RenderStats` bridge is a short-lock value copy
+  with no Vulkan call; `vkDeviceWaitIdle` is used only for capacity growth between frames and for
+  recreation/shutdown, never per frame.
 
 ## 7. Invariants
 
@@ -811,15 +874,23 @@ BCL exceptions.
 - **Sprite validity (WP-2, as built):** fatal fields (null/short/non-finite UVs, bad Scale/Pivot,
   unknown topology, indices on Quad), allowed UVs outside `[0,1]`, null sprite/layer/non-Quad skip,
   flips/pivot math, signed-size flip encoding, negative `LocalScale` composition.
-- **Texture page state machine:** fake `IAssets`; descriptor/payload readiness, fault-once, page-key
-  dedupe, placeholder on each content failure, pending skip, pool/capacity growth, device-limit
-  failure, no-repeat-load.
+- **Texture page state machine (WP-3, as built):** fake `IAssets` and a fake GPU seam; descriptor/
+  payload readiness, page-key dedupe/one load per path, pending and uploading skips, every content
+  failure mapping to the placeholder with the owner-approved declared-dimension sizing, no retry
+  after failure, the 8×8 magenta/black placeholder pattern, the 256→doubling→device-limit capacity
+  policy with the explicit failure, `TexturePages`/`TexturePageCapacity`/failed-path accounting,
+  allocation-free steady lookups, and shutdown with a pending load.
+- **Public API (WP-3, as built for `RenderStats`):** the record struct's exact fields/order/types,
+  `IEngine<TLayer>`'s pinned surface, defaults before the source/headless, the host-installed source,
+  consistent concurrent reads, never throwing, and an allocation-free read path. The
+  `CaptureFrameAsync` contract tests remain WP-4.
 - **Frame plan/passes:** per-camera pass order, `Clear.Color`/`None`/`Depth`, empty clear-only pass,
   zero-camera no-pass, one draw per non-empty camera, ranges/`firstInstance`, instance total.
 - **Instance buffer (WP-2 layout, as built):** layout offsets/stride (96 bytes), mapped-memory writer,
   builder field order, zero `flags`; growth/capacity tests remain WP-4.
-- **Public API:** `RenderStats` defaults/headless/after-shutdown/consistency, `CaptureFrameAsync`
-  length/cancellation/headless/shutdown behavior (no pixel assertions), full public-surface test.
+- **Public API:** `RenderStats` defaults/headless/after-shutdown/consistency (WP-3, as built),
+  `CaptureFrameAsync` length/cancellation/headless/shutdown behavior (WP-4; no pixel assertions), full
+  public-surface test.
 - **Allocation:** warm plan/build with fixed counts allocates 0 bytes
   (`GC.GetAllocatedBytesForCurrentThread`).
 - **No regression:** dependency matrix/public-surface tests confirm only §6.9 public additions; docs
@@ -883,12 +954,13 @@ GPU. GPU tests/benchmark remain local.
 ## 9. Runtime and host integration
 
 - **Asset seam:** `RendererStartInfo.Assets` is the app's `IAssets` (`AssetService`), supplied after
-  `assetService.Start()` and before renderer creation. The renderer uses it for descriptor/payload
-  loads; no Runtime reference. The renderer joins before `assetService.Stop()`.
-- **Stats/capture bridge:** Runtime installs an internal bridge in `GameEngine` after `Build()`/before
-  `Run()`; the renderer publishes `RenderStats` once per completed frame and serves pending
-  `CaptureFrameAsync` requests. Headless uses a not-supported/default bridge. After shutdown the
-  engine retains the last stats and capture faults.
+  `assetService.Start()` and before renderer creation (as built in WP-3); both renderers and the
+  factory reject a missing seam with a `Bork2dException`. The renderer uses it for
+  descriptor/payload loads; no Runtime reference. The renderer joins before `assetService.Stop()`.
+- **Stats/capture bridge:** Runtime installs an internal stats source in `GameEngine` right after the
+  renderer is created (`() => renderer.RenderStats`); headless installs none and stays `default`. WP-3
+  sets up the type/property/bridge and the renderer's board; the per-frame publication and
+  `CaptureFrameAsync` are WP-4. After shutdown the engine retains the last stats.
 - **Loops:** windowed/offscreen keep acquire → freeze/time/text → tick → capture → publish; M8 adds
   no pacing/sleep/thread. Minimized/zero extent still drains without GPU work and performs no
   uploads. Headless remains renderer-free.
@@ -916,7 +988,10 @@ two paddles and the ball with their tints.
   `vulkan-1.dll`, no tooling assemblies, no `Bork2d.ShaderCompiler`/Silk.NET.Shaderc assemblies, no
   loose `.spv`; generated SPIR-V is linked in.
 - **Published runs:** `--headless`, `--headless --ticks N`, `--windowed --ticks 120`, and
-  `--offscreen --ticks 120` exit 0; windowed/offscreen report the approved stats relationships.
+  `--offscreen --ticks 120` exit 0; windowed/offscreen report the approved stats relationships (WP-4).
+  Since WP-3 each windowed/offscreen publish creates and uploads the placeholder page at startup and
+  the start/stop logs report `texturePages=1`, `texturePageCapacity=256`, and `placeholder=on`; the
+  run still draws only the M7 clear.
 
 ## 11. Documentation changes
 
@@ -948,19 +1023,28 @@ The owner approved five sequential work packages. Each is one branch under `m-8/
 | --- | --- | --- | --- |
 | WP-1 | `m-8/wp-1` | Documentation/status reconciliation with this spec: rendering/assets/API/guide/threading/nativeaot/projects/logging/contributing/roadmap/README; mark M8 in progress. No code. | Docs check; all conflicting statements fixed; no code. |
 | WP-2 | `m-8/wp-2` | (Complete) Shader compiler tool + Silk.NET.Shaderc 2.23.0 + GLSL/pipeline/layout/samplers; camera projection/rounding; public `WorldToScreen`/`ScreenToWorld`/`WorldSize`; deterministic math/plan/instance-layout tests. | Zero-warning build; pipeline path compiles; public helper tests; format/docs. |
-| WP-3 | `m-8/wp-3` | `RendererStartInfo.Assets`; texture page cache/prefetch/pool/placeholder/upload fence/dynamic capacity/bindless; public `RenderStats` type/`IEngine.RenderStats`; fake-`IAssets` tests. | Page state machine/placeholder/growth/limit tests; no public Render type; no leak. |
+| WP-3 | `m-8/wp-3` | (Complete) `RendererStartInfo.Assets`; texture page cache/prefetch/pool/placeholder/upload fence/dynamic capacity/bindless; public `RenderStats` type/`IEngine.RenderStats`; fake-`IAssets` tests. | Page state machine/placeholder/growth/limit tests; no public Render type; no leak. |
 | WP-4 | `m-8/wp-4` | Draw integration: per-camera passes, sort/filter/validity/flips, growable instance buffers, stats publishing, public `CaptureFrameAsync`, GPU rendering/readback-contract tests. | One draw per non-empty camera; no safety pass; validation zero; readback contract; allocation tests. |
 | WP-5 | `m-8/wp-5` | Pong/AOT gate, 165 FPS benchmark, manual visual evidence, final docs, full gates, PR. | AOT zero warnings/runs; benchmark evidence; PR; docs. |
 
 Dependencies: WP-1 → WP-2 → WP-3 → WP-4 → WP-5. Shared Vulkan/docs files rule out parallel waves.
 
-**As-built status (2026-10-31):** WP-1 (`m-8/wp-1`) and WP-2 (`m-8/wp-2`) are complete. WP-2 landed
-the build-only shader compiler and MSBuild integration, the GLSL/SPIR-V modules, the internal sprite
-pipeline (descriptor-set layout, 64-byte push-constant pipeline layout, pipeline-per-sRGB-format, and
-sampler cache) created/destroyed by both renderers, the shared camera projection/rounding helper, the
-public `WorldToScreen`/`ScreenToWorld`/`WorldSize` members, and the pure sprite planner/quad/96-byte
-instance layout with deterministic tests. It records no descriptor writes, passes, or draws
-(WP-3/WP-4). WP-3–WP-5 remain pending.
+**As-built status (2026-10-31):** WP-1 (`m-8/wp-1`), WP-2 (`m-8/wp-2`), and WP-3 (`m-8/wp-3`) are
+complete. WP-2 landed the build-only shader compiler and MSBuild integration, the GLSL/SPIR-V
+modules, the internal sprite pipeline (descriptor-set layout, 64-byte push-constant pipeline layout,
+pipeline-per-sRGB-format, and sampler cache) created/destroyed by both renderers, the shared camera
+projection/rounding helper, the public `WorldToScreen`/`ScreenToWorld`/`WorldSize` members, and the
+pure sprite planner/quad/96-byte instance layout with deterministic tests. It records no descriptor
+writes, passes, or draws (WP-4). WP-3 added the required internal `RendererStartInfo.Assets` seam, the
+internal `Bork2d.Render.Textures` page subsystem (one page per path, async `IAssets` prefetch,
+content validation, the generated 8×8 placeholder uploaded and resident at startup, a device-local
+image suballocator, a host-visible staging pool, per-page one-shot uploads with fences, bindless
+descriptor writes, and dynamic capacity up to the effective update-after-bind limit with an explicit
+limit failure), the replacement per-frame resources (binding 0 instance SSBO plus binding 1 variable
+bindless set), the extended `VulkanDeviceLimits`, the public `RenderStats` record struct and
+`IEngine<T>.RenderStats` with the runtime-installed stats source, and 58 deterministic tests plus
+GPU placeholder/validation evidence. Both GPU renderer tests assert the placeholder is resident with
+zero validation errors and a leak-free shutdown. WP-4–WP-5 remain pending.
 
 ## 13. Acceptance criteria
 
@@ -969,8 +1053,8 @@ instance layout with deterministic tests. It records no descriptor writes, passe
    pass.
 2. **Public API.** Only the §6.9 additions: `ICamera.WorldToScreen`/`ScreenToWorld`/`WorldSize`,
    `IEngine.RenderStats`, `IEngine.CaptureFrameAsync`; public-surface/dependency tests agree; no
-   public Render type; no other public member. WP-2 makes the three camera members `Current`;
-   `RenderStats`/`CaptureFrameAsync` remain `Planned`.
+   public Render type; no other public member. WP-2 makes the three camera members `Current`; WP-3
+   makes `RenderStats` `Current`; `CaptureFrameAsync` remains `Planned` (WP-4).
 3. **Cameras.** Projection/viewport/aspect/Y orientation are correct; half-up rounding/clamping;
    invalid cameras skip the whole camera with diagnostics; split-screen and camera order match §6.8.
 4. **Screen/world helpers.** Round-trip/viewport/offset/rotation behavior, `WorldSize`, invalid-camera
@@ -978,8 +1062,10 @@ instance layout with deterministic tests. It records no descriptor writes, passe
 5. **Sprites.** Size/pivot/UV/tint/transform/flips are correct; malformed fields fatal; non-Quad/
    null/invalid-layer skip; pending pages skip; failed pages draw the placeholder.
 6. **Texture pages.** `IAssets` seam works; async prefetch never blocks the render thread; separate
-   upload submit/fence; one page per path; placeholder for content failures; pool/suballocator;
-   dynamic capacity to the device limit; explicit failure at the limit.
+   upload submit/fence; one page per path; placeholder for content failures (with the approved
+   declared-dimension sizing); pool/suballocator; dynamic capacity to the device limit; explicit
+   failure at the limit. WP-3 implements the subsystem and startup placeholder and proves it with
+   fake-`IAssets` and GPU tests; the draw-time `EnsurePage` call is WP-4.
 7. **Draw/passes.** Exactly one draw per non-empty camera; per-camera passes with the approved
    load ops; no frame-level safety pass; empty `Clear.Color` clear-only pass; zero-camera/no-clear
    behavior documented and tested; one dynamic-rendering pass per camera.

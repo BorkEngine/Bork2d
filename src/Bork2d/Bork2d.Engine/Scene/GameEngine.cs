@@ -38,12 +38,15 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     private const int ExitStopped = 2;
 
     private readonly Lock _structuralLock = new();
+    private readonly Lock _renderStatsLock = new();
     private readonly SceneRoot _root;
     private readonly SnapshotCapture<TLayer> _capture;
     private readonly IInput? _input;
     private readonly ILoggerFactory _loggerFactory;
     private int _exitState;
     private Action? _exitCallback;
+    private Func<RenderStats>? _renderStatsSource;
+    private RenderStats _renderStats;
 
     internal GameEngine(
         ITime time,
@@ -80,6 +83,56 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     public ILoggerFactory LoggerFactory => _loggerFactory;
 
     public ISceneRoot Root => _root;
+
+    public RenderStats RenderStats
+    {
+        get
+        {
+            // The host installs a source after the renderer exists; headless runs never do and keep
+            // returning default (M8 §6.9). Reading is allocation-free and never blocks on the GPU.
+            Func<RenderStats>? source = Volatile.Read(ref _renderStatsSource);
+            if (source is not null)
+            {
+                try
+                {
+                    RenderStats current = source();
+                    lock (_renderStatsLock)
+                    {
+                        _renderStats = current;
+                    }
+
+                    return current;
+                }
+                catch (Exception)
+                {
+                    // The public getter never throws (M8 §6.9); the last consistent snapshot wins.
+                }
+            }
+
+            lock (_renderStatsLock)
+            {
+                return _renderStats;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Installs (or clears) the host's render-stats source (M8 §6.9).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The runtime installs a source that reads the renderer's snapshot after the renderer is
+    /// created, so the tick thread observes the last completed frame without touching Vulkan.
+    /// Headless runs never install one and <see cref="RenderStats"/> stays <see langword="default"/>.
+    /// </para>
+    /// <para>
+    /// The source must be cheap, allocation-free, and thread-safe; the getter calls it on the
+    /// reader's thread. If it throws, the getter returns the last value it observed.
+    /// </para>
+    /// </remarks>
+    /// <param name="source">The source, or <see langword="null"/> to return the last snapshot.</param>
+    internal void SetRenderStatsSource(Func<RenderStats>? source)
+        => Volatile.Write(ref _renderStatsSource, source);
 
     /// <summary>
     /// Gets a value indicating whether <see cref="Exit"/> was called while the run is active.

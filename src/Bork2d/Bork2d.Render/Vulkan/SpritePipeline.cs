@@ -1,5 +1,6 @@
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
+using Bork2d.Render.Textures;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
 
@@ -83,8 +84,9 @@ internal sealed unsafe class SpritePipeline : IDisposable
     internal PipelineLayout PipelineLayout => _pipelineLayout;
 
     /// <summary>
-    /// Gets the fixed layout maximum for the bindless sampler array: the device's
-    /// <c>maxPerStageDescriptorUpdateAfterBindSampledImages</c>.
+    /// Gets the fixed layout maximum for the bindless sampler array: the smaller of the device's
+    /// <c>maxPerStageDescriptorUpdateAfterBindSampledImages</c> and
+    /// <c>maxDescriptorSetUpdateAfterBindSampledImages</c>.
     /// </summary>
     internal uint MaxTexturePages => _maxTexturePages;
 
@@ -104,13 +106,10 @@ internal sealed unsafe class SpritePipeline : IDisposable
         ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(logger);
 
-        uint maxTexturePages = device.Limits.MaxPerStageDescriptorUpdateAfterBindSampledImages;
-        if (maxTexturePages == 0)
-        {
-            throw new Bork2dException(
-                "The selected Vulkan device cannot support the sprite bindless texture array: "
-                    + "maxPerStageDescriptorUpdateAfterBindSampledImages is zero.");
-        }
+        uint maxTexturePages = (uint)TexturePageCapacity.EffectiveLimit(
+            device.Limits.MaxPerStageDescriptorUpdateAfterBindSampledImages,
+            device.Limits.MaxDescriptorSetUpdateAfterBindSampledImages);
+        TexturePageCapacity.EnsureSupportsInitialCapacity((int)maxTexturePages);
 
         Vk vk = device.Api;
         Device logicalDevice = device.Device;

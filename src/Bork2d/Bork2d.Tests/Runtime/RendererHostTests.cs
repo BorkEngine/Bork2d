@@ -61,11 +61,48 @@ public sealed class RendererHostTests
         Assert.Equal(1280, startInfo.Width);
         Assert.Equal(720, startInfo.Height);
         Assert.True(startInfo.ValidationRequested);
+        Assert.Same(game.Engine!.Assets, startInfo.Assets);
         Assert.NotNull(instanceFactory.LastRequest);
         Assert.True(instanceFactory.LastRequest!.ValidationRequested);
         Assert.Equal("Loop test", instanceFactory.LastRequest.ApplicationName);
         Assert.Equal("Bork2d", instanceFactory.LastRequest.EngineName);
         Assert.Contains("VK_KHR_surface", instanceFactory.LastRequest.RequiredExtensions);
+    }
+
+    [Fact]
+    public void TheHostInstallsTheRenderersStatsSnapshot()
+    {
+        var sdl = new FakeSdlApi();
+        var expected = new Bork2d.Engine.Rendering.RenderStats(
+            FrameSequence: 4,
+            FramebufferWidth: 1280,
+            FramebufferHeight: 720,
+            DrawCalls: 1,
+            Instances: 3,
+            Cameras: 1,
+            NonEmptyCameras: 1,
+            TexturePages: 2,
+            TexturePageCapacity: 256,
+            SkippedSprites: 0,
+            ValidationErrors: 0,
+            ValidationWarnings: 0);
+        var renderer = new FakeRenderer { AutoReady = true, RenderStats = expected };
+        var factory = new FakeRendererFactory(renderer);
+        var instanceFactory = new FakeVulkanInstanceFactory();
+        var observed = default(Bork2d.Engine.Rendering.RenderStats);
+        var game = new ScriptedGame<GameLayer>();
+        game.OnSetup = engine => Assert.Equal(expected, engine.RenderStats);
+        game.OnTick = () =>
+        {
+            observed = game.Engine!.RenderStats;
+            game.Engine!.Exit();
+        };
+
+        using var app = WindowedTestSupport.Builder(sdl, game, factory, instanceFactory).Build();
+        AppTestSupport.RunToCompletion(app);
+
+        Assert.Equal(expected, observed);
+        Assert.Equal(1, game.TickCount);
     }
 
     [Fact]

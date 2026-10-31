@@ -12,11 +12,12 @@
 > tick is backpressured by the ring and the only timer is the minimized-only 30 Hz tick cap. Headless
 > runs the K1 paced loop with the L2 synthesized clock, the M4/F1 strict grid, and unbounded catch-up
 > (Q11–Q13, F5–F8). The sprite renderer (M8) is **in progress** (WP-2 pipeline/camera helpers/instance
-> planning are in place; draws are pending). The windowed/offscreen AOT/Pong gate is
+> planning and WP-3 texture pages/`RenderStats` are in place; draws are pending WP-4). The
+> windowed/offscreen AOT/Pong gate is
 > proven through M6 and re-proven for M7 with the 120-tick headless default and `--headless --ticks
 > N` (Q15=O2/F3), `--windowed --ticks 120`, and `--offscreen --ticks 120`. Status detail is in
 > [the roadmap](../roadmap.md). The
-> engine suite is 1158 tests (1141 deterministic + 17 opt-in/conditional).
+> engine suite is 1310 tests (1293 deterministic + 17 opt-in/conditional).
 >
 > Source file types are registered asset processors with `[GenerateShape]` sidecars when settings are
 > required; the built-in texture importer is one processor. Data types are registered explicitly with
@@ -80,7 +81,8 @@ there is no descriptor and no generated host. See [asset processors](asset-proce
   clock, a positive tick rate, a strict absolute grid, and unbounded catch-up (Q11–Q13, F5–F8).
   Offscreen runs a real Vulkan render thread against a fixed sRGB target and records one discarded
   frame per consumed snapshot; the host publishes one snapshot per tick and backpressures the tick.
-  Readback is M8/M10.
+  Readback (`CaptureFrameAsync`) is M8 WP-4; WP-3 already creates the texture pages and uploads the
+  placeholder.
 - **Diagnostics and quality.** Microsoft.Extensions.Logging/ZLogger, `IEngine.LoggerFactory`;
   warnings and style violations are build errors.
 - **A short, composable startup API** through a builder in `Bork2d.Runtime`.
@@ -180,10 +182,13 @@ Source file types are registered processors (D-036).
 18. **Headless never calls SDL or the Vulkan loader**, creates no instance/device/platform/renderer/ring/snapshot, runs `Setup` → `Tick`… → `Teardown` until `Exit` (Q11=K1), and paces with a synthesized clock on a strict grid (Q12/Q13).
 19. **Windowed and offscreen require Vulkan 1.3**: the OS/window thread owns the windowed instance/surface; the render thread owns the device, swapchain, offscreen targets, frames, and recording. No renderer thread outlives `Run()`.
 20. **`Setup` runs before renderer readiness and is never skipped because the renderer failed**; no `Tick` runs before readiness (D-M6-06/D-M6-14).
-21. **Every frame starts with an opaque-black clear and has no depth**; the M7 renderer records one
-    frame per consumed snapshot and adds no camera, draw, or readback. The host publishes exactly one
-    snapshot per completed windowed/offscreen tick (including the `Exit` tick) after `Tick` returns,
-    with the slot held in the ring until the consuming frame's fence.
+21. **There is no frame-level safety clear and no depth**: M8 replaces the M7 opaque-black clear with
+    one dynamic-rendering pass per camera (WP-4), `Clear.Color` clearing only that camera's rect and
+    `Clear.None`/`Clear.Depth` loading; a frame with no cameras clears nothing. The renderer records
+    one frame per consumed snapshot; WP-3 creates the texture pages and uploads the placeholder at
+    startup, and WP-4 adds the per-camera draws. The host publishes exactly one snapshot per
+    completed windowed/offscreen tick (including the `Exit` tick) after `Tick` returns, with the slot
+    held in the ring until the consuming frame's fence.
 
 ## 7. Read next
 

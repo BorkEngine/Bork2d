@@ -33,6 +33,12 @@ internal sealed class VulkanRendererFactory : IRendererFactory
     public IRenderer Create(RendererStartInfo startInfo)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
+        if (startInfo.Assets is null)
+        {
+            throw new Bork2dException(
+                "Vulkan rendering requires the app's IAssets seam in RendererStartInfo so the "
+                    + "renderer can prefetch texture descriptors and payloads (M8 §6.5).");
+        }
 
         return startInfo.Mode switch
         {

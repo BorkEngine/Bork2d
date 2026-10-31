@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using Bork2d.Engine;
+using Bork2d.Engine.Rendering;
 using Bork2d.Render.Diagnostics;
 using Bork2d.Render.Handoff;
+using Bork2d.Render.Textures;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Core;
 using Silk.NET.Vulkan;
@@ -35,7 +37,7 @@ namespace Bork2d.Render.Vulkan;
 /// renderer never calls SDL and never destroys the host-owned instance or surface.
 /// </para>
 /// </remarks>
-internal sealed unsafe class VulkanRenderer : IRenderer
+internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
 {
     private const int FramesInFlight = 2;
     private const string ThreadName = "Bork2d.Render";
@@ -48,12 +50,14 @@ internal sealed unsafe class VulkanRenderer : IRenderer
     private readonly SnapshotControlWait _wait;
     private readonly ManualResetEventSlim _ready = new(initialState: false);
     private readonly ManualResetEventSlim _progress = new(initialState: false);
+    private readonly RenderStatsBoard _stats = new();
 
     private WindowedFrame?[] _frames = [];
     private Thread? _thread;
     private VulkanDevice? _device;
     private WindowedSwapchain? _swapchain;
     private SpritePipeline? _spritePipeline;
+    private TexturePageStore? _pages;
     private KhrSurface? _surfaceApi;
     private KhrSwapchain? _swapchainApi;
     private IVulkanInstance? _instance;
@@ -70,6 +74,10 @@ internal sealed unsafe class VulkanRenderer : IRenderer
     private int _lastPresentResult;
     private int _validationErrorCount;
     private int _validationWarningCount;
+    private int _loggedPageCount;
+    private int _loggedPageCapacity;
+    private int _loggedPageGrowths;
+    private int _loggedFailedPaths;
     private Result _lastResult = Result.Success;
     private WindowExtent _requestedExtent;
     private bool _fullscreen;
@@ -80,9 +88,17 @@ internal sealed unsafe class VulkanRenderer : IRenderer
 
     /// <summary>Initializes a new instance of the <see cref="VulkanRenderer"/> class.</summary>
     /// <param name="startInfo">The validated windowed start request.</param>
+    /// <exception cref="Bork2dException">The start request has no asset seam.</exception>
     internal VulkanRenderer(RendererStartInfo startInfo)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
+        if (startInfo.Assets is null)
+        {
+            throw new Bork2dException(
+                "Windowed Vulkan rendering requires the app's IAssets seam so the renderer can "
+                    + "prefetch texture descriptors and payloads (M8 §6.5).");
+        }
+
         _startInfo = startInfo;
         _logger = startInfo.LoggerFactory.CreateLogger(RenderLog.Category);
         _requestedExtent = new WindowExtent(startInfo.Width, startInfo.Height);
@@ -107,6 +123,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         ValidationWarningCount: Volatile.Read(ref _validationWarningCount),
         LastFrameNumber: Volatile.Read(ref _lastFrameNumber),
         LastPresentResult: Volatile.Read(ref _lastPresentResult));
+
+    /// <inheritdoc/>
+    public RenderStats RenderStats => _stats.Current;
 
     /// <inheritdoc/>
     public Exception? FatalException => _control.FatalException;
@@ -150,6 +169,31 @@ internal sealed unsafe class VulkanRenderer : IRenderer
 
     /// <summary>Gets a value indicating whether the sprite pipeline was created at startup.</summary>
     internal bool HasSpritePipeline => _spritePipeline is not null;
+
+    /// <summary>Gets the texture-page cache (GPU tests observe the placeholder and counts).</summary>
+    internal TexturePageStore? PageStore => _pages;
+
+    /// <inheritdoc/>
+    void IBindlessPageWriter.EnsureCapacity(int capacity)
+    {
+        // Growth happens between frames: the device is idle and every in-flight frame's fence has
+        // signaled before the per-frame descriptor pools/sets are recreated.
+        WaitForDeviceIdle("texture page capacity growth");
+
+        for (var index = 0; index < _frames.Length; index++)
+        {
+            _frames[index]?.InstanceResources.RecreateBindless(capacity);
+        }
+    }
+
+    /// <inheritdoc/>
+    void IBindlessPageWriter.WritePage(int pageIndex, ImageView imageView, Sampler sampler)
+    {
+        for (var index = 0; index < _frames.Length; index++)
+        {
+            _frames[index]?.InstanceResources.WritePage(pageIndex, imageView, sampler);
+        }
+    }
 
     /// <inheritdoc/>
     public SnapshotSlot? AcquireSnapshotSlot() => _consumer.Ring.Acquire();
@@ -361,6 +405,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             }
 
             CreateFrames();
+            CreatePageStore();
             _clearLabel = _instance.CreateDebugLabel("Bork2d clear pass");
             UpdateValidationCounters();
             if (_control.IsStopRequested)
@@ -580,6 +625,11 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         {
             return;
         }
+
+        // Advance the texture-page state machine once per frame, before recording: completed
+        // descriptor/payload loads prepare uploads, completed uploads write their bindless
+        // descriptor, and a capacity growth recreates the frame sets while the device is idle.
+        _pages!.Pump();
 
         uint imageIndex = 0;
         Result acquire = _swapchainApi!.AcquireNextImage(
@@ -971,6 +1021,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer
     private void CreateFrames()
     {
         VulkanDevice device = _device!;
+        SpritePipeline pipeline = _spritePipeline
+            ?? throw new Bork2dException(
+                "The windowed renderer cannot create frames without the sprite pipeline.");
         _frames = new WindowedFrame?[FramesInFlight];
         for (var index = 0; index < FramesInFlight; index++)
         {
@@ -980,6 +1033,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer
                 device.PhysicalDevice,
                 index,
                 device.QueueFamilyIndex,
+                pipeline,
+                TexturePageCapacity.Initial,
+                device.Limits.MaxStorageBufferRange,
                 _instance,
                 _logger);
             _frames[index] = frame;
@@ -989,6 +1045,26 @@ internal sealed unsafe class VulkanRenderer : IRenderer
                 frame.CommandBuffer.Handle,
                 $"Bork2d frame {index} command buffer");
         }
+    }
+
+    /// <summary>
+    /// Creates the texture-page cache, uploads the placeholder (waiting its fence at startup), and
+    /// makes it resident at index 0. Failure is a renderer startup failure.
+    /// </summary>
+    private void CreatePageStore()
+    {
+        VulkanDevice device = _device!;
+        SpritePipeline pipeline = _spritePipeline
+            ?? throw new Bork2dException(
+                "The windowed renderer cannot create texture pages without the sprite pipeline.");
+        var gpu = new VulkanTexturePages(device, pipeline, this, _instance, _logger);
+        _pages = new TexturePageStore(
+            _startInfo.Assets,
+            gpu,
+            (int)pipeline.MaxTexturePages,
+            (int)device.Limits.MaxImageDimension2D,
+            _logger);
+        _pages.Start();
     }
 
     /// <summary>
@@ -1155,14 +1231,21 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         // snapshot slot any more, so every held slot returns to Free before teardown.
         ReleaseHeldSnapshots("shutdown");
 
+        CapturePageCounters();
+
         _swapchain?.Dispose();
         _swapchain = null;
 
+        // Frame descriptor sets/pools are destroyed before the page images/views they reference,
+        // and the pages before the pipeline that owns their samplers and the device itself.
         for (var index = 0; index < _frames.Length; index++)
         {
             _frames[index]?.Dispose();
             _frames[index] = null;
         }
+
+        _pages?.Destroy();
+        _pages = null;
 
         _spritePipeline?.Destroy();
         _spritePipeline = null;
@@ -1206,6 +1289,21 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         }
     }
 
+    /// <summary>Records the page counters before the page store is destroyed for the stop log.</summary>
+    private void CapturePageCounters()
+    {
+        TexturePageStore? pages = _pages;
+        if (pages is null)
+        {
+            return;
+        }
+
+        _loggedPageCount = pages.TexturePageCount;
+        _loggedPageCapacity = pages.TexturePageCapacityInEntries;
+        _loggedPageGrowths = pages.GrowthCount;
+        _loggedFailedPaths = pages.FailedPathCount;
+    }
+
     private void LogStarted()
     {
         WindowedSwapchain? swapchain = _swapchain;
@@ -1219,7 +1317,10 @@ internal sealed unsafe class VulkanRenderer : IRenderer
                 + "colorSpace={ColorSpace}, presentMode={PresentMode}, images={ImageCount}, "
                 + "framesInFlight={FramesInFlight}, handoff={Handoff}, ringDepth={RingDepth}, "
                 + "oneFramePerSnapshot={OneFramePerSnapshot}, instanceResources={InstanceResources}, "
-                + "validation={Validation}, framesPresented={FramesPresented}, "
+                + "instanceCapacity={InstanceCapacity}, texturePages={TexturePages}, "
+                + "texturePageCapacity={TexturePageCapacity}, bindlessLimit={BindlessLimit}, "
+                + "placeholder={Placeholder}, validation={Validation}, "
+                + "framesPresented={FramesPresented}, "
                 + "framesDiscarded={FramesDiscarded}, swapchainRecreations={SwapchainRecreations}, "
                 + "validationErrors={ValidationErrors}, validationWarnings={ValidationWarnings}, "
                 + "stopReason={StopReason}.",
@@ -1235,6 +1336,11 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             SnapshotRing.SlotCapacity,
             "on",
             HasInstanceResources ? "on" : "off",
+            FrameInstanceResources.InstanceCapacity,
+            _pages?.TexturePageCount ?? 0,
+            _pages?.TexturePageCapacityInEntries ?? 0,
+            _spritePipeline?.MaxTexturePages ?? 0,
+            _pages?.IsPlaceholderReady == true ? "on" : "off",
             _instance?.ValidationEnabled == true ? "on" : "off",
             Volatile.Read(ref _framesPresented),
             0,
@@ -1254,7 +1360,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer
                 + "backpressureWaits={BackpressureWaits}, maxLiveSnapshots={MaxLiveSnapshots}, "
                 + "suspendedConsumptions={SuspendedConsumptions}, "
                 + "framesPresented={FramesPresented}, framesDiscarded={FramesDiscarded}, "
-                + "swapchainRecreations={SwapchainRecreations}, "
+                + "swapchainRecreations={SwapchainRecreations}, texturePages={TexturePages}, "
+                + "texturePageCapacity={TexturePageCapacity}, pageGrowths={PageGrowths}, "
+                + "failedPages={FailedPages}, "
                 + "validationErrors={ValidationErrors}, validationWarnings={ValidationWarnings}, "
                 + "lastFrameNumber={LastFrameNumber}, lastPresentResult={LastPresentResult}.",
             nameof(RendererMode.Windowed),
@@ -1268,6 +1376,10 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             Volatile.Read(ref _framesPresented),
             0,
             Volatile.Read(ref _swapchainRecreations),
+            _loggedPageCount,
+            _loggedPageCapacity,
+            _loggedPageGrowths,
+            _loggedFailedPaths,
             Volatile.Read(ref _validationErrorCount),
             Volatile.Read(ref _validationWarningCount),
             Volatile.Read(ref _lastFrameNumber),
