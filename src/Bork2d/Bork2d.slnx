@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="Bork2d.Bake/Bork2d.Bake.csproj" />
+  <Project Path="Bork2d.Engine/Bork2d.Engine.csproj" />
+  <Project Path="Bork2d.Render/Bork2d.Render.csproj" />
+  <Project Path="Bork2d.Runtime/Bork2d.Runtime.csproj" />
+  <Project Path="Bork2d.Tests/Bork2d.Tests.csproj" />
+</Solution>

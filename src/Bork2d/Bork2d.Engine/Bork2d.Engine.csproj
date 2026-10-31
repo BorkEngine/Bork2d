@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <IsAotCompatible>true</IsAotCompatible>
+        <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+        <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- The contract needs PolyType for the IShapeable<T> constraint and the generated public
+             shapes; the pack implementation uses Nerdbank.MessagePack generated shapes and XXH3
+             hashing. No GPU/OS/Silk/ZLogger/Avalonia dependency belongs in the engine. -->
+        <PackageReference Include="Nerdbank.MessagePack" Version="1.4.95" />
+        <PackageReference Include="PolyType" Version="1.4.1" />
+        <PackageReference Include="System.IO.Hashing" Version="11.0.0-rc.1.26425.128" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Scene, time, serialization, and asset implementations are internal. The composition
+             root, renderer, bake tooling, editor, and tests see them; Bake needs the canonical
+             asset path grammar. -->
+        <InternalsVisibleTo Include="Bork2d.Bake" />
+        <InternalsVisibleTo Include="Bork2d.Editor" />
+        <InternalsVisibleTo Include="Bork2d.Render" />
+        <InternalsVisibleTo Include="Bork2d.Runtime" />
+        <InternalsVisibleTo Include="Bork2d.Tests" />
+    </ItemGroup>
+
+</Project>

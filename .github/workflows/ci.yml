@@ -1,0 +1,47 @@
+name: CI
+
+# Human decision: CI runs on pull requests targeting develop and after a merge to develop.
+# No CI on milestone/task branch pushes. AOT publish/run stays a local gate.
+on:
+  pull_request:
+    branches:
+      - develop
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build, format, and test
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify documentation links
+        shell: pwsh
+        run: ./scripts/check-docs.ps1
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          # Hosted runners do not ship the .NET 11 RC. global.json pins the same feature band
+          # (11.0.100-rc.1) and rolls forward to this patch.
+          dotnet-version: 11.0.100-rc.1.26425.128
+
+      - name: Restore
+        run: dotnet restore src/Bork2d/Bork2d.slnx
+
+      - name: Verify formatting
+        run: dotnet format src/Bork2d/Bork2d.slnx --verify-no-changes --no-restore
+
+      - name: Build (Debug)
+        run: dotnet build src/Bork2d/Bork2d.slnx -c Debug --no-restore
+
+      - name: Test (Debug)
+        run: dotnet test src/Bork2d/Bork2d.slnx -c Debug --no-build --no-restore

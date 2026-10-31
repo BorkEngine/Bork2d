@@ -1,0 +1,11 @@
+paddle = "sprites/paddle"
+ball = "sprites/ball"
+paddleSpeed = 14.0
+paddleSpeedMultiplier = 0.05
+ballSpeed = 12.0
+winningScore = 11
+leftPaddleTint = [1.0, 0.1, 0.1, 1.0]
+rightPaddleTint = [0.1, 0.3, 1.0, 1.0]
+
+[bork2d]
+type = "Pong.Common.GameSettings"
