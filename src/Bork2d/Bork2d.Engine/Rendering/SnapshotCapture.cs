@@ -18,11 +18,19 @@ namespace Bork2d.Engine.Rendering;
 /// <para>
 /// <b>Traversal.</b> The pass uses one explicit reusable stack of nodes paired with their evaluated
 /// parent world matrix instead of recursion, so a deep hierarchy cannot exhaust the call stack. A
-/// node's world matrix is composed exactly once as <c>local * parentWorld</c>, where
-/// <c>parentWorld</c> is the matrix of the node that owns it and the root's direct children use the
-/// identity. The stack arrays grow to the observed high-water mark and allocate nothing after
-/// warm-up; every used reference is cleared after the pass, so a capture never retains a detached
-/// node.
+/// node's world matrix is composed exactly once by whichever registered producer matches it, and
+/// the root's direct children use the identity parent world matrix. The stack arrays grow to the
+/// observed high-water mark and allocate nothing after warm-up; every used reference is cleared
+/// after the pass, so a capture never retains a detached node.
+/// </para>
+/// <para>
+/// <b>Producers.</b> Capture has no central renderable switch. The engine registers its camera and
+/// sprite producers plus any custom renderable producers, in order, and each node is offered to
+/// them in that order; the first match captures the node's typed record and returns its world
+/// matrix. When no producer matches, the pass uses the plain
+/// <see cref="Transform.CaptureLocalMatrix"/> path so non-renderable transforms still contribute a
+/// world matrix to their children. A custom renderable kind is added by a new definition or
+/// producer, never by editing this class.
 /// </para>
 /// <para>
 /// <b>Locking.</b> The whole traversal holds the existing engine structural lock. Each node's
@@ -32,36 +40,44 @@ namespace Bork2d.Engine.Rendering;
 /// held across a wait and no new lock ordering is added.
 /// </para>
 /// <para>
-/// <b>What is captured.</b> Every reachable camera and sprite renderable is copied into
-/// value-only <see cref="CameraSnapshot"/>/<see cref="SpriteSnapshot"/> entries; other transforms
-/// are traversed but not captured. World matrices include the parent hierarchy, and
-/// <typeparamref name="TLayer"/> is flattened to a raw <see cref="uint"/> mask (bit 31 survives;
-/// invalid <c>0</c>/multi-bit values are preserved, Q3=C2). A sprite carries the immutable
-/// <see cref="Assets.SpriteRenderData"/> frozen when its asset was assigned, never the live
-/// <see cref="Assets.SpriteAsset"/>. The capture object is reused per engine, so a warm capture
-/// allocates nothing.
+/// <b>What is captured.</b> Cameras land in the reserved camera buffer, sprites in the reserved
+/// sprite buffer, and each custom renderable in its producer's typed buffer. The records are
+/// value-only snapshot structs; world matrices include the parent hierarchy and
+/// <c>TLayer</c> is flattened to a raw <see cref="uint"/> mask by the definition that captures it
+/// (bit 31 survives; invalid <c>0</c>/multi-bit values are preserved, Q3=C2). A sprite carries the
+/// immutable <see cref="Assets.SpriteRenderData"/> frozen when its asset was assigned, never the
+/// live <see cref="Assets.SpriteAsset"/>. The capture object is reused per engine, so a warm
+/// capture allocates nothing.
 /// </para>
 /// </remarks>
-/// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
-internal sealed class SnapshotCapture<TLayer>
-    where TLayer : struct, Enum
+internal sealed class SnapshotCapture
 {
     private readonly Lock _structuralLock;
     private readonly SceneRoot _root;
+    private readonly IReadOnlyList<IRenderDataProducer> _producers;
     private Transform?[] _nodeStack = Array.Empty<Transform?>();
     private Matrix3x2[] _worldStack = Array.Empty<Matrix3x2>();
     private int _stackCount;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SnapshotCapture{TLayer}"/> class.
+    /// Initializes a new instance of the <see cref="SnapshotCapture"/> class.
     /// </summary>
     /// <param name="structuralLock">The engine-owned structural lock shared by the scene nodes.</param>
     /// <param name="root">The scene root owned by the same engine.</param>
-    internal SnapshotCapture(Lock structuralLock, SceneRoot root)
+    /// <param name="producers">
+    /// The registered render-data producers in capture order. The camera and sprite producers write
+    /// the reserved snapshot slots; custom producers use slots assigned by the renderable registry.
+    /// </param>
+    internal SnapshotCapture(
+        Lock structuralLock,
+        SceneRoot root,
+        IReadOnlyList<IRenderDataProducer> producers)
     {
         ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(producers);
         _structuralLock = structuralLock;
         _root = root;
+        _producers = producers;
     }
 
     /// <summary>
@@ -103,37 +119,27 @@ internal sealed class SnapshotCapture<TLayer>
     }
 
     /// <summary>
-    /// Copies one node under its single per-object lock acquisition and returns its world matrix.
+    /// Offers one node to the registered producers in order and returns its world matrix.
     /// </summary>
     /// <remarks>
-    /// The world matrix is composed after the capture method releases the per-object lock.
+    /// The first matching producer takes the node's per-object lock once and composes the world
+    /// matrix outside it. A non-matching node uses the plain transform capture so its children
+    /// still receive an evaluated world matrix.
     /// </remarks>
-    private static Matrix3x2 CaptureNode(
+    private Matrix3x2 CaptureNode(
         Transform node,
         FrameSnapshot snapshot,
         in Matrix3x2 parentWorld)
     {
-        switch (node)
+        for (var index = 0; index < _producers.Count; index++)
         {
-            case Camera<TLayer> camera:
+            if (_producers[index].TryCapture(node, in parentWorld, snapshot, out Matrix3x2 world))
             {
-                Matrix3x2 local = camera.CaptureForSnapshot(out CameraSnapshot cameraSnapshot);
-                Matrix3x2 world = local * parentWorld;
-                snapshot.AddCamera(cameraSnapshot with { WorldMatrix = world });
                 return world;
             }
-
-            case SpriteRender<TLayer> sprite:
-            {
-                Matrix3x2 local = sprite.CaptureForSnapshot(out SpriteSnapshot spriteSnapshot);
-                Matrix3x2 world = local * parentWorld;
-                snapshot.AddSprite(spriteSnapshot with { WorldMatrix = world });
-                return world;
-            }
-
-            default:
-                return node.CaptureLocalMatrix() * parentWorld;
         }
+
+        return node.CaptureLocalMatrix() * parentWorld;
     }
 
     /// <summary>
