@@ -13,7 +13,7 @@ instance/surface, renderer composition, the three host loops, and logging. It ex
 | `WithAssetsPack(string)` | Base pack path (default `assets.pck`). Opened by `Run`, not `Build`. |
 | `WithoutAssets()` | Starts with an empty asset filesystem; overlays may still be mounted later. |
 | `WithHeadless(int ticksPerSecond = 60)` | Selects the no-window, no-GPU mode. |
-| `WithOffscreen(int width, int height)` | Selects windowless rendering to a fixed target. |
+| `WithOffscreen(int width, int height)` | Selects offscreen rendering to a fixed sRGB target. |
 | `WithTitle`, `WithSize`, `WithResizable`, `WithFullscreen`, `WithVSync` | Windowed-only options. |
 | `WithMaxDeltaTime(double)` | Gameplay delta clamp for windowed/offscreen ticks (default `0.25` s). |
 | `WithValidation(bool)` | Requests Vulkan validation layers. Default is on in `DEBUG`, off otherwise. |
@@ -23,9 +23,10 @@ instance/surface, renderer composition, the three host loops, and logging. It ex
 mode. Configuration errors throw `Bork2dException` from `Build`.
 
 `Build()` validates the configuration and creates the logger factory, engine, clock, an unstarted
-asset service, and (for windowed apps) detached window/input proxies. It does not open a pack,
-create a window, render, or start a thread. `Run()` starts the base pack, platform, renderer, and
-game, and is callable once from any thread.
+asset service, and (for windowed apps) detached window/input proxies. Offscreen apps get a
+functional window facade reporting the target extent; headless apps get the throwing window stub. It
+does not open a pack, create an OS window, render, or start a thread. `Run()` starts the base pack,
+platform, renderer, and game, and is callable once from any thread.
 
 ## Host loops
 
@@ -46,8 +47,10 @@ minimized, tick starts are capped at 30 per second; no cap applies once the loop
 
 ### Offscreen
 
-The same handoff loop without SDL, a window, input, or presentation. It renders against a fixed
-sRGB target and discards each frame. It stops on `Exit` or a renderer fatal.
+The same handoff loop without SDL, input, or presentation. It renders against a fixed sRGB target
+and discards each frame. `IEngine.Window` is a functional facade reporting the fixed target extent;
+its title, fullscreen, and cursor setters store inert state and no member throws. It stops on
+`Exit` or a renderer fatal.
 
 ### Headless
 
@@ -68,7 +71,8 @@ Input is frozen at each tick start, so every read during one `Tick` sees the sam
 and release helpers are true for exactly one tick (a press and release inside one interval reports
 both edges with `IsKeyDown` false). Focus loss synthesizes releases for held keys/buttons and clears
 wheel and pending text; focus regain re-seeds state without creating press edges. Input is available
-only in windowed mode and never crosses to the render thread.
+only in windowed mode and never crosses to the render thread. Offscreen apps expose the fixed target
+extent through `IEngine.Window` instead of an SDL window.
 
 ## Lifecycle and failures
 
@@ -76,8 +80,9 @@ only in windowed mode and never crosses to the render thread.
 - `Dispose()` is idempotent and may run before or after `Run`, but throws while a run is active.
   Disposal detaches the root's direct children, detaches proxies, and disposes the stopped asset
   service and logger factory. It never calls `Teardown` again.
-- After a run, every `IAssets`, window, and input member on a retained reference throws
-  `ObjectDisposedException`. `IEngine.RenderStats` stays readable and may keep the last values.
+- After a run, every `IAssets` and input member on a retained reference throws
+  `ObjectDisposedException`; so does every window member of a windowed app. The offscreen window
+  facade stays functional. `IEngine.RenderStats` stays readable and may keep the last values.
 - A platform start failure precedes `Setup`. A renderer factory/start/readiness failure still lets
   `Setup` finish, runs zero ticks, attempts `Teardown`, joins the renderer, and rethrows.
 - A `Setup` failure wins over a renderer failure and runs no `Teardown`. Tick/capture/text/`Teardown`

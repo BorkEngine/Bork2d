@@ -22,8 +22,9 @@ namespace Bork2d.Engine.Scene;
 /// </para>
 /// <para>
 /// The window and input implementations are injected by the composition root: a windowed app gets
-/// internal proxies that the runtime host attaches to a live platform before <c>Setup</c>, while
-/// headless and offscreen apps get the throwing window stub and no input. The exit flag is a
+/// internal proxies that the runtime host attaches to a live platform before <c>Setup</c>, an
+/// offscreen app gets a functional window facade reporting the fixed target extent, and a headless
+/// app gets the throwing window stub. Offscreen and headless apps have no input. The exit flag is a
 /// three-state token so <see cref="Exit"/> becomes a no-op once the host has stopped the run; the
 /// host may install a wake callback that is invoked once on the active-to-requested transition so a
 /// tick blocked on the snapshot ring returns without starting another tick (M7 Q9=I1).

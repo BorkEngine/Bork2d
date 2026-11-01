@@ -32,13 +32,14 @@ concurrent. Exceptions propagate to `Bork2dApp.Run` after cleanup.
 
 | Member | Windowed | Offscreen | Headless |
 | --- | --- | --- | --- |
-| `Window` | Live proxy during the run | Stub; members throw `NotSupportedException` | Stub; members throw `NotSupportedException` |
+| `Window` | Live proxy during the run | Functional facade: `Size` is the fixed target extent, setters are inert, and nothing throws | Stub; members throw `NotSupportedException` |
 | `Input` | Live proxy during the run | Getter throws `NotSupportedException` | Getter throws `NotSupportedException` |
 | `CaptureFrameAsync` | Supported | Supported | Throws `NotSupportedException` |
 | `RenderStats` | Last completed frame | Last completed frame | `default` |
 
-Retained window/input references throw `ObjectDisposedException` after a run. `Exit` may be called
-from any thread; the current tick finishes and the next tick does not start.
+Retained window/input references throw `ObjectDisposedException` after a windowed run; the offscreen
+window facade stays functional. `Exit` may be called from any thread; the current tick finishes and
+the next tick does not start.
 
 ## Scene model
 
@@ -57,9 +58,10 @@ collectible when game code drops them.
 Cameras are transforms plus projection and clear state: normalized `Viewport`, `Size` (half the
 visible height), `CullingMask`, `Clear`, `ClearColor`, and `ZIndex`. `WorldSize`, `WorldToScreen`,
 and `ScreenToWorld` use the engine window's framebuffer size and the same projection math as the
-renderer; they require a windowed framebuffer. A camera's world scale must stay `1` (within
-`1e-4`), and its matrix must be invertible; otherwise the camera is skipped. Camera defaults are a
-full viewport, size `10`, all layers, color clear to black, and `ZIndex` `0`.
+renderer: the windowed window, or the fixed offscreen target extent. Headless mode has no
+framebuffer, so the helpers throw `InvalidOperationException`. A camera's world scale must stay `1`
+(within `1e-4`), and its matrix must be invertible; otherwise the camera is skipped. Camera defaults
+are a full viewport, size `10`, all layers, color clear to black, and `ZIndex` `0`.
 
 Sprite renderables are transforms plus `Sprite`, one-bit `Layer`, linear `Tint`, `ZIndex`, and
 `FlipX`/`FlipY`. `SpriteAsset` is a MessagePack quad description: a `Texture` reference, four

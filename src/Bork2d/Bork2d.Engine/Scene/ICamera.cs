@@ -44,10 +44,11 @@ public interface ICamera<TLayer> : ITransform where TLayer : struct, Enum
     /// </summary>
     /// <value>
     /// <c>(2 * Size * aspect, 2 * Size)</c>, where the aspect is the rounded pixel-viewport width
-    /// divided by its height from the engine window's framebuffer size (physical pixels).
+    /// divided by its height from the engine window's framebuffer size (physical pixels; the fixed
+    /// offscreen target extent in offscreen mode).
     /// </value>
     /// <exception cref="InvalidOperationException">
-    /// The camera is invalid, or the app is headless or offscreen so it has no framebuffer.
+    /// The camera is invalid, or the app is headless so it has no framebuffer.
     /// </exception>
     Vector2 WorldSize { get; }
 
@@ -66,7 +67,7 @@ public interface ICamera<TLayer> : ITransform where TLayer : struct, Enum
     /// A component of <paramref name="world"/> is NaN or infinite.
     /// </exception>
     /// <exception cref="InvalidOperationException">
-    /// The camera is invalid, or the app is headless or offscreen so it has no framebuffer.
+    /// The camera is invalid, or the app is headless so it has no framebuffer.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The windowed app has shut down.</exception>
     Vector2 WorldToScreen(Vector2 world);
@@ -84,7 +85,7 @@ public interface ICamera<TLayer> : ITransform where TLayer : struct, Enum
     /// A component of <paramref name="screen"/> is NaN or infinite.
     /// </exception>
     /// <exception cref="InvalidOperationException">
-    /// The camera is invalid, or the app is headless or offscreen so it has no framebuffer.
+    /// The camera is invalid, or the app is headless so it has no framebuffer.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The windowed app has shut down.</exception>
     Vector2 ScreenToWorld(Vector2 screen);
