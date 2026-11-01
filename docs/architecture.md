@@ -43,13 +43,14 @@ per-object property access uses a per-object lock, with structural-then-object l
 
 The two render target drivers stay separate: `VulkanRenderer` owns swapchain acquire/present,
 resize, recovery, and the minimized drain; `VulkanOffscreenRenderer` owns the fixed sRGB target, its
-one-time layout transition, and the discard path. They compose three shared services instead of
+one-time layout transition, and the discard path. They compose four shared compositions instead of
 duplicating renderer machinery: one `RendererLifecycle` (render thread, readiness, status/stop
 reason, one-shot fatal, snapshot handoff delegations, counters, stats board), one
-`RendererCaptureService` (bounded capture queue, frame-fence retirement, stop/fatal close), and one
-`RendererTextures` (sprite pipeline per output format, texture-page store, bindless page writes). A
-small `IVulkanFrame`/frame-set seam adapts the two frame types to those services. There is no
-renderer inheritance hierarchy.
+`RendererCaptureService` (bounded capture queue, frame-fence retirement, stop/fatal close), one
+`RendererTextures` (sprite pipeline per output format, texture-page store, bindless page writes), and
+one `RenderPassRegistry` (the ordered render passes and the aggregate frame statistics). A small
+`IVulkanFrame`/frame-set seam adapts the two frame types to those services. There is no renderer
+inheritance hierarchy.
 
 ## Frame handoff
 

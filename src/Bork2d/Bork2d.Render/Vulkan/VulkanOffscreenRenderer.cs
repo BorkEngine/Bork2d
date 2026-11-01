@@ -59,7 +59,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
 
     private RendererTextures? _textures;
     private OffscreenTarget? _target;
-    private SpriteFramePlanner? _planner;
+    private RenderPassRegistry? _passes;
     private VulkanDevice? _device;
     private IVulkanInstance? _instance;
     private bool _ownsInstance;
@@ -283,7 +283,8 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
 
         CreateFrames();
         _textures.CreatePageStore();
-        _planner = new SpriteFramePlanner(_textures.Pages!, _logger);
+        _passes = new RenderPassRegistry(
+            new SpriteRenderPass(_textures.Pipeline!, _textures.Pages!, _logger));
         TransitionTargets();
         _passLabel = instance.CreateDebugLabel(PassLabelText);
         _lifecycle.UpdateValidationCounters(instance);
@@ -372,12 +373,12 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             }
 
             OffscreenTarget target = _target!;
-            SpriteFramePlan plan = _planner!.Plan(
+            _passes!.Plan(
                 slot.Snapshot,
                 (int)target.Extent.Width,
                 (int)target.Extent.Height,
                 frame.InstanceResources);
-            RecordFrame(frame, _frameIndex, plan);
+            RecordFrame(frame, _frameIndex);
             Submit(frame);
             frame.InstanceResources.MarkSubmitted();
             frame.Capture.MarkSubmitted();
@@ -388,7 +389,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 slot.Snapshot.Sequence,
                 (int)target.Extent.Width,
                 (int)target.Extent.Height,
-                plan,
+                _passes.Stats,
                 _textures.Pages?.TexturePageCount ?? 0,
                 _textures.Pages?.TexturePageCapacityInEntries ?? 0);
             _lifecycle.SignalProgress();
@@ -396,7 +397,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
         }
     }
 
-    private void RecordFrame(OffscreenFrame frame, int imageIndex, SpriteFramePlan plan)
+    private void RecordFrame(OffscreenFrame frame, int imageIndex)
     {
         VulkanDevice device = _device!;
         OffscreenTarget target = _target!;
@@ -425,22 +426,19 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             target.GetView(imageIndex),
             target.Extent);
 
-        SpritePipeline pipeline = _textures!.Pipeline!;
         bool capture = _captures.BeginRecord(
             frame,
             (int)target.Extent.Width,
             (int)target.Extent.Height,
             target.Format);
-        SpritePassRecorder.RecordPasses(
-            device.Api,
-            commandBuffer,
-            pipeline,
-            pipeline.GetOrCreatePipeline(target.Format),
-            frame.InstanceResources.DescriptorSet,
-            target.GetView(imageIndex),
-            target.GetImage(imageIndex),
-            plan.Cameras,
-            plan.CameraPlanCount);
+        _passes!.Record(
+            new RenderPassRecordContext(
+                device.Api,
+                commandBuffer,
+                target.GetView(imageIndex),
+                target.GetImage(imageIndex),
+                frame.InstanceResources.DescriptorSet,
+                target.Format));
 
         if (capture)
         {

@@ -30,6 +30,9 @@ Windowed and offscreen compose the same internal services instead of duplicating
   frame fence, and the stop/fatal close path.
 - `RendererTextures` owns the sprite pipeline per output format, the `VulkanTexturePages` GPU seam,
   the `TexturePageStore`, and bindless page writes/growth across the frames.
+- `RenderPassRegistry` owns the ordered render passes and the aggregate frame statistics; both
+  target drivers create one during startup and call it from their own frame loop, so a pass is added
+  by registration rather than by editing a central plan/record switch.
 - `IVulkanFrame`/`VulkanFrameSet<TFrame>` is the small seam that lets the shared services operate on
   both frame types without moving target-specific recording into them.
 
@@ -42,6 +45,8 @@ Useful files: [IRenderer.cs](../src/Bork2d/Bork2d.Render/IRenderer.cs),
 [RendererLifecycle.cs](../src/Bork2d/Bork2d.Render/Vulkan/RendererLifecycle.cs),
 [RendererCaptureService.cs](../src/Bork2d/Bork2d.Render/Vulkan/RendererCaptureService.cs),
 [RendererTextures.cs](../src/Bork2d/Bork2d.Render/Vulkan/RendererTextures.cs),
+[RenderPassRegistry.cs](../src/Bork2d/Bork2d.Render/Vulkan/RenderPassRegistry.cs),
+[SpriteRenderPass.cs](../src/Bork2d/Bork2d.Render/Sprites/SpriteRenderPass.cs),
 [VulkanFrameSet.cs](../src/Bork2d/Bork2d.Render/Vulkan/VulkanFrameSet.cs),
 [VulkanRenderer.cs](../src/Bork2d/Bork2d.Render/Vulkan/VulkanRenderer.cs),
 [VulkanOffscreenRenderer.cs](../src/Bork2d/Bork2d.Render/Vulkan/VulkanOffscreenRenderer.cs).
@@ -63,7 +68,13 @@ out-of-date results. One surface-recovery attempt is available per run.
 
 ## Frame planning
 
-The render thread consumes one snapshot and plans it in one allocation-free pass:
+The render thread consumes one snapshot and plans it through the registered render-pass list.
+`RenderPassRegistry.Plan` resets the aggregate statistics and each pass's per-frame state, then runs
+every pass in registration order; recording runs the same passes in the same order, so pass order is
+deterministic. The sprite pass is the only registered pass today; a new renderable kind adds a typed
+engine producer and one pass, not a central plan/record switch.
+
+The sprite pass plans its data in one allocation-free pass:
 
 1. Sort sprite indices by ascending `(Layer, ZIndex)`.
 2. Classify each sprite once from its frozen render data: a null sprite, zero/multi-bit layer,
@@ -99,8 +110,9 @@ layout transition and before any camera pass: linear `(0, 0, 0, 1)`, `LoadOp = C
 whole target (the swapchain image extent for windowed, the offscreen target extent for offscreen),
 so every pixel has a defined current-frame value. Camera clear semantics are layered on top:
 `Clear.Color` clears the camera's pixel rect to `ClearColor`; `Clear.None` and `Clear.Depth` load the
-existing content, which the frame clear has already defined. The frame clear is not a camera and not
-a draw call, so `RenderStats` and draw-call/instance accounting are unchanged. There is no depth
+existing content, which the frame clear has already defined. The frame clear is not a camera, not a
+draw call, and not a registered pass: the target driver records it before the registry records the
+passes, so `RenderStats` and draw-call/instance accounting are unchanged. There is no depth
 attachment.
 
 ## Textures

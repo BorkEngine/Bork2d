@@ -3,7 +3,6 @@ using Bork2d.Engine;
 using Bork2d.Engine.Rendering;
 using Bork2d.Render.Diagnostics;
 using Bork2d.Render.Handoff;
-using Bork2d.Render.Sprites;
 using Microsoft.Extensions.Logging;
 
 namespace Bork2d.Render.Vulkan;
@@ -331,27 +330,27 @@ internal sealed class RendererLifecycle
     /// <param name="sequence">The snapshot sequence the frame consumed.</param>
     /// <param name="width">The target/framebuffer width in pixels.</param>
     /// <param name="height">The target/framebuffer height in pixels.</param>
-    /// <param name="plan">The frame plan after instance writing.</param>
+    /// <param name="stats">The planned frame's aggregate render-pass statistics.</param>
     /// <param name="texturePages">The resident pages, including the placeholder.</param>
     /// <param name="texturePageCapacity">The current bindless page capacity, including the placeholder.</param>
     internal void PublishStats(
         long sequence,
         int width,
         int height,
-        SpriteFramePlan plan,
+        RenderPassStats stats,
         int texturePages,
         int texturePageCapacity)
     {
-        RenderStats stats = FrameRenderStats.Create(
+        RenderStats renderStats = FrameRenderStats.Create(
             sequence,
             width,
             height,
-            plan,
+            stats,
             texturePages,
             texturePageCapacity,
             Volatile.Read(ref _validationErrorCount),
             Volatile.Read(ref _validationWarningCount));
-        _stats.Publish(in stats);
+        _stats.Publish(in renderStats);
     }
 
     /// <summary>Records one windowed frame presented.</summary>

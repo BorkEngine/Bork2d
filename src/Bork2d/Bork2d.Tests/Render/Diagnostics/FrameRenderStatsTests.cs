@@ -1,21 +1,21 @@
 using Bork2d.Engine.Rendering;
 using Bork2d.Render.Diagnostics;
-using Bork2d.Render.Sprites;
+using Bork2d.Render.Vulkan;
 using Xunit;
 
 namespace Bork2d.Tests.Render.Diagnostics;
 
 /// <summary>
 /// Deterministic tests for the one-frame <see cref="RenderStats"/> mapping (M8 §6.9/§6.10): every
-/// documented field maps from the frame plan/page store, and the public invariants
-/// (<c>DrawCalls == NonEmptyCameras &lt;= Cameras</c>) hold.
+/// documented field maps from the aggregate render-pass statistics/page store, and the public
+/// invariants (<c>DrawCalls == NonEmptyCameras &lt;= Cameras</c>) hold.
 /// </summary>
 public sealed class FrameRenderStatsTests
 {
     [Fact]
-    public void TheSnapshotMapsEveryPlanAndStoreField()
+    public void TheSnapshotMapsEveryAggregateAndStoreField()
     {
-        var plan = new SpriteFramePlan
+        var passStats = new RenderPassStats
         {
             CameraCount = 3,
             CameraPlanCount = 2,
@@ -23,13 +23,14 @@ public sealed class FrameRenderStatsTests
             NonEmptyCameras = 2,
             InstanceCount = 7,
             SkippedSprites = 4,
+            CulledSprites = 5,
         };
 
         RenderStats stats = FrameRenderStats.Create(
             frameSequence: 42,
             framebufferWidth: 1280,
             framebufferHeight: 720,
-            plan,
+            passStats,
             texturePages: 3,
             texturePageCapacity: 256,
             validationErrors: 1,
@@ -52,7 +53,7 @@ public sealed class FrameRenderStatsTests
     [Fact]
     public void DrawCallRelationshipsAlwaysHold()
     {
-        var plan = new SpriteFramePlan
+        var passStats = new RenderPassStats
         {
             CameraCount = 4,
             CameraPlanCount = 0,
@@ -60,13 +61,14 @@ public sealed class FrameRenderStatsTests
             NonEmptyCameras = 0,
             InstanceCount = 0,
             SkippedSprites = 9,
+            CulledSprites = 6,
         };
 
         RenderStats stats = FrameRenderStats.Create(
             frameSequence: 1,
             framebufferWidth: 320,
             framebufferHeight: 240,
-            plan,
+            passStats,
             texturePages: 1,
             texturePageCapacity: 256,
             validationErrors: 0,
