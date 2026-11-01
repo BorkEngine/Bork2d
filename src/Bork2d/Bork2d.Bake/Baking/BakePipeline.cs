@@ -7,26 +7,27 @@ using Bork2d.Engine.Assets.Pack;
 namespace Bork2d.Bake.Baking;
 
 /// <summary>
-/// The complete multi-pack bake pipeline: discovery, per-pack custom-data binding, processor execution,
-/// the generic baked asset index, reference validation, pack composition and staging, and the
-/// transactional publish of the whole pack set.
+/// The complete multi-pack bake pipeline: discovery, per-pack custom-data binding and validation,
+/// processor execution, the generic baked asset index, reference validation, pack composition and
+/// staging, and the transactional publish of the whole pack set.
 /// </summary>
 /// <remarks>
 /// <para>
 /// A <see cref="BakeProject"/> declares one or more ordered packs. The first is the main/base pack;
 /// the rest are DLC/overlay packs. Each pack is processed in order with its own root: sources are
-/// discovered and bound through the project's explicit registrations, registered processors run over
-/// their non-TOML sources (the built-in texture processor is one of them), its index is built, and its
-/// references are validated. The main index is built first and is the only external index a DLC pack
-/// receives; the main pack is strict (local entries only).
+/// discovered and bound through the project's explicit registrations, every registered validator for
+/// each bound asset runs, registered processors run over their non-TOML sources (the built-in texture
+/// processor is one of them), its index is built, and its references are validated. The main index is
+/// built first and is the only external index a DLC pack receives; the main pack is strict (local
+/// entries only). A validator error is a <see cref="BakeFailureStage.Validation"/> failure.
 /// </para>
 /// <para>
 /// Every pack validates before any target is touched. After a pack validates it is composed into a
 /// <c>PackBuilder</c> and immediately staged in a unique temporary file next to its target; the builder
 /// is released as soon as the pack is staged. The staged set is published only after every pack has
 /// validated and staged, through a <see cref="PackPublishTransaction"/> that replaces each target via
-/// its own backup and rolls every already-replaced target back on failure. A normal source, processor,
-/// reference, composition, staging, or publish failure therefore leaves every previous pack
+/// its own backup and rolls every already-replaced target back on failure. A normal source, validation,
+/// processor, reference, composition, staging, or publish failure therefore leaves every previous pack
 /// byte-identical. A process crash inside the publish window cannot be rolled back; see
 /// <see cref="PackPublishTransaction"/>.
 /// </para>
@@ -138,6 +139,18 @@ internal static class BakePipeline
                 return Failure(
                     BakeStatus.DiagnosticsError,
                     BakeFailureStage.Sources,
+                    output.Path,
+                    assetCount: assets.Count,
+                    textureCount: 0,
+                    referenceCount: 0,
+                    diagnostics);
+            }
+
+            if (!RunValidators(project, assets, diagnostics))
+            {
+                return Failure(
+                    BakeStatus.DiagnosticsError,
+                    BakeFailureStage.Validation,
                     output.Path,
                     assetCount: assets.Count,
                     textureCount: 0,
@@ -279,6 +292,41 @@ internal static class BakePipeline
         }
 
         return Success(packStates, packWritten: true, diagnostics);
+    }
+
+    private static bool RunValidators(
+        BakeProject project,
+        IReadOnlyList<BoundAsset> assets,
+        BakeDiagnostics diagnostics)
+    {
+        bool valid = true;
+
+        foreach (BoundAsset asset in assets)
+        {
+            if (!project.AssetTypes.TryGetValue(
+                    asset.TypeName,
+                    out BakeAssetTypeRegistration? registration)
+                || registration.Validators.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (IBakeAssetValidator validator in registration.Validators)
+            {
+                var sink = new BakeProcessorDiagnosticSink(
+                    validator.Name,
+                    asset.SourcePath,
+                    asset.AssetPath,
+                    diagnostics);
+                validator.Validate(asset.AssetPath, asset.Value, sink);
+                if (sink.HasError)
+                {
+                    valid = false;
+                }
+            }
+        }
+
+        return valid;
     }
 
     private static int CountShapedOutputs(IReadOnlyList<BakeProcessorOutput> outputs)

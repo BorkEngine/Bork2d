@@ -316,6 +316,7 @@ public sealed class DependencyMatrixTests
                 "Bork2d.Bake.IAssetOutputSink",
                 "Bork2d.Bake.IAssetProcessor",
                 "Bork2d.Bake.IAssetProcessorDiagnostics",
+                "Bork2d.Bake.IAssetValidator`1",
                 "Bork2d.Bake.SidecarPolicy",
             },
             exported);

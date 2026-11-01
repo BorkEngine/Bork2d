@@ -135,7 +135,8 @@ extensions therefore never appear in an asset path.
 
 `AssetRef<T>` and `DataRef` store canonical path strings; a null path is an absent reference. The
 runtime loader treats a pack as trusted content: it does not validate asset fields or follow
-references. Pack creation validates reference integrity and the bake tooling validates fields.
+references. Pack creation validates reference integrity and the bake tooling validates fields through
+registered asset validators.
 
 ### Pack format
 

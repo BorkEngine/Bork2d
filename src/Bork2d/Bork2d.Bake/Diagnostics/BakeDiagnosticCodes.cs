@@ -5,8 +5,8 @@ namespace Bork2d.Bake.Diagnostics;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Codes are stable once a range is released. The final published table belongs to the documentation
-/// work package; this class records the ranges and the codes the bake uses.
+/// Codes are stable once a range is released. The documentation publishes the same ranges; this class
+/// records the ranges and the codes the bake uses.
 /// </para>
 /// <list type="table">
 /// <listheader>
@@ -45,6 +45,13 @@ namespace Bork2d.Bake.Diagnostics;
 /// <description>
 /// Processor registration and processing: invalid registrations, extension overrides, sidecar
 /// creation, source inputs, outputs, and processor exceptions.
+/// </description>
+/// </item>
+/// <item>
+/// <term><c>BK8xxx</c></term>
+/// <description>
+/// Registered semantic asset validators and the built-in sprite field validation. A validator error
+/// fails the pack before composition or staging.
 /// </description>
 /// </item>
 /// </list>
@@ -209,4 +216,22 @@ internal static class BakeDiagnosticCodes
 
     /// <summary>A required sidecar was created next to its source.</summary>
     internal const string ProcessorSidecarCreated = "BK7009";
+
+    /// <summary>
+    /// A sprite's UV array is missing, does not have exactly four entries, or contains a non-finite
+    /// coordinate.
+    /// </summary>
+    internal const string SpriteUvsInvalid = "BK8001";
+
+    /// <summary>A sprite's scale is not finite or is not greater than zero on both axes.</summary>
+    internal const string SpriteScaleInvalid = "BK8002";
+
+    /// <summary>A sprite's pivot is not finite or is outside <c>[0,1]</c>.</summary>
+    internal const string SpritePivotInvalid = "BK8003";
+
+    /// <summary>
+    /// A sprite's topology is unknown, a Quad carries an index buffer, or an indexed topology has a
+    /// missing/empty index buffer or an index outside <c>0..3</c>.
+    /// </summary>
+    internal const string SpriteTopologyInvalid = "BK8004";
 }

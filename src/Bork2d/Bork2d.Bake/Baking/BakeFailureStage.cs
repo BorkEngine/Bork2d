@@ -14,6 +14,9 @@ internal enum BakeFailureStage
     /// <summary>A custom-data source could not be read, parsed, or bound.</summary>
     Sources,
 
+    /// <summary>A bound custom-data asset failed a registered semantic validator.</summary>
+    Validation,
+
     /// <summary>A processor source, output, required sidecar, or processor call failed.</summary>
     Processors,
 
