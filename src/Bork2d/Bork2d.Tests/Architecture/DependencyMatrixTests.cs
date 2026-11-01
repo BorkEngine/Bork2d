@@ -39,6 +39,7 @@ public sealed class DependencyMatrixTests
         "Bork2d.Engine.Assets",
         "Bork2d.Engine.Assets.Pack",
         "Bork2d.Engine.Assets.Vfs",
+        "Bork2d.Engine.Mathematics",
     ];
 
     [Fact]
@@ -91,6 +92,7 @@ public sealed class DependencyMatrixTests
                 "Bork2d.Engine.Assets",
                 "Bork2d.Engine.Assets.Pack",
                 "Bork2d.Engine.Input",
+                "Bork2d.Engine.Mathematics",
                 "Bork2d.Engine.Platform",
                 "Bork2d.Engine.Rendering",
                 "Bork2d.Engine.Scene",
