@@ -112,6 +112,18 @@ internal sealed class Bork2dAppOptions<TLayer> where TLayer : struct, Enum
         TexturePageStore.DefaultUploadBudgetBytes;
 
     /// <summary>
+    /// Gets or sets the maximum texture-page capacity reserved at renderer startup. Defaults to
+    /// 4096 entries, including the placeholder.
+    /// </summary>
+    /// <remarks>
+    /// This is an internal seam, not part of the public builder surface. The renderer clamps it to
+    /// at least the policy's initial capacity and to the device limit; GPU tests request a smaller
+    /// value to exercise capacity growth.
+    /// </remarks>
+    internal int TexturePageStartupReservation { get; set; } =
+        TexturePageCapacity.StartupReservation;
+
+    /// <summary>
     /// Gets or sets the internal test seam for creating the SDL adapter on the OS/window thread.
     /// </summary>
     /// <remarks>

@@ -40,7 +40,8 @@ namespace Bork2d.Render.Vulkan;
 /// </para>
 /// <para>
 /// Steady-state frames allocate nothing, log nothing, and never call <c>vkDeviceWaitIdle</c>;
-/// shutdown is the only place it is used. The renderer never calls SDL.
+/// shutdown is the only place it is used, and texture-page capacity growth retires the in-flight
+/// frame fences instead of idling the device. The renderer never calls SDL.
 /// </para>
 /// </remarks>
 internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
@@ -134,6 +135,12 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
 
     /// <summary>Gets the texture-page cache (GPU tests observe the placeholder and counts).</summary>
     internal TexturePageStore? PageStore => _textures?.Pages;
+
+    /// <summary>Gets the device's effective bindless page limit, or <c>0</c> before the pipeline exists.</summary>
+    internal uint MaxTexturePages => _textures?.MaxTexturePages ?? 0;
+
+    /// <summary>Gets the largest bindless page capacity among the frames (GPU tests/diagnostics).</summary>
+    internal int TexturePageCapacityHighWater => _frames.BindlessCapacityHighWater;
 
     /// <summary>Gets the largest instance-buffer capacity among the frames (GPU tests/diagnostics).</summary>
     internal int InstanceCapacityHighWater => _frames.InstanceCapacityHighWater;
@@ -284,8 +291,11 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             return false;
         }
 
-        CreateFrames();
-        _textures.CreatePageStore();
+        int startupPageCapacity = TexturePageCapacity.StartupCapacity(
+            (int)_textures.MaxTexturePages,
+            _startInfo.TexturePageStartupReservation);
+        CreateFrames(startupPageCapacity);
+        _textures.CreatePageStore(startupPageCapacity);
         _passes = new RenderPassRegistry(
             new SpriteRenderPass(_textures.Pipeline!, _textures.Pages!, _logger));
         TransitionTargets();
@@ -493,7 +503,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
         }
     }
 
-    private void CreateFrames()
+    private void CreateFrames(int pageCapacity)
     {
         VulkanDevice device = _device!;
         SpritePipeline pipeline = _textures?.Pipeline
@@ -513,7 +523,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 index,
                 device.QueueFamilyIndex,
                 pipeline,
-                TexturePageCapacity.Initial,
+                pageCapacity,
                 device.Limits.MaxStorageBufferRange,
                 _instance,
                 _logger);

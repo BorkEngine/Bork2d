@@ -1,4 +1,5 @@
 using Bork2d.Engine;
+using Bork2d.Render.Textures;
 using Bork2d.Runtime;
 using Bork2d.Runtime.Hosting;
 using Bork2d.Tests.TestDoubles;
@@ -379,6 +380,9 @@ public sealed class Bork2dAppBuilderTests
         Assert.Equal(0.25, options.MaxDeltaTime);
         Assert.Equal(1L << 30, options.TextureResidencyBudgetBytes);
         Assert.Equal(128 * 1024 * 1024, options.TextureUploadBudgetBytes);
+        Assert.Equal(
+            TexturePageCapacity.StartupReservation,
+            options.TexturePageStartupReservation);
         Assert.Null(options.ConfigureLogging);
         Assert.Null(options.SdlApiFactory);
         Assert.Null(options.RendererFactory);

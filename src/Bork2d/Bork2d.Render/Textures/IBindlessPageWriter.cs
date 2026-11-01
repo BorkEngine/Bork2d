@@ -17,9 +17,9 @@ internal interface IBindlessPageWriter
     /// Recreates every per-frame descriptor pool/set with <paramref name="capacity"/> entries.
     /// </summary>
     /// <remarks>
-    /// The implementation waits the device idle first (growth happens between frames with all
-    /// in-flight frames idle), then recreates the sets empty. The caller rewrites every resident
-    /// page descriptor afterwards.
+    /// The implementation waits every in-flight frame fence first (growth happens between frames),
+    /// then recreates the sets empty; it never calls <c>vkDeviceWaitIdle</c> for growth. The caller
+    /// rewrites every resident page descriptor afterwards.
     /// </remarks>
     /// <param name="capacity">The new variable descriptor count, including the placeholder.</param>
     void EnsureCapacity(int capacity);

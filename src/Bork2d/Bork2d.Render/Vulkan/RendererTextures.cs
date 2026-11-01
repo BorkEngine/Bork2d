@@ -14,8 +14,8 @@ namespace Bork2d.Render.Vulkan;
 /// <para>
 /// Both target drivers create the same sprite pipeline per output format, the same asynchronous
 /// <see cref="TexturePageStore"/>, and the same production <see cref="VulkanTexturePages"/> GPU seam;
-/// they also wait the device idle and rewrite every frame's bindless descriptor set when the page
-/// capacity grows. This composition owns that setup and teardown.
+/// they also retire every in-flight frame fence and rewrite every frame's bindless descriptor set
+/// when the page capacity grows. This composition owns that setup and teardown.
 /// </para>
 /// <para>
 /// The target driver still creates the frames (their descriptor sets come from
@@ -122,8 +122,13 @@ internal sealed class RendererTextures : IBindlessPageWriter
     /// Creates the texture-page cache, uploads the placeholder (waiting its fence at startup), and
     /// makes it resident at index 0. Failure is a renderer startup failure.
     /// </summary>
+    /// <param name="initialCapacity">
+    /// The startup table capacity from <see cref="TexturePageCapacity.StartupCapacity(int)"/>,
+    /// including the placeholder. It is passed to the page store so a normal run starts already
+    /// reserved instead of growing at the policy's base capacity.
+    /// </param>
     /// <exception cref="Bork2dException">The page store could not be created.</exception>
-    internal void CreatePageStore()
+    internal void CreatePageStore(int initialCapacity)
     {
         SpritePipeline pipeline = _pipeline
             ?? throw new Bork2dException(
@@ -138,7 +143,8 @@ internal sealed class RendererTextures : IBindlessPageWriter
             _logger,
             _assetCatalogVersion,
             _textureUploadBudgetBytes,
-            _textureResidencyBudgetBytes);
+            _textureResidencyBudgetBytes,
+            initialCapacity);
         _pages.Start();
     }
 

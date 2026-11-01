@@ -19,8 +19,8 @@ namespace Bork2d.Render.Textures;
 /// barrier chain. Samplers come from the shared <see cref="SpritePipeline"/> cache (no per-page
 /// sampler). Uploads never block the render thread; only the startup placeholder waits its fence.
 /// Capacity growth recreates the per-frame descriptor sets through <see cref="IBindlessPageWriter"/>
-/// after the renderer waited the device idle, then rewrites the placeholder and every resident
-/// page.
+/// after the frame writer retires every in-flight frame fence, then rewrites the placeholder and
+/// every resident page.
 /// </para>
 /// <para>
 /// All objects are render-thread-owned. <see cref="Destroy"/> waits/discards pending uploads, then
@@ -115,9 +115,9 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
             return;
         }
 
-        // The renderer waits the device idle and recreates the per-frame descriptor pools/sets; the
-        // sets are empty afterwards, so every resident descriptor (including the placeholder) is
-        // written again.
+        // The frame writer retires every in-flight frame fence and recreates the per-frame
+        // descriptor pools/sets; the sets are empty afterwards, so every resident descriptor
+        // (including the placeholder) is written again.
         _writer.EnsureCapacity(capacity);
         _capacity = capacity;
         foreach (ResidentPage page in _resident)

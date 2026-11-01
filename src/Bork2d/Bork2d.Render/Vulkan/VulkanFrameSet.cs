@@ -1,3 +1,4 @@
+using Bork2d.Engine;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
 
@@ -105,6 +106,25 @@ internal sealed unsafe class VulkanFrameSet<TFrame> : IVulkanFrameSet
         }
     }
 
+    /// <summary>Gets the largest bindless page capacity among the frames.</summary>
+    internal int BindlessCapacityHighWater
+    {
+        get
+        {
+            var capacity = 0;
+            for (var index = 0; index < _frames.Length; index++)
+            {
+                FrameInstanceResources? resources = _frames[index]?.InstanceResources;
+                if (resources is not null)
+                {
+                    capacity = Math.Max(capacity, resources.PageCapacity);
+                }
+            }
+
+            return capacity;
+        }
+    }
+
     /// <summary>Gets the instance-buffer high-water mark recorded for the stop log.</summary>
     internal int StopLogInstanceCapacity => _stopLogInstanceCapacity;
 
@@ -131,16 +151,42 @@ internal sealed unsafe class VulkanFrameSet<TFrame> : IVulkanFrameSet
         _frames = frames;
     }
 
-    /// <summary>Waits the device idle and recreates every frame's bindless set at a new capacity.</summary>
+    /// <summary>
+    /// Waits every frame fence and recreates every frame's bindless set at a new capacity.
+    /// </summary>
+    /// <remarks>
+    /// Growth runs on the render thread between submissions and must not stall unrelated queue work
+    /// with a device-idle wait. Each frame is retired from its own fence instead, so no descriptor
+    /// pool/set is destroyed while a frame using it may still be in flight.
+    /// </remarks>
     /// <param name="device">The selected logical device.</param>
     /// <param name="capacity">The new bindless page capacity, including the placeholder.</param>
+    /// <exception cref="Bork2dException">An in-flight frame fence could not be waited.</exception>
     internal void EnsureBindlessCapacity(VulkanDevice device, int capacity)
     {
         ArgumentNullException.ThrowIfNull(device);
 
-        // Growth happens between frames: the device is idle and every in-flight frame's fence has
-        // signaled before the per-frame descriptor pools/sets are recreated.
-        VulkanDeviceIdle.Wait(device, "texture page capacity growth");
+        for (var index = 0; index < _frames.Length; index++)
+        {
+            if (_frames[index] is not { } frame)
+            {
+                continue;
+            }
+
+            Fence fence = frame.Fence;
+            Result result = device.Api.WaitForFences(
+                device.Device,
+                1,
+                &fence,
+                true,
+                ulong.MaxValue);
+            if (result != Result.Success)
+            {
+                throw new Bork2dException(
+                    $"vkWaitForFences failed with VkResult {result} before recreating the bindless "
+                        + $"texture-page descriptor sets at {capacity} entries.");
+            }
+        }
 
         for (var index = 0; index < _frames.Length; index++)
         {

@@ -359,6 +359,80 @@ public sealed class TexturePageStoreTests
     }
 
     [Fact]
+    public void AStartupCapacityLargerThanTheBaseSetsTheInitialTableSize()
+    {
+        Harness harness = CreateHarness(
+            limit: 8192,
+            initialCapacity: TexturePageCapacity.StartupReservation);
+
+        Assert.Equal(
+            TexturePageCapacity.StartupReservation,
+            harness.Store.TexturePageCapacityInEntries);
+        Assert.Equal(
+            new[] { TexturePageCapacity.StartupReservation },
+            harness.Gpu.CapacityRequests);
+        Assert.Equal(0, harness.Store.GrowthCount);
+        Assert.Equal(1, harness.Store.TexturePageCount);
+    }
+
+    [Fact]
+    public void GrowthDoublesFromTheStartupCapacity()
+    {
+        const int startupCapacity = 512;
+        const int pagesThatFit = startupCapacity - 1;
+        Harness harness = CreateHarness(limit: 4096, initialCapacity: startupCapacity);
+
+        for (var index = 0; index < pagesThatFit; index++)
+        {
+            LoadPage(
+                harness,
+                $"textures/page-{index}",
+                Descriptor(1, 1, $"textures/page-{index}-raw"),
+                Payload(1, 1));
+        }
+
+        Assert.Equal(startupCapacity, harness.Store.TexturePageCapacityInEntries);
+        Assert.Equal(0, harness.Store.GrowthCount);
+        Assert.Equal(new[] { startupCapacity }, harness.Gpu.CapacityRequests);
+
+        LoadPage(
+            harness,
+            "textures/page-overflow",
+            Descriptor(1, 1, "textures/page-overflow-raw"),
+            Payload(1, 1));
+
+        Assert.Equal(1024, harness.Store.TexturePageCapacityInEntries);
+        Assert.Equal(1, harness.Store.GrowthCount);
+        Assert.Equal(new[] { startupCapacity, 1024 }, harness.Gpu.CapacityRequests);
+    }
+
+    [Fact]
+    public void AStartupCapacityAboveTheDeviceLimitIsRejected()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new TexturePageStore(
+                new FakeTextureAssets(),
+                new FakeTexturePageGpu(),
+                512,
+                DefaultMaxDimension,
+                NullLogger.Instance,
+                initialCapacity: 1024));
+    }
+
+    [Fact]
+    public void AStartupCapacityBelowTheBaseCapacityIsRejected()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new TexturePageStore(
+                new FakeTextureAssets(),
+                new FakeTexturePageGpu(),
+                DefaultLimit,
+                DefaultMaxDimension,
+                NullLogger.Instance,
+                initialCapacity: TexturePageCapacity.Initial - 1));
+    }
+
+    [Fact]
     public void CapacityReachingTheDeviceLimitIsAnExplicitFailureNamingIt()
     {
         Harness harness = CreateHarness(limit: TexturePageCapacity.Initial);
@@ -754,7 +828,8 @@ public sealed class TexturePageStoreTests
         int limit = DefaultLimit,
         int maxDimension = DefaultMaxDimension,
         int uploadBudget = TexturePageStore.DefaultUploadBudgetBytes,
-        long residencyBudget = TexturePageStore.DefaultResidencyBudgetBytes)
+        long residencyBudget = TexturePageStore.DefaultResidencyBudgetBytes,
+        int initialCapacity = TexturePageCapacity.Initial)
     {
         var assets = new FakeTextureAssets();
         var gpu = new FakeTexturePageGpu();
@@ -766,7 +841,8 @@ public sealed class TexturePageStoreTests
             NullLogger.Instance,
             assets,
             uploadBudget,
-            residencyBudget);
+            residencyBudget,
+            initialCapacity);
         store.Start();
         return new Harness(store, assets, gpu);
     }

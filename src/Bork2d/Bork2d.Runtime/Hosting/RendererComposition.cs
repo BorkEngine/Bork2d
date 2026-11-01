@@ -95,6 +95,7 @@ internal sealed class RendererComposition<TLayer> where TLayer : struct, Enum
             AssetCatalogVersion = _engine.Assets as IAssetCatalogVersion,
             TextureResidencyBudgetBytes = _options.TextureResidencyBudgetBytes,
             TextureUploadBudgetBytes = _options.TextureUploadBudgetBytes,
+            TexturePageStartupReservation = _options.TexturePageStartupReservation,
             CreateReplacementSurface = platform is null
                 ? null
                 : platform.CreateReplacementSurface,
