@@ -14,7 +14,7 @@ namespace Bork2d.Render.Vulkan;
 /// present, and no readback (D-M6-23), so a frame owns no synchronization beyond its fence.
 /// <see cref="Dispose"/> is idempotent and never throws (D-M6-27).
 /// </remarks>
-internal sealed unsafe class OffscreenFrame : IDisposable
+internal sealed unsafe class OffscreenFrame : IVulkanFrame
 {
     private readonly Vk _vk;
     private readonly Device _device;
@@ -55,6 +55,15 @@ internal sealed unsafe class OffscreenFrame : IDisposable
 
     /// <summary>Gets the frame's pooled readback staging and pending capture requests (M8 §6.9).</summary>
     internal FrameCapture Capture { get; }
+
+    /// <inheritdoc/>
+    Fence IVulkanFrame.Fence => Fence;
+
+    /// <inheritdoc/>
+    FrameInstanceResources IVulkanFrame.InstanceResources => InstanceResources;
+
+    /// <inheritdoc/>
+    FrameCapture IVulkanFrame.Capture => Capture;
 
     /// <summary>Creates one offscreen frame's Vulkan objects.</summary>
     /// <param name="vk">The Vulkan API object.</param>

@@ -20,8 +20,29 @@ tick. `RequestStop()` is a request, and `Join()` guarantees no renderer thread s
 - Steady-state frames allocate nothing, log nothing, and never call `vkDeviceWaitIdle`.
   `vkDeviceWaitIdle` is allowed only during recreation and shutdown.
 
+Windowed and offscreen compose the same internal services instead of duplicating them:
+
+- `RendererLifecycle` owns the render thread and start-once guard, the readiness flag/event, status,
+  stop reason, the one-shot fatal, progress signaling, the control channel, the snapshot
+  ring/consumer/combined wait, the identical `IRenderer` handoff/counter delegations, the stats
+  board, and the post-join ring drain.
+- `RendererCaptureService` owns the bounded capture queue, per-frame capture retirement from the
+  frame fence, and the stop/fatal close path.
+- `RendererTextures` owns the sprite pipeline per output format, the `VulkanTexturePages` GPU seam,
+  the `TexturePageStore`, and bindless page writes/growth across the frames.
+- `IVulkanFrame`/`VulkanFrameSet<TFrame>` is the small seam that lets the shared services operate on
+  both frame types without moving target-specific recording into them.
+
+The two target drivers stay separate: `VulkanRenderer` owns swapchain acquire/present, resize,
+recovery, and the minimized drain; `VulkanOffscreenRenderer` owns the fixed sRGB target, its
+one-time layout transition, and the discard path. There is no renderer inheritance hierarchy.
+
 Useful files: [IRenderer.cs](../src/Bork2d/Bork2d.Render/IRenderer.cs),
 [SnapshotRing.cs](../src/Bork2d/Bork2d.Render/Handoff/SnapshotRing.cs),
+[RendererLifecycle.cs](../src/Bork2d/Bork2d.Render/Vulkan/RendererLifecycle.cs),
+[RendererCaptureService.cs](../src/Bork2d/Bork2d.Render/Vulkan/RendererCaptureService.cs),
+[RendererTextures.cs](../src/Bork2d/Bork2d.Render/Vulkan/RendererTextures.cs),
+[VulkanFrameSet.cs](../src/Bork2d/Bork2d.Render/Vulkan/VulkanFrameSet.cs),
 [VulkanRenderer.cs](../src/Bork2d/Bork2d.Render/Vulkan/VulkanRenderer.cs),
 [VulkanOffscreenRenderer.cs](../src/Bork2d/Bork2d.Render/Vulkan/VulkanOffscreenRenderer.cs).
 
@@ -115,6 +136,9 @@ intermediate output, never in the repository or publish output.
 
 ## Windowed versus offscreen
 
+Both target drivers compose the same lifecycle coordinator, capture service, and texture services;
+only the target driver differs.
+
 | | Windowed | Offscreen |
 | --- | --- | --- |
 | Target | Swapchain image | Two permanent sRGB images |
@@ -132,8 +156,9 @@ skipped sprites, and cumulative validation errors/warnings. The host installs it
 invalid-layer, non-`Quad`, and still-loading sprites; bounds-culled sprites are not skipped, they
 only reduce `Instances`.
 
-`CaptureFrameAsync` queues a one-shot request. The copy is recorded after the last camera pass and
-before present/discard, so it includes the frame clear and every camera and excludes window chrome.
+`CaptureFrameAsync` queues a one-shot request through the shared `RendererCaptureService`. The copy
+is recorded after the last camera pass and before present/discard, so it includes the frame clear and
+every camera and excludes window chrome.
 The result is a `FrameCaptureResult` whose pixels are row-major, top-left-origin RGBA8, whose
 dimensions are the captured frame's actual extent, and whose format is always `TextureFormat.Rgba8`.
 The render thread swizzles/copies the staging bytes into one `byte[]` per captured frame, and every
@@ -142,8 +167,8 @@ GPU frame.
 
 A submitted capture completes from its frame's fence, even when the game never publishes another
 snapshot. At the top of each render loop, before waiting for a new snapshot or draining a minimized
-frame, the renderer waits on every in-flight frame that carries capture requests, marks its instance
-resources fence-signaled, and completes those requests. It does not release the snapshot slot early:
+frame, the capture service waits on every in-flight frame that carries capture requests, marks its
+instance resources fence-signaled, and completes those requests. It does not release the snapshot slot early:
 the slot stays held until the frame is reused or shutdown. At most eight requests may be outstanding
 at once, including requests already taken by an in-flight frame; the ninth and later requests fault
 with `Bork2dException` instead of blocking the caller or being dropped silently. Taking a frame's
