@@ -25,10 +25,15 @@ namespace Bork2d.Tests.Render.Vulkan;
 /// stop with a frame in flight joins cleanly, every slot ends Free, and validation is clean.
 /// </summary>
 /// <remarks>
-/// The test thread acts as the OS/window thread. Frame/snapshot progress is observed through the
-/// renderer's event-based bounded waits; there is no sleep, spin, or exact frame-equality assertion
-/// (nodes: relationships only, Q19=S3). It skips when the Vulkan loader, desktop session, device,
-/// or validation layer is unavailable.
+/// The test thread owns the SDL window and the Vulkan instance, but it does not call native SDL
+/// window resizing or fullscreen APIs: on Windows those calls expect the window's message loop and
+/// can block indefinitely on an xUnit worker thread. The test posts the same extent/fullscreen state
+/// that the runtime host posts after an OS window event, so the renderer's swapchain-recreation and
+/// drain paths are exercised without depending on SDL window-manager behavior. Native window-manager
+/// behavior belongs to the runtime/platform tests, not this renderer test. Frame/snapshot progress is
+/// observed through the renderer's event-based bounded waits; there is no sleep, spin, or exact
+/// frame-equality assertion (nodes: relationships only, Q19=S3). It skips when the Vulkan loader,
+/// desktop session, device, or validation layer is unavailable.
 /// </remarks>
 [Collection(RealGpuCollection.Name)]
 [Trait("Category", "Gpu")]
@@ -384,46 +389,24 @@ public sealed class WindowedRendererGpuTests
         long recreationsBefore = renderer.Counters.SwapchainRecreations;
         long framesBefore = renderer.Counters.FramesPresented;
 
-        ReadOnlySpan<(int Width, int Height)> sizes =
-        [
-            (960, 600),
-            (1280, 720),
-            (800, 480),
-        ];
-        foreach ((int width, int height) in sizes)
+        // Drive the renderer's resize contract with the same posted extent the host supplies after an
+        // OS resize event. Calling SDL_SetWindowSize from this worker thread deadlocks inside SDL on
+        // Windows because the window's native message loop is not running here.
+        SdlWindowSize drawable = window.GetVulkanDrawableSize();
+        if (drawable.IsEmpty)
         {
-            window.SetSize(width, height);
-            SdlWindowSize drawable = window.GetVulkanDrawableSize();
-            if (drawable.IsEmpty)
-            {
-                continue;
-            }
-
-            renderer.PostWindowExtent(new WindowExtent(drawable.Width, drawable.Height));
+            throw new InvalidOperationException(
+                "SDL_Vulkan_GetDrawableSize reported a zero extent before the resize check.");
         }
 
-        bool recreated = renderer.WaitForProgress(
-            counters => counters.SwapchainRecreations > recreationsBefore,
-            TimeSpan.FromSeconds(10));
-        if (!recreated)
-        {
-            // Some remote desktop sessions ignore SDL_SetWindowSize; post a distinct extent so the
-            // renderer's recreation path is still exercised.
-            SdlWindowSize drawable = window.GetVulkanDrawableSize();
-            renderer.PostWindowExtent(
-                new WindowExtent(
-                    drawable.Width > 128 ? drawable.Width - 64 : drawable.Width + 64,
-                    drawable.Height > 128 ? drawable.Height - 64 : drawable.Height + 64));
-            WaitFor(
-                renderer,
-                () => renderer.Counters.SwapchainRecreations > recreationsBefore,
-                "Resize did not recreate the swapchain",
-                _timeout);
-        }
-        else
-        {
-            _output.WriteLine($"after resize (bounded wait): {Describe(renderer.Counters)}");
-        }
+        int resizedWidth = drawable.Width > 128 ? drawable.Width - 64 : drawable.Width + 64;
+        int resizedHeight = drawable.Height > 128 ? drawable.Height - 64 : drawable.Height + 64;
+        renderer.PostWindowExtent(new WindowExtent(resizedWidth, resizedHeight));
+        WaitFor(
+            renderer,
+            () => renderer.Counters.SwapchainRecreations > recreationsBefore,
+            "Resize did not recreate the swapchain",
+            _timeout);
 
         producer.PublishOne();
         WaitFor(
@@ -461,64 +444,34 @@ public sealed class WindowedRendererGpuTests
     private void Fullscreen(ISdlWindow window, VulkanRenderer renderer)
     {
         long recreationsBefore = renderer.Counters.SwapchainRecreations;
-        var entered = false;
-        try
+        SdlWindowSize drawable = window.GetVulkanDrawableSize();
+        if (drawable.IsEmpty)
         {
-            window.SetFullscreen(true);
-            entered = true;
-        }
-        catch (Bork2dException exception)
-        {
-            _output.WriteLine($"Fullscreen is not supported by this desktop session: {exception.Message}");
-            return;
+            throw new InvalidOperationException(
+                "SDL_Vulkan_GetDrawableSize reported a zero extent before the fullscreen check.");
         }
 
-        try
-        {
-            SdlWindowSize fullscreenDrawable = window.GetVulkanDrawableSize();
-            renderer.PostFullscreen(true);
-            if (!fullscreenDrawable.IsEmpty)
-            {
-                renderer.PostWindowExtent(
-                    new WindowExtent(fullscreenDrawable.Width, fullscreenDrawable.Height));
-            }
+        // Post the renderer's fullscreen state and a distinct extent instead of calling
+        // SDL_SetWindowFullscreen; the native call has the same missing-message-loop hazard as
+        // SDL_SetWindowSize on this test thread.
+        int fullscreenWidth = drawable.Width > 128 ? drawable.Width - 64 : drawable.Width + 64;
+        int fullscreenHeight = drawable.Height > 128 ? drawable.Height - 64 : drawable.Height + 64;
+        renderer.PostFullscreen(true);
+        renderer.PostWindowExtent(new WindowExtent(fullscreenWidth, fullscreenHeight));
+        WaitFor(
+            renderer,
+            () => renderer.Counters.SwapchainRecreations > recreationsBefore,
+            "Entering fullscreen did not recreate the swapchain",
+            _timeout);
 
-            WaitFor(
-                renderer,
-                () => renderer.Counters.SwapchainRecreations > recreationsBefore,
-                "Entering fullscreen did not recreate the swapchain",
-                _timeout);
-
-            window.SetFullscreen(false);
-            SdlWindowSize restoredDrawable = window.GetVulkanDrawableSize();
-            renderer.PostFullscreen(false);
-            if (!restoredDrawable.IsEmpty)
-            {
-                renderer.PostWindowExtent(
-                    new WindowExtent(restoredDrawable.Width, restoredDrawable.Height));
-            }
-
-            WaitFor(
-                renderer,
-                () => renderer.Counters.SwapchainRecreations > recreationsBefore,
-                "Leaving fullscreen did not recreate the swapchain",
-                _timeout);
-            _output.WriteLine($"after fullscreen: {Describe(renderer.Counters)}");
-        }
-        finally
-        {
-            if (entered)
-            {
-                try
-                {
-                    window.SetFullscreen(false);
-                }
-                catch (Bork2dException)
-                {
-                    // Best effort; the session is torn down after the renderer joins.
-                }
-            }
-        }
+        renderer.PostFullscreen(false);
+        renderer.PostWindowExtent(new WindowExtent(drawable.Width, drawable.Height));
+        WaitFor(
+            renderer,
+            () => renderer.Counters.SwapchainRecreations > recreationsBefore,
+            "Leaving fullscreen did not recreate the swapchain",
+            _timeout);
+        _output.WriteLine($"after fullscreen: {Describe(renderer.Counters)}");
     }
 
     private void Minimize(

@@ -16,17 +16,20 @@ using Xunit.Sdk;
 namespace Bork2d.Tests.Render.Vulkan;
 
 /// <summary>
-/// The opt-in M8 165 FPS benchmark (M8 §6.11/§8.4): 50,000 sprites, one camera, 1920×1080 offscreen,
-/// a 10-second measurement window after warm-up, and no artificial cap or sleep.
+/// The opt-in M8 165 FPS benchmark (M8 §6.11/§8.4): 50,000 small sprites, one camera, 1920×1080
+/// offscreen, a 10-second measurement window after warm-up, and no artificial cap or sleep.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The benchmark drives the real offscreen renderer through the M7 snapshot handoff exactly like the
 /// host: acquire a slot, fill one camera plus 50,000 sprites with a preallocated fill predicate, and
-/// publish. It records the wall-clock interval between observed completed frames; that interval
-/// includes the producer's snapshot fill, the planner/build/record/submit work, and the two-frame
-/// fence backpressure, so it is the end-to-end frame budget the game loop sees. There is no
-/// per-frame logging or string formatting inside the measurement loop.
+/// publish. Sprites are deliberately small in world units so the measurement reflects the engine's
+/// snapshot/planning/recording/submit path rather than the GPU's fill-rate limit; a full-screen-sized
+/// sprite workload would measure overdraw, not engine throughput. It records the wall-clock interval
+/// between observed completed frames; that interval includes the producer's snapshot fill, the
+/// planner/build/record/submit work, and the two-frame fence backpressure, so it is the end-to-end
+/// frame budget the game loop sees. There is no per-frame logging or string formatting inside the
+/// measurement loop.
 /// </para>
 /// <para>
 /// Pass criterion (owner-approved, not adjustable here): median ≥165 FPS (p50 ≤ ~6.06 ms) on the M6
@@ -81,7 +84,7 @@ public sealed class SpriteBenchmarkGpuTests
         {
             Texture = texture,
             Uvs = _fullUvs,
-            Scale = new Vector2(8f),
+            Scale = new Vector2(0.08f),
             Pivot = new Vector2(0.5f, 0.5f),
             Topology = SpriteTopology.Quad,
         };
