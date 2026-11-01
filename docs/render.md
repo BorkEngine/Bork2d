@@ -126,9 +126,25 @@ invalid-layer, non-`Quad`, and still-loading sprites; bounds-culled sprites are 
 only reduce `Instances`.
 
 `CaptureFrameAsync` queues a one-shot request. The copy is recorded after the last camera pass and
-before present/discard, so it includes every camera and excludes window chrome. The result is a new
-RGBA8, row-major, top-left-origin byte array; staging memory is pooled per GPU frame. Cancellation
-faults the task; a stop or fatal faults all pending requests.
+before present/discard, so it includes every camera and excludes window chrome. The result is a
+`FrameCaptureResult` whose pixels are row-major, top-left-origin RGBA8, whose dimensions are the
+captured frame's actual extent, and whose format is always `TextureFormat.Rgba8`. The render thread
+swizzles/copies the staging bytes into one `byte[]` per captured frame, and every request served by
+that frame shares the same immutable memory; staging memory itself is pooled per GPU frame.
+
+A submitted capture completes from its frame's fence, even when the game never publishes another
+snapshot. At the top of each render loop, before waiting for a new snapshot or draining a minimized
+frame, the renderer waits on every in-flight frame that carries capture requests, marks its instance
+resources fence-signaled, and completes those requests. It does not release the snapshot slot early:
+the slot stays held until the frame is reused or shutdown. At most eight requests may be outstanding
+at once; the ninth and later requests fault with `Bork2dException` instead of blocking the caller or
+being dropped silently, and cancellation is checked before that limit. A cancelled token faults the
+task; a stop or fatal faults all pending requests.
+
+A capture needs a GPU frame, and a GPU frame needs a published snapshot. Waiting for the task
+synchronously inside `Setup` or `Tick` before the snapshot that serves the request is published can
+block the only producer that can publish it, so request the capture there and await it from a worker
+or a later callback.
 
 Renderer failures are one-shot: the host observes `FatalException` at a tick boundary, no further
 tick starts, and cleanup is best-effort, idempotent, and non-throwing.

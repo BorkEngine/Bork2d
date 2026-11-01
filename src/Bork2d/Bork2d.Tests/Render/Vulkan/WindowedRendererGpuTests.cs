@@ -257,30 +257,35 @@ public sealed class WindowedRendererGpuTests
                 $"after {initialSnapshots} snapshots: {Describe(renderer.Counters)}; "
                     + $"ring={DescribeRing(renderer)}");
 
-            // Capture contract: one RGBA8 array for the frame that recorded the copy. The copy is
-            // recorded on the next frame and completes at a later frame-fence reuse.
-            Task<byte[]> captureTask = renderer.CaptureFrameAsync();
-            for (var frame = 0; frame < 4 && !captureTask.IsCompleted; frame++)
-            {
-                producer.PublishOne();
-                WaitFor(
-                    renderer,
-                    () => renderer.Counters.FramesPresented >= producer.Published,
-                    "A capture frame was not presented",
-                    _timeout);
-            }
+            // Capture contract: each captured frame allocates one RGBA8 result shared by every
+            // request it serves, and the dimensions are that frame's actual extent. Both requests
+            // are queued before the next snapshot, so the same frame serves them.
+            long captureSequence = renderer.RenderStats.FrameSequence;
+            Task<FrameCaptureResult> firstCapture = renderer.CaptureFrameAsync();
+            Task<FrameCaptureResult> secondCapture = renderer.CaptureFrameAsync();
+            producer.PublishOne();
+            WaitFor(
+                renderer,
+                () => renderer.RenderStats.FrameSequence > captureSequence,
+                "A capture frame was not presented",
+                _timeout);
 
-            byte[] captured = await captureTask.WaitAsync(_timeout);
+            FrameCaptureResult firstResult = await firstCapture.WaitAsync(_timeout);
+            FrameCaptureResult secondResult = await secondCapture.WaitAsync(_timeout);
             RenderStats captureStats = renderer.RenderStats;
-            Assert.Equal(
-                captureStats.FramebufferWidth * captureStats.FramebufferHeight * 4,
-                captured.Length);
+            Assert.Equal(captureStats.FramebufferWidth, firstResult.Width);
+            Assert.Equal(captureStats.FramebufferHeight, firstResult.Height);
+            Assert.Equal(TextureFormat.Rgba8, firstResult.Format);
+            Assert.Equal(firstResult.Width * firstResult.Height * 4, firstResult.Pixels.Length);
+            Assert.Equal(firstResult.Pixels, secondResult.Pixels);
             Assert.Equal(1, captureStats.DrawCalls);
             _output.WriteLine(
-                $"capture: bytes={captured.Length}, extent={captureStats.FramebufferWidth}x"
-                    + $"{captureStats.FramebufferHeight}");
+                $"capture: bytes={firstResult.Pixels.Length}, "
+                    + $"extent={firstResult.Width}x{firstResult.Height}, "
+                    + $"format={firstResult.Format}");
 
             Resize(window, renderer, producer);
+            await AssertCaptureUsesTheResizedExtent(renderer, producer);
             Fullscreen(window, renderer);
             Minimize(window, renderer, producer);
 
@@ -423,6 +428,30 @@ public sealed class WindowedRendererGpuTests
             "Presentation did not resume after resize",
             _timeout);
         _output.WriteLine($"after resize: {Describe(renderer.Counters)}");
+    }
+
+    private async Task AssertCaptureUsesTheResizedExtent(
+        VulkanRenderer renderer,
+        TestSnapshotProducer producer)
+    {
+        long sequence = renderer.RenderStats.FrameSequence;
+        Task<FrameCaptureResult> capture = renderer.CaptureFrameAsync();
+        producer.PublishOne();
+        WaitFor(
+            renderer,
+            () => renderer.RenderStats.FrameSequence > sequence,
+            "A post-resize capture frame was not presented",
+            _timeout);
+
+        FrameCaptureResult result = await capture.WaitAsync(_timeout);
+        RenderStats stats = renderer.RenderStats;
+        Assert.Equal(stats.FramebufferWidth, result.Width);
+        Assert.Equal(stats.FramebufferHeight, result.Height);
+        Assert.Equal(TextureFormat.Rgba8, result.Format);
+        Assert.Equal(result.Width * result.Height * 4, result.Pixels.Length);
+        _output.WriteLine(
+            $"post-resize capture: extent={result.Width}x{result.Height}, "
+                + $"stats={stats.FramebufferWidth}x{stats.FramebufferHeight}");
     }
 
     private void Fullscreen(ISdlWindow window, VulkanRenderer renderer)

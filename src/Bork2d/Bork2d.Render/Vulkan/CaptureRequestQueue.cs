@@ -1,7 +1,11 @@
+using Bork2d.Engine;
+using Bork2d.Engine.Rendering;
+
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// The thread-safe queue of pending <c>IEngine.CaptureFrameAsync</c> requests (M8 §6.9/§6.13).
+/// The thread-safe, bounded queue of pending <c>IEngine.CaptureFrameAsync</c> requests
+/// (M8 §6.9/§6.13).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -12,13 +16,24 @@ namespace Bork2d.Render.Vulkan;
 /// never held across a Vulkan call, fence wait, or user continuation.
 /// </para>
 /// <para>
+/// At most <see cref="MaxOutstandingRequests"/> requests may be outstanding (queued and not yet
+/// taken by a frame). A request beyond the limit is rejected with a faulted task whose exception is
+/// a <see cref="Bork2dException"/> explaining the limit; the call never blocks and never silently
+/// drops the request. Cancellation is checked before the limit, so an already-cancelled token
+/// faults the task with <see cref="OperationCanceledException"/> even when the queue is full or
+/// closed.
+/// </para>
+/// <para>
 /// A stop or fatal calls <see cref="Close"/> once, which faults every queued request and rejects
-/// later ones with a faulted task. Staging memory lives in the per-frame
-/// <see cref="FrameCapture"/> and is pooled for the run.
+/// later ones with a faulted task. Staging memory lives in the per-frame <see cref="FrameCapture"/>
+/// and is pooled for the run.
 /// </para>
 /// </remarks>
 internal sealed class CaptureRequestQueue
 {
+    /// <summary>The maximum number of outstanding requests accepted at once.</summary>
+    internal const int MaxOutstandingRequests = 8;
+
     private readonly Lock _gate = new();
     private readonly List<CaptureRequest> _pending = [];
     private int _closed;
@@ -40,28 +55,43 @@ internal sealed class CaptureRequestQueue
 
     /// <summary>Enqueues one capture request.</summary>
     /// <param name="cancellationToken">The caller's cancellation token.</param>
-    /// <returns>A task completed by the next frame that records a copy, or faulted on stop.</returns>
-    internal Task<byte[]> Request(CancellationToken cancellationToken)
+    /// <returns>
+    /// A task completed by the next frame that records a copy and serves the request; faulted when
+    /// the outstanding-request limit is reached or the queue is closed; cancelled when the token is
+    /// already cancelled.
+    /// </returns>
+    internal Task<FrameCaptureResult> Request(CancellationToken cancellationToken)
     {
         if (cancellationToken.IsCancellationRequested)
         {
-            return Task.FromCanceled<byte[]>(cancellationToken);
+            return Task.FromCanceled<FrameCaptureResult>(cancellationToken);
         }
 
         var request = new CaptureRequest(cancellationToken);
+        Exception rejection;
         lock (_gate)
         {
-            if (_closed == 0)
+            if (_closed != 0)
+            {
+                rejection = new ObjectDisposedException(
+                    nameof(CaptureRequestQueue),
+                    "The renderer stopped before the capture request could be served.");
+            }
+            else if (CountOutstanding() >= MaxOutstandingRequests)
+            {
+                rejection = new Bork2dException(
+                    $"At most {MaxOutstandingRequests} frame capture requests may be outstanding at "
+                        + "once; the request was rejected instead of blocking the caller or being "
+                        + "dropped silently.");
+            }
+            else
             {
                 _pending.Add(request);
                 return request.Task;
             }
         }
 
-        request.Fault(
-            new ObjectDisposedException(
-                nameof(CaptureRequestQueue),
-                "The renderer stopped before the capture request could be served."));
+        request.Fault(rejection);
         return request.Task;
     }
 
@@ -117,5 +147,34 @@ internal sealed class CaptureRequestQueue
         {
             request.Fault(exception);
         }
+    }
+
+    /// <summary>
+    /// Counts the requests that can still be served, dropping cancelled ones from the pending list.
+    /// </summary>
+    /// <remarks>
+    /// A cancelled request is already completed and will never be recorded; it must not consume one
+    /// of the <see cref="MaxOutstandingRequests"/> slots while it waits for the render thread to take
+    /// it. The caller holds <see cref="_gate"/>.
+    /// </remarks>
+    /// <returns>The number of outstanding requests.</returns>
+    private int CountOutstanding()
+    {
+        var outstanding = 0;
+        for (var index = 0; index < _pending.Count; index++)
+        {
+            if (!_pending[index].IsCompleted)
+            {
+                _pending[outstanding] = _pending[index];
+                outstanding++;
+            }
+        }
+
+        if (outstanding < _pending.Count)
+        {
+            _pending.RemoveRange(outstanding, _pending.Count - outstanding);
+        }
+
+        return outstanding;
     }
 }

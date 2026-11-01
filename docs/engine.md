@@ -10,7 +10,7 @@ provider package.
 | --- | --- |
 | `Bork2d.Engine` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
 | `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `IRenderable`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
-| `Bork2d.Engine.Rendering` | `Bounds`, `Color`, `RenderStats`, `ClearKind` |
+| `Bork2d.Engine.Rendering` | `Bounds`, `Color`, `RenderStats`, `ClearKind`, `FrameCaptureResult` |
 | `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `TextureDescriptor`, `AssetRef<T>`, `DataRef`, enums |
 | `Bork2d.Engine.Assets.Pack` | `PackBuilder`, `PackCompressionMode` (tooling only) |
 | `Bork2d.Engine.Input` | `IInput`, `KeyCode`, `MouseButton` |
@@ -41,6 +41,22 @@ concurrent. Exceptions propagate to `Bork2dApp.Run` after cleanup.
 Retained window/input references throw `ObjectDisposedException` after a windowed run; the offscreen
 window facade stays functional. `Exit` may be called from any thread; the current tick finishes and
 the next tick does not start.
+
+### Frame capture
+
+`CaptureFrameAsync` returns a `FrameCaptureResult`: row-major RGBA8 pixels with a top-left origin,
+the captured frame's actual `Width`, `Height`, and `Format` (`TextureFormat.Rgba8`). `Pixels` is
+exactly `Width * Height * 4` bytes and the result is a shared immutable capture result — every
+request served by the same GPU frame observes the same memory, so callers must not mutate it. One
+array is allocated per captured frame, not per request.
+
+A request is served by the next frame recorded from a published snapshot, and the renderer completes
+it from that frame's fence even when the game never publishes another snapshot. At most eight
+requests may be outstanding at once; a request beyond the limit faults with `Bork2dException` instead
+of blocking the caller or being dropped. Cancellation is checked first and faults the task with
+`OperationCanceledException`; a renderer stop or fatal faults pending requests. Waiting for the task
+synchronously inside `Setup` or `Tick` before the snapshot that serves the request is published can
+block the producer needed to generate that frame.
 
 ## Scene model
 

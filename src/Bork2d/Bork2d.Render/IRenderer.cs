@@ -1,3 +1,5 @@
+using Bork2d.Engine;
+using Bork2d.Engine.Assets;
 using Bork2d.Engine.Rendering;
 using Bork2d.Render.Diagnostics;
 using Bork2d.Render.Handoff;
@@ -61,19 +63,28 @@ internal interface IRenderer
     RenderStats RenderStats { get; }
 
     /// <summary>
-    /// Requests the next completed frame as RGBA8 bytes for <c>IEngine.CaptureFrameAsync</c>
-    /// (M8 §6.9).
+    /// Requests the next completed frame as a <see cref="FrameCaptureResult"/> for
+    /// <c>IEngine.CaptureFrameAsync</c> (M8 §6.9).
     /// </summary>
     /// <remarks>
-    /// The request is queued thread-safely; the render thread records the image-to-buffer copy after
-    /// the last camera pass and before present/discard, and completes the task from the frame fence.
-    /// At most the frame's current extent is captured, one <see cref="byte"/> array is allocated per
-    /// request, and the staging memory is pooled per GPU frame. A stop/fatal faults pending requests;
-    /// a cancelled token faults the task with <see cref="OperationCanceledException"/>.
+    /// <para>
+    /// The request is queued thread-safely. The render thread records the image-to-buffer copy after
+    /// the last camera pass and before present/discard, and completes the task from the serving
+    /// frame's fence, even when no further snapshot is published. The result carries the frame's
+    /// actual extent, <see cref="TextureFormat.Rgba8"/>, and row-major top-left-origin RGBA8 pixels:
+    /// one <see cref="byte"/> array per captured frame shared by every request that frame serves,
+    /// while staging memory is pooled per GPU frame.
+    /// </para>
+    /// <para>
+    /// At most eight requests may be outstanding; a request beyond the limit faults with
+    /// <see cref="Bork2dException"/> instead of blocking or being dropped. Cancellation is checked
+    /// first and faults the task with <see cref="OperationCanceledException"/>; a stop or fatal
+    /// faults pending requests.
+    /// </para>
     /// </remarks>
     /// <param name="cancellationToken">The caller's cancellation token.</param>
-    /// <returns>The frame's row-major, top-left-origin RGBA8 bytes.</returns>
-    Task<byte[]> CaptureFrameAsync(CancellationToken cancellationToken = default);
+    /// <returns>The captured frame's pixels, extent, and format.</returns>
+    Task<FrameCaptureResult> CaptureFrameAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Gets the one-shot fatal error observed by the host at a tick boundary.</summary>
     Exception? FatalException { get; }

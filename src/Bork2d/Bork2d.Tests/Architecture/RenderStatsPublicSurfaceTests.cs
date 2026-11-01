@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Bork2d.Engine;
+using Bork2d.Engine.Assets;
 using Bork2d.Engine.Rendering;
 using Xunit;
 
@@ -121,10 +122,52 @@ public sealed class RenderStatsPublicSurfaceTests
         MethodInfo method = Assert.IsAssignableFrom<MethodInfo>(
             typeof(IEngine<>).GetMethod("CaptureFrameAsync"));
 
-        Assert.Equal(typeof(Task<byte[]>), method.ReturnType);
+        Assert.Equal(typeof(Task<FrameCaptureResult>), method.ReturnType);
         ParameterInfo parameter = Assert.Single(method.GetParameters());
         Assert.Equal(typeof(CancellationToken), parameter.ParameterType);
         Assert.True(parameter.IsOptional, "The cancellation token must be optional.");
+    }
+
+    [Fact]
+    public void FrameCaptureResultIsAPublicReadOnlyRecordStructWithTheApprovedShape()
+    {
+        Type type = typeof(FrameCaptureResult);
+
+        Assert.True(type.IsPublic);
+        Assert.True(type.IsValueType);
+        Assert.Equal("Bork2d.Engine.Rendering", type.Namespace);
+        Assert.True(
+            type.IsDefined(typeof(IsReadOnlyAttribute), inherit: false),
+            "FrameCaptureResult must be a readonly record struct.");
+
+        ConstructorInfo constructor = Assert.Single(type.GetConstructors());
+        ParameterInfo[] parameters = constructor.GetParameters();
+        Assert.Equal(
+            new[]
+            {
+                typeof(ReadOnlyMemory<byte>),
+                typeof(int),
+                typeof(int),
+                typeof(TextureFormat),
+            },
+            parameters.Select(parameter => parameter.ParameterType));
+        Assert.Equal(
+            new[] { "Pixels", "Width", "Height", "Format" },
+            parameters.Select(parameter => parameter.Name));
+
+        PropertyInfo[] properties = type
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+        Assert.Equal(
+            new[]
+            {
+                "Int32 Height",
+                "Int32 Width",
+                "ReadOnlyMemory`1 Pixels",
+                "TextureFormat Format",
+            },
+            properties
+                .Select(property => $"{property.PropertyType.Name} {property.Name}")
+                .OrderBy(signature => signature, StringComparer.Ordinal));
     }
 
     [Fact]
