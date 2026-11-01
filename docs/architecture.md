@@ -95,7 +95,7 @@ Assets are built ahead of time, not loaded from loose files at runtime:
 1. A game-owned assets executable configures `BakeApplicationBuilder` and registers data types and
    processors.
 2. The bake discovers sources under ordered pack roots, binds TOML, runs processors, validates
-   references, and writes one or more packs atomically.
+   references, stages every pack, and publishes the staged set with rollback on failure.
 3. The runtime mounts the base pack (and any later overlays), resolving a canonical path to the
    winning entry.
 4. The asset loader thread decompresses and deserializes on demand.
