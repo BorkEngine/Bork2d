@@ -388,7 +388,7 @@ public sealed class SpriteRenderGpuTests
     }
 
     [GpuFact]
-    public async Task CaptureFrameAsyncReturnsOneRgbaArrayPerRequestAndFaultsAfterStop()
+    public async Task CaptureFrameAsyncReturnsOneSharedRgbaResultPerFrameAndFaultsAfterStop()
     {
         const int width = 32;
         const int height = 16;
@@ -403,35 +403,73 @@ public sealed class SpriteRenderGpuTests
             renderer = StartOffscreen(assets, width, height, loggerFactory);
             var producer = new Producer(renderer);
 
-            Task<byte[]> first = renderer.CaptureFrameAsync();
-            Task<byte[]> second = renderer.CaptureFrameAsync();
-
-            // The copy is recorded on the next frame; the requests complete when that GPU frame's
-            // fence is observed at a later reuse (or shutdown). Pump a few frames.
-            for (var frame = 0; frame < 4 && !(first.IsCompleted && second.IsCompleted); frame++)
+            // Both requests are queued before the next snapshot, so one GPU frame serves both and
+            // every request that frame serves shares the same immutable pixels.
+            Task<FrameCaptureResult> first = renderer.CaptureFrameAsync();
+            Task<FrameCaptureResult> second = renderer.CaptureFrameAsync();
+            PublishFrame(renderer, producer, snapshot =>
             {
-                PublishFrame(renderer, producer, snapshot =>
-                {
-                    AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
-                    AddSprite(snapshot, sprite, layer: 1u);
-                });
-            }
+                AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
+                AddSprite(snapshot, sprite, layer: 1u);
+            });
 
-            byte[] firstBytes = await first.WaitAsync(_timeout);
-            byte[] secondBytes = await second.WaitAsync(_timeout);
-            Assert.Equal(width * height * 4, firstBytes.Length);
-            Assert.Equal(width * height * 4, secondBytes.Length);
-            Assert.NotSame(firstBytes, secondBytes);
+            FrameCaptureResult firstResult = await first.WaitAsync(_timeout);
+            FrameCaptureResult secondResult = await second.WaitAsync(_timeout);
+            Assert.Equal(width, firstResult.Width);
+            Assert.Equal(height, firstResult.Height);
+            Assert.Equal(TextureFormat.Rgba8, firstResult.Format);
+            Assert.Equal(width * height * 4, firstResult.Pixels.Length);
+            Assert.Equal(firstResult.Width, secondResult.Width);
+            Assert.Equal(firstResult.Height, secondResult.Height);
+            Assert.Equal(firstResult.Format, secondResult.Format);
+            Assert.Equal(firstResult.Pixels, secondResult.Pixels);
 
             using var cancellation = new CancellationTokenSource();
-            Task<byte[]> cancelled = renderer.CaptureFrameAsync(cancellation.Token);
+            Task<FrameCaptureResult> cancelled = renderer.CaptureFrameAsync(cancellation.Token);
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
 
             renderer.RequestStop();
             Assert.True(renderer.Join(_joinTimeout), "The renderer did not join.");
-            Task<byte[]> afterStop = renderer.CaptureFrameAsync();
+            Task<FrameCaptureResult> afterStop = renderer.CaptureFrameAsync();
             await Assert.ThrowsAsync<ObjectDisposedException>(() => afterStop);
+            Assert.Null(renderer.FatalException);
+            Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+            Assert.Equal(0, renderer.Counters.ValidationWarningCount);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    [GpuFact]
+    public async Task ACaptureCompletesFromItsFrameFenceWithoutANewSnapshot()
+    {
+        const int width = 32;
+        const int height = 16;
+        var assets = new GeneratedTextureAssets();
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, width, height, loggerFactory);
+            var producer = new Producer(renderer);
+
+            Task<FrameCaptureResult> capture = renderer.CaptureFrameAsync();
+            PublishFrame(
+                renderer,
+                producer,
+                snapshot => AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color));
+
+            // No further snapshot is published: retirement from the serving frame's own fence must
+            // complete the capture within the bounded wait.
+            FrameCaptureResult result = await capture.WaitAsync(_timeout);
+            Assert.Equal(width, result.Width);
+            Assert.Equal(height, result.Height);
+            Assert.Equal(TextureFormat.Rgba8, result.Format);
+            Assert.Equal(width * height * 4, result.Pixels.Length);
             Assert.Null(renderer.FatalException);
             Assert.Equal(0, renderer.Counters.ValidationErrorCount);
             Assert.Equal(0, renderer.Counters.ValidationWarningCount);
@@ -455,7 +493,7 @@ public sealed class SpriteRenderGpuTests
             renderer = StartOffscreen(assets, 32, 16, loggerFactory);
             var producer = new Producer(renderer);
 
-            Task<byte[]> pending = renderer.CaptureFrameAsync();
+            Task<FrameCaptureResult> pending = renderer.CaptureFrameAsync();
             producer.Publish(snapshot =>
             {
                 AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
@@ -488,7 +526,7 @@ public sealed class SpriteRenderGpuTests
         {
             renderer = StartOffscreen(assets, 32, 16, loggerFactory);
 
-            Task<byte[]> pending = renderer.CaptureFrameAsync();
+            Task<FrameCaptureResult> pending = renderer.CaptureFrameAsync();
             renderer.RequestStop();
             Assert.True(renderer.Join(_joinTimeout), "The renderer did not join.");
 

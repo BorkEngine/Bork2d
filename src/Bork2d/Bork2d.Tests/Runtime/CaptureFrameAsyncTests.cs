@@ -1,4 +1,6 @@
 using Bork2d.Engine;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
 using Bork2d.Runtime;
 using Bork2d.Tests.TestDoubles;
@@ -31,12 +33,15 @@ public sealed class CaptureFrameAsyncTests
     public async Task TheInstalledSourceIsInvokedAndItsTaskReturned()
     {
         GameEngine<GameLayer> engine = TestEngineFactory.Create();
-        byte[] expected = [1, 2, 3, 4];
+        FrameCaptureResult expected = CreateResult([1, 2, 3, 4], width: 1, height: 1);
         engine.SetCaptureSource(_ => Task.FromResult(expected));
 
-        byte[] result = await engine.CaptureFrameAsync();
+        FrameCaptureResult result = await engine.CaptureFrameAsync();
 
-        Assert.Same(expected, result);
+        Assert.Equal(expected.Pixels, result.Pixels);
+        Assert.Equal(1, result.Width);
+        Assert.Equal(1, result.Height);
+        Assert.Equal(TextureFormat.Rgba8, result.Format);
     }
 
     [Fact]
@@ -56,7 +61,7 @@ public sealed class CaptureFrameAsyncTests
     public void AfterTheRunOrDisposeTheCallThrowsObjectDisposedEvenIfASourceWasInstalled()
     {
         GameEngine<GameLayer> engine = TestEngineFactory.Create();
-        engine.SetCaptureSource(_ => Task.FromResult(new byte[4]));
+        engine.SetCaptureSource(_ => Task.FromResult(CreateResult(new byte[4], 1, 1)));
 
         engine.MarkCaptureDisposed();
         Assert.Throws<ObjectDisposedException>(
@@ -65,7 +70,7 @@ public sealed class CaptureFrameAsyncTests
                 _ = engine.CaptureFrameAsync();
             });
 
-        engine.SetCaptureSource(_ => Task.FromResult(new byte[4]));
+        engine.SetCaptureSource(_ => Task.FromResult(CreateResult(new byte[4], 1, 1)));
         Assert.Throws<ObjectDisposedException>(
             () =>
             {
@@ -77,7 +82,7 @@ public sealed class CaptureFrameAsyncTests
     public async Task ACancelledPendingRequestFaultsWithOperationCancelled()
     {
         GameEngine<GameLayer> engine = TestEngineFactory.Create();
-        var completion = new TaskCompletionSource<byte[]>(
+        var completion = new TaskCompletionSource<FrameCaptureResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         engine.SetCaptureSource(cancellationToken =>
         {
@@ -86,7 +91,7 @@ public sealed class CaptureFrameAsyncTests
         });
         using var source = new CancellationTokenSource();
 
-        Task<byte[]> task = engine.CaptureFrameAsync(source.Token);
+        Task<FrameCaptureResult> task = engine.CaptureFrameAsync(source.Token);
         source.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
@@ -100,7 +105,7 @@ public sealed class CaptureFrameAsyncTests
         engine.SetCaptureSource(_ =>
         {
             Interlocked.Increment(ref calls);
-            return Task.FromResult(new byte[4]);
+            return Task.FromResult(CreateResult(new byte[4], 1, 1));
         });
 
         var started = new ManualResetEventSlim();
@@ -134,7 +139,7 @@ public sealed class CaptureFrameAsyncTests
     public void AWindowedRunForwardsCaptureToTheRendererAndDisposesAfterRun()
     {
         var sdl = new FakeSdlApi();
-        byte[] expected = [9, 8, 7, 6];
+        FrameCaptureResult expected = CreateResult([9, 8, 7, 6], width: 1, height: 1);
         var renderer = new FakeRenderer
         {
             AutoReady = true,
@@ -144,7 +149,7 @@ public sealed class CaptureFrameAsyncTests
         var instanceFactory = new FakeVulkanInstanceFactory();
         var game = new ScriptedGame<GameLayer>();
         IEngine<GameLayer>? engine = null;
-        byte[]? captured = null;
+        FrameCaptureResult? captured = null;
         game.OnSetup = capturedEngine =>
         {
             engine = capturedEngine;
@@ -155,7 +160,10 @@ public sealed class CaptureFrameAsyncTests
         using var app = WindowedTestSupport.Builder(sdl, game, factory, instanceFactory).Build();
         AppTestSupport.RunToCompletion(app);
 
-        Assert.Same(expected, captured);
+        Assert.Equal(expected.Pixels, captured!.Value.Pixels);
+        Assert.Equal(expected.Width, captured.Value.Width);
+        Assert.Equal(expected.Height, captured.Value.Height);
+        Assert.Equal(expected.Format, captured.Value.Format);
         Assert.Equal(1, renderer.CaptureRequestCount);
         Assert.NotNull(engine);
         Assert.Throws<ObjectDisposedException>(
@@ -168,7 +176,7 @@ public sealed class CaptureFrameAsyncTests
     [Fact]
     public void AnOffscreenRunForwardsCaptureToTheRenderer()
     {
-        byte[] expected = [4, 3, 2, 1];
+        FrameCaptureResult expected = CreateResult([4, 3, 2, 1], width: 1, height: 1);
         var renderer = new FakeRenderer
         {
             AutoReady = true,
@@ -177,7 +185,7 @@ public sealed class CaptureFrameAsyncTests
         var factory = new FakeRendererFactory(renderer);
         var instanceFactory = new FakeVulkanInstanceFactory();
         var game = new ScriptedGame<GameLayer>();
-        byte[]? captured = null;
+        FrameCaptureResult? captured = null;
         game.OnTick = () =>
         {
             captured = game.Engine!.CaptureFrameAsync().GetAwaiter().GetResult();
@@ -192,7 +200,10 @@ public sealed class CaptureFrameAsyncTests
             .Build();
         AppTestSupport.RunToCompletion(app);
 
-        Assert.Same(expected, captured);
+        Assert.Equal(expected.Pixels, captured!.Value.Pixels);
+        Assert.Equal(expected.Width, captured.Value.Width);
+        Assert.Equal(expected.Height, captured.Value.Height);
+        Assert.Equal(expected.Format, captured.Value.Format);
         Assert.Equal(1, renderer.CaptureRequestCount);
     }
 
@@ -231,4 +242,7 @@ public sealed class CaptureFrameAsyncTests
                 _ = engine!.CaptureFrameAsync();
             });
     }
+
+    private static FrameCaptureResult CreateResult(byte[] pixels, int width, int height)
+        => new(pixels, width, height, TextureFormat.Rgba8);
 }

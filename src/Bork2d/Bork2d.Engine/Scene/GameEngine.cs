@@ -61,7 +61,7 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     private Action? _exitCallback;
     private Func<RenderStats>? _renderStatsSource;
     private RenderStats _renderStats;
-    private Func<CancellationToken, Task<byte[]>>? _captureSource;
+    private Func<CancellationToken, Task<FrameCaptureResult>>? _captureSource;
     private int _captureState = CaptureUnavailable;
 
     internal GameEngine(
@@ -155,9 +155,9 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
         => Volatile.Write(ref _renderStatsSource, source);
 
     /// <inheritdoc/>
-    public Task<byte[]> CaptureFrameAsync(CancellationToken cancellationToken = default)
+    public Task<FrameCaptureResult> CaptureFrameAsync(CancellationToken cancellationToken = default)
     {
-        Func<CancellationToken, Task<byte[]>>? source;
+        Func<CancellationToken, Task<FrameCaptureResult>>? source;
         int state;
         lock (_captureLock)
         {
@@ -189,7 +189,7 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     /// delegate must be thread-safe and non-blocking; it is invoked outside every engine lock.
     /// </remarks>
     /// <param name="source">The renderer capture delegate, or <see langword="null"/> to clear it.</param>
-    internal void SetCaptureSource(Func<CancellationToken, Task<byte[]>>? source)
+    internal void SetCaptureSource(Func<CancellationToken, Task<FrameCaptureResult>>? source)
     {
         lock (_captureLock)
         {

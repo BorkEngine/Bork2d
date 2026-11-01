@@ -142,7 +142,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
     public long SuspendedConsumptions => _consumer.SuspendedConsumptions;
 
     /// <inheritdoc/>
-    public Task<byte[]> CaptureFrameAsync(CancellationToken cancellationToken = default)
+    public Task<FrameCaptureResult> CaptureFrameAsync(CancellationToken cancellationToken = default)
         => _captures.Request(cancellationToken);
 
     /// <summary>Gets the renderer's snapshot ring (GPU tests observe slot state through it).</summary>
@@ -508,6 +508,11 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
             {
                 return;
             }
+
+            // Complete captures from their own frame fences before waiting for a new snapshot or
+            // draining a minimized frame: a submitted capture must not depend on the game
+            // publishing another snapshot.
+            RetireCompletedCaptures();
 
             if (_minimized || _requestedExtent.IsZeroOrMinimized)
             {
@@ -884,6 +889,43 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
             Volatile.Read(ref _validationErrorCount),
             Volatile.Read(ref _validationWarningCount));
         _stats.Publish(in stats);
+    }
+
+    /// <summary>
+    /// Completes captures whose frame fence has signaled, independent of frame reuse and snapshots.
+    /// </summary>
+    /// <remarks>
+    /// Runs at the top of every render-loop iteration. Only frames that carry capture requests are
+    /// waited on, so an idle loop still blocks on the snapshot/control wait without touching Vulkan.
+    /// The snapshot slot is not released here; it stays held until the frame is reused or shutdown,
+    /// as before.
+    /// </remarks>
+    private void RetireCompletedCaptures()
+    {
+        VulkanDevice device = _device!;
+        for (var index = 0; index < _frames.Length; index++)
+        {
+            WindowedFrame? frame = _frames[index];
+            if (frame is null || !frame.Capture.HasRequests)
+            {
+                continue;
+            }
+
+            Fence fence = frame.Fence;
+            Result wait = device.Api.WaitForFences(
+                device.Device,
+                1,
+                &fence,
+                true,
+                ulong.MaxValue);
+            if (wait != Result.Success)
+            {
+                throw new Bork2dException($"vkWaitForFences failed with VkResult {wait}.");
+            }
+
+            frame.InstanceResources.MarkFenceSignaled();
+            frame.Capture.Complete();
+        }
     }
 
     private void CompleteCaptures()
