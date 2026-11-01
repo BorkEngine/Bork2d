@@ -186,6 +186,111 @@ public sealed class SnapshotCaptureTests
     }
 
     [Fact]
+    public void CapturedWorldMatricesMatchTheIterativeWorldMatrixForEveryNode()
+    {
+        var engine = CreateEngine();
+
+        var rig = engine.CreateTransform(engine.Root);
+        rig.LocalPosition = new Vector2(10f, -5f);
+        rig.LocalRotation = 35f;
+        rig.LocalScale = new Vector2(2f, 0.5f);
+
+        var turret = engine.CreateTransform(rig);
+        turret.LocalPosition = new Vector2(1f, 2f);
+        turret.LocalRotation = -20f;
+        turret.LocalScale = new Vector2(1.5f, 3f);
+
+        var barrel = engine.CreateTransform(turret);
+        barrel.LocalPosition = new Vector2(0.5f, -1f);
+        barrel.LocalRotation = 10f;
+        barrel.LocalScale = new Vector2(0.75f, 2f);
+
+        var spriteA = engine.CreateSpriteRender(barrel);
+        spriteA.LocalPosition = new Vector2(3f, 4f);
+        spriteA.LocalRotation = 15f;
+        spriteA.LocalScale = new Vector2(2f, 0.5f);
+        spriteA.ZIndex = 0;
+
+        var spriteB = engine.CreateSpriteRender(rig);
+        spriteB.LocalPosition = new Vector2(-2f, 1f);
+        spriteB.LocalRotation = 80f;
+        spriteB.LocalScale = new Vector2(1.25f, 0.5f);
+        spriteB.ZIndex = 1;
+
+        var spriteC = engine.CreateSpriteRender(engine.Root);
+        spriteC.LocalPosition = new Vector2(7f, -3f);
+        spriteC.LocalRotation = -45f;
+        spriteC.LocalScale = new Vector2(-1.5f, 1f);
+        spriteC.ZIndex = 2;
+
+        var spriteD = engine.CreateSpriteRender(turret);
+        spriteD.LocalPosition = new Vector2(0f, 0f);
+        spriteD.LocalScale = new Vector2(1f, 1f);
+        spriteD.ZIndex = 3;
+
+        var cameraA = engine.CreateCamera(rig);
+        cameraA.LocalPosition = new Vector2(0f, 0f);
+        cameraA.LocalRotation = 90f;
+        cameraA.ZIndex = 0;
+
+        var cameraB = engine.CreateCamera(barrel);
+        cameraB.LocalPosition = new Vector2(-5f, 2f);
+        cameraB.LocalRotation = 180f;
+        cameraB.ZIndex = 1;
+
+        var expectedSprites = new Dictionary<int, Matrix3x2>
+        {
+            [0] = ((Transform)spriteA).WorldMatrix(),
+            [1] = ((Transform)spriteB).WorldMatrix(),
+            [2] = ((Transform)spriteC).WorldMatrix(),
+            [3] = ((Transform)spriteD).WorldMatrix(),
+        };
+        var expectedCameras = new Dictionary<int, Matrix3x2>
+        {
+            [0] = ((Transform)cameraA).WorldMatrix(),
+            [1] = ((Transform)cameraB).WorldMatrix(),
+        };
+
+        var snapshot = Capture(engine);
+
+        Assert.Equal(expectedSprites.Count, snapshot.SpriteCount);
+        Assert.Equal(expectedCameras.Count, snapshot.CameraCount);
+        foreach (SpriteSnapshot captured in snapshot.Sprites)
+        {
+            TestAssertions.Close(expectedSprites[captured.ZIndex], captured.WorldMatrix);
+        }
+
+        foreach (CameraSnapshot captured in snapshot.Cameras)
+        {
+            TestAssertions.Close(expectedCameras[captured.ZIndex], captured.WorldMatrix);
+        }
+    }
+
+    [Fact]
+    public void ADeepChainIsCapturedAndEvaluatedWithoutRecursion()
+    {
+        const int depth = 50_000;
+        var engine = CreateEngine();
+        ITransform deepest = engine.Root;
+        for (var index = 0; index < depth; index++)
+        {
+            var child = engine.CreateTransform(deepest);
+            child.LocalPosition = new Vector2(1f, 0f);
+            deepest = child;
+        }
+
+        var sprite = engine.CreateSpriteRender(deepest);
+        sprite.LocalPosition = new Vector2(2f, 3f);
+
+        var snapshot = Capture(engine);
+
+        var expected = new Vector2(depth + 2f, 3f);
+        Assert.Equal(1, snapshot.SpriteCount);
+        TestAssertions.Close(expected, snapshot.Sprites[0].WorldMatrix.Translation);
+        TestAssertions.Close(new Vector2(depth, 0f), ((Transform)deepest).WorldMatrix().Translation);
+    }
+
+    [Fact]
     public void ReparentedNodeIsCapturedUnderItsNewParent()
     {
         var engine = CreateEngine();

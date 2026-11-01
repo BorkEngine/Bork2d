@@ -116,13 +116,17 @@ sorted by canonical path and written atomically.
 
 ## Rendering data
 
-`SnapshotCapture` walks the rooted tree under the engine's structural lock after `IGame.Tick`
+`SnapshotCapture` walks the rooted tree once under the engine's structural lock after `IGame.Tick`
 returns and writes value-only `CameraSnapshot`/`SpriteSnapshot` records into the current frame slot.
-Transforms are traversed, but only cameras and sprites are captured; world matrices include the
-parent chain, and the layer enum is flattened to a raw 32-bit mask. Each sprite record carries the
-immutable `SpriteRenderData` frozen when the asset was assigned, never the live `SpriteAsset`.
-Buffers are slot-private and grow to a high-water mark without shrinking, so a warm capture allocates
-nothing.
+The walk is iterative and parent-first: an explicit reusable stack carries each node's evaluated
+parent world matrix, so every node's world matrix is composed exactly once as its local matrix times
+the parent world matrix, and a deep hierarchy cannot exhaust the call stack. Each node is read under
+one acquisition of its per-object lock, and world-matrix composition happens outside that lock.
+Transforms are traversed, but only cameras and sprites are captured; the layer enum is flattened to
+a raw 32-bit mask. Each sprite record carries the immutable `SpriteRenderData` frozen when the asset
+was assigned, never the live `SpriteAsset`. Buffers are slot-private and grow to a high-water mark
+without shrinking; resetting a slot clears the previously used camera and sprite ranges, releasing
+obsolete references without shrinking the buffers, so a warm capture allocates nothing.
 
 Camera projection is pure and shared with the renderer: the camera world matrix is the inverse-view
 source, the rounded pixel viewport supplies the aspect, and the only Y conversion is the negation

@@ -1,3 +1,5 @@
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
@@ -63,16 +65,34 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
     }
 
     /// <summary>
-    /// Gets the frozen render data captured for the current sprite, or <see langword="null"/>.
+    /// Copies this sprite's capture state under one per-object lock acquisition.
     /// </summary>
-    internal SpriteRenderData? RenderData
+    /// <remarks>
+    /// The caller must hold the structural lock. Capture uses this instead of the public property
+    /// getters, which would acquire <see cref="Transform.Sync"/> once per field and could observe a
+    /// concurrent writer between fields. The frozen render data is read in the same critical
+    /// section. The snapshot's <see cref="SpriteSnapshot.WorldMatrix"/> is the local matrix as a
+    /// placeholder; the capture pass replaces it with the composed world matrix after this method
+    /// returns and the lock is released.
+    /// </remarks>
+    /// <param name="snapshot">
+    /// The sprite values with the local matrix in <see cref="SpriteSnapshot.WorldMatrix"/>.
+    /// </param>
+    /// <returns>The sprite's local-to-parent matrix.</returns>
+    internal Matrix3x2 CaptureForSnapshot(out SpriteSnapshot snapshot)
     {
-        get
+        lock (Sync)
         {
-            lock (Sync)
-            {
-                return _renderData;
-            }
+            var local = LocalMatrixUnderLock;
+            snapshot = new SpriteSnapshot(
+                _renderData,
+                local,
+                _tint,
+                ToMask(_layer),
+                _zIndex,
+                _flipX,
+                _flipY);
+            return local;
         }
     }
 
@@ -170,4 +190,6 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
             }
         }
     }
+
+    private static uint ToMask(TLayer layer) => (uint)Unsafe.As<TLayer, int>(ref layer);
 }

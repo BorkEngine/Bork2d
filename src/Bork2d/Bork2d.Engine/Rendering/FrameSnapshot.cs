@@ -11,8 +11,9 @@ namespace Bork2d.Engine.Rendering;
 /// fills it, the slot is published as <c>Ready</c> with a release, and the renderer reads it only
 /// while the slot is <c>Rendering</c>; nothing writes it after publication. The camera and sprite
 /// arrays are slot-private pooling buffers: they start empty, grow to the observed high-water
-/// mark, and never shrink (Q6=Z1), so a warm capture appends values without allocating. Capture
-/// uses no LINQ, boxing, or per-node allocation.
+/// mark, and never shrink (Q6=Z1), so a warm capture appends values without allocating. Resetting
+/// a slot clears the previously used camera and sprite ranges, releasing obsolete references
+/// without shrinking the buffers. Capture uses no LINQ, boxing, or per-node allocation.
 /// </para>
 /// <para>
 /// The snapshot is asset-agnostic: each sprite carries the immutable <see cref="SpriteRenderData"/>
@@ -63,10 +64,18 @@ internal sealed class FrameSnapshot
     internal ReadOnlySpan<SpriteSnapshot> Sprites => _sprites.AsSpan(0, _spriteCount);
 
     /// <summary>
-    /// Clears the captured counts and the sequence/time values while keeping the pooled buffers.
+    /// Clears the captured camera and sprite ranges, releasing obsolete references, then resets the
+    /// counts and the sequence/time values.
     /// </summary>
+    /// <remarks>
+    /// The previously used entries are cleared so a sprite buffer no longer retains frozen render
+    /// data after a later capture without sprites. Capacity and the high-water mark are kept: the
+    /// buffers never shrink (Q6=Z1).
+    /// </remarks>
     internal void Reset()
     {
+        _cameras.AsSpan(0, _cameraCount).Clear();
+        _sprites.AsSpan(0, _spriteCount).Clear();
         _cameraCount = 0;
         _spriteCount = 0;
         Sequence = 0;

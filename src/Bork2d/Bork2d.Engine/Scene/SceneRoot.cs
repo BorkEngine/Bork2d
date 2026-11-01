@@ -22,8 +22,8 @@ namespace Bork2d.Engine.Scene;
 /// </para>
 /// <para>
 /// The tree is unordered: the root owns its children strongly but exposes no child enumeration,
-/// order, or identity. Snapshot capture reaches them only through the internal unordered
-/// <see cref="ISceneNodeVisitor"/> walk (M7 WP-2).
+/// order, or identity. Snapshot capture reaches them through the internal
+/// <see cref="ISceneNode.ChildCountCore"/> and <see cref="ISceneNode.GetChildCore"/> accessors.
 /// </para>
 /// </remarks>
 internal sealed class SceneRoot : ISceneRoot, ISceneNode
@@ -84,5 +84,7 @@ internal sealed class SceneRoot : ISceneRoot, ISceneNode
 
     void ISceneNode.RemoveChildCore(Transform child) => _children?.Remove(child);
 
-    void ISceneNode.VisitChildrenCore(ISceneNodeVisitor visitor) => _children?.Visit(visitor);
+    int ISceneNode.ChildCountCore => _children?.Count ?? 0;
+
+    Transform ISceneNode.GetChildCore(int index) => _children!.Get(index);
 }
