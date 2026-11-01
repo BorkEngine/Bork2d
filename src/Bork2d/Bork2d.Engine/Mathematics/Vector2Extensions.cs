@@ -100,8 +100,9 @@ public static class Vector2Extensions
         /// <param name="vector">The vector to limit.</param>
         /// <param name="maxLength">The maximum length of the result.</param>
         /// <returns>
-        /// The original vector when it is already short enough, otherwise the vector scaled to
-        /// <paramref name="maxLength"/>. A zero vector is returned when the result would be zero.
+        /// The original vector when its length is at most <paramref name="maxLength"/>, otherwise
+        /// the vector scaled to <paramref name="maxLength"/>; a <paramref name="maxLength"/> of
+        /// <c>0</c> therefore yields a zero vector for a non-zero input.
         /// </returns>
         public static Vector2 ClampMagnitude(Vector2 vector, float maxLength)
         {
@@ -146,7 +147,10 @@ public static class Vector2Extensions
                 current.Y + ((toVectorY / distance) * maxDistanceDelta));
         }
 
-        /// <summary>Returns <paramref name="inDirection"/> rotated 90 degrees clockwise.</summary>
+        /// <summary>
+        /// Returns <paramref name="inDirection"/> rotated 90 degrees counter-clockwise in the
+        /// +Y-up convention.
+        /// </summary>
         /// <param name="inDirection">The direction to rotate.</param>
         /// <returns><c>(-inDirection.Y, inDirection.X)</c>.</returns>
         public static Vector2 Perpendicular(Vector2 inDirection)

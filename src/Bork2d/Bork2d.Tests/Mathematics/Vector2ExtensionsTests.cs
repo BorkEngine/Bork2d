@@ -162,7 +162,7 @@ public sealed class Vector2ExtensionsTests
     }
 
     [Fact]
-    public void PerpendicularRotatesNinetyDegreesClockwise()
+    public void PerpendicularRotatesNinetyDegreesCounterClockwise()
     {
         Assert.Equal(new Vector2(-3f, 2f), Vector2.Perpendicular(new Vector2(2f, 3f)));
         Assert.Equal(new Vector2(-1f, 0f), Vector2.Perpendicular(Vector2.Up));
