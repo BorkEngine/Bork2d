@@ -52,16 +52,16 @@ public abstract class AssetProcessor<TSidecar> : IAssetProcessor, ITypedAssetPro
     /// <param name="sidecar">The bound or defaulted sidecar.</param>
     protected abstract void Process(AssetProcessorContext context, TSidecar sidecar);
 
-    object ITypedAssetProcessor.CreateDefaultSidecar(BakeProcessorContext context)
+    object ITypedAssetProcessor.CreateDefaultSidecar(AssetProcessorContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return CreateDefaultSidecar(ProcessorContextAdapter.Map(context));
+        return CreateDefaultSidecar(context);
     }
 
-    void ITypedAssetProcessor.Process(BakeProcessorContext context, object sidecar)
+    void ITypedAssetProcessor.Process(AssetProcessorContext context, object sidecar)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(sidecar);
-        Process(ProcessorContextAdapter.Map(context), (TSidecar)sidecar);
+        Process(context, (TSidecar)sidecar);
     }
 }

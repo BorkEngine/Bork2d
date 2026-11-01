@@ -207,7 +207,7 @@ internal static class BakeProjectFactory
             definition.TextureFilter,
             definition.TextureWrap,
             assetTypes,
-            definition.Processors,
+            processorRegistry.Processors,
             processorRegistry,
             definition.UseDefaultProcessors);
 

@@ -356,9 +356,36 @@ public sealed class DependencyMatrixTests
     public void BakeImplementationStaysInternal()
     {
         AssertInternal(typeof(Bork2d.Bake.Baking.BakePipeline));
-        AssertInternal(typeof(Bork2d.Bake.Processors.IBakeAssetProcessor));
+        AssertInternal(typeof(Bork2d.Bake.Processors.BakeProcessorRegistration));
         AssertInternal(typeof(Bork2d.Bake.Toml.TomlShapeBinder));
         AssertInternal(typeof(Bork2d.Bake.Textures.StbTextureDecoder));
+    }
+
+    [Fact]
+    public void BakeRunsOnePublicProcessorContract()
+    {
+        Assembly assembly = typeof(BakeApplicationBuilder).Assembly;
+
+        // The parallel internal processor model and its adapter chain are gone; the registry and
+        // runner execute IAssetProcessor directly, so a duplicate context/sink cannot reappear.
+        Assert.Null(assembly.GetType("Bork2d.Bake.Processors.IBakeAssetProcessor", throwOnError: false));
+        Assert.Null(assembly.GetType("Bork2d.Bake.Processors.BakeProcessorContext", throwOnError: false));
+        Assert.Null(assembly.GetType("Bork2d.Bake.Processors.IBakeOutputSink", throwOnError: false));
+        Assert.Null(
+            assembly.GetType("Bork2d.Bake.Processors.IBakeProcessorDiagnostics", throwOnError: false));
+        Assert.Null(assembly.GetType("Bork2d.Bake.Processors.BakeSidecarPolicy", throwOnError: false));
+        Assert.Null(
+            assembly.GetType("Bork2d.Bake.Processors.ProcessorContextAdapter", throwOnError: false));
+        Assert.Null(assembly.GetType("Bork2d.Bake.Processors.OutputSinkAdapter", throwOnError: false));
+        Assert.Null(
+            assembly.GetType("Bork2d.Bake.Processors.ProcessorDiagnosticsAdapter", throwOnError: false));
+
+        Assert.True(
+            typeof(IAssetOutputSink).IsAssignableFrom(
+                typeof(Bork2d.Bake.Processors.BakeOutputSink)));
+        Assert.True(
+            typeof(IAssetProcessorDiagnostics).IsAssignableFrom(
+                typeof(Bork2d.Bake.Processors.BakeProcessorDiagnosticSink)));
     }
 
     [Fact]

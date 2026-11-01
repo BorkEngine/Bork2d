@@ -1,5 +1,4 @@
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Processors;
 using Bork2d.Bake.Textures;
 using Bork2d.Engine.Assets;
 using PolyType;
@@ -27,7 +26,7 @@ internal sealed class BakeProjectDefinition
 {
     private readonly List<BakePackDefinition> _packs = [];
     private readonly Dictionary<string, BakeAssetTypeRegistration> _assetTypes = new(StringComparer.Ordinal);
-    private readonly List<IBakeAssetProcessor> _processors = [];
+    private readonly List<IAssetProcessor> _processors = [];
     private readonly List<BakeDiagnostic> _issues = [];
 
     /// <summary>Gets or sets the configured project root, or <see langword="null"/> when unset.</summary>
@@ -40,7 +39,7 @@ internal sealed class BakeProjectDefinition
     internal IReadOnlyDictionary<string, BakeAssetTypeRegistration> AssetTypes => _assetTypes;
 
     /// <summary>Gets the registered processors in registration order.</summary>
-    internal IReadOnlyList<IBakeAssetProcessor> Processors => _processors;
+    internal IReadOnlyList<IAssetProcessor> Processors => _processors;
 
     /// <summary>Gets a value indicating whether <c>UseDefaultProcessors()</c> was called.</summary>
     internal bool UseDefaultProcessors { get; private set; }
@@ -102,8 +101,12 @@ internal sealed class BakeProjectDefinition
     internal void RequestDefaultProcessors() => UseDefaultProcessors = true;
 
     /// <summary>Adds one registered processor.</summary>
-    /// <param name="processor">The internal processor adapter.</param>
-    internal void AddProcessor(IBakeAssetProcessor processor) => _processors.Add(processor);
+    /// <param name="processor">The public processor instance.</param>
+    internal void AddProcessor(IAssetProcessor processor)
+    {
+        ArgumentNullException.ThrowIfNull(processor);
+        _processors.Add(processor);
+    }
 
     /// <summary>Sets the texture defaults used when a texture sidecar is missing.</summary>
     /// <param name="filter">The default sampler filter.</param>

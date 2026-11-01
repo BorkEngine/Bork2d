@@ -9,5 +9,5 @@ namespace Bork2d.Bake.Processors;
 /// its inner dots (for example <c>tar.gz</c>).
 /// </param>
 internal readonly record struct BakeProcessorMatch(
-    IBakeAssetProcessor Processor,
+    BakeProcessorRegistration Processor,
     string Extension);

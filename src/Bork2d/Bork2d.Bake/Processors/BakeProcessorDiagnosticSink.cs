@@ -10,7 +10,7 @@ namespace Bork2d.Bake.Processors;
 /// the source failed: the runner discards all of its outputs. Warnings and infos are informational and
 /// do not affect the outputs.
 /// </remarks>
-internal sealed class BakeProcessorDiagnosticSink : IBakeProcessorDiagnostics
+internal sealed class BakeProcessorDiagnosticSink : IAssetProcessorDiagnostics
 {
     private readonly string _processorName;
     private readonly string _sourcePath;

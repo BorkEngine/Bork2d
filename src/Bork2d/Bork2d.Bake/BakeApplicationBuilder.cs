@@ -99,8 +99,7 @@ public sealed class BakeApplicationBuilder
         if (!_definition.UseDefaultProcessors)
         {
             _definition.RequestDefaultProcessors();
-            _definition.AddProcessor(
-                new BakeProcessorAdapter(new TextureProcessor(_definition.TextureDefaults)));
+            _definition.AddProcessor(new TextureProcessor(_definition.TextureDefaults));
         }
 
         return this;
@@ -136,7 +135,7 @@ public sealed class BakeApplicationBuilder
     public BakeApplicationBuilder AddProcessor(IAssetProcessor processor)
     {
         ArgumentNullException.ThrowIfNull(processor);
-        _definition.AddProcessor(new BakeProcessorAdapter(processor));
+        _definition.AddProcessor(processor);
         return this;
     }
 

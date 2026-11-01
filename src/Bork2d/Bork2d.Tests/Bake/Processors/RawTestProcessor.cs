@@ -1,13 +1,13 @@
-using Bork2d.Bake.Processors;
+using Bork2d.Bake;
 using PolyType;
 
 namespace Bork2d.Tests.Bake.Processors;
 
 /// <summary>
-/// A raw internal processor double for registry tests: the public adapter normalizes the policy, so
-/// invalid-registration tests implement <see cref="IBakeAssetProcessor"/> directly.
+/// A raw public processor double for registry tests: it declares its registration metadata directly
+/// so invalid-registration tests reach the registry's validation.
 /// </summary>
-internal sealed class RawTestProcessor : IBakeAssetProcessor
+internal sealed class RawTestProcessor : IAssetProcessor
 {
     /// <summary>Initializes a new instance of the <see cref="RawTestProcessor"/> class.</summary>
     /// <param name="name">The processor name.</param>
@@ -17,7 +17,7 @@ internal sealed class RawTestProcessor : IBakeAssetProcessor
     internal RawTestProcessor(
         string name,
         IReadOnlyList<string> extensions,
-        BakeSidecarPolicy policy = BakeSidecarPolicy.None,
+        SidecarPolicy policy = SidecarPolicy.None,
         ITypeShape? sidecarShape = null)
     {
         Name = name;
@@ -30,22 +30,15 @@ internal sealed class RawTestProcessor : IBakeAssetProcessor
     public string Name { get; }
 
     /// <inheritdoc/>
-    public Type ProcessorType => typeof(RawTestProcessor);
-
-    /// <inheritdoc/>
     public IReadOnlyList<string> Extensions { get; }
 
     /// <inheritdoc/>
-    public BakeSidecarPolicy Policy { get; }
+    public SidecarPolicy Policy { get; }
 
     /// <inheritdoc/>
     public ITypeShape? SidecarShape { get; }
 
     /// <inheritdoc/>
-    public object CreateDefaultSidecar(BakeProcessorContext context)
-        => throw new NotSupportedException("Registry tests never create sidecars.");
-
-    /// <inheritdoc/>
-    public void Process(BakeProcessorContext context, object? sidecar)
+    public void Process(AssetProcessorContext context)
         => throw new NotSupportedException("Registry tests never process sources.");
 }

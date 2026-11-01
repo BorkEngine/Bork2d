@@ -576,10 +576,10 @@ public sealed class TextureProcessorTests
         Assert.NotNull(project);
         Assert.Empty(diagnostics.GetSorted());
         Assert.True(project.UseDefaultProcessors);
-        IBakeAssetProcessor processor = Assert.Single(project.Processors);
+        BakeProcessorRegistration processor = Assert.Single(project.Processors);
         Assert.Equal("texture", processor.Name);
         Assert.Equal(["bmp", "jpeg", "jpg", "png", "tga"], processor.Extensions.Order(StringComparer.Ordinal));
-        Assert.Equal(BakeSidecarPolicy.Required, processor.Policy);
+        Assert.Equal(SidecarPolicy.Required, processor.Policy);
         Assert.NotNull(processor.SidecarShape);
     }
 

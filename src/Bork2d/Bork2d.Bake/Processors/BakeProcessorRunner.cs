@@ -13,10 +13,11 @@ namespace Bork2d.Bake.Processors;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A <see cref="BakeSidecarPolicy.None"/> processor runs directly. A
-/// <see cref="BakeSidecarPolicy.Required"/> processor runs with its bound sidecar; when the sidecar
-/// file is missing and source writes are allowed, <see cref="IBakeAssetProcessor.CreateDefaultSidecar"/>
-/// is called exactly once, the result is written as canonical TOML with
+/// A <see cref="SidecarPolicy.None"/> processor runs directly. A
+/// <see cref="SidecarPolicy.Required"/> processor runs with its bound sidecar; when the sidecar
+/// file is missing and source writes are allowed,
+/// <see cref="BakeProcessorRegistration.CreateDefaultSidecar"/> is called exactly once, the result is
+/// written as canonical TOML with
 /// <see cref="TomlSidecarWriter"/>, an informational
 /// <see cref="BakeDiagnosticCodes.ProcessorSidecarCreated"/> diagnostic is reported, and the file is
 /// read back and bound. An existing file is never overwritten or defaulted. When source writes are
@@ -82,7 +83,7 @@ internal static class BakeProcessorRunner
                 diagnostics);
 
             string fileName = Path.GetFileName(source.FullPath);
-            var context = new BakeProcessorContext(
+            var context = new AssetProcessorContext(
                 source.FullPath,
                 source.RelativePath,
                 source.BaseAssetPath,
@@ -92,7 +93,7 @@ internal static class BakeProcessorRunner
                 diagnosticSink);
 
             object? sidecar = null;
-            if (source.Processor.Policy == BakeSidecarPolicy.Required)
+            if (source.Processor.Policy == SidecarPolicy.Required)
             {
                 string sidecarPath = source.SidecarPath ?? source.FullPath + ".toml";
                 if (File.Exists(sidecarPath))
@@ -212,7 +213,7 @@ internal static class BakeProcessorRunner
         BakeProject project,
         BakeProcessorSource source,
         string sidecarPath,
-        BakeProcessorContext context,
+        AssetProcessorContext context,
         string diagnosticPath,
         BakeDiagnostics diagnostics,
         bool writeFile,

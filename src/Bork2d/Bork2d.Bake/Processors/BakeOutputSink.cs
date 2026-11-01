@@ -24,7 +24,7 @@ namespace Bork2d.Bake.Processors;
 /// produce any number of outputs, including none.
 /// </para>
 /// </remarks>
-internal sealed class BakeOutputSink : IBakeOutputSink
+internal sealed class BakeOutputSink : IAssetOutputSink
 {
     private readonly List<BakeProcessorOutput> _outputs = [];
     private readonly HashSet<string> _paths = new(StringComparer.Ordinal);

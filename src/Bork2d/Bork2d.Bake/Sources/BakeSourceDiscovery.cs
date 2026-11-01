@@ -19,12 +19,12 @@ namespace Bork2d.Bake.Sources;
 /// </para>
 /// <para>
 /// A <c>.toml</c> whose exact pack-relative path is <c>&lt;source relative path&gt;.toml</c> for a
-/// registered <see cref="BakeSidecarPolicy.Required"/> processor source is that source's
+/// registered <see cref="SidecarPolicy.Required"/> processor source is that source's
 /// sidecar. Filename and registration decide classification; the file is never read for
 /// classification, so a <c>[bork2d]</c> table inside it is an unknown sidecar key at binding time.
 /// Every other <c>.toml</c> follows the data rules: a typed document is a custom-data source, and an
 /// untyped document is a missing-type error unless it is an orphan sidecar or an ordinary TOML next
-/// to a <see cref="BakeSidecarPolicy.None"/> processor.
+/// to a <see cref="SidecarPolicy.None"/> processor.
 /// </para>
 /// <para>
 /// The returned data and processor sources are each ordered by pack index and then canonical path.
@@ -144,7 +144,7 @@ internal static class BakeSourceDiscovery
                 match.Processor);
             processorSources.Add(source);
 
-            if (match.Processor.Policy == BakeSidecarPolicy.Required)
+            if (match.Processor.Policy == SidecarPolicy.Required)
             {
                 requiredByRelativePath[relativePath] = source;
             }
@@ -168,7 +168,7 @@ internal static class BakeSourceDiscovery
 
             if (matchedRelativePaths.Contains(stem)
                 && project.ProcessorRegistry.TryMatch(stem, out BakeProcessorMatch invalidOwner)
-                && invalidOwner.Processor.Policy == BakeSidecarPolicy.Required)
+                && invalidOwner.Processor.Policy == SidecarPolicy.Required)
             {
                 // The source exists but its own BK7002 already reports the invalid base path; the
                 // sidecar belongs to it and must not add a second diagnostic.
@@ -302,7 +302,7 @@ internal static class BakeSourceDiscovery
     {
         if (project.ProcessorRegistry.TryMatch(stem, out BakeProcessorMatch match))
         {
-            if (match.Processor.Policy == BakeSidecarPolicy.Required)
+            if (match.Processor.Policy == SidecarPolicy.Required)
             {
                 if (matchedRelativePaths.Contains(stem))
                 {
