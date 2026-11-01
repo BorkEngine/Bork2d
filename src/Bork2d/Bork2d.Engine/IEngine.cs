@@ -41,10 +41,18 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     /// Gets the window controls. The property access never throws.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// In windowed mode this is the internal proxy attached for the duration of <c>Run()</c>. In
-    /// headless and offscreen mode it is a stub whose members throw
-    /// <see cref="NotSupportedException"/>. After a windowed run returns, retained references remain
-    /// valid objects but their members throw <see cref="ObjectDisposedException"/> (D-M2-17).
+    /// offscreen mode it is a functional facade whose <see cref="IWindow.Size"/> is the fixed
+    /// <c>WithOffscreen</c> target extent and whose setters store inert window state; its members
+    /// never throw, including after the run. In headless mode it is a stub whose members throw
+    /// <see cref="NotSupportedException"/>.
+    /// </para>
+    /// <para>
+    /// After a windowed run returns, retained references remain valid objects but their members
+    /// throw <see cref="ObjectDisposedException"/> (D-M2-17). The getter itself never throws in any
+    /// mode.
+    /// </para>
     /// </remarks>
     IWindow Window { get; }
 

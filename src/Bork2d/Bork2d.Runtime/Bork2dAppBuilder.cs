@@ -233,7 +233,7 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     }
 
     /// <summary>
-    /// Selects offscreen mode: windowless rendering to an internal target.
+    /// Selects offscreen mode: rendering to a fixed internal target.
     /// </summary>
     /// <param name="width">The positive offscreen target width.</param>
     /// <param name="height">The positive offscreen target height.</param>
@@ -241,7 +241,8 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <remarks>
     /// The run creates a fixed sRGB Vulkan target, publishes one snapshot per completed tick, and
     /// is backpressured by the snapshot ring; the renderer discards one frame per consumed snapshot
-    /// until <c>IEngine.Exit()</c>. There is no surface, window, input, or readback.
+    /// until <c>IEngine.Exit()</c>. There is no surface, SDL window, input, or readback;
+    /// <c>IEngine.Window</c> is a functional facade reporting the fixed target extent.
     /// </remarks>
     public Bork2dAppBuilder<TLayer> WithOffscreen(int width, int height)
     {
@@ -372,9 +373,10 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <c>Setup</c>.
     /// </para>
     /// <para>
-    /// Windowed apps are created with unattached internal window/input proxies; headless and
-    /// offscreen apps keep the throwing window stub and no input. <see cref="Build"/> creates no
-    /// SDL state, window, or thread in any mode.
+    /// Windowed apps are created with unattached internal window/input proxies; offscreen apps get
+    /// a functional window facade reporting the fixed target extent and no input; headless apps
+    /// keep the throwing window stub and no input. <see cref="Build"/> creates no SDL state, OS
+    /// window, or thread in any mode.
     /// </para>
     /// </remarks>
     /// <exception cref="Bork2dException">The configuration is invalid.</exception>
@@ -405,6 +407,14 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
                 inputProxy = new InputProxy();
                 window = windowProxy;
                 input = inputProxy;
+            }
+            else if (_options.Mode == Bork2dAppMode.Offscreen)
+            {
+                window = new OffscreenWindow(
+                    _options.OffscreenWidth,
+                    _options.OffscreenHeight,
+                    _options.Title);
+                input = null;
             }
             else
             {

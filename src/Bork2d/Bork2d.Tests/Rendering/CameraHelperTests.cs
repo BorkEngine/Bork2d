@@ -196,6 +196,30 @@ public sealed class CameraHelperTests
     }
 
     [Fact]
+    public void OffscreenWindowProvidesTheFramebuffer()
+    {
+        var engine = new GameEngine<GameLayer>(
+            new FakeTime(),
+            new OffscreenWindow(800, 600, "offscreen"),
+            new FakeAssets());
+        var camera = engine.CreateCamera(engine.Root);
+        camera.Size = 5f;
+
+        Vector2 worldSize = camera.WorldSize;
+
+        Assert.Equal(2f * 5f * (800f / 600f), worldSize.X, 4);
+        Assert.Equal(10f, worldSize.Y, 4);
+
+        Vector2 screen = camera.WorldToScreen(Vector2.Zero);
+        Assert.Equal(400f, screen.X, 3);
+        Assert.Equal(300f, screen.Y, 3);
+
+        Vector2 roundTrip = camera.ScreenToWorld(screen);
+        Assert.Equal(0f, roundTrip.X, 3);
+        Assert.Equal(0f, roundTrip.Y, 3);
+    }
+
+    [Fact]
     public void HeadlessWindowThrowsInvalidOperation()
     {
         var engine = new GameEngine<GameLayer>(

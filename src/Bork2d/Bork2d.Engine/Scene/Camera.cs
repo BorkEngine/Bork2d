@@ -244,8 +244,8 @@ internal sealed class Camera<TLayer> : Transform, ICamera<TLayer>
         catch (NotSupportedException exception)
         {
             throw new InvalidOperationException(
-                "Camera screen/world helpers require a framebuffer. This app is headless or "
-                    + "offscreen, so IWindow.Size is not available.",
+                "Camera screen/world helpers require a framebuffer. This app is headless, so "
+                    + "IWindow.Size is not available.",
                 exception);
         }
 

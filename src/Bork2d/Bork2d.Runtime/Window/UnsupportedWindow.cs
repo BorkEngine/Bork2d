@@ -4,19 +4,20 @@ using Bork2d.Engine.Platform;
 namespace Bork2d.Runtime.Window;
 
 /// <summary>
-/// The <see cref="IWindow"/> stub used when the app has no window.
+/// The <see cref="IWindow"/> stub used by a headless app.
 /// </summary>
 /// <remarks>
-/// Every member throws <see cref="NotSupportedException"/>. Headless and offscreen apps keep this
-/// stub. A windowed app gets the internal proxy attached by the runtime host during
+/// Every member throws <see cref="NotSupportedException"/>. Only headless apps keep this stub. A
+/// windowed app gets the internal proxy attached by the runtime host during
 /// <c>Bork2dApp.Run()</c>; after that run the proxy's members throw
-/// <see cref="ObjectDisposedException"/> instead.
+/// <see cref="ObjectDisposedException"/> instead. An offscreen app gets the functional
+/// <see cref="OffscreenWindow"/> facade, which never throws.
 /// </remarks>
 internal sealed class UnsupportedWindow : IWindow
 {
     private const string Message =
-        "This app has no window. Headless and offscreen modes do not create one, and a windowed "
-        + "window exists only while Bork2dApp.Run() is running.";
+        "This app has no window. Headless mode does not create one, and a windowed window exists "
+        + "only while Bork2dApp.Run() is running.";
 
     public string Title
     {

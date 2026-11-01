@@ -66,8 +66,8 @@ snapshot; it only runs the paced game loop.
 | Mode | Window / input | Renderer | Loop |
 | --- | --- | --- | --- |
 | Windowed (default) | SDL window; input available | Vulkan swapchain | Backpressured by the ring; stops on `Exit`, close, renderer fatal, or platform fatal. |
-| Offscreen | None | Fixed sRGB Vulkan target; frames discarded | Same handoff loop; stops on `Exit` or renderer fatal. |
-| Headless | None | None, no GPU or SDL | Absolute-deadline paced loop with a synthesized clock; stops on `Exit`. |
+| Offscreen | Functional window facade reporting the fixed target extent; no input | Fixed sRGB Vulkan target; frames discarded | Same handoff loop; stops on `Exit` or renderer fatal. |
+| Headless | None; `IEngine.Window` is a throwing stub | None, no GPU or SDL | Absolute-deadline paced loop with a synthesized clock; stops on `Exit`. |
 
 ## Assets and tooling
 
