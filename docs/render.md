@@ -80,14 +80,17 @@ The sprite pass plans its data in one allocation-free pass:
 1. Sort sprite indices by ascending `(Layer, ZIndex)`.
 2. Classify each sprite once from its frozen render data: a null sprite, zero/multi-bit layer,
    non-`Quad` topology, or a still-loading texture page is skipped; malformed fields are fatal.
-3. Ensure each sprite's texture page and resolve quad geometry from the frozen UVs and per-axis
-   world scale for drawable sprites.
+3. Ensure each drawable sprite's texture page, resolve its quad geometry from the frozen UVs and
+   per-axis world scale, and build its camera-independent instance record once. The sorted index is
+   compacted into a per-layer range: each single-bit layer maps to one of the 32 mask bits, and each
+   range keeps its ascending `ZIndex` order.
 4. Sort cameras by `ZIndex` and resolve their projections; invalid cameras are skipped.
-5. Filter by each camera's culling mask, then cull by bounds: a sprite whose known world AABB does
-   not intersect the camera's world AABB is skipped for that camera. Empty sprite bounds mean
-   "unknown" and are never culled.
-6. Assign contiguous per-camera instance ranges, grow the instance buffer once, and write the
-   instance records.
+5. One camera×sprite visibility pass builds each camera's contiguous visible-index range while
+   counting its instances: only the layer bits set in the camera's culling mask are visited, and a
+   sprite whose known world AABB does not intersect the camera's world AABB is skipped. Empty sprite
+   bounds mean "unknown" and are never culled, and empty camera bounds never cull either.
+6. Validate the frame's accumulated instance total against `int.MaxValue`, grow the instance buffer
+   once, and copy the precomputed instance records into their per-camera ranges.
 
 Bounds culling is always on and conservative. The camera's world AABB is the AABB of its four
 visible world-space corners, so a rotated camera culls with the larger axis-aligned box around its
