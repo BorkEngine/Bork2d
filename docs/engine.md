@@ -14,6 +14,7 @@ provider package.
 | `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `TextureDescriptor`, `AssetRef<T>`, `DataRef`, enums |
 | `Bork2d.Engine.Assets.Pack` | `PackBuilder`, `PackCompressionMode` (tooling only) |
 | `Bork2d.Engine.Input` | `IInput`, `KeyCode`, `MouseButton` |
+| `Bork2d.Engine.Mathematics` | `Vector2Extensions`, `Vector2ApproximatelyExtensions` |
 | `Bork2d.Engine.Platform` | `IWindow`, `ITime` |
 
 `GameEngine`, `Transform`, `Camera`, `SpriteRender`, `AssetService`, `FrameSnapshot`, the typed
@@ -119,6 +120,28 @@ set of Unity presets plus `Transparent` and `Clear` (both transparent black) and
 `Grey`. Equality is exact .NET component equality: `==`, `Equals(Color)`, and `GetHashCode` agree,
 and no approximate comparison is used. Gamma conversion, `Color32`, and `ColorUtility` are out of
 scope and are not part of the surface.
+
+## Vector2 extensions
+
+`Vector2` remains `System.Numerics.Vector2`. `Bork2d.Engine.Mathematics.Vector2Extensions` adds the
+Unity 6000.6 surface as C# 14 extension members, so there is no second vector type and no existing
+public signature changes. Import `using Bork2d.Engine.Mathematics;` to use `Magnitude`,
+`SqrMagnitude`, `Normalized`, `Vector2.Up`/`Down`/`Left`/`Right`, `Angle`, `SignedAngle`,
+`ClampMagnitude`, `MoveTowards`, `Perpendicular`, `Scale`, `LerpUnclamped`, `LerpClamped`,
+`NormalizeOrZero`, `ApproximatelyEquals`, and `SmoothDamp`, plus the mutating `Set`, `Scale`, and
+`Normalize`.
+
+Members that `System.Numerics.Vector2` already provides keep their .NET semantics and are not
+redeclared: `Lerp` is unclamped, static `Normalize` returns NaN components for a zero vector, `==`,
+`Equals`, `GetHashCode`, and `ToString` are exact or unchanged, and there are no implicit
+conversions between `Vector2` and `Vector3`. Unity's clamped interpolation, zero-safe
+normalization, and approximate equality are available as `LerpClamped`, `NormalizeOrZero`, and
+`ApproximatelyEquals`. `SmoothDamp` takes an explicit `deltaTime`; there is no ambient frame clock.
+
+The static `ApproximatelyEquals(Vector2, Vector2)` lives in `Vector2ApproximatelyExtensions`
+because C# extension blocks lower a same-named static and instance member to colliding static
+methods. Both call forms work in the same namespace: `Vector2.ApproximatelyEquals(a, b)` and
+`a.ApproximatelyEquals(b)`.
 
 ## Time
 
