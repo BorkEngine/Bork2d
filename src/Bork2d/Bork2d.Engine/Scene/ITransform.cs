@@ -14,8 +14,9 @@ namespace Bork2d.Engine.Scene;
 /// <para>
 /// A parent retains its children strongly. Setting <see cref="Parent"/> to another transform
 /// preserves the world transform, and setting it to <see langword="null"/> detaches the node
-/// without destroying it: the same object can be re-attached later with its state intact.
-/// Self-parenting, cycles, and parenting the scene root are rejected at runtime.
+/// without moving it: its world transform is preserved and the same object can be re-attached
+/// later with its state intact. Self-parenting, cycles, and parenting the scene root are rejected
+/// at runtime.
 /// </para>
 /// </remarks>
 public interface ITransform
@@ -25,8 +26,8 @@ public interface ITransform
     /// </summary>
     /// <value>
     /// The parent transform, or <see langword="null"/> when unparented. Assigning
-    /// <see langword="null"/> detaches the node from the scene; it stays valid and can be
-    /// re-attached.
+    /// <see langword="null"/> detaches the node from the scene without moving it: its world
+    /// transform is preserved, and the node stays valid and can be re-attached.
     /// </value>
     /// <exception cref="InvalidOperationException">
     /// The transform is the scene root, or the assignment would create a cycle.
@@ -70,8 +71,10 @@ public interface ITransform
     /// Detaches all direct children of this transform.
     /// </summary>
     /// <remarks>
-    /// Grandchildren stay attached to their parents. Detached children keep their state and can
-    /// be re-parented later. Can be called on any transform, not only the scene root.
+    /// Grandchildren stay attached to their parents. Each detached direct child keeps its world
+    /// transform because its old local-to-world matrix becomes its new local matrix, so detaching
+    /// from a transformed parent does not move the child. Detached children keep their state and
+    /// can be re-parented later. Can be called on any transform, not only the scene root.
     /// </remarks>
     void DetachAll();
 }

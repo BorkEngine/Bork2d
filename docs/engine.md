@@ -47,9 +47,11 @@ The scene is a strong tree rooted at `IEngine.Root`, a read-only identity transf
 collectible when game code drops them.
 
 - `CreateTransform(parent)` creates a transform, optionally parented.
-- `Parent = null` detaches without destroying; the same instance can be re-attached later.
+- `Parent = null` detaches without destroying and preserves the node's world transform; the same
+  instance can be re-attached later.
 - Re-parenting preserves the world transform. Cycles and parenting the root are rejected.
-- `DetachAll()` clears one node's direct children; grandchildren keep their parents.
+- `DetachAll()` clears one node's direct children while each direct child keeps its world
+  transform; grandchildren keep their parents.
 - There is no entity `Dispose`, liveness flag, ID, or ordered child enumeration.
 
 Cameras are transforms plus projection and clear state: normalized `Viewport`, `Size` (half the

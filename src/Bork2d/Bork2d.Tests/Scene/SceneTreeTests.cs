@@ -1,3 +1,4 @@
+using Bork2d.Engine.Scene;
 using Bork2d.Tests.TestSupport;
 using Xunit;
 
@@ -70,5 +71,70 @@ public sealed class SceneTreeTests
         Assert.Same(rig, turret.Parent);
         Assert.Same(turret, barrel.Parent);
         Assert.Same(barrel, muzzle.Parent);
+    }
+
+    [Fact]
+    public void LargeFlatPopulationSurvivesScatteredRemovalAndReattachment()
+    {
+        const int childCount = 2000;
+        const int removeStride = 7;
+
+        var engine = TestEngineFactory.Create();
+        var newParent = engine.CreateTransform();
+        var children = new ITransform[childCount];
+        for (var index = 0; index < childCount; index++)
+        {
+            children[index] = engine.CreateTransform(engine.Root);
+        }
+
+        var removed = new List<int>();
+        for (var index = 0; index < childCount; index += removeStride)
+        {
+            children[index].Parent = null;
+            removed.Add(index);
+        }
+
+        var reattached = new HashSet<int>();
+        for (var index = 0; index < removed.Count; index += 2)
+        {
+            children[removed[index]].Parent = newParent;
+            reattached.Add(removed[index]);
+        }
+
+        var rootIndexes = new HashSet<int>();
+        var newParentIndexes = new HashSet<int>();
+        for (var index = 0; index < childCount; index++)
+        {
+            var childIndex = ((Transform)children[index]).ChildIndex;
+            if (index % removeStride != 0)
+            {
+                Assert.Same(engine.Root, children[index].Parent);
+                Assert.True(childIndex >= 0, $"Rooted child {index} must cache a valid index.");
+                Assert.True(rootIndexes.Add(childIndex), $"Rooted child {index} has a duplicate index.");
+            }
+            else if (reattached.Contains(index))
+            {
+                Assert.Same(newParent, children[index].Parent);
+                Assert.True(childIndex >= 0, $"Re-attached child {index} must cache a valid index.");
+                Assert.True(
+                    newParentIndexes.Add(childIndex),
+                    $"Re-attached child {index} has a duplicate index.");
+            }
+            else
+            {
+                Assert.Null(children[index].Parent);
+                Assert.Equal(-1, childIndex);
+            }
+        }
+
+        Assert.Equal(childCount - removed.Count, rootIndexes.Count);
+        Assert.Equal(reattached.Count, newParentIndexes.Count);
+        AssertIndexesAreDense(rootIndexes);
+        AssertIndexesAreDense(newParentIndexes);
+    }
+
+    private static void AssertIndexesAreDense(HashSet<int> indexes)
+    {
+        Assert.All(indexes, index => Assert.InRange(index, 0, indexes.Count - 1));
     }
 }
