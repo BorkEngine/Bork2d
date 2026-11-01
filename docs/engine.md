@@ -10,7 +10,7 @@ provider package.
 | --- | --- |
 | `Bork2d.Engine` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
 | `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `IRenderable`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
-| `Bork2d.Engine.Rendering` | `Bounds`, `Color`, `RenderStats`, `ClearKind`, `FrameCaptureResult` |
+| `Bork2d.Engine.Rendering` | `Bounds`, `Color` (immutable linear RGBA), `RenderStats`, `ClearKind`, `FrameCaptureResult` |
 | `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `TextureDescriptor`, `AssetRef<T>`, `DataRef`, enums |
 | `Bork2d.Engine.Assets.Pack` | `PackBuilder`, `PackCompressionMode` (tooling only) |
 | `Bork2d.Engine.Input` | `IInput`, `KeyCode`, `MouseButton` |
@@ -103,6 +103,22 @@ instance to change the rendered result.
 
 Layer enums must be `int`-backed `[Flags]` enums with 1-32 named single-bit values; `None = 0` is
 allowed. Invalid layer types fail at build/host creation.
+
+## Color
+
+`Color` is an immutable linear RGBA value type in `Bork2d.Engine.Rendering`. It stores its four
+components in one `System.Numerics.Vector4`, so the value is exactly 16 bytes and the basic
+arithmetic operators run through the vector operators. `R`, `G`, `B`, `A`, the get-only indexer,
+`Grayscale` (`0.299*R + 0.587*G + 0.114*B`), and `MaxColorComponent` expose the components without
+allowing mutation; `Lerp` clamps its ratio to `[0, 1]` and `LerpUnclamped` does not.
+
+The surface follows Unity 6000.6 `Color`: the three- and four-argument constructors, implicit
+conversions to and from `Vector4`, component arithmetic, `HSVToRGB`/`RGBToHSV`, `ToString` with the
+`RGBA(r, g, b, a)` form (default `F3`, invariant culture when no provider is given), and the full
+set of Unity presets plus `Transparent` and `Clear` (both transparent black) and both `Gray` and
+`Grey`. Equality is exact .NET component equality: `==`, `Equals(Color)`, and `GetHashCode` agree,
+and no approximate comparison is used. Gamma conversion, `Color32`, and `ColorUtility` are out of
+scope and are not part of the surface.
 
 ## Time
 
