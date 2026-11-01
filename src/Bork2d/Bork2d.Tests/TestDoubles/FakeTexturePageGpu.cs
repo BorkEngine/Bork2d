@@ -4,21 +4,25 @@ using Bork2d.Render.Textures;
 namespace Bork2d.Tests.TestDoubles;
 
 /// <summary>
-/// A deterministic <see cref="ITexturePageGpu"/> that records capacity and upload requests and lets
-/// a test decide when an upload completes, so the page state machine runs without Vulkan.
+/// A deterministic <see cref="ITexturePageGpu"/> that records capacity, upload, and retirement
+/// requests and lets a test decide when an upload completes, so the page state machine runs without
+/// Vulkan.
 /// </summary>
 internal sealed class FakeTexturePageGpu : ITexturePageGpu
 {
     private readonly List<TexturePageUpload> _uploads = [];
     private readonly HashSet<int> _pending = [];
     private readonly HashSet<int> _completed = [];
-    private int _resident;
+    private readonly HashSet<int> _resident = [];
 
     /// <summary>Gets the capacities requested through <see cref="EnsureCapacity"/>.</summary>
     internal List<int> CapacityRequests { get; } = [];
 
     /// <summary>Gets the uploads requested through <see cref="Upload"/>.</summary>
     internal IReadOnlyList<TexturePageUpload> Uploads => _uploads;
+
+    /// <summary>Gets the page indices reclaimed through <see cref="RetirePage"/>, in call order.</summary>
+    internal List<int> RetiredPageIndices { get; } = [];
 
     /// <summary>
     /// Gets or sets a value indicating whether every submitted upload's fence reports complete
@@ -27,7 +31,7 @@ internal sealed class FakeTexturePageGpu : ITexturePageGpu
     internal bool UploadsCompleteImmediately { get; set; } = true;
 
     /// <inheritdoc/>
-    public int ResidentPageCount => _resident;
+    public int ResidentPageCount => _resident.Count;
 
     /// <summary>Gets the number of <see cref="Destroy"/> calls.</summary>
     internal int DestroyCount { get; private set; }
@@ -62,7 +66,7 @@ internal sealed class FakeTexturePageGpu : ITexturePageGpu
     {
         _pending.Remove(pageIndex);
         _completed.Remove(pageIndex);
-        _resident++;
+        _resident.Add(pageIndex);
     }
 
     /// <inheritdoc/>
@@ -70,7 +74,14 @@ internal sealed class FakeTexturePageGpu : ITexturePageGpu
     {
         _pending.Remove(pageIndex);
         _completed.Remove(pageIndex);
-        _resident++;
+        _resident.Add(pageIndex);
+    }
+
+    /// <inheritdoc/>
+    public void RetirePage(int pageIndex)
+    {
+        RetiredPageIndices.Add(pageIndex);
+        _resident.Remove(pageIndex);
     }
 
     /// <inheritdoc/>

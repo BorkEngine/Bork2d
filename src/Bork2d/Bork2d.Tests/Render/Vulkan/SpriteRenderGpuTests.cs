@@ -851,6 +851,144 @@ public sealed class SpriteRenderGpuTests
         }
     }
 
+    [GpuFact]
+    public void ResidencyBudgetEvictsAndReloadsPagesWithoutValidationErrors()
+    {
+        const int textureCount = 8;
+        const int pageBytes = 4 * 4 * 4;
+        var assets = new GeneratedTextureAssets();
+        var sprites = new SpriteAsset[textureCount];
+        for (var index = 0; index < textureCount; index++)
+        {
+            string path = assets.AddTexture($"tex/{index}");
+            sprites[index] = MakeSprite(path);
+        }
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(
+                assets,
+                320,
+                240,
+                loggerFactory,
+                textureResidencyBudgetBytes: 4 * pageBytes);
+            var producer = new Producer(renderer);
+            TexturePageStore pages = Assert.IsType<TexturePageStore>(renderer.PageStore);
+
+            // Phase 1: every texture is visible every frame. The eight pages exceed the four-page
+            // budget, but each is still inside the reclaim safety age, so the over-budget set is
+            // kept and eviction is retried later.
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                PublishFrame(renderer, producer, snapshot => AddTextureBurst(snapshot, sprites));
+                if (renderer.RenderStats.Instances == textureCount)
+                {
+                    break;
+                }
+            }
+
+            Assert.Equal(textureCount, renderer.RenderStats.Instances);
+            Assert.Equal(textureCount + 1, pages.TexturePageCount);
+            Assert.Equal(textureCount * pageBytes, pages.ResidentPayloadBytes);
+            Assert.Equal(0, pages.EvictionCount);
+            Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+
+            // Phase 2: only the first texture stays visible. The rest age out and the least recently
+            // seen are evicted until the resident payload fits the budget; rendering continues from
+            // the survivor. The budget fits four pages, so four of the eight are evicted.
+            const int pagesOverBudget = textureCount - 4;
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                PublishFrame(
+                    renderer,
+                    producer,
+                    snapshot =>
+                    {
+                        AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
+                        AddSprite(snapshot, sprites[0], layer: 1u);
+                    });
+
+                if (pages.EvictionCount >= pagesOverBudget)
+                {
+                    break;
+                }
+            }
+
+            Assert.Equal(pagesOverBudget, pages.EvictionCount);
+            Assert.Equal(4 + 1, pages.TexturePageCount);
+            Assert.Equal(4 * pageBytes, pages.ResidentPayloadBytes);
+            Assert.Equal(0, pages.DescriptorSlotReuseCount);
+            Assert.Equal(1, renderer.RenderStats.Instances);
+            Assert.Equal(0, pages.RetiredPageCount);
+            Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+            Assert.Equal(0, renderer.Counters.ValidationWarningCount);
+            Assert.Null(renderer.FatalException);
+
+            // Eviction returns descriptor slots. Driving more frames here proves the reuse below is
+            // separated from the eviction by at least two frames, and the reload reuses the freed
+            // slots instead of growing the table.
+            long evictionsBeforeReuse = pages.EvictionCount;
+            int growthsBeforeReuse = pages.GrowthCount;
+            PublishFrame(
+                renderer,
+                producer,
+                snapshot =>
+                {
+                    AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
+                    AddSprite(snapshot, sprites[0], layer: 1u);
+                });
+            PublishFrame(
+                renderer,
+                producer,
+                snapshot =>
+                {
+                    AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
+                    AddSprite(snapshot, sprites[0], layer: 1u);
+                });
+
+            // Phase 3: every texture is visible again, so the evicted paths reload into the freed
+            // slots and the frame draws all eight sprites again.
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                PublishFrame(renderer, producer, snapshot => AddTextureBurst(snapshot, sprites));
+                if (renderer.RenderStats.Instances == textureCount)
+                {
+                    break;
+                }
+            }
+
+            Assert.Equal(textureCount, renderer.RenderStats.Instances);
+            Assert.Equal(textureCount * pageBytes, pages.ResidentPayloadBytes);
+            Assert.True(
+                pages.EvictionCount >= evictionsBeforeReuse,
+                "Reload must not reduce the eviction counter.");
+            Assert.True(
+                pages.DescriptorSlotReuseCount >= pagesOverBudget,
+                $"Only {pages.DescriptorSlotReuseCount} uploads recycled a descriptor slot.");
+            Assert.Equal(growthsBeforeReuse, pages.GrowthCount);
+            Assert.Equal(0, pages.RetiredPageCount);
+            Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+            Assert.Equal(0, renderer.Counters.ValidationWarningCount);
+            Assert.Null(renderer.FatalException);
+            StopAndAssertClean(renderer);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    private static void AddTextureBurst(FrameSnapshot snapshot, SpriteAsset[] sprites)
+    {
+        AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
+        for (var index = 0; index < sprites.Length; index++)
+        {
+            AddSprite(snapshot, sprites[index], layer: 1u, zIndex: index, x: index);
+        }
+    }
+
     private static ILoggerFactory CreateLoggerFactory(out CapturingLoggerProvider provider)
     {
         var created = new CapturingLoggerProvider();

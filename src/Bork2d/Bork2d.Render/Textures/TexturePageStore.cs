@@ -24,9 +24,20 @@ namespace Bork2d.Render.Textures;
 /// queued uploads, and failed-path state are retired, so the next <see cref="EnsurePage"/> for a path
 /// starts a fresh load from the new winning entry and a previously failed path is retried. Uploads
 /// that were already submitted finish so their GPU resources are released, but they never become
-/// visible or count as ready. Retired images stay GPU-resident until the residency policy reclaims
-/// them; a retired page's descriptor slot is never reused or mutated, so new pages always take fresh
-/// indices.
+/// visible or count as ready. Retired pages keep their image resident until the reclamation safety
+/// age proves no in-flight frame can sample them; their descriptor slots and image-memory ranges are
+/// then recycled.
+/// </para>
+/// <para>
+/// Residency is bounded by <see cref="ResidencyBudgetBytes"/> over the declared payload bytes
+/// (<c>width * height * 4</c>) of the current catalog's ready pages. When the total exceeds the
+/// budget, <see cref="Pump"/> evicts ready pages least recently seen first, but only pages the safety
+/// age proves no in-flight frame can sample: with two GPU frames in flight, a page is reclaimable
+/// only when <c>_frameSequence - LastSeenFrame &gt; 2</c>, so the two plans that could still be in
+/// flight can never reference it. If every ready page is still recent, the over-budget set is kept
+/// and eviction is retried on a later pump; the placeholder is never a candidate. A reclaimed
+/// descriptor slot goes to a free list and the next upload reuses it before growing the table, and a
+/// reclaimed image-memory range returns to the image pool for reuse.
 /// </para>
 /// <para>
 /// The state machine is <see cref="TexturePageState.Pending"/> (the descriptor/payload load runs on
@@ -55,11 +66,24 @@ namespace Bork2d.Render.Textures;
 /// </remarks>
 internal sealed class TexturePageStore
 {
-    /// <summary>The default texture residency budget in bytes (1 GiB), reserved for page eviction.</summary>
+    /// <summary>The default texture residency budget in bytes (1 GiB), enforced by page eviction.</summary>
     internal const long DefaultResidencyBudgetBytes = 1L << 30;
 
     /// <summary>The default per-frame texture upload budget in bytes (128 MiB).</summary>
     internal const int DefaultUploadBudgetBytes = 128 * 1024 * 1024;
+
+    /// <summary>
+    /// The number of frame pumps a page must stay unseen before its descriptor slot and image memory
+    /// may be reclaimed.
+    /// </summary>
+    /// <remarks>
+    /// The store pumps once per frame and the renderers keep two GPU frames in flight. A page last
+    /// seen while planning the frame recorded at sequence <c>S</c> can still be sampled by that frame
+    /// and by the frame recorded at <c>S + 1</c>, so reclaiming is safe only once
+    /// <c>_frameSequence - LastSeenFrame &gt; ReclaimSafetyAgeFrames</c>: the reclaiming pump then runs
+    /// before a new plan, and every frame that could reference the page is complete.
+    /// </remarks>
+    internal const int ReclaimSafetyAgeFrames = 2;
 
     private readonly IAssets _assets;
     private readonly ITexturePageGpu _gpu;
@@ -73,15 +97,22 @@ internal sealed class TexturePageStore
     private readonly List<TexturePage> _pending = [];
     private readonly List<TexturePage> _uploadQueue = [];
     private readonly List<TexturePage> _uploading = [];
+    private readonly List<TexturePage> _retired = [];
+    private readonly List<int> _freeIndices = [];
+    private readonly List<TexturePage> _evictionCandidates = [];
     private int _capacity;
     private int _nextIndex = TexturePageCapacity.PlaceholderIndex + 1;
     private int _readyRealPages;
     private int _failedPaths;
     private int _growths;
+    private int _evictions;
+    private int _reclaimedRetiredPages;
+    private int _descriptorSlotReuses;
     private long _catalogVersionSeen;
     private long _frameSequence;
     private long _loadSequence;
     private long _pendingUploadBytes;
+    private long _residentPayloadBytes;
     private bool _placeholderReady;
     private bool _destroyed;
 
@@ -106,8 +137,8 @@ internal sealed class TexturePageStore
     /// The maximum validated payload bytes whose uploads <see cref="Pump"/> may start per frame.
     /// </param>
     /// <param name="residencyBudgetBytes">
-    /// The texture residency budget in bytes. It is stored for the residency/eviction policy and is
-    /// not enforced by this type yet.
+    /// The texture residency budget in bytes. Ready-page payload bytes above it are evicted least
+    /// recently seen first, subject to <see cref="ReclaimSafetyAgeFrames"/>. It must be positive.
     /// </param>
     /// <param name="initialCapacity">
     /// The startup table capacity, including the placeholder. The renderer passes its startup
@@ -188,10 +219,40 @@ internal sealed class TexturePageStore
     internal int UploadBudgetBytes => _uploadBudgetBytes;
 
     /// <summary>
-    /// Gets the configured texture residency budget in bytes. It is carried for the eviction policy
-    /// and is not enforced yet.
+    /// Gets the configured texture residency budget in bytes. Ready-page payload bytes above it are
+    /// evicted least recently seen first.
     /// </summary>
     internal long ResidencyBudgetBytes => _residencyBudgetBytes;
+
+    /// <summary>
+    /// Gets the declared payload bytes of the current catalog's ready pages, which the residency
+    /// budget bounds. Retired pages awaiting reclamation and uploading pages are not counted.
+    /// </summary>
+    internal long ResidentPayloadBytes => _residentPayloadBytes;
+
+    /// <summary>Gets the number of ready pages evicted by the residency policy this run.</summary>
+    internal int EvictionCount => _evictions;
+
+    /// <summary>
+    /// Gets the number of pages retired by a catalog change whose descriptor slot and image memory
+    /// the residency policy reclaimed this run.
+    /// </summary>
+    internal int ReclaimedRetiredPageCount => _reclaimedRetiredPages;
+
+    /// <summary>
+    /// Gets the number of retired pages still waiting for the reclamation safety age. They do not
+    /// count as resident.
+    /// </summary>
+    internal int RetiredPageCount => _retired.Count;
+
+    /// <summary>Gets the number of descriptor indices waiting on the free list for reuse.</summary>
+    internal int FreeDescriptorSlotCount => _freeIndices.Count;
+
+    /// <summary>
+    /// Gets the number of uploads that took a reclaimed descriptor index instead of the next fresh
+    /// one this run.
+    /// </summary>
+    internal int DescriptorSlotReuseCount => _descriptorSlotReuses;
 
     /// <summary>Gets the number of capacity growths this run.</summary>
     internal int GrowthCount => _growths;
@@ -269,13 +330,21 @@ internal sealed class TexturePageStore
     }
 
     /// <summary>
-    /// Advances the state machine once per frame: consumes completed loads into the upload queue,
-    /// starts as many queued uploads as the per-frame budget admits, and promotes uploads whose
-    /// fence has signaled.
+    /// Advances the state machine once per frame: reclaims pages old enough to be safe, consumes
+    /// completed loads into the upload queue, enforces the residency budget, starts as many queued
+    /// uploads as the per-frame budget admits, and promotes uploads whose fence has signaled.
     /// </summary>
     /// <remarks>
-    /// The frame sequence advances before the queue is planned, so the pages the planner marked
-    /// during the previous frame are the ones prioritized here.
+    /// <para>
+    /// The frame sequence advances before reclamation and queue planning, so the pages the planner
+    /// marked during the previous frame are the ones prioritized here and a page reclaimed this
+    /// pump was not seen by the two previous pumps' plans.
+    /// </para>
+    /// <para>
+    /// Eviction runs before uploads start so a reclaimed descriptor index can serve this frame's
+    /// upload instead of growing the table. A page whose upload completes after the budget check
+    /// may leave the resident total above the budget until a later pump retries.
+    /// </para>
     /// </remarks>
     /// <exception cref="Bork2dException">
     /// The page capacity reached the device limit, or a Vulkan upload failed.
@@ -289,7 +358,9 @@ internal sealed class TexturePageStore
 
         _frameSequence++;
         ObserveCatalogVersion();
+        ReclaimRetiredPages();
         AdvanceLoads();
+        EnforceResidencyBudget();
         StartQueuedUploads();
         CompleteUploads();
     }
@@ -337,8 +408,12 @@ internal sealed class TexturePageStore
         _pending.Clear();
         _uploadQueue.Clear();
         _uploading.Clear();
+        _retired.Clear();
+        _freeIndices.Clear();
+        _evictionCandidates.Clear();
         _pages.Clear();
         _pendingUploadBytes = 0;
+        _residentPayloadBytes = 0;
         _gpu.Destroy();
     }
 
@@ -349,9 +424,11 @@ internal sealed class TexturePageStore
     /// <remarks>
     /// The page map, in-flight loads, queued uploads, and failed-path state are dropped; already
     /// submitted uploads keep running so their staging/command resources are released, but they are
-    /// marked retired and never become visible or count as ready. Ready images are not freed: the
-    /// residency policy owns reclamation, so they may stay GPU-resident until it runs. New pages use
-    /// fresh descriptor indices because <see cref="_nextIndex"/> never rewinds.
+    /// marked retired and never become visible or count as ready. Every ready page moves to the
+    /// retirement list, which keeps its image resident but drops it from the resident accounting;
+    /// the residency policy reclaims it, and its descriptor slot and image-memory range, once the
+    /// safety age proves no in-flight frame can sample it. A retired in-flight upload joins the
+    /// retirement list when it completes.
     /// </remarks>
     /// <param name="version">The new catalog version.</param>
     private void RetireForCatalogChange(long version)
@@ -368,6 +445,19 @@ internal sealed class TexturePageStore
             page.PayloadTask = null;
         }
 
+        foreach (TexturePage page in _pages.Values)
+        {
+            if (page.State != TexturePageState.Ready)
+            {
+                continue;
+            }
+
+            // A frame recorded before the mount may still sample the image, so the retirement list
+            // restarts the safety clock at the retirement pump.
+            page.LastSeenFrame = _frameSequence;
+            _retired.Add(page);
+        }
+
         foreach (TexturePage page in _uploading)
         {
             page.Retired = true;
@@ -379,6 +469,7 @@ internal sealed class TexturePageStore
         _readyRealPages = 0;
         _failedPaths = 0;
         _pendingUploadBytes = 0;
+        _residentPayloadBytes = 0;
     }
 
     private void ObserveCatalogVersion()
@@ -594,14 +685,18 @@ internal sealed class TexturePageStore
             _uploading.RemoveAt(index);
 
             // A retired upload only releases its staging/command resources; it must not appear in
-            // the ready count or in any lookup.
+            // the ready count or in any lookup. Its image becomes resident when the GPU completes
+            // the copy, so the retirement list reclaims it after the safety age.
             if (page.Retired)
             {
+                page.LastSeenFrame = _frameSequence;
+                _retired.Add(page);
                 continue;
             }
 
             page.State = TexturePageState.Ready;
             _readyRealPages++;
+            _residentPayloadBytes += page.PayloadBytes;
         }
     }
 
@@ -611,13 +706,25 @@ internal sealed class TexturePageStore
             ?? throw new InvalidOperationException("A queued texture page has no payload to upload.");
         page.Payload = null;
 
-        if (_nextIndex >= _capacity)
+        if (_freeIndices.Count > 0)
         {
-            Grow();
+            // A reclaimed slot is safe to reuse: the reclaim safety age already proved no in-flight
+            // frame references its previous page, and the GPU rewrote it to the placeholder.
+            page.Index = _freeIndices[^1];
+            _freeIndices.RemoveAt(_freeIndices.Count - 1);
+            _descriptorSlotReuses++;
+        }
+        else
+        {
+            if (_nextIndex >= _capacity)
+            {
+                Grow();
+            }
+
+            page.Index = _nextIndex;
+            _nextIndex++;
         }
 
-        page.Index = _nextIndex;
-        _nextIndex++;
         page.State = TexturePageState.Uploading;
         _uploading.Add(page);
         _gpu.Upload(page.Index, page.Descriptor!, payload);
@@ -639,6 +746,105 @@ internal sealed class TexturePageStore
             previous,
             _capacity,
             _limit);
+    }
+
+    /// <summary>
+    /// Reclaims retired pages whose last frame is older than <see cref="ReclaimSafetyAgeFrames"/>,
+    /// returning their descriptor slots and image-memory ranges.
+    /// </summary>
+    private void ReclaimRetiredPages()
+    {
+        for (var index = _retired.Count - 1; index >= 0; index--)
+        {
+            TexturePage page = _retired[index];
+            if (!IsSafeToReclaim(page.LastSeenFrame))
+            {
+                continue;
+            }
+
+            _retired.RemoveAt(index);
+            _gpu.RetirePage(page.Index);
+            _freeIndices.Add(page.Index);
+            _reclaimedRetiredPages++;
+            _logger.LogDebug(
+                "Retired texture page reclaimed: index={Index}, bytes={Bytes}, "
+                    + "remainingRetired={RemainingRetired}.",
+                page.Index,
+                page.PayloadBytes,
+                _retired.Count);
+        }
+    }
+
+    /// <summary>
+    /// Evicts ready pages least recently seen first until the resident payload fits the budget.
+    /// </summary>
+    /// <remarks>
+    /// Pages seen by the previous pump or the one before it are never candidates, so the two in-flight
+    /// GPU frames can never still sample an evicted page. When every ready page is that recent the
+    /// over-budget set is kept and the next pump retries.
+    /// </remarks>
+    private void EnforceResidencyBudget()
+    {
+        if (_residentPayloadBytes <= _residencyBudgetBytes)
+        {
+            return;
+        }
+
+        _evictionCandidates.Clear();
+        foreach (TexturePage page in _pages.Values)
+        {
+            if (page.State == TexturePageState.Ready && IsSafeToReclaim(page.LastSeenFrame))
+            {
+                _evictionCandidates.Add(page);
+            }
+        }
+
+        if (_evictionCandidates.Count == 0)
+        {
+            return;
+        }
+
+        _evictionCandidates.Sort(CompareEvictionPriority);
+        foreach (TexturePage page in _evictionCandidates)
+        {
+            if (_residentPayloadBytes <= _residencyBudgetBytes)
+            {
+                break;
+            }
+
+            Evict(page);
+        }
+
+        _evictionCandidates.Clear();
+    }
+
+    private void Evict(TexturePage page)
+    {
+        _pages.Remove(page.Path);
+        _readyRealPages--;
+        _residentPayloadBytes -= page.PayloadBytes;
+        _gpu.RetirePage(page.Index);
+        _freeIndices.Add(page.Index);
+        _evictions++;
+        _logger.LogDebug(
+            "Texture page evicted: path={Path}, index={Index}, bytes={Bytes}, "
+                + "residentBytes={ResidentBytes}, residentPages={ResidentPages}.",
+            page.Path,
+            page.Index,
+            page.PayloadBytes,
+            _residentPayloadBytes,
+            _readyRealPages);
+    }
+
+    private bool IsSafeToReclaim(long lastSeenFrame)
+        => _frameSequence - lastSeenFrame > ReclaimSafetyAgeFrames;
+
+    private static int CompareEvictionPriority(TexturePage left, TexturePage right)
+    {
+        int byLastSeen = left.LastSeenFrame.CompareTo(right.LastSeenFrame);
+        return byLastSeen != 0
+            ? byLastSeen
+            : left.LoadSequence.CompareTo(right.LoadSequence);
     }
 
     private bool Validate(TexturePage page, byte[] payload, out TexturePageFailure failure)

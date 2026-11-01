@@ -346,9 +346,10 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// </param>
     /// <returns>This builder, for fluent chaining.</returns>
     /// <remarks>
-    /// The budget describes how much texture-page image memory the residency policy may keep
-    /// resident. It is validated and carried now; eviction itself is not implemented, so a page
-    /// created since the last asset mount stays GPU-resident.
+    /// The budget bounds the declared payload bytes (<c>width * height * 4</c>) of the renderer's
+    /// ready texture pages. When the total exceeds it, the renderer evicts the least recently seen
+    /// pages that no in-flight frame can still sample; an evicted path reloads from the asset catalog
+    /// on its next sighting and its descriptor slot and image memory are reused.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
