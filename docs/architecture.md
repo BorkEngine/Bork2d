@@ -91,8 +91,12 @@ Assets are built ahead of time, not loaded from loose files at runtime:
   and the detached node keeps its world transform; re-attach the same object later.
 - **Coordinates.** World space is +X right, +Y up, in absolute world units. `Camera.Size` is the
   half visible height; viewports are normalized with a top-left origin.
-- **Layers.** A layer type is an `int`-backed `[Flags]` enum with 1-32 named single-bit values
-  (`None = 0` allowed). A sprite uses exactly one bit; a camera culls with a mask.
+- **Layers and culling.** A layer type is an `int`-backed `[Flags]` enum with 1-32 named single-bit
+  values (`None = 0` allowed). A sprite uses exactly one bit; a camera culls with a mask. After the
+  mask, culling is a conservative world-space AABB test: the camera's visible rectangle and the
+  sprite's drawn quad are converted to world AABBs, and a sprite is skipped only when its known
+  bounds do not intersect the camera's. Empty bounds mean "unknown" and never cull; there is no
+  spatial index and no culling toggle.
 - **Snapshots.** Capture contains no live scene entities. The only object reference that crosses
   the tick/render boundary is immutable sprite render data, frozen from the loaded `SpriteAsset`
   when it was assigned; the mutable asset itself is never captured. Reusing a slot clears every

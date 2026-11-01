@@ -9,16 +9,16 @@ provider package.
 | Namespace | Key public types |
 | --- | --- |
 | `Bork2d.Engine` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
-| `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
-| `Bork2d.Engine.Rendering` | `Color`, `RenderStats`, `ClearKind` |
+| `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `IRenderable`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
+| `Bork2d.Engine.Rendering` | `Bounds`, `Color`, `RenderStats`, `ClearKind` |
 | `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `TextureDescriptor`, `AssetRef<T>`, `DataRef`, enums |
 | `Bork2d.Engine.Assets.Pack` | `PackBuilder`, `PackCompressionMode` (tooling only) |
 | `Bork2d.Engine.Input` | `IInput`, `KeyCode`, `MouseButton` |
 | `Bork2d.Engine.Platform` | `IWindow`, `ITime` |
 
 `GameEngine`, `Transform`, `Camera`, `SpriteRender`, `AssetService`, `FrameSnapshot`, the typed
-render-data buffers/producers/definitions, `RenderableRegistry`, and the projection math are
-internal. `Bork2d.Engine.Assets.Pack` exposes only the pack writer and its
+render-data buffers/producers/definitions, `RenderableRegistry`, and the projection and
+sprite-bounds math are internal. `Bork2d.Engine.Assets.Pack` exposes only the pack writer and its
 compression enum; everything else there is implementation.
 
 ## Game and engine
@@ -70,6 +70,13 @@ normalized UVs (top-left, top-right, bottom-right, bottom-left), a per-axis `Vec
 a normalized pivot, a topology, and optional indices. The renderer derives the quad; there is no
 vertex array. Quad world size is `(maxU - minU) * Scale.X` by `(maxV - minV) * Scale.Y`, so texture
 pixel dimensions never affect geometry.
+
+Cameras and sprites are `IRenderable`s and expose a read-only world-space `Bounds` AABB for
+conservative renderer culling. A camera's bounds contain its transformed visible rectangle; a
+sprite's bounds contain the drawn quad, derived from the frozen render data, pivot, flips, and
+composed world matrix. Both return `Bounds.Empty` for an invalid renderable, a headless or
+shut-down app, or a sprite with no drawable frozen data, and reading them never throws for those
+cases. Empty bounds mean "unknown": the renderer must not treat them as "outside".
 
 `SpriteAsset` is a mutable authoring and loading DTO, but rendering reads only an immutable frozen
 copy of its draw fields. Assigning an asset to a renderable freezes it once; mutating the asset
@@ -135,7 +142,9 @@ returns its world matrix, and a node that matches no producer uses the plain tra
 children still compose. The camera and sprite producers own the reserved slots `0` and `1`; a custom
 renderable producer owns a slot at or above `2`. Transforms are traversed, but only renderables
 produce records; the layer enum is flattened to a raw 32-bit mask. Each sprite record carries the
-immutable `SpriteRenderData` frozen when the asset was assigned, never the live `SpriteAsset`.
+immutable `SpriteRenderData` frozen when the asset was assigned, never the live `SpriteAsset`, and
+the world-space AABB computed from that data when the capture composed the world matrix. The
+renderer culls with those bounds without reading the scene.
 
 Frame buffers are compact typed pools (`RenderDataBuffer<T>`) owned by the snapshot through a
 `RenderDataBufferSet`. They start empty, grow to the observed high-water mark, and never shrink;
@@ -146,8 +155,10 @@ switch case and no engine creation method.
 
 Camera projection is pure and shared with the renderer: the camera world matrix is the inverse-view
 source, the rounded pixel viewport supplies the aspect, and the only Y conversion is the negation
-for Vulkan clip space. Invalid cameras (bad framebuffer, size, viewport, clear mode, scale, or
-non-finite values) are skipped with a diagnostic instead of being repaired.
+for Vulkan clip space. The projection result also yields the world-space AABB of the camera's
+visible rectangle, which the renderer uses for bounds culling. Invalid cameras (bad framebuffer,
+size, viewport, clear mode, scale, or non-finite values) are skipped with a diagnostic instead of
+being repaired.
 
 ## AOT and surface rules
 

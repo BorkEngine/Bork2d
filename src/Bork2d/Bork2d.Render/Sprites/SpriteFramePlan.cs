@@ -2,7 +2,7 @@ namespace Bork2d.Render.Sprites;
 
 /// <summary>
 /// The renderer-owned result of planning one snapshot: valid cameras in ascending <c>ZIndex</c>
-/// order with their contiguous instance ranges, plus the frame's draw/instance/skip totals
+/// order with their contiguous instance ranges, plus the frame's draw/instance/skip/cull totals
 /// (M8 §6.6/§6.8).
 /// </summary>
 /// <remarks>
@@ -36,6 +36,17 @@ internal sealed class SpriteFramePlan
 
     /// <summary>Gets the number of sprites skipped by the frame (null/layer/non-Quad/pending).</summary>
     internal long SkippedSprites { get; set; }
+
+    /// <summary>
+    /// Gets the number of sprites whose world bounds keep every layer-matching planned camera from
+    /// emitting them.
+    /// </summary>
+    /// <remarks>
+    /// A sprite is counted once per frame, not once per camera: a sprite that one camera culls but
+    /// another draws is visible and is not counted. Sprites with empty (unknown) bounds are never
+    /// culled and are never counted here.
+    /// </remarks>
+    internal int CulledSprites { get; set; }
 
     /// <summary>Gets the valid per-camera plans, in ascending <c>ZIndex</c> order.</summary>
     internal CameraDrawPlan[] Cameras { get; set; } = [];

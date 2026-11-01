@@ -53,7 +53,16 @@ internal sealed class SpriteRenderableDefinition<TLayer>
     {
         Matrix3x2 local = node.CaptureForSnapshot(out SpriteSnapshot sprite);
         world = local * parentWorld;
-        snapshot.GetBuffer<SpriteSnapshot>(Slot).Add(sprite with { WorldMatrix = world });
+
+        // The snapshot and the live ISpriteRender.Bounds getter share SpriteBounds, so culling in
+        // the renderer sees exactly the quad the shader draws.
+        Bounds bounds = SpriteBounds.CreateWorldBounds(
+            sprite.SpriteData,
+            world,
+            sprite.FlipX,
+            sprite.FlipY);
+        snapshot.GetBuffer<SpriteSnapshot>(Slot).Add(
+            sprite with { WorldMatrix = world, Bounds = bounds });
         return true;
     }
 }

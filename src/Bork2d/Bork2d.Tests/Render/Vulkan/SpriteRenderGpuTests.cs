@@ -2,6 +2,7 @@ using System.Numerics;
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Rendering;
+using Bork2d.Engine.Scene;
 using Bork2d.Render;
 using Bork2d.Render.Diagnostics;
 using Bork2d.Render.Textures;
@@ -17,8 +18,8 @@ namespace Bork2d.Tests.Render.Vulkan;
 /// <summary>
 /// Opt-in real-GPU proof for the M8 sprite draw integration (WP-4): per-camera passes and one
 /// instanced draw per non-empty camera, split-screen and clear modes, zero-camera/no-safety-pass
-/// behavior, the placeholder, fatal malformed sprites, instance-buffer growth, texture-page growth,
-/// and the <c>CaptureFrameAsync</c> contract. No pixel/golden assertions.
+/// behavior, the placeholder, fatal malformed sprites, instance-buffer growth, bounds culling,
+/// texture-page growth, and the <c>CaptureFrameAsync</c> contract. No pixel/golden assertions.
 /// </summary>
 /// <remarks>
 /// The tests use an internal <see cref="GeneratedTextureAssets"/> so a valid RGBA8 page path exists
@@ -494,6 +495,69 @@ public sealed class SpriteRenderGpuTests
             await Assert.ThrowsAsync<ObjectDisposedException>(() => pending.WaitAsync(_timeout));
             Assert.Equal(RendererStatus.Stopped, renderer.Status);
             Assert.Equal(RendererStopReason.Requested, renderer.StopReason);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    [GpuFact]
+    public void BoundsCullingKeepsAFarOffscreenSpriteOutOfTheInstanceBuffer()
+    {
+        var assets = new GeneratedTextureAssets();
+        assets.AddTexture("tex/a");
+
+        var window = new FakeWindow { Size = new Vector2(64f, 64f) };
+        var engine = new GameEngine<GameLayer>(new FakeTime(), window, new FakeAssets());
+        var camera = engine.CreateCamera(engine.Root);
+        camera.Size = 10f;
+        camera.CullingMask = GameLayer.World;
+
+        var visible = engine.CreateSpriteRender(engine.Root);
+        visible.Sprite = MakeSprite("tex/a");
+        visible.Layer = GameLayer.World;
+
+        var offscreen = engine.CreateSpriteRender(engine.Root);
+        offscreen.Sprite = MakeSprite("tex/a");
+        offscreen.Layer = GameLayer.World;
+        offscreen.LocalPosition = new Vector2(1000f, 0f);
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, 64, 64, loggerFactory);
+            var producer = new Producer(renderer);
+            var captureSequence = 0L;
+
+            // Production capture stamps both sprites' bounds; the far sprite must be culled before
+            // instance emission, so only the visible sprite reaches the instance buffer.
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                PublishFrame(
+                    renderer,
+                    producer,
+                    snapshot => engine.CaptureSnapshot(snapshot, ++captureSequence));
+
+                if (renderer.RenderStats.TexturePages >= 2 && renderer.RenderStats.Instances == 1)
+                {
+                    break;
+                }
+            }
+
+            RenderStats stats = renderer.RenderStats;
+            Assert.Equal(1, stats.Cameras);
+            Assert.Equal(1, stats.NonEmptyCameras);
+            Assert.Equal(1, stats.DrawCalls);
+            Assert.Equal(1, stats.Instances);
+            Assert.Equal(0, stats.SkippedSprites);
+            Assert.Equal(0, stats.ValidationErrors);
+            Assert.Equal(0, stats.ValidationWarnings);
+            Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+            Assert.Equal(0, renderer.Counters.ValidationWarningCount);
+            Assert.Null(renderer.FatalException);
+            StopAndAssertClean(renderer);
         }
         finally
         {

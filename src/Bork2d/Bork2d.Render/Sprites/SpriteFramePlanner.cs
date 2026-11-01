@@ -23,11 +23,18 @@ namespace Bork2d.Render.Sprites;
 /// </item>
 /// <item>Sort camera indices by <c>ZIndex</c>, resolve each projection, and skip invalid cameras.</item>
 /// <item>
-/// Filter each valid camera by its culling mask, assign contiguous per-camera instance ranges, grow
-/// the frame's instance buffer once, and write every <see cref="SpriteInstance"/> directly into its
-/// mapping.
+/// Filter each valid camera by its culling mask and then by the sprite's world bounds, assign
+/// contiguous per-camera instance ranges, grow the frame's instance buffer once, and write every
+/// <see cref="SpriteInstance"/> directly into its mapping.
 /// </item>
 /// </list>
+/// <para>
+/// Bounds culling is always on and conservative: a sprite is skipped for a camera only when its
+/// non-empty world AABB does not intersect the camera's world AABB. Empty bounds mean "unknown"
+/// (direct snapshot producers and malformed or absent data), so they never cull. A culled sprite is
+/// a normal visibility skip, not a fatal error; the pre-pass classification and malformed-field
+/// validation still run before culling and keep their existing order.
+/// </para>
 /// <para>
 /// Every per-sprite array is renderer-owned and preallocated; after warm-up the plan allocates
 /// nothing. Diagnostics are throttled: invalid-camera reasons and invalid layers log once per
@@ -40,6 +47,13 @@ internal sealed class SpriteFramePlanner
 {
     private const int MinimumCapacity = 16;
 
+    // Per-sprite bounds visibility for the current plan: not a layer candidate, a candidate that
+    // no planned camera emitted, or emitted by at least one camera. CulledSprites counts the
+    // middle state once per sprite.
+    private const byte VisibilityNone = 0;
+    private const byte VisibilityCandidate = 1;
+    private const byte VisibilityDrawn = 2;
+
     private readonly TexturePageStore _pages;
     private readonly ILogger _logger;
     private readonly HashSet<string> _loggedNonQuadAssets = new(StringComparer.Ordinal);
@@ -48,6 +62,7 @@ internal sealed class SpriteFramePlanner
     private SpriteSkipReason[] _skipReasons = [];
     private TexturePageLookup[] _lookups = [];
     private SpriteQuad[] _quads = [];
+    private byte[] _visibility = [];
     private int[] _cameraIndices = [];
     private CameraDrawPlan[] _cameras = [];
     private uint _loggedCameraReasons;
@@ -136,6 +151,7 @@ internal sealed class SpriteFramePlanner
 
             _cameras[cameraPlanCount++] = new CameraDrawPlan(
                 projection,
+                projection.CreateWorldBounds(),
                 camera.Clear,
                 camera.ClearColor,
                 camera.CullingMask,
@@ -143,6 +159,8 @@ internal sealed class SpriteFramePlanner
                 InstanceCount: 0);
         }
 
+        Span<byte> visibility = _visibility.AsSpan(0, spriteCount);
+        visibility.Clear();
         var instanceCount = 0;
         var nonEmptyCameras = 0;
         for (var cameraIndex = 0; cameraIndex < cameraPlanCount; cameraIndex++)
@@ -157,11 +175,23 @@ internal sealed class SpriteFramePlanner
                     continue;
                 }
 
-                if (!SpritePlanning.LayerMatches(camera.CullingMask, sprites[spriteIndex].Layer))
+                SpriteSnapshot sprite = sprites[spriteIndex];
+                if (!SpritePlanning.LayerMatches(camera.CullingMask, sprite.Layer))
                 {
                     continue;
                 }
 
+                if (visibility[spriteIndex] == VisibilityNone)
+                {
+                    visibility[spriteIndex] = VisibilityCandidate;
+                }
+
+                if (IsCulled(camera, sprite))
+                {
+                    continue;
+                }
+
+                visibility[spriteIndex] = VisibilityDrawn;
                 count++;
             }
 
@@ -174,6 +204,15 @@ internal sealed class SpriteFramePlanner
             if (count > 0)
             {
                 nonEmptyCameras++;
+            }
+        }
+
+        var culled = 0;
+        for (var index = 0; index < spriteCount; index++)
+        {
+            if (visibility[index] == VisibilityCandidate)
+            {
+                culled++;
             }
         }
 
@@ -196,6 +235,7 @@ internal sealed class SpriteFramePlanner
         _plan.NonEmptyCameras = nonEmptyCameras;
         _plan.InstanceCount = instanceCount;
         _plan.SkippedSprites = skipped;
+        _plan.CulledSprites = culled;
         _plan.Cameras = _cameras;
         return _plan;
     }
@@ -232,6 +272,11 @@ internal sealed class SpriteFramePlanner
                     continue;
                 }
 
+                if (IsCulled(camera, sprite))
+                {
+                    continue;
+                }
+
                 SpriteInstance instance = SpriteInstanceBuilder.Create(
                     sprite,
                     quads[spriteIndex],
@@ -241,6 +286,20 @@ internal sealed class SpriteFramePlanner
             }
         }
     }
+
+    /// <summary>
+    /// Returns whether a camera's world bounds exclude a sprite's known world bounds.
+    /// </summary>
+    /// <remarks>
+    /// Empty sprite bounds mean "unknown" and never cull, which keeps direct snapshot producers and
+    /// malformed or absent data conservative. Empty camera bounds are treated the same way: a
+    /// camera whose visible rectangle overflows or otherwise yields a non-finite AABB culls
+    /// nothing instead of culling everything.
+    /// </remarks>
+    private static bool IsCulled(in CameraDrawPlan camera, in SpriteSnapshot sprite)
+        => !sprite.Bounds.IsEmpty
+            && !camera.WorldBounds.IsEmpty
+            && !sprite.Bounds.Intersects(camera.WorldBounds);
 
     private SpriteSkipReason ResolveSprite(
         in SpriteSnapshot sprite,
@@ -349,6 +408,7 @@ internal sealed class SpriteFramePlanner
         Array.Resize(ref _skipReasons, capacity);
         Array.Resize(ref _lookups, capacity);
         Array.Resize(ref _quads, capacity);
+        Array.Resize(ref _visibility, capacity);
     }
 
     private void EnsureCameraArrays(int count)

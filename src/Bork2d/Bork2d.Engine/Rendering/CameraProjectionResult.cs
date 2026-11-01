@@ -37,4 +37,37 @@ internal readonly record struct CameraProjectionResult(
     int Width,
     int Height,
     float Aspect,
-    Vector2 WorldSize);
+    Vector2 WorldSize)
+{
+    /// <summary>
+    /// Gets the world-space AABB of the camera's visible rectangle.
+    /// </summary>
+    /// <remarks>
+    /// The four view-space corners <c>(±WorldSize.X/2, ±WorldSize.Y/2)</c> are transformed by
+    /// <see cref="ViewToWorld"/> and reduced to an AABB, so a rotated camera yields the larger
+    /// axis-aligned box that conservatively contains its rotated view rectangle. The renderer's
+    /// camera plans and the public <c>ICamera.Bounds</c> helper both use this method, so they can
+    /// never disagree. An invalid projection returns <see cref="Bounds.Empty"/>.
+    /// </remarks>
+    /// <returns>The world-space AABB, or <see cref="Bounds.Empty"/> when the projection is invalid.</returns>
+    internal Bounds CreateWorldBounds()
+    {
+        if (!IsValid)
+        {
+            return Bounds.Empty;
+        }
+
+        Vector2 half = WorldSize * 0.5f;
+        Vector2 corner0 = Vector2.Transform(new Vector2(-half.X, -half.Y), ViewToWorld);
+        Vector2 corner1 = Vector2.Transform(new Vector2(half.X, -half.Y), ViewToWorld);
+        Vector2 corner2 = Vector2.Transform(new Vector2(half.X, half.Y), ViewToWorld);
+        Vector2 corner3 = Vector2.Transform(new Vector2(-half.X, half.Y), ViewToWorld);
+        var bounds = new Bounds(
+            Vector2.Min(Vector2.Min(corner0, corner1), Vector2.Min(corner2, corner3)),
+            Vector2.Max(Vector2.Max(corner0, corner1), Vector2.Max(corner2, corner3)));
+
+        // A visible-size overflow makes the corners non-finite; normalize it to the Empty sentinel
+        // so callers can compare against Bounds.Empty as well as check IsEmpty.
+        return bounds.IsEmpty ? Bounds.Empty : bounds;
+    }
+}

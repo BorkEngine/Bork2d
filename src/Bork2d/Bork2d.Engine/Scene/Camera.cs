@@ -191,6 +191,29 @@ internal sealed class Camera<TLayer> : Transform, ICamera<TLayer>
     }
 
     /// <inheritdoc/>
+    public Bounds Bounds
+    {
+        get
+        {
+            CameraProjectionResult projection;
+            try
+            {
+                projection = CreateProjection();
+            }
+            catch (InvalidOperationException)
+            {
+                // Invalid cameras and apps without a usable framebuffer (headless, disposed) have
+                // no visible world rectangle. ObjectDisposedException derives from
+                // InvalidOperationException, so this covers both documented helper failures and
+                // lets unrelated exceptions propagate.
+                return Bounds.Empty;
+            }
+
+            return projection.CreateWorldBounds();
+        }
+    }
+
+    /// <inheritdoc/>
     public Vector2 WorldSize => CreateProjection().WorldSize;
 
     /// <inheritdoc/>
