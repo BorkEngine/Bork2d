@@ -1,3 +1,4 @@
+using System.Numerics;
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Engine.Assets;
@@ -76,7 +77,7 @@ public sealed class BakePipelineTests
 
         SpriteAsset sprite = await host.Service.LoadAsset<SpriteAsset>(BakeProjectFixture.SpritePath);
         Assert.Equal(BakeProjectFixture.TexturePath, sprite.Texture.Path);
-        Assert.Equal(16f, sprite.Scale);
+        Assert.Equal(new Vector2(16f, 16f), sprite.Scale);
         Assert.Equal(SpriteTopology.Triangles, sprite.Topology);
         Assert.Equal(new ushort[] { 0, 1, 2, 0, 2, 3 }, sprite.Indices);
 

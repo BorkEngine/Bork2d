@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Bork2d.Engine.Assets;
@@ -186,7 +187,7 @@ public sealed class AssetApiContractTests
         var asset = new SpriteAsset
         {
             Texture = new AssetRef<TextureDescriptor>("textures/player"),
-            Scale = 16f,
+            Scale = new Vector2(16f),
         };
 
         Assert.Equal("textures/player", asset.Texture.Path);

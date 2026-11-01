@@ -2,6 +2,7 @@ using System.Numerics;
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Rendering;
+using Bork2d.Engine.Scene;
 using Bork2d.Render.Sprites;
 using Bork2d.Render.Textures;
 using Bork2d.Tests.TestDoubles;
@@ -160,7 +161,7 @@ public sealed class SpriteFramePlannerTests
 
         // The page never loads: the malformed-field rule is unconditional and must run before the
         // pending skip.
-        AssertFatal(fixture, Sprite("tex/pending-bad", scale: 0f), "Scale");
+        AssertFatal(fixture, Sprite("tex/pending-bad", scale: new Vector2(0f)), "Scale");
         AssertFatal(
             fixture,
             Sprite("tex/pending-bad", pivot: new Vector2(-0.1f, 0.5f)),
@@ -180,23 +181,23 @@ public sealed class SpriteFramePlannerTests
     }
 
     [Fact]
-    public void FailedTextureDrawsThePlaceholderWithItsDeclaredSizeAndAbsentTextureUsesEightByEight()
+    public void FailedAndAbsentTexturesDrawThePlaceholderWithTheAssetWorldScale()
     {
         using var fixture = new PlanningFixture();
         fixture.MakeFailedPage("tex/failed", 32, 16);
         var snapshot = new FrameSnapshot { Sequence = 1 };
         AddCamera(snapshot, zIndex: 0);
-        AddSprite(snapshot, Sprite("tex/failed", scale: 10f), layer: 1u, zIndex: 0);
-        AddSprite(snapshot, Sprite(texture: null, scale: 10f), layer: 1u, zIndex: 1);
+        AddSprite(snapshot, Sprite("tex/failed", scale: new Vector2(10f, 4f)), layer: 1u, zIndex: 0);
+        AddSprite(snapshot, Sprite(texture: null, scale: new Vector2(10f, 4f)), layer: 1u, zIndex: 1);
 
         SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
 
         Assert.Equal(2, plan.InstanceCount);
         Assert.Equal(0, plan.SkippedSprites);
-        Assert.Equal(3.2f, fixture.Instances.Get(0).Transform1.Z, 3);
-        Assert.Equal(1.6f, fixture.Instances.Get(0).Transform1.W, 3);
-        Assert.Equal(0.8f, fixture.Instances.Get(1).Transform1.Z, 3);
-        Assert.Equal(0.8f, fixture.Instances.Get(1).Transform1.W, 3);
+        Assert.Equal(10f, fixture.Instances.Get(0).Transform1.Z, 3);
+        Assert.Equal(4f, fixture.Instances.Get(0).Transform1.W, 3);
+        Assert.Equal(10f, fixture.Instances.Get(1).Transform1.Z, 3);
+        Assert.Equal(4f, fixture.Instances.Get(1).Transform1.W, 3);
         Assert.Equal(0f, fixture.Instances.Get(0).Misc.Z);
         Assert.Equal(0f, fixture.Instances.Get(1).Misc.Z);
     }
@@ -217,7 +218,7 @@ public sealed class SpriteFramePlannerTests
         AddCamera(snapshot, zIndex: 0);
         AddSprite(
             snapshot,
-            Sprite("tex/a", scale: 8f, uvs: uvs, pivot: new Vector2(0.25f, 0.75f)),
+            Sprite("tex/a", scale: new Vector2(8f), uvs: uvs, pivot: new Vector2(0.25f, 0.75f)),
             layer: 1u,
             flipX: true,
             flipY: true);
@@ -225,8 +226,8 @@ public sealed class SpriteFramePlannerTests
         _ = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
 
         SpriteInstance instance = fixture.Instances.Get(0);
-        Assert.Equal(-0.5f, instance.Transform1.Z, 5);
-        Assert.Equal(-0.8f, instance.Transform1.W, 5);
+        Assert.Equal(-4f, instance.Transform1.Z, 5);
+        Assert.Equal(-6.4f, instance.Transform1.W, 5);
         Assert.Equal(0.25f, instance.Misc.X);
         Assert.Equal(0.75f, instance.Misc.Y);
         Assert.Equal(0f, instance.Misc.W);
@@ -303,11 +304,53 @@ public sealed class SpriteFramePlannerTests
                 "tex/a",
                 uvs: [new(float.NaN, 0f), new(1f, 0f), new(1f, 1f), new(0f, 1f)]),
             "Uvs");
-        AssertFatal(fixture, Sprite("tex/a", scale: 0f), "Scale");
-        AssertFatal(fixture, Sprite("tex/a", scale: float.NaN), "Scale");
+        AssertFatal(fixture, Sprite("tex/a", scale: new Vector2(0f)), "Scale");
+        AssertFatal(fixture, Sprite("tex/a", scale: new Vector2(float.NaN)), "Scale");
         AssertFatal(fixture, Sprite("tex/a", pivot: new Vector2(1.1f, 0.5f)), "Pivot");
         AssertFatal(fixture, Sprite("tex/a", topology: (SpriteTopology)7), "Topology");
         AssertFatal(fixture, Sprite("tex/a", indices: [0, 1, 2]), "Indices");
+    }
+
+    [Fact]
+    public void MutatingTheAssetAfterAssignmentKeepsTheCapturedDataAndPlannedQuad()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        var engine = new GameEngine<GameLayer>(new FakeTime(), new FakeWindow(), new FakeAssets());
+        var camera = engine.CreateCamera(engine.Root);
+        camera.CullingMask = GameLayer.World;
+        var sprite = engine.CreateSpriteRender(engine.Root);
+        SpriteAsset asset = Sprite("tex/a", scale: new Vector2(2f, 3f));
+        sprite.Sprite = asset;
+        sprite.Layer = GameLayer.World;
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        engine.CaptureSnapshot(snapshot, 1);
+        SpriteRenderData frozen = Assert.IsType<SpriteRenderData>(snapshot.Sprites[0].SpriteData);
+
+        SpriteFramePlan before = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
+        SpriteInstance first = fixture.Instances.Get(0);
+
+        asset.Uvs![0] = new Vector2(-1f, -1f);
+        asset.Indices = [0, 1, 2];
+        asset.Scale = new Vector2(50f, 50f);
+        asset.Pivot = new Vector2(1f, 0f);
+        asset.Topology = SpriteTopology.Triangles;
+        asset.Texture = "tex/other";
+
+        var again = new FrameSnapshot { Sequence = 2 };
+        engine.CaptureSnapshot(again, 2);
+        SpriteFramePlan after = fixture.Planner.Plan(again, 320, 240, fixture.Instances);
+        SpriteInstance second = fixture.Instances.Get(0);
+
+        Assert.Equal(1, before.InstanceCount);
+        Assert.Equal(1, after.InstanceCount);
+        Assert.Same(frozen, again.Sprites[0].SpriteData);
+        Assert.Equal(first.Transform1, second.Transform1);
+        Assert.Equal(first.Uv0, second.Uv0);
+        Assert.Equal(first.Uv1, second.Uv1);
+        Assert.Equal(first.Misc, second.Misc);
+        Assert.Equal(2f, second.Transform1.Z, 5);
+        Assert.Equal(3f, second.Transform1.W, 5);
     }
 
     [Fact]
@@ -345,7 +388,7 @@ public sealed class SpriteFramePlannerTests
         fixture.MakeReadyPage("tex/a", 4, 4);
         var snapshot = new FrameSnapshot { Sequence = 1 };
         AddCamera(snapshot, zIndex: 0);
-        SpriteAsset asset = Sprite("tex/a", scale: 8f);
+        SpriteAsset asset = Sprite("tex/a", scale: new Vector2(8f));
         for (var index = 0; index < spriteCount; index++)
         {
             AddSprite(snapshot, asset, layer: 1u, zIndex: index, x: index * 0.01f);
@@ -411,7 +454,7 @@ public sealed class SpriteFramePlannerTests
         float x = 0f)
         => snapshot.AddSprite(
             new SpriteSnapshot(
-                asset,
+                SpriteRenderData.Freeze(asset),
                 Matrix3x2.CreateTranslation(x, 0f),
                 Color.White,
                 layer,
@@ -421,7 +464,7 @@ public sealed class SpriteFramePlannerTests
 
     private static SpriteAsset Sprite(
         string? texture,
-        float scale = 10f,
+        Vector2? scale = null,
         Vector2[]? uvs = null,
         Vector2? pivot = null,
         SpriteTopology topology = SpriteTopology.Quad,
@@ -430,7 +473,7 @@ public sealed class SpriteFramePlannerTests
         {
             Texture = texture,
             Uvs = uvs ?? _fullUvs,
-            Scale = scale,
+            Scale = scale ?? new Vector2(10f),
             Pivot = pivot ?? new Vector2(0.5f, 0.5f),
             Topology = topology,
             Indices = indices,

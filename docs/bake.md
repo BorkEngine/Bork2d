@@ -71,13 +71,16 @@ Canonical asset paths are lowercase with `/` separators and segments limited to 
 ```toml
 texture = "art/hero"
 uvs = [[0, 0], [1, 0], [1, 1], [0, 1]]
-scale = 64.0
+scale = [1.0, 1.0]
 pivot = [0.5, 0.5]
 topology = "quad"
 
 [bork2d]
 type = "Bork2d.Engine.Assets.SpriteAsset"
 ```
+
+`scale` is the per-axis world size of a full UV quad in world units; the source texture's pixel
+dimensions never affect the quad geometry.
 
 `Assets/art/hero.png` is handled by the built-in texture processor. It emits a
 `TextureDescriptor` at `art/hero` and the raw RGBA8 payload at `art/hero-raw`. Its settings sidecar

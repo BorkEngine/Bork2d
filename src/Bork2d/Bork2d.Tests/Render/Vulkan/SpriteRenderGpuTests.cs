@@ -610,7 +610,7 @@ public sealed class SpriteRenderGpuTests
     {
         Texture = texture,
         Uvs = _fullUvs,
-        Scale = scale,
+        Scale = new Vector2(scale),
         Pivot = new Vector2(0.5f, 0.5f),
         Topology = SpriteTopology.Quad,
     };
@@ -639,7 +639,7 @@ public sealed class SpriteRenderGpuTests
         float x = 0f)
         => snapshot.AddSprite(
             new SpriteSnapshot(
-                asset,
+                SpriteRenderData.Freeze(asset),
                 Matrix3x2.CreateTranslation(x, 0f),
                 Color.White,
                 layer,

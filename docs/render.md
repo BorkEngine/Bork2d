@@ -45,19 +45,24 @@ out-of-date results. One surface-recovery attempt is available per run.
 The render thread consumes one snapshot and plans it in one allocation-free pass:
 
 1. Sort sprite indices by ascending `(Layer, ZIndex)`.
-2. Classify each sprite once: a null sprite, zero/multi-bit layer, non-`Quad` topology, or a
-   still-loading texture page is skipped; malformed fields are fatal.
-3. Ensure each sprite's texture page and resolve quad geometry for drawable sprites.
+2. Classify each sprite once from its frozen render data: a null sprite, zero/multi-bit layer,
+   non-`Quad` topology, or a still-loading texture page is skipped; malformed fields are fatal.
+3. Ensure each sprite's texture page and resolve quad geometry from the frozen UVs and per-axis
+   world scale for drawable sprites.
 4. Sort cameras by `ZIndex` and resolve their projections; invalid cameras are skipped.
 5. Filter by each camera's culling mask, assign contiguous per-camera instance ranges, grow the
    instance buffer once, and write the instance records.
 
-Each non-empty camera gets one dynamic-rendering pass and exactly one
+A captured sprite carries the immutable `SpriteRenderData` frozen when its asset was assigned, never
+the live `SpriteAsset`, so mutating an asset after assignment cannot change a plan or a published
+snapshot. Each non-empty camera gets one dynamic-rendering pass and exactly one
 `vkCmdDraw(4, instanceCount, 0, firstInstance)`. A quad is a four-vertex triangle strip with no
 vertex buffer: `gl_VertexIndex` selects the corner, and the vertex shader builds the world position
-from the instance matrix, pivot, size, and UVs. Clear semantics are per camera: `Clear.Color`
-clears the camera's pixel rect to `ClearColor`; `Clear.None` and `Clear.Depth` load the existing
-content. There is no frame-level safety clear and no depth attachment.
+from the instance matrix, pivot, size, and UVs. The quad is `(maxU - minU) * Scale.X` by
+`(maxV - minV) * Scale.Y` world units; texture pixel dimensions are never used. Clear semantics are
+per camera: `Clear.Color` clears the camera's pixel rect to `ClearColor`; `Clear.None` and
+`Clear.Depth` load the existing content. There is no frame-level safety clear and no depth
+attachment.
 
 ## Textures
 

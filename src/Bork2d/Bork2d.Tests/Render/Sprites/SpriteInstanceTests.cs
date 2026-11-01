@@ -78,7 +78,7 @@ public sealed class SpriteInstanceTests
                 new Vector2(0.5f, 1f),
                 new Vector2(0.25f, 1f),
             ],
-            scale: 10f,
+            scale: new Vector2(10f),
             pivot: new Vector2(0.25f, 0.75f));
         var world = Matrix3x2.CreateScale(2f, 3f) * Matrix3x2.CreateTranslation(10f, 20f);
         SpriteSnapshot snapshot = Snapshot(
@@ -89,7 +89,7 @@ public sealed class SpriteInstanceTests
             zIndex: 2,
             flipX: true,
             flipY: false);
-        SpriteQuad quad = SpriteQuad.Resolve(asset, textureWidth: 4, textureHeight: 8, true, false);
+        SpriteQuad quad = SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), flipX: true, flipY: false);
 
         SpriteInstance instance = SpriteInstanceBuilder.Create(snapshot, quad, textureIndex: 9);
 
@@ -105,8 +105,8 @@ public sealed class SpriteInstanceTests
     [Fact]
     public void FlagsStayZeroForBothFlipAxes()
     {
-        SpriteAsset asset = Asset();
-        SpriteQuad quad = SpriteQuad.Resolve(asset, 32, 32, flipX: true, flipY: true);
+        SpriteAsset asset = Asset(scale: new Vector2(2f));
+        SpriteQuad quad = SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), flipX: true, flipY: true);
         SpriteInstance instance = SpriteInstanceBuilder.Create(
             Snapshot(asset, Matrix3x2.Identity),
             quad,
@@ -122,7 +122,7 @@ public sealed class SpriteInstanceTests
     {
         SpriteAsset asset = Asset();
         var world = Matrix3x2.CreateScale(-1f, 2f) * Matrix3x2.CreateTranslation(3f, 4f);
-        SpriteQuad quad = SpriteQuad.Resolve(asset, 1, 1, flipX: false, flipY: false);
+        SpriteQuad quad = SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), flipX: false, flipY: false);
 
         SpriteInstance instance = SpriteInstanceBuilder.Create(
             Snapshot(asset, world),
@@ -152,7 +152,7 @@ public sealed class SpriteInstanceTests
 
     private static SpriteAsset Asset(
         Vector2[]? uvs = null,
-        float scale = 16f,
+        Vector2? scale = null,
         Vector2? pivot = null)
     {
         return new SpriteAsset
@@ -166,7 +166,7 @@ public sealed class SpriteInstanceTests
                     new Vector2(1f, 1f),
                     new Vector2(0f, 1f),
                 ],
-            Scale = scale,
+            Scale = scale ?? new Vector2(16f),
             Pivot = pivot ?? new Vector2(0.5f, 0.5f),
             Topology = SpriteTopology.Quad,
             Indices = null,
@@ -183,7 +183,7 @@ public sealed class SpriteInstanceTests
         bool flipY = false)
     {
         return new SpriteSnapshot(
-            asset,
+            SpriteRenderData.FreezeOrNull(asset),
             world,
             tint ?? Color.White,
             layer,

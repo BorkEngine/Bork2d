@@ -160,7 +160,7 @@ public sealed class WindowedRendererGpuTests
                     new Vector2(1f, 1f),
                     new Vector2(0f, 1f),
                 ],
-                Scale = 8f,
+                Scale = new Vector2(8f),
                 Pivot = new Vector2(0.5f, 0.5f),
                 Topology = SpriteTopology.Quad,
             };
@@ -645,13 +645,13 @@ public sealed class WindowedRendererGpuTests
     private sealed class TestSnapshotProducer
     {
         private readonly VulkanRenderer _renderer;
-        private readonly SpriteAsset _sprite;
+        private readonly SpriteRenderData _sprite;
         private long _published;
 
         internal TestSnapshotProducer(VulkanRenderer renderer, SpriteAsset sprite)
         {
             _renderer = renderer;
-            _sprite = sprite;
+            _sprite = SpriteRenderData.Freeze(sprite);
         }
 
         internal long Published => _published;
