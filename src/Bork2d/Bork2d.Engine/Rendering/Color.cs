@@ -17,7 +17,14 @@ namespace Bork2d.Engine.Rendering;
 /// The payload is one <see cref="Vector4"/>, so the value is exactly 16 bytes and arithmetic uses
 /// the vector operators. Equality is exact .NET float equality per component, not Unity's
 /// approximate comparison. The surface follows Unity 6000.6 <c>Color</c> except gamma conversion,
-/// <c>Color32</c>, and <c>ColorUtility</c>, which this engine does not provide.
+/// <c>Color32</c>, and <c>ColorUtility</c>, which this engine does not provide; OkLab conversion and
+/// interpolation are added on top of that surface.
+/// </para>
+/// <para>
+/// <see cref="ToOkLab"/> and <see cref="FromOkLab"/> convert between linear sRGB (D65) and OkLab,
+/// and <see cref="LerpOkLab"/> and <see cref="LerpOkLabUnclamped"/> interpolate in OkLab. The
+/// conversions apply no sRGB gamma decode or encode and do not clamp the result to the
+/// <c>[0, 1]</c> gamut.
 /// </para>
 /// <para>
 /// A color is serialized by <see cref="ColorMarshaler"/> as a four-element linear float array
@@ -104,6 +111,124 @@ public readonly struct Color : IEquatable<Color>, IFormattable
     /// <returns>The interpolated color.</returns>
     public static Color LerpUnclamped(Color a, Color b, float t)
         => new(a._value + ((b._value - a._value) * t));
+
+    /// <summary>Converts the color from linear sRGB (D65) to OkLab.</summary>
+    /// <param name="l">The OkLab lightness; <c>0</c> is black and <c>1</c> is white.</param>
+    /// <param name="a">The OkLab <c>a</c> opponent axis, from green (negative) to red (positive).</param>
+    /// <param name="b">The OkLab <c>b</c> opponent axis, from blue (negative) to yellow (positive).</param>
+    /// <remarks>
+    /// <para>
+    /// The red, green, and blue components are read as linear sRGB with a D65 white point and are
+    /// converted directly to OkLab; no sRGB gamma decode is applied. The alpha component is
+    /// ignored and is not part of the result.
+    /// </para>
+    /// <para>
+    /// The conversion allocates nothing and does not clamp the result to a gamut.
+    /// </para>
+    /// </remarks>
+    public void ToOkLab(out float l, out float a, out float b)
+    {
+        float red = _value.X;
+        float green = _value.Y;
+        float blue = _value.Z;
+
+        float lmsL = (0.4122214708f * red) + (0.5363325363f * green) + (0.0514459929f * blue);
+        float lmsM = (0.2119034982f * red) + (0.6806995451f * green) + (0.1073969566f * blue);
+        float lmsS = (0.0883024619f * red) + (0.2817188376f * green) + (0.6299787005f * blue);
+
+        lmsL = MathF.Cbrt(lmsL);
+        lmsM = MathF.Cbrt(lmsM);
+        lmsS = MathF.Cbrt(lmsS);
+
+        l = (0.2104542553f * lmsL) + (0.7936177850f * lmsM) - (0.0040720468f * lmsS);
+        a = (1.9779984951f * lmsL) - (2.4285922050f * lmsM) + (0.4505937099f * lmsS);
+        b = (0.0259040371f * lmsL) + (0.7827717662f * lmsM) - (0.8086757660f * lmsS);
+    }
+
+    /// <summary>Converts an OkLab color to linear sRGB (D65).</summary>
+    /// <param name="l">The OkLab lightness; <c>0</c> is black and <c>1</c> is white.</param>
+    /// <param name="a">The OkLab <c>a</c> opponent axis, from green (negative) to red (positive).</param>
+    /// <param name="b">The OkLab <c>b</c> opponent axis, from blue (negative) to yellow (positive).</param>
+    /// <param name="alpha">The alpha component of the result; <c>1</c> is opaque.</param>
+    /// <returns>The linear sRGB color with the given alpha.</returns>
+    /// <remarks>
+    /// <para>
+    /// The result is linear sRGB with a D65 white point; no sRGB gamma encode is applied. Alpha is
+    /// independent of OkLab and is copied from <paramref name="alpha"/>.
+    /// </para>
+    /// <para>
+    /// The result is not clamped to the <c>[0, 1]</c> gamut, so an OkLab color outside the linear
+    /// sRGB gamut produces negative or greater-than-one components.
+    /// </para>
+    /// </remarks>
+    public static Color FromOkLab(float l, float a, float b, float alpha = 1f)
+    {
+        float lmsL = l + (0.3963377774f * a) + (0.2158037573f * b);
+        float lmsM = l - (0.1055613458f * a) - (0.0638541728f * b);
+        float lmsS = l - (0.0894841775f * a) - (1.2914855480f * b);
+
+        lmsL = lmsL * lmsL * lmsL;
+        lmsM = lmsM * lmsM * lmsM;
+        lmsS = lmsS * lmsS * lmsS;
+
+        float red = (4.0767416621f * lmsL) - (3.3077115913f * lmsM) + (0.2309699292f * lmsS);
+        float green = (-1.2684380046f * lmsL) + (2.6097574011f * lmsM) - (0.3413193965f * lmsS);
+        float blue = (-0.0041960863f * lmsL) - (0.7034186147f * lmsM) + (1.7076147010f * lmsS);
+
+        return new Color(red, green, blue, alpha);
+    }
+
+    /// <summary>Interpolates between two colors in OkLab, clamping <paramref name="t"/> to <c>[0, 1]</c>.</summary>
+    /// <param name="a">The color returned when <paramref name="t"/> is <c>0</c>.</param>
+    /// <param name="b">The color returned when <paramref name="t"/> is <c>1</c>.</param>
+    /// <param name="t">The interpolation ratio.</param>
+    /// <returns>The interpolated color.</returns>
+    /// <remarks>
+    /// <para>
+    /// Both colors are converted from linear sRGB (D65) to OkLab without gamma conversion, the
+    /// OkLab lightness and opponent axes are interpolated linearly, and the result is converted back
+    /// to linear sRGB. The result is not clamped to the <c>[0, 1]</c> gamut.
+    /// </para>
+    /// <para>
+    /// Alpha is interpolated linearly with the same <paramref name="t"/> and is independent of the
+    /// OkLab interpolation.
+    /// </para>
+    /// </remarks>
+    public static Color LerpOkLab(Color a, Color b, float t)
+    {
+        t = Math.Clamp(t, 0f, 1f);
+        return LerpOkLabUnclamped(a, b, t);
+    }
+
+    /// <summary>Interpolates between two colors in OkLab without clamping <paramref name="t"/>.</summary>
+    /// <param name="a">The color returned when <paramref name="t"/> is <c>0</c>.</param>
+    /// <param name="b">The color returned when <paramref name="t"/> is <c>1</c>.</param>
+    /// <param name="t">The interpolation ratio.</param>
+    /// <returns>The interpolated color, which may extrapolate beyond both inputs.</returns>
+    /// <remarks>
+    /// <para>
+    /// This is <see cref="LerpOkLab"/> without clamping: a <paramref name="t"/> outside <c>[0, 1]</c>
+    /// extrapolates along the OkLab path and can produce linear sRGB components outside the
+    /// <c>[0, 1]</c> gamut.
+    /// </para>
+    /// <para>
+    /// Both colors are converted from linear sRGB (D65) to OkLab without gamma conversion and the
+    /// result is converted back to linear sRGB without a gamut clamp. Alpha is interpolated linearly
+    /// with the same <paramref name="t"/>.
+    /// </para>
+    /// </remarks>
+    public static Color LerpOkLabUnclamped(Color a, Color b, float t)
+    {
+        a.ToOkLab(out float startL, out float startA, out float startB);
+        b.ToOkLab(out float endL, out float endA, out float endB);
+
+        float l = startL + ((endL - startL) * t);
+        float okA = startA + ((endA - startA) * t);
+        float okB = startB + ((endB - startB) * t);
+        float alpha = a.A + ((b.A - a.A) * t);
+
+        return FromOkLab(l, okA, okB, alpha);
+    }
 
     /// <summary>Creates an RGB color from hue, saturation, and value, with high-dynamic-range output.</summary>
     /// <param name="h">The hue in <c>[0, 1]</c>.</param>

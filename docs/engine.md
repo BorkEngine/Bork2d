@@ -113,6 +113,15 @@ arithmetic operators run through the vector operators. `R`, `G`, `B`, `A`, the g
 `Grayscale` (`0.299*R + 0.587*G + 0.114*B`), and `MaxColorComponent` expose the components without
 allowing mutation; `Lerp` clamps its ratio to `[0, 1]` and `LerpUnclamped` does not.
 
+`ToOkLab` converts the linear RGB components to OkLab with the standard linear sRGB (D65) matrices,
+ignores alpha, and applies no sRGB gamma decode. `FromOkLab` converts OkLab back to the same linear
+space, sets alpha from its optional `alpha` argument (default `1`), and applies no sRGB gamma
+encode. Neither conversion clamps to the `[0, 1]` gamut, so an out-of-gamut OkLab color keeps its
+negative or greater-than-one linear components. `LerpOkLab` converts both colors to OkLab,
+interpolates `L`, `a`, `b`, and alpha linearly with the same ratio, and converts back without a gamut
+clamp, clamping `t` to `[0, 1]`; `LerpOkLabUnclamped` is the same without the `t` clamp and may
+extrapolate. There is no separate OkLab type; the conversions use `out` parameters on `Color`.
+
 The surface follows Unity 6000.6 `Color`: the three- and four-argument constructors, implicit
 conversions to and from `Vector4`, component arithmetic, `HSVToRGB`/`RGBToHSV`, `ToString` with the
 `RGBA(r, g, b, a)` form (default `F3`, invariant culture when no provider is given), and the full
