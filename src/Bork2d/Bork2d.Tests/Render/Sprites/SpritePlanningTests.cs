@@ -1,6 +1,7 @@
 using System.Numerics;
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
+using Bork2d.Engine.Mathematics;
 using Bork2d.Engine.Rendering;
 using Bork2d.Render.Sprites;
 using Xunit;
@@ -197,7 +198,7 @@ public sealed class SpritePlanningTests
     public void VisibilityRuleUsesTheLayerMaskAndNeverCullsUnknownBounds()
     {
         SpriteSnapshot sprite = Snapshot(layer: 1);
-        var cameraBounds = new Bounds(new Vector2(-10f, -10f), new Vector2(10f, 10f));
+        var cameraBounds = Bounds.FromMinMax(new Vector2(-10f, -10f), new Vector2(10f, 10f));
 
         Assert.True(SpritePlanning.IsVisible(0b1, cameraBounds, sprite));
         Assert.False(SpritePlanning.IsVisible(0b10, cameraBounds, sprite));
@@ -207,19 +208,19 @@ public sealed class SpritePlanningTests
         Assert.True(SpritePlanning.IsVisible(0b1, Bounds.Empty, sprite));
         SpriteSnapshot outside = Bounded(
             0b1,
-            new Bounds(new Vector2(100f, -1f), new Vector2(105f, 1f)));
+            Bounds.FromMinMax(new Vector2(100f, -1f), new Vector2(105f, 1f)));
         Assert.True(SpritePlanning.IsVisible(0b1, Bounds.Empty, outside));
         Assert.False(SpritePlanning.IsVisible(0b1, cameraBounds, outside));
 
         // Bounds that only touch the camera edge still intersect.
         SpriteSnapshot touching = Bounded(
             0b1,
-            new Bounds(new Vector2(10f, -1f), new Vector2(15f, 1f)));
+            Bounds.FromMinMax(new Vector2(10f, -1f), new Vector2(15f, 1f)));
         Assert.True(SpritePlanning.IsVisible(0b1, cameraBounds, touching));
 
         SpriteSnapshot overlapping = Bounded(
             0b1,
-            new Bounds(new Vector2(5f, 5f), new Vector2(15f, 15f)));
+            Bounds.FromMinMax(new Vector2(5f, 5f), new Vector2(15f, 15f)));
         Assert.True(SpritePlanning.IsVisible(0b1, cameraBounds, overlapping));
     }
 

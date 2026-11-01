@@ -1,6 +1,7 @@
 using System.Numerics;
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
+using Bork2d.Engine.Mathematics;
 using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
 using Bork2d.Render.Sprites;
@@ -880,7 +881,7 @@ public sealed class SpriteFramePlannerTests
     }
 
     private static Bounds Box(float x, float y, float halfExtent)
-        => new(
+        => Bounds.FromMinMax(
             new Vector2(x - halfExtent, y - halfExtent),
             new Vector2(x + halfExtent, y + halfExtent));
 

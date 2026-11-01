@@ -10,11 +10,11 @@ provider package.
 | --- | --- |
 | `Bork2d.Engine` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
 | `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `IRenderable`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
-| `Bork2d.Engine.Rendering` | `Bounds`, `Color` (immutable linear RGBA), `RenderStats`, `ClearKind`, `FrameCaptureResult` |
+| `Bork2d.Engine.Rendering` | `Color` (immutable linear RGBA), `RenderStats`, `ClearKind`, `FrameCaptureResult` |
 | `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `TextureDescriptor`, `AssetRef<T>`, `DataRef`, enums |
 | `Bork2d.Engine.Assets.Pack` | `PackBuilder`, `PackCompressionMode` (tooling only) |
 | `Bork2d.Engine.Input` | `IInput`, `KeyCode`, `MouseButton` |
-| `Bork2d.Engine.Mathematics` | `Vector2Extensions`, `Vector2ApproximatelyExtensions` |
+| `Bork2d.Engine.Mathematics` | `Bounds`, `Ray2D`, `Vector2Extensions`, `Vector2ApproximatelyExtensions` |
 | `Bork2d.Engine.Platform` | `IWindow`, `ITime` |
 
 `GameEngine`, `Transform`, `Camera`, `SpriteRender`, `AssetService`, `FrameSnapshot`, the typed
@@ -142,6 +142,35 @@ The static `ApproximatelyEquals(Vector2, Vector2)` lives in `Vector2Approximatel
 because C# extension blocks lower a same-named static and instance member to colliding static
 methods. Both call forms work in the same namespace: `Vector2.ApproximatelyEquals(a, b)` and
 `a.ApproximatelyEquals(b)`.
+
+## Bounds and Ray2D
+
+`Bork2d.Engine.Mathematics.Bounds` is the 2D adaptation of Unity 6000.6 `Bounds`: a mutable
+world-space axis-aligned box stored as a center and half extents (two `Vector2` fields, 16 bytes).
+`Center`, `Size`, `Extents`, `Min`, and `Max` are settable, and the value exposes Unity's mutating
+`Encapsulate`, `Expand`, and `SetMinMax` helpers plus `ClosestPoint`, `Contains`, `Intersects`,
+`SqrDistance`, and `IntersectRay`. Construct it from a center and a full size with
+`new Bounds(center, size)`, or from two corners with `Bounds.FromMinMax(min, max)`. The type lives in
+the mathematics namespace; `IRenderable.Bounds` and the renderer's culling bounds use it from there.
+
+`Bounds.Empty` is the default value and means "no bounds" or "unknown bounds". A box without
+positive area is empty: the default value, a zero-area box, an inverted box (a minimum beyond the
+maximum on either axis), and any box with a non-finite center or extent. This is a deliberate
+divergence from Unity, which has no empty sentinel and treats a zero-size box as valid, because the
+engine uses empty bounds as "unknown, never cull". Queries are empty-safe: `Contains`, `Intersects`,
+and `IntersectRay` return `false` for an empty operand, `ClosestPoint` returns `Vector2.Zero`, and
+`SqrDistance` returns `float.PositiveInfinity`. The `Center`, `Size`, and `Extents` getters return
+`Vector2.Zero` for an empty box, while `Min` and `Max` return the raw stored edges so the mutating
+helpers can grow an empty box. Equality and hashing use the raw center and extents, and the value
+implements `IEquatable<Bounds>` and `IFormattable`.
+
+`Bounds.IntersectRay` uses a 2D slab test in world units: a ray origin inside the box reports
+distance `0`, a zero-direction ray hits only when its origin is contained, and a parallel or
+pointing-away ray misses. `Bork2d.Engine.Mathematics.Ray2D` is the matching mutable ray type: its
+constructor and `Direction` setter normalize the direction (a zero or tiny vector stays zero), and
+`GetPoint(distance)` returns `Origin + Direction * distance`. `Bounds.ToString()` prints
+`Center: (x, y), Extents: (x, y)` and `Ray2D.ToString()` prints `Origin: (x, y), Dir: (x, y)`, both
+with `F2` components and invariant culture when no provider is given.
 
 ## Time
 
