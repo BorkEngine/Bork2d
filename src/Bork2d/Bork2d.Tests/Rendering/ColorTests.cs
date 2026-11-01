@@ -130,6 +130,22 @@ public sealed class ColorTests
     }
 
     [Fact]
+    public void EqualsAgreesWithOperatorEqualityForNaN()
+    {
+        Color color = new(0.1f, 0.2f, 0.3f, 0.4f);
+        Color same = new(0.1f, 0.2f, 0.3f, 0.4f);
+        Color different = new(0.1f, 0.2f, 0.3f, 0.5f);
+        Color notANumber = new(float.NaN, 0f, 0f, 1f);
+        Color notANumberCopy = new(float.NaN, 0f, 0f, 1f);
+
+        Assert.Equal(color == same, color.Equals(same));
+        Assert.Equal(color == different, color.Equals(different));
+        Assert.Equal(notANumber == notANumberCopy, notANumber.Equals(notANumberCopy));
+        Assert.False(notANumber.Equals(notANumberCopy));
+        Assert.False(notANumber == notANumberCopy);
+    }
+
+    [Fact]
     public void ObjectEqualityOnlyMatchesColors()
     {
         Color color = new(0.1f, 0.2f, 0.3f, 0.4f);
@@ -218,8 +234,13 @@ public sealed class ColorTests
 
         Color negative = Color.HSVToRGB(-0.1f, 1f, 1f);
         Assert.Equal(1f, negative.R);
-        Assert.Equal(0.4f, negative.G, 5);
-        Assert.Equal(0f, negative.B, 5);
+        Assert.Equal(0f, negative.G);
+        Assert.Equal(0.6f, negative.B, 5);
+
+        Color lowerBoundary = Color.HSVToRGB(-1f / 6f, 1f, 1f);
+        Assert.Equal(1f, lowerBoundary.R);
+        Assert.Equal(0f, lowerBoundary.G);
+        Assert.Equal(1f, lowerBoundary.B);
     }
 
     [Fact]

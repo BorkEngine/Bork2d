@@ -149,7 +149,8 @@ public readonly struct Color : IEquatable<Color>, IFormattable
                 3 => new Vector4(var1, var2, v, 1f),
                 4 => new Vector4(var3, var1, v, 1f),
                 5 => new Vector4(v, var1, var2, 1f),
-                6 or -1 => new Vector4(v, var3, var1, 1f),
+                6 => new Vector4(v, var3, var1, 1f),
+                -1 => new Vector4(v, var1, var2, 1f),
                 _ => new Vector4(0f, 0f, 0f, 1f),
             };
 
@@ -254,7 +255,7 @@ public readonly struct Color : IEquatable<Color>, IFormattable
     /// <summary>Determines whether this color has exactly the same components as another color.</summary>
     /// <param name="other">The color to compare.</param>
     /// <returns><see langword="true"/> when every component is exactly equal.</returns>
-    public bool Equals(Color other) => _value.Equals(other._value);
+    public bool Equals(Color other) => _value == other._value;
 
     /// <summary>Determines whether this color equals another object.</summary>
     /// <param name="obj">The object to compare.</param>
