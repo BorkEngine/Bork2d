@@ -52,6 +52,33 @@ public sealed class SceneRootTests
     }
 
     [Fact]
+    public void RootChildIndexTracksSwapRemovalAndDetachAll()
+    {
+        var engine = TestEngineFactory.Create();
+        var first = engine.CreateTransform(engine.Root);
+        var middle = engine.CreateTransform(engine.Root);
+        var last = engine.CreateTransform(engine.Root);
+
+        Assert.Equal(0, ((Transform)first).ChildIndex);
+        Assert.Equal(1, ((Transform)middle).ChildIndex);
+        Assert.Equal(2, ((Transform)last).ChildIndex);
+
+        middle.Parent = null;
+
+        Assert.Null(middle.Parent);
+        Assert.Equal(-1, ((Transform)middle).ChildIndex);
+        Assert.Equal(0, ((Transform)first).ChildIndex);
+        Assert.Equal(1, ((Transform)last).ChildIndex);
+
+        engine.Root.DetachAll();
+
+        Assert.Null(first.Parent);
+        Assert.Null(last.Parent);
+        Assert.Equal(-1, ((Transform)first).ChildIndex);
+        Assert.Equal(-1, ((Transform)last).ChildIndex);
+    }
+
+    [Fact]
     public void RootRemainsValidAndCanOwnChildrenAfterDetachAll()
     {
         var engine = TestEngineFactory.Create();

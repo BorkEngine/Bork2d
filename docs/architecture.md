@@ -85,8 +85,8 @@ Assets are built ahead of time, not loaded from loose files at runtime:
 ## Invariants
 
 - **Scene ownership.** The root is a read-only identity transform. Parents hold children strongly;
-  scene entities have no `Dispose` or liveness flag. Detach with `Parent = null` and re-attach the
-  same object later.
+  scene entities have no `Dispose` or liveness flag. Detach with `Parent = null` or `DetachAll()`
+  and the detached node keeps its world transform; re-attach the same object later.
 - **Coordinates.** World space is +X right, +Y up, in absolute world units. `Camera.Size` is the
   half visible height; viewports are normalized with a top-left origin.
 - **Layers.** A layer type is an `int`-backed `[Flags]` enum with 1-32 named single-bit values

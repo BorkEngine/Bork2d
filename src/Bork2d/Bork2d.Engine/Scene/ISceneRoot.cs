@@ -12,7 +12,9 @@ namespace Bork2d.Engine.Scene;
 /// </para>
 /// <para>
 /// <see cref="ISceneRoot"/> adds no members. <see cref="ITransform.DetachAll"/> is inherited and
-/// detaches the root's direct children; their subtrees remain intact and can be re-attached.
+/// detaches the root's direct children; their subtrees remain intact and can be re-attached. The
+/// root is an identity transform, so root detachment leaves each direct child's local values
+/// unchanged while still preserving its world transform.
 /// </para>
 /// <para>
 /// The root is the owner node of the scene tree, not a scene entity: it implements
