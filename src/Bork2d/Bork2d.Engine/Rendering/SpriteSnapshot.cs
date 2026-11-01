@@ -35,4 +35,15 @@ internal readonly record struct SpriteSnapshot(
     uint Layer,
     int ZIndex,
     bool FlipX,
-    bool FlipY);
+    bool FlipY)
+{
+    /// <summary>
+    /// Gets the sprite's world-space AABB for conservative camera culling.
+    /// </summary>
+    /// <remarks>
+    /// The capture definition sets this from the frozen render data, pivot, flips, and composed
+    /// world matrix. <see cref="Bounds.Empty"/> means "unknown" and never culls, which keeps direct
+    /// snapshot producers conservative.
+    /// </remarks>
+    internal Bounds Bounds { get; init; } = Bounds.Empty;
+}

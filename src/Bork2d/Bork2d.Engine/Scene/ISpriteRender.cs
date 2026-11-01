@@ -8,12 +8,20 @@ namespace Bork2d.Engine.Scene;
 /// </summary>
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
 /// <remarks>
+/// <para>
 /// Sprite renderables are scene entities. They do not implement <see cref="IDisposable"/> and
 /// have no liveness flag: detach with <see cref="ITransform.Parent"/> = <see langword="null"/> or
 /// clear the owning parent to remove one, and re-attach the same instance later. Hide a sprite
 /// without removing it by assigning <see langword="null"/>.
+/// </para>
+/// <para>
+/// <see cref="IRenderable.Bounds"/> is the world-space AABB of the drawn quad, derived from the
+/// frozen render data, the pivot, the flips, and the world matrix with the same formula the vertex
+/// shader uses. It returns <see cref="Bounds.Empty"/> for a null or malformed sprite and never
+/// throws for those cases.
+/// </para>
 /// </remarks>
-public interface ISpriteRender<TLayer> : ITransform where TLayer : struct, Enum
+public interface ISpriteRender<TLayer> : IRenderable where TLayer : struct, Enum
 {
     /// <summary>
     /// Gets or sets the loaded sprite asset; <see langword="null"/> draws nothing.

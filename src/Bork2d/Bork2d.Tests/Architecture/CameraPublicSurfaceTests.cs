@@ -1,4 +1,5 @@
 using System.Reflection;
+using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
 using Xunit;
 
@@ -6,7 +7,8 @@ namespace Bork2d.Tests.Architecture;
 
 /// <summary>
 /// Pins the public <c>ICamera&lt;TLayer&gt;</c> surface: M8 adds exactly the three approved helper
-/// members and nothing else.
+/// members and nothing else, and the camera and sprite interfaces derive from the shared
+/// <see cref="IRenderable"/> contract.
 /// </summary>
 public sealed class CameraPublicSurfaceTests
 {
@@ -48,6 +50,19 @@ public sealed class CameraPublicSurfaceTests
                 "WorldToScreen(Vector2)",
             },
             methods);
+    }
+
+    [Fact]
+    public void RenderablesShareThePublicBoundsContract()
+    {
+        Assert.True(typeof(IRenderable).IsAssignableFrom(typeof(ICamera<>)));
+        Assert.True(typeof(IRenderable).IsAssignableFrom(typeof(ISpriteRender<>)));
+        Assert.True(typeof(ITransform).IsAssignableFrom(typeof(IRenderable)));
+
+        PropertyInfo? bounds = typeof(IRenderable).GetProperty(nameof(IRenderable.Bounds));
+        Assert.NotNull(bounds);
+        Assert.Equal(typeof(Bounds), bounds.PropertyType);
+        Assert.False(bounds.CanWrite);
     }
 
     private static string Describe(MethodInfo method)

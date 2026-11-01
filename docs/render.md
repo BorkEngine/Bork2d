@@ -50,8 +50,19 @@ The render thread consumes one snapshot and plans it in one allocation-free pass
 3. Ensure each sprite's texture page and resolve quad geometry from the frozen UVs and per-axis
    world scale for drawable sprites.
 4. Sort cameras by `ZIndex` and resolve their projections; invalid cameras are skipped.
-5. Filter by each camera's culling mask, assign contiguous per-camera instance ranges, grow the
-   instance buffer once, and write the instance records.
+5. Filter by each camera's culling mask, then cull by bounds: a sprite whose known world AABB does
+   not intersect the camera's world AABB is skipped for that camera. Empty sprite bounds mean
+   "unknown" and are never culled.
+6. Assign contiguous per-camera instance ranges, grow the instance buffer once, and write the
+   instance records.
+
+Bounds culling is always on and conservative. The camera's world AABB is the AABB of its four
+visible world-space corners, so a rotated camera culls with the larger axis-aligned box around its
+rotated rectangle; a sprite's world AABB is the AABB of its four drawn quad corners, including the
+pivot, flips, and any world-matrix rotation, mirror, shear, or non-uniform scale. There is no
+spatial index and no culling toggle. A culled sprite is a normal visibility skip, never a
+malformed-field fatal, and it is not counted in `RenderStats.SkippedSprites`; it only reduces the
+instance count.
 
 A captured sprite carries the immutable `SpriteRenderData` frozen when its asset was assigned, never
 the live `SpriteAsset`, so mutating an asset after assignment cannot change a plan or a published
@@ -110,7 +121,9 @@ intermediate output, never in the repository or publish output.
 The renderer publishes an immutable `RenderStats` for the last completed frame: sequence,
 framebuffer size, draw calls, instances, cameras, non-empty cameras, texture pages/capacity,
 skipped sprites, and cumulative validation errors/warnings. The host installs it as
-`IEngine.RenderStats`; reading it never touches Vulkan.
+`IEngine.RenderStats`; reading it never touches Vulkan. `SkippedSprites` counts the null,
+invalid-layer, non-`Quad`, and still-loading sprites; bounds-culled sprites are not skipped, they
+only reduce `Instances`.
 
 `CaptureFrameAsync` queues a one-shot request. The copy is recorded after the last camera pass and
 before present/discard, so it includes every camera and excludes window chrome. The result is a new

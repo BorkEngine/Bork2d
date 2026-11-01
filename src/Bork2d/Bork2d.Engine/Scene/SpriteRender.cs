@@ -64,6 +64,29 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
         }
     }
 
+    /// <inheritdoc/>
+    public Bounds Bounds
+    {
+        get
+        {
+            SpriteRenderData? data;
+            bool flipX;
+            bool flipY;
+            lock (Sync)
+            {
+                data = _renderData;
+                flipX = _flipX;
+                flipY = _flipY;
+            }
+
+            // The world matrix is composed under the structural lock, so read the renderable state
+            // first and never hold the per-object lock while acquiring the structural lock.
+            return data is null
+                ? Bounds.Empty
+                : SpriteBounds.CreateWorldBounds(data, WorldMatrix(), flipX, flipY);
+        }
+    }
+
     /// <summary>
     /// Copies this sprite's capture state under one per-object lock acquisition.
     /// </summary>

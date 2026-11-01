@@ -13,8 +13,8 @@ namespace Bork2d.Tests.Render.Sprites;
 
 /// <summary>
 /// Deterministic tests for the M8 sprite frame planner: sorting, masks, validity, page resolution,
-/// quad math, camera skips, contiguous instance ranges, clears, throttled diagnostics, and the
-/// allocation-free warm path (M8 §6.4–§6.8/§8.1).
+/// quad math, camera skips, conservative bounds culling, contiguous instance ranges, clears,
+/// throttled diagnostics, and the allocation-free warm path (M8 §6.4–§6.8/§8.1).
 /// </summary>
 public sealed class SpriteFramePlannerTests
 {
@@ -363,7 +363,12 @@ public sealed class SpriteFramePlannerTests
         AddCamera(snapshot, zIndex: 1, viewport: new Vector4(0.5f, 0f, 0.5f, 1f));
         for (var index = 0; index < 8; index++)
         {
-            AddSprite(snapshot, Sprite("tex/a"), layer: (uint)((index % 2) + 1), zIndex: index);
+            AddSprite(
+                snapshot,
+                Sprite("tex/a"),
+                layer: (uint)((index % 2) + 1),
+                zIndex: index,
+                bounds: Box(0f, 0f, 5f));
         }
 
         _ = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
@@ -412,6 +417,245 @@ public sealed class SpriteFramePlannerTests
             "The warmed instance sink must hold the whole 50,000-sprite frame.");
     }
 
+    [Fact]
+    public void BoundsCullingSkipsSpritesOutsideTheCameraAndKeepsUnknownBounds()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 0, x: 0f, bounds: Box(0f, 0f, 5f));
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 1, x: 100f, bounds: Box(100f, 0f, 5f));
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 2, x: 13f, bounds: Box(13f, 0f, 5f));
+
+        // No bounds means "unknown": a far sprite with empty bounds stays conservative and draws.
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 3, x: 1000f);
+
+        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
+
+        Assert.Equal(1, plan.CameraCount);
+        Assert.Equal(0, plan.SkippedSprites);
+        Assert.Equal(1, plan.CulledSprites);
+        Assert.Equal(3, plan.InstanceCount);
+        Assert.Equal(3, fixture.Instances.WriteCount);
+        Assert.Equal(3, fixture.Instances.LastRequiredInstances);
+    }
+
+    [Fact]
+    public void LayerFilteringRunsBeforeBoundsCulling()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0, mask: 1u);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 2u, x: 100f, bounds: Box(100f, 0f, 5f));
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, x: 100f, bounds: Box(100f, 0f, 5f));
+
+        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
+
+        // The layer-mismatched sprite was never a bounds candidate, so only the layer-matched
+        // offscreen sprite counts as culled.
+        Assert.Equal(0, plan.SkippedSprites);
+        Assert.Equal(1, plan.CulledSprites);
+        Assert.Equal(0, plan.InstanceCount);
+        Assert.Equal(0, fixture.Instances.WriteCount);
+    }
+
+    [Fact]
+    public void ASpriteCulledByOneCameraIsStillDrawnByAnother()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0, clear: ClearKind.None);
+        AddCamera(
+            snapshot,
+            zIndex: 1,
+            clear: ClearKind.None,
+            world: Matrix3x2.CreateTranslation(100f, 0f));
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, x: 100f, bounds: Box(100f, 0f, 5f));
+
+        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
+
+        Assert.Equal(1, plan.InstanceCount);
+        Assert.Equal(0, plan.CulledSprites);
+        Assert.Equal(0, plan.Cameras[0].InstanceCount);
+        Assert.Equal(1, plan.Cameras[1].InstanceCount);
+    }
+
+    [Fact]
+    public void CulledSpritesCountsEachSpriteOnceAcrossOverlappingCameras()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0, clear: ClearKind.None);
+        AddCamera(snapshot, zIndex: 1, clear: ClearKind.None);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, x: 0f, bounds: Box(0f, 0f, 5f));
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, x: 100f, bounds: Box(100f, 0f, 5f));
+
+        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
+
+        Assert.Equal(2, plan.InstanceCount);
+        Assert.Equal(1, plan.CulledSprites);
+        Assert.Equal(2, fixture.Instances.WriteCount);
+    }
+
+    [Fact]
+    public void MalformedFieldsRemainFatalBeforeBoundsCulling()
+    {
+        using var fixture = new PlanningFixture();
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(
+            snapshot,
+            Sprite("tex/a", scale: Vector2.Zero),
+            layer: 1u,
+            x: 100f,
+            bounds: Box(100f, 0f, 5f));
+
+        Bork2dException exception = Assert.Throws<Bork2dException>(
+            () => fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances));
+        Assert.Contains("Scale", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NonFiniteCameraBoundsNeverCull()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0, size: float.MaxValue);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, x: 1000f, bounds: Box(1000f, 0f, 5f));
+
+        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
+
+        Assert.Equal(1, plan.CameraPlanCount);
+        Assert.Equal(1, plan.InstanceCount);
+        Assert.Equal(0, plan.CulledSprites);
+    }
+
+    [Fact]
+    public void ProductionBoundsKeepRotatedCameraSpritesVisible()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        (GameEngine<GameLayer> engine, _) = CreateEngine(new Vector2(320f, 240f));
+        var camera = engine.CreateCamera(engine.Root);
+        camera.Size = 10f;
+        camera.LocalRotation = 30f;
+        camera.CullingMask = GameLayer.World;
+        var sprite = engine.CreateSpriteRender(engine.Root);
+        sprite.Sprite = Sprite("tex/a", scale: new Vector2(4f));
+        sprite.Layer = GameLayer.World;
+
+        // The view-space top-right corner (13, 9.5) is inside the rotated view. Unrotated camera
+        // bounds would end at y = 10 and wrongly cull it.
+        float cosine = MathF.Cos(MathF.PI / 6f);
+        float sine = MathF.Sin(MathF.PI / 6f);
+        var viewCorner = new Vector2(13f, 9.5f);
+        sprite.LocalPosition = new Vector2(
+            (viewCorner.X * cosine) - (viewCorner.Y * sine),
+            (viewCorner.X * sine) + (viewCorner.Y * cosine));
+
+        FrameSnapshot snapshot = CaptureEngine(engine);
+        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
+
+        Assert.Equal(1, plan.InstanceCount);
+        Assert.Equal(0, plan.CulledSprites);
+    }
+
+    [Fact]
+    public void ProductionBoundsKeepMirroredPivotedSpritesVisible()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        (GameEngine<GameLayer> engine, _) = CreateEngine(new Vector2(320f, 240f));
+        var camera = engine.CreateCamera(engine.Root);
+        camera.Size = 10f;
+        camera.CullingMask = GameLayer.World;
+        var sprite = engine.CreateSpriteRender(engine.Root);
+        sprite.Sprite = Sprite("tex/a", scale: new Vector2(6f), pivot: new Vector2(0.1f, 0.1f));
+        sprite.Layer = GameLayer.World;
+        sprite.FlipX = true;
+        sprite.FlipY = true;
+        sprite.LocalPosition = new Vector2(14f, -14f);
+
+        FrameSnapshot snapshot = CaptureEngine(engine);
+        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
+
+        // The mirrored pivot places the quad at x [8.6, 14.6], y [-14.6, -8.6]; dropping the flip
+        // sign would put it at x [13.4, 19.4], y [-19.4, -13.4] and wrongly cull it.
+        Assert.False(snapshot.Sprites[0].Bounds.IsEmpty);
+        Assert.Equal(1, plan.InstanceCount);
+        Assert.Equal(0, plan.CulledSprites);
+    }
+
+    [Fact]
+    public void ProductionBoundsKeepShearedSpritesVisible()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        (GameEngine<GameLayer> engine, _) = CreateEngine(new Vector2(320f, 240f));
+        var camera = engine.CreateCamera(engine.Root);
+        camera.Size = 10f;
+        camera.CullingMask = GameLayer.World;
+        var parent = engine.CreateTransform(engine.Root);
+        parent.LocalScale = new Vector2(2f, 1f);
+        var sprite = engine.CreateSpriteRender(parent);
+        sprite.Sprite = Sprite("tex/a", scale: new Vector2(10f, 4f));
+        sprite.Layer = GameLayer.World;
+        sprite.LocalPosition = new Vector2(11f, 0f);
+        sprite.LocalRotation = 30f;
+
+        FrameSnapshot snapshot = CaptureEngine(engine);
+        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
+
+        // The sheared quad reaches x = 11.34; the un-sheared quad would start at x = 17 and be
+        // wrongly culled against the camera's x extent of 13.33.
+        Assert.Equal(1, plan.InstanceCount);
+        Assert.Equal(0, plan.CulledSprites);
+    }
+
+    [Fact]
+    public void ProductionBoundsKeepNonSquareSpritesVisible()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        (GameEngine<GameLayer> engine, _) = CreateEngine(new Vector2(320f, 240f));
+        var camera = engine.CreateCamera(engine.Root);
+        camera.Size = 10f;
+        camera.CullingMask = GameLayer.World;
+        var sprite = engine.CreateSpriteRender(engine.Root);
+        sprite.Sprite = Sprite("tex/a", scale: new Vector2(2f, 8f));
+        sprite.Layer = GameLayer.World;
+        sprite.LocalPosition = new Vector2(13f, 0f);
+
+        FrameSnapshot snapshot = CaptureEngine(engine);
+        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances);
+
+        Assert.Equal(1, plan.InstanceCount);
+        Assert.Equal(0, plan.CulledSprites);
+    }
+
+    private static Bounds Box(float x, float y, float halfExtent)
+        => new(
+            new Vector2(x - halfExtent, y - halfExtent),
+            new Vector2(x + halfExtent, y + halfExtent));
+
+    private static (GameEngine<GameLayer> Engine, FakeWindow Window) CreateEngine(Vector2 size)
+    {
+        var window = new FakeWindow { Size = size };
+        return (new GameEngine<GameLayer>(new FakeTime(), window, new FakeAssets()), window);
+    }
+
+    private static FrameSnapshot CaptureEngine(GameEngine<GameLayer> engine)
+    {
+        var snapshot = new FrameSnapshot();
+        engine.CaptureSnapshot(snapshot, 1);
+        return snapshot;
+    }
+
     private static void AssertFatal(PlanningFixture fixture, SpriteAsset asset, string field)
     {
         var snapshot = new FrameSnapshot { Sequence = 1 };
@@ -451,7 +695,8 @@ public sealed class SpriteFramePlannerTests
         int zIndex = 0,
         bool flipX = false,
         bool flipY = false,
-        float x = 0f)
+        float x = 0f,
+        Bounds? bounds = null)
         => snapshot.AddSprite(
             new SpriteSnapshot(
                 SpriteRenderData.Freeze(asset),
@@ -460,7 +705,10 @@ public sealed class SpriteFramePlannerTests
                 layer,
                 zIndex,
                 flipX,
-                flipY));
+                flipY)
+            {
+                Bounds = bounds ?? Bounds.Empty,
+            });
 
     private static SpriteAsset Sprite(
         string? texture,
