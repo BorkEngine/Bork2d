@@ -824,6 +824,315 @@ public sealed class TexturePageStoreTests
         Assert.Equal(0, harness.Store.ObservedTeardownFaults);
     }
 
+    [Fact]
+    public void ASmallResidencyBudgetEvictsTheLeastRecentlySeenReadyPageFirst()
+    {
+        const int pageBytes = 4 * 4 * 4;
+        Harness harness = CreateHarness(residencyBudget: 3 * pageBytes);
+
+        LoadPage(
+            harness,
+            "textures/first",
+            Descriptor(4, 4, "textures/first-raw"),
+            Payload(4, 4));
+        LoadPage(
+            harness,
+            "textures/second",
+            Descriptor(4, 4, "textures/second-raw"),
+            Payload(4, 4));
+        LoadPage(
+            harness,
+            "textures/third",
+            Descriptor(4, 4, "textures/third-raw"),
+            Payload(4, 4));
+        LoadPage(
+            harness,
+            "textures/fourth",
+            Descriptor(4, 4, "textures/fourth-raw"),
+            Payload(4, 4));
+
+        Assert.Equal(4 * pageBytes, harness.Store.ResidentPayloadBytes);
+        Assert.Equal(0, harness.Store.EvictionCount);
+
+        harness.Store.Pump();
+
+        // The budget needs one page reclaimed; the least recently seen ready page goes first even
+        // though three pages are old enough to be safe.
+        Assert.Equal(1, harness.Store.EvictionCount);
+        Assert.Equal(new[] { 1 }, harness.Gpu.RetiredPageIndices);
+        Assert.Equal(3 * pageBytes, harness.Store.ResidentPayloadBytes);
+        Assert.Equal(4, harness.Store.TexturePageCount);
+        Assert.False(
+            harness.Store.TryGetPageState("textures/first", out _, out _),
+            "The evicted path must leave the page map.");
+        Assert.Equal(
+            TexturePageLookupKind.Ready,
+            harness.Store.EnsurePage("textures/second").Kind);
+        Assert.Equal(
+            TexturePageLookupKind.Ready,
+            harness.Store.EnsurePage("textures/third").Kind);
+        Assert.Equal(
+            TexturePageLookupKind.Ready,
+            harness.Store.EnsurePage("textures/fourth").Kind);
+    }
+
+    [Fact]
+    public void APageInTheReclaimSafetyAgeIsNeverEvictedAndIsEvictedOnceItAgesOut()
+    {
+        const int pageBytes = 4 * 4 * 4;
+        Harness harness = CreateHarness(residencyBudget: pageBytes - 1);
+
+        LoadPage(
+            harness,
+            "textures/visible",
+            Descriptor(4, 4, "textures/visible-raw"),
+            Payload(4, 4));
+
+        // The single ready page is already over budget. While the planner keeps seeing it, it stays
+        // inside the safety age and the over-budget set is kept for a later pump.
+        PumpKeepingVisible(harness, "textures/visible");
+        PumpKeepingVisible(harness, "textures/visible");
+        PumpKeepingVisible(harness, "textures/visible");
+
+        Assert.Equal(pageBytes, harness.Store.ResidentPayloadBytes);
+        Assert.Equal(0, harness.Store.EvictionCount);
+        Assert.Equal(2, harness.Store.TexturePageCount);
+
+        // Age == the safety age is still safe; the pump after it no longer is.
+        harness.Store.Pump();
+        Assert.Equal(0, harness.Store.EvictionCount);
+        harness.Store.Pump();
+
+        Assert.Equal(1, harness.Store.EvictionCount);
+        Assert.Equal(new[] { 1 }, harness.Gpu.RetiredPageIndices);
+        Assert.Equal(0, harness.Store.ResidentPayloadBytes);
+        Assert.Equal(1, harness.Store.TexturePageCount);
+        Assert.True(harness.Store.IsPlaceholderReady);
+        Assert.Equal(1, harness.Gpu.ResidentPageCount);
+        Assert.DoesNotContain(TexturePageCapacity.PlaceholderIndex, harness.Gpu.RetiredPageIndices);
+    }
+
+    [Fact]
+    public void AnEvictedPathReloadsOnItsNextEnsurePageAndReusesItsSlot()
+    {
+        const int pageBytes = 4 * 4 * 4;
+        Harness harness = CreateHarness(residencyBudget: 3 * pageBytes);
+
+        LoadPage(
+            harness,
+            "textures/first",
+            Descriptor(4, 4, "textures/first-raw"),
+            Payload(4, 4));
+        LoadPage(
+            harness,
+            "textures/second",
+            Descriptor(4, 4, "textures/second-raw"),
+            Payload(4, 4));
+        LoadPage(
+            harness,
+            "textures/third",
+            Descriptor(4, 4, "textures/third-raw"),
+            Payload(4, 4));
+        LoadPage(
+            harness,
+            "textures/fourth",
+            Descriptor(4, 4, "textures/fourth-raw"),
+            Payload(4, 4));
+        harness.Store.Pump();
+
+        Assert.Equal(1, harness.Store.EvictionCount);
+        Assert.Equal(1, harness.Store.FreeDescriptorSlotCount);
+        int loads = harness.Assets.LoadAssetCount;
+
+        // The evicted path starts a fresh descriptor/payload load on its next sighting.
+        Assert.Equal(
+            TexturePageLookupKind.Pending,
+            harness.Store.EnsurePage("textures/first").Kind);
+        Assert.Equal(loads + 1, harness.Assets.LoadAssetCount);
+
+        harness.Store.Pump();
+
+        TexturePageLookup reloaded = harness.Store.EnsurePage("textures/first");
+        Assert.Equal(TexturePageLookupKind.Ready, reloaded.Kind);
+        Assert.Equal(1, reloaded.Index);
+        Assert.Equal(1, harness.Store.DescriptorSlotReuseCount);
+        Assert.Equal(0, harness.Store.FreeDescriptorSlotCount);
+        Assert.Equal(4 * pageBytes, harness.Store.ResidentPayloadBytes);
+    }
+
+    [Fact]
+    public void AFreedDescriptorSlotIsReusedBeforeTheTableGrows()
+    {
+        // Each 1x1 page is 4 payload bytes; the budget fits 254 pages, so the 255th page leaves the
+        // 256-entry table exactly full and one byte over the budget.
+        const int pageBytes = 4;
+        Harness harness = CreateHarness(residencyBudget: 254 * pageBytes);
+
+        for (var index = 0; index < TexturePageCapacity.InitialRealPages; index++)
+        {
+            LoadPage(
+                harness,
+                $"textures/page-{index}",
+                Descriptor(1, 1, $"textures/page-{index}-raw"),
+                Payload(1, 1));
+        }
+
+        Assert.Equal(TexturePageCapacity.Initial, harness.Store.TexturePageCapacityInEntries);
+        Assert.Equal(TexturePageCapacity.Initial, harness.Store.TexturePageCount);
+        Assert.Equal(0, harness.Store.GrowthCount);
+
+        harness.Store.Pump();
+
+        Assert.Equal(1, harness.Store.EvictionCount);
+        Assert.Equal(1, harness.Store.FreeDescriptorSlotCount);
+        Assert.Equal(254 * pageBytes, harness.Store.ResidentPayloadBytes);
+
+        LoadPage(
+            harness,
+            "textures/page-after-eviction",
+            Descriptor(1, 1, "textures/page-after-eviction-raw"),
+            Payload(1, 1));
+
+        Assert.Equal(0, harness.Store.GrowthCount);
+        Assert.Equal(TexturePageCapacity.Initial, harness.Store.TexturePageCapacityInEntries);
+        Assert.Equal(1, harness.Store.DescriptorSlotReuseCount);
+        Assert.Equal(
+            1,
+            harness.Store.EnsurePage("textures/page-after-eviction").Index);
+    }
+
+    [Fact]
+    public void ACatalogChangeReclaimsRetiredPagesAfterTheSafetyAge()
+    {
+        const int pageBytes = 4 * 4 * 4;
+        Harness harness = CreateHarness();
+
+        LoadPage(
+            harness,
+            "textures/a",
+            Descriptor(4, 4, "textures/a-raw"),
+            Payload(4, 4));
+        LoadPage(
+            harness,
+            "textures/b",
+            Descriptor(4, 4, "textures/b-raw"),
+            Payload(4, 4));
+        Assert.Equal(2 * pageBytes, harness.Store.ResidentPayloadBytes);
+
+        harness.Assets.CatalogVersion++;
+        harness.Store.Pump();
+
+        // Both ready pages become retired: they stay GPU-resident but stop counting as resident.
+        Assert.Equal(0, harness.Store.ResidentPayloadBytes);
+        Assert.Equal(2, harness.Store.RetiredPageCount);
+        Assert.Equal(0, harness.Store.ReclaimedRetiredPageCount);
+        Assert.Equal(1, harness.Store.TexturePageCount);
+        Assert.Equal(3, harness.Gpu.ResidentPageCount);
+
+        harness.Store.Pump();
+        harness.Store.Pump();
+
+        Assert.Equal(2, harness.Store.RetiredPageCount);
+        Assert.Equal(0, harness.Store.ReclaimedRetiredPageCount);
+        Assert.Equal(3, harness.Gpu.ResidentPageCount);
+
+        harness.Store.Pump();
+
+        // Past the safety age the descriptor slots and image memory return: the GPU holds only the
+        // placeholder and both indices wait for reuse.
+        Assert.Equal(0, harness.Store.RetiredPageCount);
+        Assert.Equal(2, harness.Store.ReclaimedRetiredPageCount);
+        Assert.Equal(1, harness.Gpu.ResidentPageCount);
+        Assert.Equal(2, harness.Store.FreeDescriptorSlotCount);
+        Assert.Equal(0, harness.Store.ResidentPayloadBytes);
+        Assert.Equal(1, harness.Store.TexturePageCount);
+        Assert.Equal(0, harness.Store.EvictionCount);
+
+        // A fresh sighting of a retired path reloads it into a reclaimed slot.
+        harness.Store.EnsurePage("textures/a");
+        harness.Store.Pump();
+
+        TexturePageLookup reloaded = harness.Store.EnsurePage("textures/a");
+        Assert.Equal(TexturePageLookupKind.Ready, reloaded.Kind);
+        Assert.InRange(reloaded.Index, 1, 2);
+        Assert.Equal(pageBytes, harness.Store.ResidentPayloadBytes);
+        Assert.True(harness.Store.DescriptorSlotReuseCount >= 1);
+    }
+
+    [Fact]
+    public void ResidentBytesPagesAndEvictionsStayConsistentWhileEvicting()
+    {
+        const int pageBytes = 4 * 4 * 4;
+        Harness harness = CreateHarness(residencyBudget: 2 * pageBytes);
+
+        for (var index = 0; index < 8; index++)
+        {
+            LoadPage(
+                harness,
+                $"textures/page-{index}",
+                Descriptor(4, 4, $"textures/page-{index}-raw"),
+                Payload(4, 4));
+        }
+
+        for (var pump = 0; pump < 4; pump++)
+        {
+            harness.Store.Pump();
+        }
+
+        var ready = 0;
+        for (var index = 0; index < 8; index++)
+        {
+            if (harness.Store.TryGetPageState(
+                $"textures/page-{index}",
+                out TexturePageState state,
+                out _))
+            {
+                Assert.Equal(TexturePageState.Ready, state);
+                ready++;
+            }
+        }
+
+        Assert.True(harness.Store.EvictionCount > 0, "No page was evicted under the small budget.");
+        Assert.Equal(ready + 1, harness.Store.TexturePageCount);
+        Assert.Equal((long)ready * pageBytes, harness.Store.ResidentPayloadBytes);
+        Assert.Equal(harness.Store.EvictionCount, harness.Gpu.RetiredPageIndices.Count);
+        Assert.Equal(
+            harness.Store.EvictionCount - harness.Store.DescriptorSlotReuseCount,
+            harness.Store.FreeDescriptorSlotCount);
+        Assert.Equal(0, harness.Store.RetiredPageCount);
+        Assert.True(
+            harness.Store.ResidentPayloadBytes <= 2 * pageBytes,
+            $"Resident bytes {harness.Store.ResidentPayloadBytes} exceed the budget.");
+        Assert.All(
+            harness.Gpu.RetiredPageIndices,
+            index => Assert.InRange(index, 1, TexturePageCapacity.InitialRealPages));
+    }
+
+    [Fact]
+    public void ThePlaceholderIsNeverEvicted()
+    {
+        Harness harness = CreateHarness(residencyBudget: 1);
+
+        LoadPage(
+            harness,
+            "textures/large",
+            Descriptor(4, 4, "textures/large-raw"),
+            Payload(4, 4));
+        Assert.Equal(4 * 4 * 4, harness.Store.ResidentPayloadBytes);
+
+        for (var pump = 0; pump < 4; pump++)
+        {
+            harness.Store.Pump();
+        }
+
+        Assert.Equal(1, harness.Store.EvictionCount);
+        Assert.Equal(0, harness.Store.ResidentPayloadBytes);
+        Assert.Equal(1, harness.Store.TexturePageCount);
+        Assert.True(harness.Store.IsPlaceholderReady);
+        Assert.Equal(1, harness.Gpu.ResidentPageCount);
+        Assert.DoesNotContain(TexturePageCapacity.PlaceholderIndex, harness.Gpu.RetiredPageIndices);
+    }
+
     private static Harness CreateHarness(
         int limit = DefaultLimit,
         int maxDimension = DefaultMaxDimension,
@@ -870,6 +1179,13 @@ public sealed class TexturePageStoreTests
         harness.Assets.CompletePayload(descriptor.Payload.Path!, payload);
         harness.Store.Pump();
         Assert.Equal(TexturePageLookupKind.Ready, harness.Store.EnsurePage(path).Kind);
+    }
+
+    /// <summary>Marks a ready page as seen for the frame, then pumps (keeps it inside the safety age).</summary>
+    private static void PumpKeepingVisible(Harness harness, string path)
+    {
+        Assert.Equal(TexturePageLookupKind.Ready, harness.Store.EnsurePage(path).Kind);
+        harness.Store.Pump();
     }
 
     private static void AssertContentFailure(

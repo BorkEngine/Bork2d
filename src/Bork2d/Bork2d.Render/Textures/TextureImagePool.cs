@@ -11,10 +11,11 @@ namespace Bork2d.Render.Textures;
 /// <remarks>
 /// <para>
 /// A block is allocated on demand with the memory type the image requires and a bounded default
-/// size; a page image that does not fit in a block's remaining space allocates a new block. Pages
-/// live for the run, so ranges are never individually freed; <see cref="Destroy"/> frees every
-/// block after the images bound to them are destroyed. There is no VMA and no per-page
-/// <c>vkAllocateMemory</c>.
+/// size; a page image that does not fit in a block's remaining space allocates a new block. A
+/// retired page returns its range to the block that owns it, and the next image reuses a suitable
+/// free range instead of consuming fresh block space; adjacent free ranges coalesce, so a fully
+/// freed block can serve a large image again. Blocks stay allocated for the run and are freed by
+/// <see cref="Destroy"/>; there is no VMA and no per-page <c>vkAllocateMemory</c>.
 /// </para>
 /// <para>
 /// The class is render-thread-owned. <see cref="Destroy"/> is best-effort, idempotent, and never
@@ -52,6 +53,24 @@ internal sealed unsafe class TextureImagePool : IDisposable
     /// <summary>Gets the total number of device-memory blocks allocated.</summary>
     internal int BlockCount => _blocks.Count;
 
+    /// <summary>Gets the bytes currently reserved for live page images.</summary>
+    internal ulong AllocatedBytes { get; private set; }
+
+    /// <summary>Gets the number of free ranges across every block.</summary>
+    internal int FreeRangeCount
+    {
+        get
+        {
+            var count = 0;
+            foreach (Block block in _blocks)
+            {
+                count += block.Free.Count;
+            }
+
+            return count;
+        }
+    }
+
     /// <summary>
     /// Reserves an aligned range for one image and returns the memory and offset to bind.
     /// </summary>
@@ -77,23 +96,65 @@ internal sealed unsafe class TextureImagePool : IDisposable
                 continue;
             }
 
-            ulong aligned = Align(block.Used, alignment);
-            if (aligned + requirements.Size > block.Size)
+            if (TryTakeRange(block, requirements.Size, alignment, out offset))
+            {
+                AllocatedBytes += requirements.Size;
+                memory = block.Memory;
+                return;
+            }
+        }
+
+        Block created = CreateBlock(memoryTypeIndex, requirements.Size, alignment);
+        AllocatedBytes += requirements.Size;
+        _blocks.Add(created);
+        memory = created.Memory;
+        offset = 0;
+    }
+
+    /// <summary>
+    /// Returns one image's range to the block that owns it, coalescing adjacent free ranges.
+    /// </summary>
+    /// <remarks>
+    /// The caller destroys the image bound to the range first. A range that is unknown to the pool,
+    /// outside its block, or already free is reported and ignored so cleanup stays best-effort.
+    /// </remarks>
+    /// <param name="memory">The block's device memory, as returned by <see cref="Allocate"/>.</param>
+    /// <param name="offset">The range's aligned offset, as returned by <see cref="Allocate"/>.</param>
+    /// <param name="size">The range's allocation size, as returned by <see cref="Allocate"/>.</param>
+    internal void Free(DeviceMemory memory, ulong offset, ulong size)
+    {
+        if (memory.Handle == 0 || size == 0)
+        {
+            return;
+        }
+
+        foreach (Block block in _blocks)
+        {
+            if (block.Memory.Handle != memory.Handle)
             {
                 continue;
             }
 
-            block.Used = aligned + requirements.Size;
-            memory = block.Memory;
-            offset = aligned;
+            if (offset + size > block.Size || OverlapsFreeRange(block, offset, size))
+            {
+                _logger.LogError(
+                    "Vulkan texture image memory range ({Offset}, {Size}) does not describe a live "
+                        + "range of its block; the range is not returned to the pool.",
+                    offset,
+                    size);
+                return;
+            }
+
+            block.Free.Add(new MemoryRange(offset, size));
+            block.Free.Sort(static (left, right) => left.Offset.CompareTo(right.Offset));
+            Coalesce(block);
+            AllocatedBytes = size >= AllocatedBytes ? 0 : AllocatedBytes - size;
             return;
         }
 
-        Block created = CreateBlock(memoryTypeIndex, requirements.Size, alignment);
-        created.Used = Align(0, alignment) + requirements.Size;
-        _blocks.Add(created);
-        memory = created.Memory;
-        offset = 0;
+        _logger.LogError(
+            "Vulkan texture image memory free named a memory block the pool does not own; the range "
+                + "is ignored.");
     }
 
     /// <inheritdoc/>
@@ -125,6 +186,76 @@ internal sealed unsafe class TextureImagePool : IDisposable
         }
 
         _blocks.Clear();
+        AllocatedBytes = 0;
+    }
+
+    private static bool TryTakeRange(Block block, ulong size, ulong alignment, out ulong offset)
+    {
+        for (var index = 0; index < block.Free.Count; index++)
+        {
+            MemoryRange range = block.Free[index];
+            ulong aligned = Align(range.Offset, alignment);
+            ulong end = range.Offset + range.Size;
+            if (aligned > end || aligned + size > end)
+            {
+                continue;
+            }
+
+            block.Free.RemoveAt(index);
+
+            // The pieces left by the split replace the range at its sorted position, so the list
+            // stays ordered without another sort.
+            if (aligned > range.Offset)
+            {
+                block.Free.Insert(index, new MemoryRange(range.Offset, aligned - range.Offset));
+            }
+
+            if (aligned + size < end)
+            {
+                int suffixIndex = aligned > range.Offset ? index + 1 : index;
+                block.Free.Insert(
+                    suffixIndex,
+                    new MemoryRange(aligned + size, end - (aligned + size)));
+            }
+
+            offset = aligned;
+            return true;
+        }
+
+        offset = 0;
+        return false;
+    }
+
+    private static bool OverlapsFreeRange(Block block, ulong offset, ulong size)
+    {
+        ulong end = offset + size;
+        foreach (MemoryRange range in block.Free)
+        {
+            if (offset < range.Offset + range.Size && range.Offset < end)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void Coalesce(Block block)
+    {
+        for (var index = block.Free.Count - 1; index > 0; index--)
+        {
+            MemoryRange previous = block.Free[index - 1];
+            MemoryRange current = block.Free[index];
+            if (previous.Offset + previous.Size != current.Offset)
+            {
+                continue;
+            }
+
+            block.Free[index - 1] = new MemoryRange(
+                previous.Offset,
+                previous.Size + current.Size);
+            block.Free.RemoveAt(index);
+        }
     }
 
     private Block CreateBlock(uint memoryTypeIndex, ulong requiredBytes, ulong alignment)
@@ -144,12 +275,21 @@ internal sealed unsafe class TextureImagePool : IDisposable
                     + $"({size} bytes, memory type {memoryTypeIndex}).");
         }
 
-        return new Block
+        var block = new Block
         {
             Memory = memory,
             Size = size,
             MemoryTypeIndex = memoryTypeIndex,
         };
+
+        // Offset zero is aligned for every alignment, so a fresh block hands out its start and
+        // keeps the rest as the first free range.
+        if (size > requiredBytes)
+        {
+            block.Free.Add(new MemoryRange(requiredBytes, size - requiredBytes));
+        }
+
+        return block;
     }
 
     private uint SelectMemoryType(uint memoryTypeBits)
@@ -176,11 +316,13 @@ internal sealed unsafe class TextureImagePool : IDisposable
     private static ulong Align(ulong value, ulong alignment)
         => alignment <= 1 ? value : (value + alignment - 1) / alignment * alignment;
 
+    private readonly record struct MemoryRange(ulong Offset, ulong Size);
+
     private sealed class Block
     {
         internal DeviceMemory Memory;
         internal ulong Size;
-        internal ulong Used;
         internal uint MemoryTypeIndex;
+        internal List<MemoryRange> Free = [];
     }
 }

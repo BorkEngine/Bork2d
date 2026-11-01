@@ -144,9 +144,9 @@ which only increases) from `EnsurePage` and `Pump`. When a later overlay mount c
 retires the current page map, pending loads, queued uploads, and failed-path state. The next
 `EnsurePage` for a path starts a fresh load from the new winning entry, so an overlay-mounted path
 reloads and a previously failed path is retried. Uploads that were already submitted finish so their
-staging and command resources are released, but they never become visible or count as ready. Retired
-images are not freed: they may stay GPU-resident until the residency policy reclaims them. Retired
-descriptor slots are never reused or mutated; every new page takes a fresh index.
+staging and command resources are released, but they never become visible or count as ready; a
+retired in-flight upload joins the retirement list when it completes. Retired pages keep their image
+in GPU memory but are no longer counted as resident until the residency policy reclaims them.
 
 Completed descriptor/payload loads are content-validated and queued for upload; `Pump` starts at most
 the per-frame upload budget (default 128 MiB, `WithTextureUploadBudget`) and charges
@@ -157,9 +157,28 @@ forever; later uploads start only while the frame total fits. Queued pages seen 
 plans the queue, that priority is a next-frame ordering, not a same-frame guarantee; equal markers
 fall back to first-sighting order.
 
-The builder's texture residency budget (default 1 GiB, `WithTextureResidencyBudget`) is carried to
-the page store for the residency policy. Eviction is not implemented, so every page created since the
-last mount remains GPU-resident.
+The builder's texture residency budget (default 1 GiB, `WithTextureResidencyBudget`) bounds the
+declared payload bytes (`width * height * 4`) of the current catalog's ready pages. `Pump` enforces it
+before starting uploads: when the total exceeds the budget it evicts ready pages least recently seen
+first, with first-sighting order breaking ties, until the total fits. A page is reclaimable only once
+its last-seen frame is more than two frame pumps behind the current pump
+(`frameSequence - lastSeenFrame > 2`). Two GPU frames are in flight, so a page last seen by the
+previous pump or the one before it can still be referenced by a frame the GPU has not finished; the
+third-oldest last sighting is the first that is guaranteed complete. If every ready page is that
+recent, the over-budget set is kept and eviction is retried on a later pump, so no in-flight frame is
+ever left sampling a freed page. The placeholder is never a candidate, and a page whose upload
+completes after the check may leave the total over budget until the next pump. An evicted path leaves
+the page map, so its next `EnsurePage` starts a fresh load exactly like a path first seen after a
+mount.
+
+Reclaiming a page (a budget eviction or a retired catalog page past the safety age) returns its
+bindless index to a free list and destroys its view and image; the image-memory range goes back to
+the image pool, whose per-block free ranges coalesce and are reused by later uploads. A new upload
+takes a freed index before the page table grows, so a churning catalog reuses descriptor slots and
+image memory instead of doubling the table. Retired pages use the same safety clock but never count
+as resident. `Destroy` frees every resident and retired range and stays idempotent and non-throwing.
+Each eviction and retired-page reclamation logs at Debug with the path/index/bytes and the current
+resident totals.
 
 ## Pipeline and shaders
 
@@ -196,8 +215,10 @@ The renderer publishes an immutable `RenderStats` for the last completed frame: 
 framebuffer size, draw calls, instances, cameras, non-empty cameras, texture pages/capacity, texture
 uploads pending (count and declared bytes), skipped sprites, and cumulative validation
 errors/warnings. `TextureUploadsPending` counts content-ready pages the frame's pump left queued by
-the upload budget, and `TextureUploadBytesPending` is their declared payload total. The host installs
-it as `IEngine.RenderStats`; reading it never touches Vulkan. `SkippedSprites` counts the null,
+the upload budget, and `TextureUploadBytesPending` is their declared payload total. `TexturePages` is
+the resident page count (the placeholder plus ready pages in the current catalog); an evicted page
+leaves it and reappears once its next sighting reloads it. The host installs it as
+`IEngine.RenderStats`; reading it never touches Vulkan. `SkippedSprites` counts the null,
 invalid-layer, non-`Quad`, and still-loading sprites; bounds-culled sprites are not skipped, they
 only reduce `Instances`.
 

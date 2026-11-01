@@ -11,7 +11,11 @@ namespace Bork2d.Render.Textures;
 /// path keeps its record (<see cref="TexturePageState.Failed"/>) so a later descriptor for the same
 /// path reuses the failure instead of retrying. A catalog change (a later overlay mount) retires the
 /// whole record set: these records leave the page map and are never reused, while a later
-/// <c>EnsurePage</c> creates a fresh record that reloads the path from the new catalog.
+/// <c>EnsurePage</c> creates a fresh record that reloads the path from the new catalog. A record
+/// whose page reached the GPU is held by the store's retirement list until the residency policy
+/// proves no in-flight frame can sample it; reclaiming it returns its descriptor slot and image
+/// memory. The ready-page residency policy evicts a least-recently-seen page the same way, then
+/// reloads the path on its next sighting.
 /// </remarks>
 internal sealed class TexturePage
 {
