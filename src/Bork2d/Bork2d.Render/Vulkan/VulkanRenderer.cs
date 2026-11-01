@@ -56,7 +56,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
     private RendererTextures? _textures;
     private VulkanDevice? _device;
     private WindowedSwapchain? _swapchain;
-    private SpriteFramePlanner? _planner;
+    private RenderPassRegistry? _passes;
     private KhrSurface? _surfaceApi;
     private KhrSwapchain? _swapchainApi;
     private IVulkanInstance? _instance;
@@ -251,7 +251,8 @@ internal sealed unsafe class VulkanRenderer : IRenderer
 
         CreateFrames();
         _textures.CreatePageStore();
-        _planner = new SpriteFramePlanner(_textures.Pages!, _logger);
+        _passes = new RenderPassRegistry(
+            new SpriteRenderPass(_textures.Pipeline!, _textures.Pages!, _logger));
         _passLabel = instance.CreateDebugLabel("Bork2d windowed passes");
         _lifecycle.UpdateValidationCounters(instance);
         if (_lifecycle.Control.IsStopRequested)
@@ -499,12 +500,12 @@ internal sealed unsafe class VulkanRenderer : IRenderer
                 $"vkResetCommandBuffer failed with VkResult {resetCommandBuffer}.");
         }
 
-        SpriteFramePlan plan = _planner!.Plan(
+        _passes!.Plan(
             slot.Snapshot,
             (int)swapchain.Extent.Width,
             (int)swapchain.Extent.Height,
             frame.InstanceResources);
-        RecordFrame(frame, imageIndex, swapchain, device, plan);
+        RecordFrame(frame, imageIndex, swapchain, device);
         Submit(frame, imageIndex, swapchain, device);
         frame.InstanceResources.MarkSubmitted();
         frame.Capture.MarkSubmitted();
@@ -516,7 +517,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             slot.Snapshot.Sequence,
             (int)swapchain.Extent.Width,
             (int)swapchain.Extent.Height,
-            plan,
+            _passes.Stats,
             _textures.Pages?.TexturePageCount ?? 0,
             _textures.Pages?.TexturePageCapacityInEntries ?? 0);
         if (present is Result.Success or Result.SuboptimalKhr)
@@ -554,8 +555,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         WindowedFrame frame,
         uint imageIndex,
         WindowedSwapchain swapchain,
-        VulkanDevice device,
-        SpriteFramePlan plan)
+        VulkanDevice device)
     {
         CommandBuffer commandBuffer = frame.CommandBuffer;
         var beginInfo = new CommandBufferBeginInfo
@@ -614,22 +614,19 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             swapchain.GetView(imageIndex),
             swapchain.Extent);
 
-        SpritePipeline pipeline = _textures!.Pipeline!;
         bool capture = _captures.BeginRecord(
             frame,
             (int)swapchain.Extent.Width,
             (int)swapchain.Extent.Height,
             swapchain.Format);
-        SpritePassRecorder.RecordPasses(
-            device.Api,
-            commandBuffer,
-            pipeline,
-            pipeline.GetOrCreatePipeline(swapchain.Format),
-            frame.InstanceResources.DescriptorSet,
-            swapchain.GetView(imageIndex),
-            swapchain.GetImage(imageIndex),
-            plan.Cameras,
-            plan.CameraPlanCount);
+        _passes!.Record(
+            new RenderPassRecordContext(
+                device.Api,
+                commandBuffer,
+                swapchain.GetView(imageIndex),
+                swapchain.GetImage(imageIndex),
+                frame.InstanceResources.DescriptorSet,
+                swapchain.Format));
 
         if (capture)
         {

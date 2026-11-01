@@ -50,4 +50,23 @@ internal sealed class SpriteFramePlan
 
     /// <summary>Gets the valid per-camera plans, in ascending <c>ZIndex</c> order.</summary>
     internal CameraDrawPlan[] Cameras { get; set; } = [];
+
+    /// <summary>
+    /// Clears the frame's counts and cameras so a pass that is not planned again records nothing.
+    /// </summary>
+    /// <remarks>
+    /// The instance is reused: <see cref="SpriteFramePlanner"/> refills it in place on the next plan,
+    /// and the cleared array reference is the shared empty array, so a reset never allocates.
+    /// </remarks>
+    internal void Reset()
+    {
+        CameraCount = 0;
+        CameraPlanCount = 0;
+        DrawCalls = 0;
+        NonEmptyCameras = 0;
+        InstanceCount = 0;
+        SkippedSprites = 0;
+        CulledSprites = 0;
+        Cameras = [];
+    }
 }
