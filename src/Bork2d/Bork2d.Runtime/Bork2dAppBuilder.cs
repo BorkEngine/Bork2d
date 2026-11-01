@@ -23,8 +23,8 @@ namespace Bork2d.Runtime;
 /// The builder is configured once and is single-use after a successful <see cref="Build"/>: every
 /// configuration method and a second <see cref="Build"/> throw
 /// <see cref="InvalidOperationException"/>. A failed <see cref="Build"/> does not consume the
-/// builder, so the caller may fix the configuration and retry. The built app is owned by the
-/// caller and disposed as before; its configuration is fixed once the build succeeds.
+/// builder, so the caller may fix the configuration and retry. The built app is owned and disposed
+/// by the caller as before; later builder use cannot reconfigure it.
 /// </para>
 /// <para>
 /// It has no thread affinity: configuration and <see cref="Build"/> may run on any thread.
@@ -457,8 +457,8 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// A successful <see cref="Build"/> consumes the builder: every configuration method and a
     /// second <see cref="Build"/> throw <see cref="InvalidOperationException"/>. A failed
     /// <see cref="Build"/> does not consume the builder, so the caller may fix the configuration
-    /// and retry. The built app captures the configuration and is owned and disposed by the caller
-    /// as before.
+    /// and retry. The built app is owned and disposed by the caller as before; later builder use
+    /// cannot reconfigure it.
     /// </para>
     /// </remarks>
     /// <exception cref="Bork2dException">The configuration is invalid.</exception>

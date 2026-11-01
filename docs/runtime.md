@@ -31,7 +31,7 @@ platform, renderer, and game, and is callable once from any thread.
 A successful `Build()` consumes the builder: every later configuration method and a second `Build()`
 throw `InvalidOperationException`. A failed `Build()`, from either validation or resource creation,
 does not consume the builder, so the caller can fix the configuration and retry. The built app
-captures the configuration at build time and remains owned and disposed by the caller as before.
+remains owned and disposed by the caller as before; later builder use cannot reconfigure it.
 
 ## Host loops
 
