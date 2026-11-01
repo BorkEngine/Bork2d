@@ -37,7 +37,7 @@ internal static class SpriteTestSupport
             new Vector2(1f, 1f),
             new Vector2(0f, 1f),
         ],
-        Scale = 16f,
+        Scale = new Vector2(16f, 16f),
         Pivot = new Vector2(0.5f, 0.5f),
         Topology = SpriteTopology.Quad,
         Indices = null,

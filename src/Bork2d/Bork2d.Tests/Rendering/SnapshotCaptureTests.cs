@@ -55,7 +55,7 @@ public sealed class SnapshotCaptureTests
     }
 
     [Fact]
-    public void SpritePropertiesAreCopiedIncludingTheAssetReferenceAndFlips()
+    public void SpritePropertiesAreCopiedIncludingTheFrozenRenderDataAndFlips()
     {
         var engine = CreateEngine();
         var asset = new SpriteAsset();
@@ -71,13 +71,63 @@ public sealed class SnapshotCaptureTests
 
         Assert.Equal(1, snapshot.SpriteCount);
         SpriteSnapshot captured = snapshot.Sprites[0];
-        Assert.Same(asset, captured.Sprite);
+        Assert.Same(SpriteRenderData.Freeze(asset), captured.SpriteData);
         Assert.Equal((uint)GameLayer.Player, captured.Layer);
         Assert.Equal(Color.Yellow, captured.Tint);
         Assert.Equal(-4, captured.ZIndex);
         Assert.True(captured.FlipX);
         Assert.False(captured.FlipY);
         Assert.Equal(Matrix3x2.Identity, captured.WorldMatrix);
+    }
+
+    [Fact]
+    public void MutatingTheAssetAfterAssignmentDoesNotChangeTheCapturedData()
+    {
+        var engine = CreateEngine();
+        var asset = new SpriteAsset
+        {
+            Texture = "textures/player",
+            Uvs =
+            [
+                new Vector2(0.1f, 0.2f),
+                new Vector2(0.9f, 0.2f),
+                new Vector2(0.9f, 0.8f),
+                new Vector2(0.1f, 0.8f),
+            ],
+            Scale = new Vector2(2f, 3f),
+            Pivot = new Vector2(0.25f, 0.75f),
+            Topology = SpriteTopology.Quad,
+            Indices = null,
+        };
+        var sprite = engine.CreateSpriteRender(engine.Root);
+        sprite.Sprite = asset;
+        SpriteRenderData frozen = Assert.IsType<SpriteRenderData>(Capture(engine).Sprites[0].SpriteData);
+
+        asset.Uvs![0] = new Vector2(-1f, -1f);
+        asset.Uvs = [new Vector2(0f, 0f)];
+        asset.Scale = new Vector2(99f, 99f);
+        asset.Pivot = new Vector2(1f, 0f);
+        asset.Topology = SpriteTopology.Triangles;
+        asset.Indices = [0, 1, 2];
+        asset.Texture = "textures/other";
+
+        SpriteRenderData after = Assert.IsType<SpriteRenderData>(Capture(engine).Sprites[0].SpriteData);
+
+        Assert.Same(frozen, after);
+        Assert.Equal("textures/player", after.Texture.Path);
+        Assert.Equal(new Vector2(2f, 3f), after.Scale);
+        Assert.Equal(new Vector2(0.25f, 0.75f), after.Pivot);
+        Assert.Equal(SpriteTopology.Quad, after.Topology);
+        Assert.Null(after.Indices);
+        Assert.Equal(
+            new[]
+            {
+                new Vector2(0.1f, 0.2f),
+                new Vector2(0.9f, 0.2f),
+                new Vector2(0.9f, 0.8f),
+                new Vector2(0.1f, 0.8f),
+            },
+            after.Uvs);
     }
 
     [Fact]
@@ -90,7 +140,7 @@ public sealed class SnapshotCaptureTests
         var snapshot = Capture(engine);
 
         Assert.Equal(1, snapshot.SpriteCount);
-        Assert.Null(snapshot.Sprites[0].Sprite);
+        Assert.Null(snapshot.Sprites[0].SpriteData);
     }
 
     [Fact]

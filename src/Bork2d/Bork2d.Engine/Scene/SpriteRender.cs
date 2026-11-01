@@ -8,13 +8,21 @@ namespace Bork2d.Engine.Scene;
 /// An engine-owned sprite renderable: a transform plus a sprite asset and draw state.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Sprite renderables are scene entities with no destruction state and no global registration.
 /// They are retained only while rooted; detaching keeps the instance valid for re-attachment.
+/// </para>
+/// <para>
+/// Assigning <see cref="Sprite"/> keeps the live asset for the public property and freezes its
+/// render fields once under <see cref="Transform.Sync"/>. Capture reads only the frozen copy, so
+/// mutating the asset after assignment cannot change a published snapshot or a planned frame.
+/// </para>
 /// </remarks>
 internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
     where TLayer : struct, Enum
 {
     private SpriteAsset? _sprite;
+    private SpriteRenderData? _renderData;
     private TLayer _layer;
     private Color _tint;
     private int _zIndex;
@@ -25,6 +33,7 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
         : base(structuralLock)
     {
         _sprite = null;
+        _renderData = null;
         _layer = default;
         _tint = Color.White;
         _zIndex = 0;
@@ -44,9 +53,25 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
 
         set
         {
+            SpriteRenderData? renderData = SpriteRenderData.FreezeOrNull(value);
             lock (Sync)
             {
                 _sprite = value;
+                _renderData = renderData;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the frozen render data captured for the current sprite, or <see langword="null"/>.
+    /// </summary>
+    internal SpriteRenderData? RenderData
+    {
+        get
+        {
+            lock (Sync)
+            {
+                return _renderData;
             }
         }
     }

@@ -1,3 +1,4 @@
+using System.Numerics;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Assets.Pack;
 using Bork2d.Tests.Assets.Pack;
@@ -199,7 +200,7 @@ public sealed class AssetServiceLoadAssetTests
         {
             Texture = default,
             Uvs = null,
-            Scale = -1f,
+            Scale = new Vector2(-1f),
             Topology = (SpriteTopology)99,
         };
 
@@ -216,7 +217,7 @@ public sealed class AssetServiceLoadAssetTests
 
         Assert.False(loaded.Texture.HasValue);
         Assert.Null(loaded.Uvs);
-        Assert.Equal(-1f, loaded.Scale);
+        Assert.Equal(new Vector2(-1f), loaded.Scale);
         Assert.Equal((SpriteTopology)99, loaded.Topology);
     }
 

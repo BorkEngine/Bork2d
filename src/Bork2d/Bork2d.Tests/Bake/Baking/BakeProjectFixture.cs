@@ -76,7 +76,7 @@ public static class BakeProjectFixture
     internal const string SpriteToml = """
         texture = "art/player"
         uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
-        scale = 16.0
+        scale = [16.0, 16.0]
         pivot = [0.5, 0.5]
         topology = "triangles"
         indices = [0, 1, 2, 0, 2, 3]

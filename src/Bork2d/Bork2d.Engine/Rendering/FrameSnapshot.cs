@@ -15,8 +15,9 @@ namespace Bork2d.Engine.Rendering;
 /// uses no LINQ, boxing, or per-node allocation.
 /// </para>
 /// <para>
-/// The snapshot is asset-agnostic: the loaded <see cref="SpriteAsset"/> reference is the only
-/// object reference and no live scene entity crosses the boundary.
+/// The snapshot is asset-agnostic: each sprite carries the immutable <see cref="SpriteRenderData"/>
+/// frozen when its asset was assigned, and no live scene entity or mutable
+/// <see cref="SpriteAsset"/> crosses the boundary.
 /// </para>
 /// </remarks>
 internal sealed class FrameSnapshot

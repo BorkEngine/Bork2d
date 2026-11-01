@@ -257,7 +257,7 @@ internal sealed class SpriteFramePlanner
                 return reason;
 
             case SpriteSkipReason.NonQuad:
-                LogNonQuad(sprite.Sprite!);
+                LogNonQuad(sprite.SpriteData!);
                 return reason;
 
             case SpriteSkipReason.Null:
@@ -267,21 +267,14 @@ internal sealed class SpriteFramePlanner
                 break;
         }
 
-        SpriteAsset asset = sprite.Sprite!;
-        lookup = _pages.EnsurePage(asset.Texture.Path);
+        SpriteRenderData data = sprite.SpriteData!;
+        lookup = _pages.EnsurePage(data.Texture.Path);
         bool pending = lookup.Kind == TexturePageLookupKind.Pending;
 
-        // Validate the fields before the pending skip: the spec's malformed-field rule is
+        // Validate the frozen fields before the pending skip: the spec's malformed-field rule is
         // unconditional, so a malformed sprite is fatal even while its page is still loading. A
-        // pending lookup reports 0x0, so the resolved geometry is discarded by the skip below; a
-        // ready page reports the descriptor dimensions and a placeholder reports the failed
-        // descriptor's declared dimensions when valid (or the placeholder's own 8x8, M8 §6.4).
-        quad = SpriteQuad.Resolve(
-            asset,
-            (uint)lookup.Width,
-            (uint)lookup.Height,
-            sprite.FlipX,
-            sprite.FlipY);
+        // pending lookup is skipped below, so the resolved geometry is simply not drawn yet.
+        quad = SpriteQuad.Resolve(data, sprite.FlipX, sprite.FlipY);
         return pending ? SpriteSkipReason.Pending : SpriteSkipReason.None;
     }
 
@@ -299,9 +292,9 @@ internal sealed class SpriteFramePlanner
             layer);
     }
 
-    private void LogNonQuad(SpriteAsset asset)
+    private void LogNonQuad(SpriteRenderData data)
     {
-        string path = asset.Texture.Path ?? "<none>";
+        string path = data.Texture.Path ?? "<none>";
         if (!_loggedNonQuadAssets.Add(path))
         {
             return;
@@ -312,7 +305,7 @@ internal sealed class SpriteFramePlanner
                 + "is skipped (never approximated as a quad). This diagnostic is logged once per "
                 + "asset path.",
             path,
-            asset.Topology);
+            data.Topology);
     }
 
     private void LogInvalidCamera(int cameraIndex, CameraInvalidReason reason)

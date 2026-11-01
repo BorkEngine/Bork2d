@@ -86,8 +86,8 @@ internal static class SpritePlanning
     /// </exception>
     internal static SpriteSkipReason Classify(in SpriteSnapshot sprite, bool texturePending)
     {
-        SpriteAsset? asset = sprite.Sprite;
-        if (asset is null)
+        SpriteRenderData? data = sprite.SpriteData;
+        if (data is null)
         {
             return SpriteSkipReason.Null;
         }
@@ -97,12 +97,12 @@ internal static class SpritePlanning
             return SpriteSkipReason.InvalidLayer;
         }
 
-        SpriteTopology topology = asset.Topology;
+        SpriteTopology topology = data.Topology;
         if (topology is not (SpriteTopology.Quad or SpriteTopology.TriangleStrip
             or SpriteTopology.Triangles))
         {
             throw SpriteQuad.CreateMalformedException(
-                asset,
+                data,
                 "Topology",
                 $"unknown SpriteTopology value {(int)topology}");
         }

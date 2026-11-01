@@ -28,8 +28,10 @@ namespace Bork2d.Engine.Rendering;
 /// value-only <see cref="CameraSnapshot"/>/<see cref="SpriteSnapshot"/> entries; other transforms
 /// are traversed but not captured. World matrices include the parent hierarchy, and
 /// <typeparamref name="TLayer"/> is flattened to a raw <see cref="uint"/> mask (bit 31 survives;
-/// invalid <c>0</c>/multi-bit values are preserved, Q3=C2). The capture object is reused per
-/// engine, so a warm capture allocates nothing.
+/// invalid <c>0</c>/multi-bit values are preserved, Q3=C2). A sprite carries the immutable
+/// <see cref="Assets.SpriteRenderData"/> frozen when its asset was assigned, never the live
+/// <see cref="Assets.SpriteAsset"/>. The capture object is reused per engine, so a warm capture
+/// allocates nothing.
 /// </para>
 /// </remarks>
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
@@ -118,7 +120,7 @@ internal sealed class SnapshotCapture<TLayer> : ISceneNodeVisitor
     {
         var layer = sprite.Layer;
         return new SpriteSnapshot(
-            sprite.Sprite,
+            sprite.RenderData,
             ((ISceneNode)sprite).WorldMatrixCore(),
             sprite.Tint,
             ToMask(layer),

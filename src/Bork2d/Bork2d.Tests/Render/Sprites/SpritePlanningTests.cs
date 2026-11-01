@@ -168,7 +168,7 @@ public sealed class SpritePlanningTests
     }
 
     [Fact]
-    public void QuadSizeUsesTheUvSpanAndPixelsPerUnitScale()
+    public void QuadSizeUsesTheUvSpanAndPerAxisWorldScale()
     {
         SpriteAsset asset = Asset(
             uvs:
@@ -178,23 +178,23 @@ public sealed class SpritePlanningTests
                 new Vector2(0.75f, 0.9f),
                 new Vector2(0.25f, 0.9f),
             ],
-            scale: 10f,
+            scale: new Vector2(2f, 5f),
             pivot: new Vector2(0.25f, 0.75f));
 
-        SpriteQuad quad = SpriteQuad.Resolve(asset, 4, 8, flipX: false, flipY: false);
+        SpriteQuad quad = SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), flipX: false, flipY: false);
 
-        Assert.Equal(0.2f, quad.WorldWidth, 5);
-        Assert.Equal(0.64f, quad.WorldHeight, 5);
-        Assert.Equal(0.2f, quad.SizeX, 5);
-        Assert.Equal(0.64f, quad.SizeY, 5);
+        Assert.Equal(1f, quad.WorldWidth, 5);
+        Assert.Equal(4f, quad.WorldHeight, 5);
+        Assert.Equal(1f, quad.SizeX, 5);
+        Assert.Equal(4f, quad.SizeY, 5);
         Assert.Equal(new Vector2(0.25f, 0.75f), quad.Pivot);
     }
 
     [Fact]
     public void FlipsMirrorTheSignedSizeWithoutChangingThePivot()
     {
-        SpriteAsset asset = Asset(scale: 8f);
-        SpriteQuad quad = SpriteQuad.Resolve(asset, 16, 16, flipX: true, flipY: false);
+        SpriteAsset asset = Asset(scale: new Vector2(2f));
+        SpriteQuad quad = SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), flipX: true, flipY: false);
 
         Assert.Equal(-2f, quad.SizeX, 5);
         Assert.Equal(2f, quad.SizeY, 5);
@@ -213,25 +213,31 @@ public sealed class SpritePlanningTests
                 new Vector2(1.5f, 1.5f),
                 new Vector2(-0.5f, 1.5f),
             ],
-            scale: 10f);
+            scale: new Vector2(10f));
 
-        SpriteQuad quad = SpriteQuad.Resolve(asset, 4, 4, flipX: false, flipY: false);
+        SpriteQuad quad = SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), flipX: false, flipY: false);
 
-        Assert.Equal(0.8f, quad.WorldWidth, 5);
-        Assert.Equal(0.8f, quad.WorldHeight, 5);
+        Assert.Equal(20f, quad.WorldWidth, 5);
+        Assert.Equal(20f, quad.WorldHeight, 5);
     }
 
     [Theory]
-    [InlineData(0f)]
-    [InlineData(-1f)]
-    [InlineData(float.NaN)]
-    [InlineData(float.PositiveInfinity)]
-    public void InvalidScaleIsFatal(float scale)
+    [InlineData(0f, 1f)]
+    [InlineData(1f, 0f)]
+    [InlineData(-1f, 1f)]
+    [InlineData(1f, -1f)]
+    [InlineData(float.NaN, 1f)]
+    [InlineData(1f, float.NaN)]
+    [InlineData(float.PositiveInfinity, 1f)]
+    [InlineData(1f, float.PositiveInfinity)]
+    [InlineData(float.NegativeInfinity, 1f)]
+    [InlineData(1f, float.NegativeInfinity)]
+    public void InvalidScaleIsFatal(float x, float y)
     {
-        SpriteAsset asset = Asset(scale: scale);
+        SpriteAsset asset = Asset(scale: new Vector2(x, y));
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Scale", exception.Message, StringComparison.Ordinal);
         Assert.Contains("textures/player", exception.Message, StringComparison.Ordinal);
@@ -244,7 +250,7 @@ public sealed class SpritePlanningTests
         asset.Uvs = null;
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Uvs", exception.Message, StringComparison.Ordinal);
     }
@@ -256,7 +262,7 @@ public sealed class SpritePlanningTests
         asset.Uvs = [new Vector2(0f, 0f), new Vector2(1f, 1f)];
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Uvs", exception.Message, StringComparison.Ordinal);
     }
@@ -274,7 +280,7 @@ public sealed class SpritePlanningTests
         ];
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Uvs", exception.Message, StringComparison.Ordinal);
     }
@@ -291,7 +297,7 @@ public sealed class SpritePlanningTests
         SpriteAsset asset = Asset(pivot: new Vector2(x, y));
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Pivot", exception.Message, StringComparison.Ordinal);
     }
@@ -303,7 +309,7 @@ public sealed class SpritePlanningTests
         asset.Topology = (SpriteTopology)99;
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Topology", exception.Message, StringComparison.Ordinal);
     }
@@ -315,7 +321,7 @@ public sealed class SpritePlanningTests
         asset.Indices = [0, 1, 2];
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Indices", exception.Message, StringComparison.Ordinal);
         Assert.Contains("textures/player", exception.Message, StringComparison.Ordinal);
@@ -323,7 +329,7 @@ public sealed class SpritePlanningTests
 
     private static SpriteAsset Asset(
         Vector2[]? uvs = null,
-        float scale = 16f,
+        Vector2? scale = null,
         Vector2? pivot = null)
     {
         return new SpriteAsset
@@ -337,7 +343,7 @@ public sealed class SpritePlanningTests
                     new Vector2(1f, 1f),
                     new Vector2(0f, 1f),
                 ],
-            Scale = scale,
+            Scale = scale ?? new Vector2(16f),
             Pivot = pivot ?? new Vector2(0.5f, 0.5f),
             Topology = SpriteTopology.Quad,
             Indices = null,
@@ -350,7 +356,7 @@ public sealed class SpritePlanningTests
         int zIndex = 0)
     {
         return new SpriteSnapshot(
-            asset ?? Asset(),
+            SpriteRenderData.Freeze(asset ?? Asset()),
             Matrix3x2.Identity,
             Color.White,
             layer,

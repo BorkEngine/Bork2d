@@ -142,13 +142,16 @@ Data is authored as TOML with an explicit CLR type. A sprite source:
 ```toml
 texture = "art/hero"
 uvs = [[0, 0], [1, 0], [1, 1], [0, 1]]
-scale = 64.0
+scale = [1.0, 1.0]
 pivot = [0.5, 0.5]
 topology = "quad"
 
 [bork2d]
 type = "Bork2d.Engine.Assets.SpriteAsset"
 ```
+
+`scale` is the per-axis world size of a full UV quad: this hero draws one world unit square, and
+the source texture's pixel dimensions never affect the geometry.
 
 Texture sources (`png`, `jpg`, `jpeg`, `bmp`, `tga`) become a descriptor plus a raw RGBA8 payload.
 An optional sidecar overrides sampler state:

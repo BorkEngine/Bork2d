@@ -61,9 +61,16 @@ full viewport, size `10`, all layers, color clear to black, and `ZIndex` `0`.
 
 Sprite renderables are transforms plus `Sprite`, one-bit `Layer`, linear `Tint`, `ZIndex`, and
 `FlipX`/`FlipY`. `SpriteAsset` is a MessagePack quad description: a `Texture` reference, four
-normalized UVs (top-left, top-right, bottom-right, bottom-left), a pixels-per-world-unit `Scale`,
+normalized UVs (top-left, top-right, bottom-right, bottom-left), a per-axis `Vector2` world `Scale`,
 a normalized pivot, a topology, and optional indices. The renderer derives the quad; there is no
-vertex array. Quad world size is `UV span * texture pixels / Scale`.
+vertex array. Quad world size is `(maxU - minU) * Scale.X` by `(maxV - minV) * Scale.Y`, so texture
+pixel dimensions never affect geometry.
+
+`SpriteAsset` is a mutable authoring and loading DTO, but rendering reads only an immutable frozen
+copy of its draw fields. Assigning an asset to a renderable freezes it once; mutating the asset
+afterwards (including its UV and index arrays) does not change the drawn sprite or any published
+snapshot, and re-assigning the same asset keeps the first frozen values. Load or create a new asset
+instance to change the rendered result.
 
 Layer enums must be `int`-backed `[Flags]` enums with 1-32 named single-bit values; `None = 0` is
 allowed. Invalid layer types fail at build/host creation.
@@ -110,9 +117,10 @@ sorted by canonical path and written atomically.
 `SnapshotCapture` walks the rooted tree under the engine's structural lock after `IGame.Tick`
 returns and writes value-only `CameraSnapshot`/`SpriteSnapshot` records into the current frame slot.
 Transforms are traversed, but only cameras and sprites are captured; world matrices include the
-parent chain, and the layer enum is flattened to a raw 32-bit mask. The loaded `SpriteAsset` is the
-only object reference. Buffers are slot-private and grow to a high-water mark without shrinking, so
-a warm capture allocates nothing.
+parent chain, and the layer enum is flattened to a raw 32-bit mask. Each sprite record carries the
+immutable `SpriteRenderData` frozen when the asset was assigned, never the live `SpriteAsset`.
+Buffers are slot-private and grow to a high-water mark without shrinking, so a warm capture allocates
+nothing.
 
 Camera projection is pure and shared with the renderer: the camera world matrix is the inverse-view
 source, the rounded pixel viewport supplies the aspect, and the only Y conversion is the negation

@@ -8,7 +8,7 @@ internal enum SpriteSkipReason
     /// <summary>The sprite is drawable (its texture page state is owned by the page cache).</summary>
     None,
 
-    /// <summary>The snapshot has no loaded <c>SpriteAsset</c>; skipped silently.</summary>
+    /// <summary>The snapshot has no frozen sprite render data; skipped silently.</summary>
     Null,
 
     /// <summary>The layer is zero or has more than one bit; skipped with a diagnostic.</summary>

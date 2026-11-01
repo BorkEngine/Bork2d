@@ -81,7 +81,7 @@ public sealed class SpriteBenchmarkGpuTests
         {
             Texture = texture,
             Uvs = _fullUvs,
-            Scale = 8f,
+            Scale = new Vector2(8f),
             Pivot = new Vector2(0.5f, 0.5f),
             Topology = SpriteTopology.Quad,
         };
@@ -353,12 +353,12 @@ public sealed class SpriteBenchmarkGpuTests
 
     private sealed class BenchmarkScene
     {
-        private readonly SpriteAsset _sprite;
+        private readonly SpriteRenderData _sprite;
         private readonly Matrix3x2[] _transforms;
 
         internal BenchmarkScene(SpriteAsset sprite)
         {
-            _sprite = sprite;
+            _sprite = SpriteRenderData.Freeze(sprite);
             _transforms = new Matrix3x2[SpriteCount];
             for (var index = 0; index < SpriteCount; index++)
             {

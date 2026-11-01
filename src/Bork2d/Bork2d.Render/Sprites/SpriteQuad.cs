@@ -5,7 +5,7 @@ using Bork2d.Engine.Assets;
 namespace Bork2d.Render.Sprites;
 
 /// <summary>
-/// The world-unit quad geometry resolved from a <see cref="SpriteAsset"/> (M8 §6.4).
+/// The world-unit quad geometry resolved from frozen <see cref="SpriteRenderData"/> (M8 §6.4).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -15,8 +15,13 @@ namespace Bork2d.Render.Sprites;
 /// <c>flags</c> field stays reserved and zero.
 /// </para>
 /// <para>
-/// A malformed field is a fatal renderer error naming the field and the sprite's texture
-/// reference; a known non-<c>Quad</c> topology is a non-fatal skip handled by
+/// Geometry comes only from the normalized UV span and the per-axis world scale: a full UV quad is
+/// <c>(maxU - minU) * Scale.X</c> by <c>(maxV - minV) * Scale.Y</c> world units. Texture pixel
+/// dimensions are never consulted.
+/// </para>
+/// <para>
+/// A malformed field is a fatal renderer error naming the field and the frozen texture reference; a
+/// known non-<c>Quad</c> topology is a non-fatal skip handled by
 /// <see cref="SpritePlanning.Classify"/> and never reaches this resolver.
 /// </para>
 /// </remarks>
@@ -33,34 +38,27 @@ internal readonly record struct SpriteQuad(
     Vector2 Pivot)
 {
     /// <summary>
-    /// Validates a <c>Quad</c> sprite's fields and resolves its world-unit geometry.
+    /// Validates a <c>Quad</c> sprite's frozen fields and resolves its world-unit geometry.
     /// </summary>
-    /// <param name="sprite">The loaded sprite asset; must be a <c>Quad</c>.</param>
-    /// <param name="textureWidth">The referenced texture's pixel width.</param>
-    /// <param name="textureHeight">The referenced texture's pixel height.</param>
+    /// <param name="data">The frozen sprite render data; must be a <c>Quad</c>.</param>
     /// <param name="flipX">Whether the geometry is mirrored horizontally around the pivot.</param>
     /// <param name="flipY">Whether the geometry is mirrored vertically around the pivot.</param>
     /// <returns>The resolved quad.</returns>
     /// <exception cref="Bork2dException">A sprite field is malformed.</exception>
-    internal static SpriteQuad Resolve(
-        SpriteAsset sprite,
-        uint textureWidth,
-        uint textureHeight,
-        bool flipX,
-        bool flipY)
+    internal static SpriteQuad Resolve(SpriteRenderData data, bool flipX, bool flipY)
     {
-        ArgumentNullException.ThrowIfNull(sprite);
+        ArgumentNullException.ThrowIfNull(data);
 
-        Vector2[]? uvs = sprite.Uvs;
+        Vector2[]? uvs = data.Uvs;
         if (uvs is null)
         {
-            throw CreateMalformedException(sprite, "Uvs", "the UV array is null");
+            throw CreateMalformedException(data, "Uvs", "the UV array is null");
         }
 
         if (uvs.Length != 4)
         {
             throw CreateMalformedException(
-                sprite,
+                data,
                 "Uvs",
                 $"expected exactly four UVs, got {uvs.Length}");
         }
@@ -75,7 +73,7 @@ internal readonly record struct SpriteQuad(
             if (!float.IsFinite(uv.X) || !float.IsFinite(uv.Y))
             {
                 throw CreateMalformedException(
-                    sprite,
+                    data,
                     "Uvs",
                     $"UV[{index}] is not finite");
             }
@@ -86,16 +84,16 @@ internal readonly record struct SpriteQuad(
             maxV = MathF.Max(maxV, uv.Y);
         }
 
-        float scale = sprite.Scale;
-        if (!float.IsFinite(scale) || scale <= 0f)
+        Vector2 scale = data.Scale;
+        if (!float.IsFinite(scale.X) || scale.X <= 0f || !float.IsFinite(scale.Y) || scale.Y <= 0f)
         {
             throw CreateMalformedException(
-                sprite,
+                data,
                 "Scale",
-                $"expected a finite pixels-per-unit value greater than zero, got {scale}");
+                $"expected a finite world scale greater than zero on both axes, got ({scale.X}, {scale.Y})");
         }
 
-        Vector2 pivot = sprite.Pivot;
+        Vector2 pivot = data.Pivot;
         if (!float.IsFinite(pivot.X)
             || !float.IsFinite(pivot.Y)
             || pivot.X < 0f
@@ -104,29 +102,29 @@ internal readonly record struct SpriteQuad(
             || pivot.Y > 1f)
         {
             throw CreateMalformedException(
-                sprite,
+                data,
                 "Pivot",
                 $"expected a finite normalized pivot in [0,1], got ({pivot.X}, {pivot.Y})");
         }
 
-        if (sprite.Topology != SpriteTopology.Quad)
+        if (data.Topology != SpriteTopology.Quad)
         {
             throw CreateMalformedException(
-                sprite,
+                data,
                 "Topology",
-                $"the sprite resolver only accepts Quad, got {sprite.Topology}");
+                $"the sprite resolver only accepts Quad, got {data.Topology}");
         }
 
-        if (sprite.Indices is not null)
+        if (data.Indices is not null)
         {
             throw CreateMalformedException(
-                sprite,
+                data,
                 "Indices",
                 "a Quad must have a null index buffer");
         }
 
-        float worldWidth = ((maxU - minU) * textureWidth) / scale;
-        float worldHeight = ((maxV - minV) * textureHeight) / scale;
+        float worldWidth = (maxU - minU) * scale.X;
+        float worldHeight = (maxV - minV) * scale.Y;
         return new SpriteQuad(
             WorldWidth: worldWidth,
             WorldHeight: worldHeight,
@@ -137,18 +135,18 @@ internal readonly record struct SpriteQuad(
 
     /// <summary>
     /// Creates the fatal renderer exception for a malformed sprite field, naming the field and the
-    /// sprite's texture reference (M8 §6.4).
+    /// frozen texture reference (M8 §6.4).
     /// </summary>
-    /// <param name="sprite">The malformed sprite asset.</param>
+    /// <param name="data">The malformed frozen sprite data.</param>
     /// <param name="field">The field name.</param>
     /// <param name="detail">The concrete problem.</param>
     /// <returns>The exception to throw.</returns>
     internal static Bork2dException CreateMalformedException(
-        SpriteAsset sprite,
+        SpriteRenderData data,
         string field,
         string detail)
     {
-        string texture = sprite.Texture.Path is { Length: > 0 } path ? path : "<none>";
+        string texture = data.Texture.Path is { Length: > 0 } path ? path : "<none>";
         return new Bork2dException(
             $"Sprite asset '{texture}' has a malformed '{field}' field: {detail}.");
     }

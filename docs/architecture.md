@@ -92,7 +92,8 @@ Assets are built ahead of time, not loaded from loose files at runtime:
 - **Layers.** A layer type is an `int`-backed `[Flags]` enum with 1-32 named single-bit values
   (`None = 0` allowed). A sprite uses exactly one bit; a camera culls with a mask.
 - **Snapshots.** Capture contains no live scene entities. The only object reference that crosses
-  the tick/render boundary is the loaded `SpriteAsset`.
+  the tick/render boundary is immutable sprite render data, frozen from the loaded `SpriteAsset`
+  when it was assigned; the mutable asset itself is never captured.
 - **AOT.** Generated shapes are required; there is no reflection-shape fallback or runtime TOML.
   Runtime projects enable trim and AOT analyzers.
 - **Tooling isolation.** The bake tooling, TOML parser, image decoder, and shader compiler never

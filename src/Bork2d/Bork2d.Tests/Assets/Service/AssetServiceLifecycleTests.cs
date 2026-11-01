@@ -1,3 +1,4 @@
+using System.Numerics;
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
 using Bork2d.Tests.Assets.Pack;
@@ -225,7 +226,7 @@ public sealed class AssetServiceLifecycleTests
             .WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(SpriteTestSupport.TexturePath, sprite.Texture.Path);
-        Assert.Equal(16f, sprite.Scale);
+        Assert.Equal(new Vector2(16f, 16f), sprite.Scale);
         Assert.Equal(SpriteTopology.Quad, sprite.Topology);
 
         Assert.Throws<ArgumentNullException>(() =>
