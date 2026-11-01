@@ -52,11 +52,12 @@ array is allocated per captured frame, not per request.
 
 A request is served by the next frame recorded from a published snapshot, and the renderer completes
 it from that frame's fence even when the game never publishes another snapshot. At most eight
-requests may be outstanding at once; a request beyond the limit faults with `Bork2dException` instead
-of blocking the caller or being dropped. Cancellation is checked first and faults the task with
-`OperationCanceledException`; a renderer stop or fatal faults pending requests. Waiting for the task
-synchronously inside `Setup` or `Tick` before the snapshot that serves the request is published can
-block the producer needed to generate that frame.
+requests may be outstanding at once, including requests already taken by an in-flight frame; a
+request beyond the limit faults with `Bork2dException` instead of blocking the caller or being
+dropped, and a slot returns only when its request completes, faults, or is cancelled. Cancellation is
+checked first and faults the task with `OperationCanceledException`; a renderer stop or fatal faults
+pending requests. Waiting for the task synchronously inside `Setup` or `Tick` before the snapshot that
+serves the request is published can block the producer needed to generate that frame.
 
 ## Scene model
 

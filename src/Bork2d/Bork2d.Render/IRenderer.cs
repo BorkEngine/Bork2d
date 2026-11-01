@@ -76,10 +76,11 @@ internal interface IRenderer
     /// while staging memory is pooled per GPU frame.
     /// </para>
     /// <para>
-    /// At most eight requests may be outstanding; a request beyond the limit faults with
-    /// <see cref="Bork2dException"/> instead of blocking or being dropped. Cancellation is checked
-    /// first and faults the task with <see cref="OperationCanceledException"/>; a stop or fatal
-    /// faults pending requests.
+    /// At most eight requests may be outstanding at once, including requests already taken by an
+    /// in-flight frame; a request beyond the limit faults with <see cref="Bork2dException"/> instead
+    /// of blocking or being dropped, and a slot returns only when its request completes, faults, or
+    /// is cancelled. Cancellation is checked first and faults the task with
+    /// <see cref="OperationCanceledException"/>; a stop or fatal faults pending requests.
     /// </para>
     /// </remarks>
     /// <param name="cancellationToken">The caller's cancellation token.</param>

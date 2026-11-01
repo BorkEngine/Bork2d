@@ -161,8 +161,10 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     /// <para>
     /// A request is served by the next frame recorded from a published snapshot, and the renderer
     /// completes it from that frame's fence even when the game never publishes another snapshot.
-    /// At most eight requests may be outstanding at once; a request beyond the limit faults with
-    /// <see cref="Bork2dException"/> instead of blocking the caller or being dropped.
+    /// At most eight requests may be outstanding at once, including requests already taken by an
+    /// in-flight frame; a request beyond the limit faults with <see cref="Bork2dException"/> instead
+    /// of blocking the caller or being dropped. A slot returns only when its request completes,
+    /// faults, or is cancelled.
     /// </para>
     /// <para>
     /// Callable from any thread while a windowed or offscreen app is running; requesting never

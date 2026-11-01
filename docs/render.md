@@ -137,9 +137,11 @@ snapshot. At the top of each render loop, before waiting for a new snapshot or d
 frame, the renderer waits on every in-flight frame that carries capture requests, marks its instance
 resources fence-signaled, and completes those requests. It does not release the snapshot slot early:
 the slot stays held until the frame is reused or shutdown. At most eight requests may be outstanding
-at once; the ninth and later requests fault with `Bork2dException` instead of blocking the caller or
-being dropped silently, and cancellation is checked before that limit. A cancelled token faults the
-task; a stop or fatal faults all pending requests.
+at once, including requests already taken by an in-flight frame; the ninth and later requests fault
+with `Bork2dException` instead of blocking the caller or being dropped silently. Taking a frame's
+requests does not free capacity: a slot returns only when its request completes, faults, or is
+cancelled. Cancellation is checked before that limit, a cancelled token faults the task, and a stop or
+fatal faults all pending requests.
 
 A capture needs a GPU frame, and a GPU frame needs a published snapshot. Waiting for the task
 synchronously inside `Setup` or `Tick` before the snapshot that serves the request is published can
