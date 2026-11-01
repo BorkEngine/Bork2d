@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using Bork2d.Engine.Platform;
 using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
@@ -157,6 +158,38 @@ internal sealed class Camera<TLayer> : Transform, ICamera<TLayer>
         }
     }
 
+    /// <summary>
+    /// Copies this camera's capture state under one per-object lock acquisition.
+    /// </summary>
+    /// <remarks>
+    /// The caller must hold the structural lock. Capture uses this instead of the public property
+    /// getters, which would acquire <see cref="Transform.Sync"/> once per field and could observe a
+    /// concurrent writer between fields. The snapshot's
+    /// <see cref="CameraSnapshot.WorldMatrix"/> is the local matrix as a placeholder; the capture
+    /// pass replaces it with the composed world matrix after this method returns and the lock is
+    /// released.
+    /// </remarks>
+    /// <param name="snapshot">
+    /// The camera values with the local matrix in <see cref="CameraSnapshot.WorldMatrix"/>.
+    /// </param>
+    /// <returns>The camera's local-to-parent matrix.</returns>
+    internal Matrix3x2 CaptureForSnapshot(out CameraSnapshot snapshot)
+    {
+        lock (Sync)
+        {
+            var local = LocalMatrixUnderLock;
+            snapshot = new CameraSnapshot(
+                _zIndex,
+                local,
+                _size,
+                _viewport,
+                ToMask(_cullingMask),
+                _clear,
+                _clearColor);
+            return local;
+        }
+    }
+
     /// <inheritdoc/>
     public Vector2 WorldSize => CreateProjection().WorldSize;
 
@@ -233,4 +266,6 @@ internal sealed class Camera<TLayer> : Transform, ICamera<TLayer>
 
         return projection;
     }
+
+    private static uint ToMask(TLayer layer) => (uint)Unsafe.As<TLayer, int>(ref layer);
 }

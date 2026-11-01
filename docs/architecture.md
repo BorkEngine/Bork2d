@@ -49,8 +49,9 @@ snapshot:
 1. The tick thread acquires a free slot from the three-slot ring. This blocks only when all three
    slots are occupied, which bounds run-ahead.
 2. It freezes input, advances the clock, dispatches text, and calls `IGame.Tick`.
-3. It walks the rooted scene once and captures every camera and sprite renderable into the slot as
-   value-only records.
+3. It walks the rooted scene once with an iterative, parent-first traversal that composes one world
+   matrix and takes one per-object lock per node, and captures every camera and sprite renderable
+   into the slot as value-only records.
 4. It publishes the slot as the newest snapshot. A newer publish supersedes the previous `Ready`
    slot, never a `Rendering` one.
 5. The render thread takes the latest `Ready` snapshot, plans the frame, records it, and releases
@@ -93,7 +94,8 @@ Assets are built ahead of time, not loaded from loose files at runtime:
   (`None = 0` allowed). A sprite uses exactly one bit; a camera culls with a mask.
 - **Snapshots.** Capture contains no live scene entities. The only object reference that crosses
   the tick/render boundary is immutable sprite render data, frozen from the loaded `SpriteAsset`
-  when it was assigned; the mutable asset itself is never captured.
+  when it was assigned; the mutable asset itself is never captured. Reusing a slot clears its
+  previous camera and sprite ranges, so it retains no obsolete render data.
 - **AOT.** Generated shapes are required; there is no reflection-shape fallback or runtime TOML.
   Runtime projects enable trim and AOT analyzers.
 - **Tooling isolation.** The bake tooling, TOML parser, image decoder, and shader compiler never

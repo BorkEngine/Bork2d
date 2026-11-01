@@ -1,11 +1,11 @@
-using System.Runtime.CompilerServices;
+using System.Numerics;
 using Bork2d.Engine.Scene;
 
 namespace Bork2d.Engine.Rendering;
 
 /// <summary>
-/// Fills one <see cref="FrameSnapshot"/> by walking the rooted scene once in no specified order
-/// (M7 WP-2 capture pass).
+/// Fills one <see cref="FrameSnapshot"/> by walking the rooted scene once with an iterative,
+/// parent-first traversal in no specified order (M7 WP-2 capture pass).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -16,12 +16,20 @@ namespace Bork2d.Engine.Rendering;
 /// snapshot and a node created and attached during <c>Tick</c> is present.
 /// </para>
 /// <para>
-/// <b>Locking.</b> The whole traversal holds the existing engine structural lock and reads each
-/// object's properties under its per-object lock, in the established structural-then-per-object
-/// order (D-024). The world matrix is evaluated through the internal
-/// <see cref="ISceneNode.WorldMatrixCore"/> contract, which already assumes the structural lock is
-/// held; capture never calls <see cref="Transform.WorldMatrix"/> and so never re-enters the
-/// structural lock. No lock is held across a wait and no new lock ordering is added.
+/// <b>Traversal.</b> The pass uses one explicit reusable stack of nodes paired with their evaluated
+/// parent world matrix instead of recursion, so a deep hierarchy cannot exhaust the call stack. A
+/// node's world matrix is composed exactly once as <c>local * parentWorld</c>, where
+/// <c>parentWorld</c> is the matrix of the node that owns it and the root's direct children use the
+/// identity. The stack arrays grow to the observed high-water mark and allocate nothing after
+/// warm-up; every used reference is cleared after the pass, so a capture never retains a detached
+/// node.
+/// </para>
+/// <para>
+/// <b>Locking.</b> The whole traversal holds the existing engine structural lock. Each node's
+/// local matrix and render state are copied under one acquisition of its per-object lock, and the
+/// world matrix is composed outside that lock. This keeps the established
+/// structural-then-per-object order (D-024) and never re-enters the structural lock. No lock is
+/// held across a wait and no new lock ordering is added.
 /// </para>
 /// <para>
 /// <b>What is captured.</b> Every reachable camera and sprite renderable is copied into
@@ -35,12 +43,14 @@ namespace Bork2d.Engine.Rendering;
 /// </para>
 /// </remarks>
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
-internal sealed class SnapshotCapture<TLayer> : ISceneNodeVisitor
+internal sealed class SnapshotCapture<TLayer>
     where TLayer : struct, Enum
 {
     private readonly Lock _structuralLock;
     private readonly SceneRoot _root;
-    private FrameSnapshot? _snapshot;
+    private Transform?[] _nodeStack = Array.Empty<Transform?>();
+    private Matrix3x2[] _worldStack = Array.Empty<Matrix3x2>();
+    private int _stackCount;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SnapshotCapture{TLayer}"/> class.
@@ -71,63 +81,100 @@ internal sealed class SnapshotCapture<TLayer> : ISceneNodeVisitor
         snapshot.Time = time;
         snapshot.DeltaTime = deltaTime;
 
-        _snapshot = snapshot;
         try
         {
             using var scope = _structuralLock.EnterScope();
-            ((ISceneNode)_root).VisitChildrenCore(this);
+            PushChildren(_root, Matrix3x2.Identity);
+            while (_stackCount > 0)
+            {
+                var index = _stackCount - 1;
+                _stackCount = index;
+                Transform node = _nodeStack[index]!;
+                _nodeStack[index] = null;
+                Matrix3x2 parentWorld = _worldStack[index];
+                Matrix3x2 world = CaptureNode(node, snapshot, parentWorld);
+                PushChildren(node, world);
+            }
         }
         finally
         {
-            _snapshot = null;
+            ClearStacks();
         }
     }
 
-    void ISceneNodeVisitor.Visit(Transform node)
+    /// <summary>
+    /// Copies one node under its single per-object lock acquisition and returns its world matrix.
+    /// </summary>
+    /// <remarks>
+    /// The world matrix is composed after the capture method releases the per-object lock.
+    /// </remarks>
+    private static Matrix3x2 CaptureNode(
+        Transform node,
+        FrameSnapshot snapshot,
+        in Matrix3x2 parentWorld)
     {
-        var snapshot = _snapshot
-            ?? throw new InvalidOperationException("The scene visitor must run inside Capture.");
-
         switch (node)
         {
             case Camera<TLayer> camera:
-                snapshot.AddCamera(CaptureCamera(camera));
-                break;
+            {
+                Matrix3x2 local = camera.CaptureForSnapshot(out CameraSnapshot cameraSnapshot);
+                Matrix3x2 world = local * parentWorld;
+                snapshot.AddCamera(cameraSnapshot with { WorldMatrix = world });
+                return world;
+            }
+
             case SpriteRender<TLayer> sprite:
-                snapshot.AddSprite(CaptureSprite(sprite));
-                break;
+            {
+                Matrix3x2 local = sprite.CaptureForSnapshot(out SpriteSnapshot spriteSnapshot);
+                Matrix3x2 world = local * parentWorld;
+                snapshot.AddSprite(spriteSnapshot with { WorldMatrix = world });
+                return world;
+            }
+
             default:
-                break;
+                return node.CaptureLocalMatrix() * parentWorld;
+        }
+    }
+
+    /// <summary>
+    /// Pushes every direct child of <paramref name="owner"/> with its parent world matrix.
+    /// </summary>
+    /// <remarks>
+    /// The caller holds the structural lock, so the child count and indices are stable for the
+    /// duration of the loop.
+    /// </remarks>
+    private void PushChildren(ISceneNode owner, in Matrix3x2 parentWorld)
+    {
+        int childCount = owner.ChildCountCore;
+        for (var index = 0; index < childCount; index++)
+        {
+            EnsureStackCapacity(_stackCount + 1);
+            _nodeStack[_stackCount] = owner.GetChildCore(index);
+            _worldStack[_stackCount] = parentWorld;
+            _stackCount++;
+        }
+    }
+
+    private void EnsureStackCapacity(int required)
+    {
+        if (required <= _nodeStack.Length)
+        {
+            return;
         }
 
-        ((ISceneNode)node).VisitChildrenCore(this);
+        var capacity = _nodeStack.Length == 0 ? 16 : _nodeStack.Length * 2;
+        while (capacity < required)
+        {
+            capacity *= 2;
+        }
+
+        Array.Resize(ref _nodeStack, capacity);
+        Array.Resize(ref _worldStack, capacity);
     }
 
-    private static CameraSnapshot CaptureCamera(Camera<TLayer> camera)
+    private void ClearStacks()
     {
-        var cullingMask = camera.CullingMask;
-        return new CameraSnapshot(
-            camera.ZIndex,
-            ((ISceneNode)camera).WorldMatrixCore(),
-            camera.Size,
-            camera.Viewport,
-            ToMask(cullingMask),
-            camera.Clear,
-            camera.ClearColor);
+        Array.Clear(_nodeStack, 0, _stackCount);
+        _stackCount = 0;
     }
-
-    private static SpriteSnapshot CaptureSprite(SpriteRender<TLayer> sprite)
-    {
-        var layer = sprite.Layer;
-        return new SpriteSnapshot(
-            sprite.RenderData,
-            ((ISceneNode)sprite).WorldMatrixCore(),
-            sprite.Tint,
-            ToMask(layer),
-            sprite.ZIndex,
-            sprite.FlipX,
-            sprite.FlipY);
-    }
-
-    private static uint ToMask(TLayer layer) => (uint)Unsafe.As<TLayer, int>(ref layer);
 }

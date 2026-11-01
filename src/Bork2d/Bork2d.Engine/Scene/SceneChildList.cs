@@ -12,12 +12,24 @@ namespace Bork2d.Engine.Scene;
 /// </para>
 /// <para>
 /// Every member requires the engine-owned structural lock. The list itself is never exposed; the
-/// only child walk is <see cref="Visit"/>.
+/// owning node reads it through <see cref="Count"/> and <see cref="Get"/> while snapshot capture
+/// walks the tree with its own stack.
 /// </para>
 /// </remarks>
 internal sealed class SceneChildList
 {
     private readonly List<Transform> _children = [];
+
+    /// <summary>
+    /// Gets the number of direct children.
+    /// </summary>
+    internal int Count => _children.Count;
+
+    /// <summary>
+    /// Gets the child at <paramref name="index"/>.
+    /// </summary>
+    /// <param name="index">The slot; the caller guarantees it is below <see cref="Count"/>.</param>
+    internal Transform Get(int index) => _children[index];
 
     /// <summary>
     /// Appends <paramref name="child"/> and caches its index.
@@ -80,17 +92,5 @@ internal sealed class SceneChildList
         }
 
         _children.Clear();
-    }
-
-    /// <summary>
-    /// Visits every direct child in no specified order.
-    /// </summary>
-    /// <param name="visitor">The unordered visitor; the caller holds the structural lock.</param>
-    internal void Visit(ISceneNodeVisitor visitor)
-    {
-        for (var index = 0; index < _children.Count; index++)
-        {
-            visitor.Visit(_children[index]);
-        }
     }
 }

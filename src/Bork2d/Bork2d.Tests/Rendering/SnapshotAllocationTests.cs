@@ -39,6 +39,37 @@ public sealed class SnapshotAllocationTests
     }
 
     [Fact]
+    public void WarmCaptureOfAWideHierarchyAllocatesNothing()
+    {
+        var engine = new GameEngine<GameLayer>(new FakeTime(), new FakeWindow(), new FakeAssets());
+        var branch = engine.CreateTransform(engine.Root);
+        for (var index = 0; index < 256; index++)
+        {
+            var parent = index % 3 == 0 ? engine.Root : (ITransform)branch;
+            var sprite = engine.CreateSpriteRender(parent);
+            sprite.LocalPosition = new Vector2(index, -index);
+            sprite.ZIndex = index;
+        }
+
+        var snapshot = new FrameSnapshot();
+        for (var iteration = 0; iteration < WarmupIterations; iteration++)
+        {
+            engine.CaptureSnapshot(snapshot, sequence: iteration + 1);
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var iteration = 0; iteration < MeasuredIterations; iteration++)
+        {
+            engine.CaptureSnapshot(snapshot, sequence: iteration + 1);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
+        Assert.Equal(256, snapshot.SpriteCount);
+    }
+
+    [Fact]
     public void RepeatedCapturesKeepTheHighWaterCapacity()
     {
         var engine = CreateFixedScene();

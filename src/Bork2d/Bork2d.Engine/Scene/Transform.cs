@@ -158,7 +158,7 @@ internal class Transform : ITransform, ISceneNode
     ISceneNode? ISceneNode.ParentNode => Volatile.Read(ref _parent);
 
     /// <summary>
-    /// Gets the local-to-world matrix, composed through the parent chain.
+    /// Gets the local-to-world matrix, composed iteratively through the parent chain.
     /// </summary>
     internal Matrix3x2 WorldMatrix()
     {
@@ -194,6 +194,24 @@ internal class Transform : ITransform, ISceneNode
         using var scope = _structuralLock.EnterScope();
         Decompose(WorldMatrixCore(), out var scale, out _);
         return scale;
+    }
+
+    /// <summary>
+    /// Gets the local-to-parent matrix for one capture pass with a single per-object lock
+    /// acquisition.
+    /// </summary>
+    /// <remarks>
+    /// This is the capture path for a transform that is not a camera or sprite renderable. The
+    /// caller must hold the structural lock; the returned matrix is composed with the parent's
+    /// world matrix outside this call.
+    /// </remarks>
+    /// <returns>The node's local-to-parent matrix.</returns>
+    internal Matrix3x2 CaptureLocalMatrix()
+    {
+        lock (_sync)
+        {
+            return _localMatrix;
+        }
     }
 
     public void DetachAll()
@@ -267,7 +285,9 @@ internal class Transform : ITransform, ISceneNode
 
     void ISceneNode.RemoveChildCore(Transform child) => RemoveChildCore(child);
 
-    void ISceneNode.VisitChildrenCore(ISceneNodeVisitor visitor) => VisitChildrenCore(visitor);
+    int ISceneNode.ChildCountCore => _children?.Count ?? 0;
+
+    Transform ISceneNode.GetChildCore(int index) => _children!.Get(index);
 
     private void SetParent(ITransform? parent)
     {
@@ -372,11 +392,6 @@ internal class Transform : ITransform, ISceneNode
         (_children ??= new SceneChildList()).Add(child);
     }
 
-    private void VisitChildrenCore(ISceneNodeVisitor visitor)
-    {
-        _children?.Visit(visitor);
-    }
-
     private void RemoveChildCore(Transform child)
     {
         _children?.Remove(child);
@@ -397,14 +412,27 @@ internal class Transform : ITransform, ISceneNode
     /// Gets the local-to-world matrix without acquiring the structural lock.
     /// </summary>
     /// <remarks>
-    /// The caller must hold the structural lock. Used by the shared child list while it detaches
-    /// direct children in one pass.
+    /// <para>
+    /// The caller must hold the structural lock. The composition is iterative: the node's local
+    /// matrix is multiplied by each ancestor's local matrix up to the root, so a deep hierarchy
+    /// cannot exhaust the call stack.
+    /// </para>
+    /// <para>
+    /// Each node's local matrix is read under its own per-object lock, in the structural-then-
+    /// per-object order. Used by scene structural operations and by the shared child list while it
+    /// detaches direct children in one pass.
+    /// </para>
     /// </remarks>
+    /// <returns>The local-to-world matrix.</returns>
     internal Matrix3x2 WorldMatrixCore()
     {
-        var local = LocalMatrixCore();
-        var parent = _parent;
-        return parent is null ? local : local * parent.WorldMatrixCore();
+        var world = LocalMatrixCore();
+        for (var ancestor = _parent; ancestor is not null; ancestor = ancestor.ParentNode)
+        {
+            world *= ancestor.LocalMatrixCore();
+        }
+
+        return world;
     }
 
     private Matrix3x2 LocalMatrixCore()
@@ -414,6 +442,15 @@ internal class Transform : ITransform, ISceneNode
             return _localMatrix;
         }
     }
+
+    /// <summary>
+    /// Gets the local-to-parent matrix without acquiring the per-object lock.
+    /// </summary>
+    /// <remarks>
+    /// The caller must hold <see cref="Sync"/>. Used by a derived renderable's capture method,
+    /// which copies its own fields and this matrix in one critical section.
+    /// </remarks>
+    internal Matrix3x2 LocalMatrixUnderLock => _localMatrix;
 
     /// <summary>
     /// Refreshes the authored scalar cache from an exact local matrix.

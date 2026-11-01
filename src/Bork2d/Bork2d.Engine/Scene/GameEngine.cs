@@ -319,8 +319,9 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     /// </para>
     /// <para>
     /// The engine reuses one internal capture object, so a warm capture allocates nothing. The
-    /// traversal is unordered, holds the structural lock, reads per-object properties under their
-    /// own locks, and evaluates world matrices on the calling (tick) thread.
+    /// traversal is iterative and parent-first under the structural lock: each node is read under
+    /// one per-object lock acquisition, and its world matrix is composed once from its captured
+    /// local matrix and its parent's evaluated world matrix.
     /// </para>
     /// </remarks>
     /// <param name="snapshot">The slot-owned snapshot to reset and fill.</param>
