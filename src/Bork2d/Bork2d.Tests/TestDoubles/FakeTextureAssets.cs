@@ -9,9 +9,10 @@ namespace Bork2d.Tests.TestDoubles;
 /// </summary>
 /// <remarks>
 /// The fake records every path and call count, so tests can prove one load per page and no retry
-/// after a failed path.
+/// within a catalog. It also implements the catalog-version seam so a test can model an overlay
+/// mount deterministically.
 /// </remarks>
-internal sealed class FakeTextureAssets : IAssets
+internal sealed class FakeTextureAssets : IAssets, IAssetCatalogVersion
 {
     private readonly Dictionary<string, TaskCompletionSource<TextureDescriptor>> _descriptors =
         new(StringComparer.Ordinal);
@@ -19,6 +20,14 @@ internal sealed class FakeTextureAssets : IAssets
         new(StringComparer.Ordinal);
     private readonly List<string> _loadAssetPaths = [];
     private readonly List<string> _loadDataPaths = [];
+
+    /// <summary>
+    /// Gets or sets the catalog version reported to the page store. Incrementing it models an
+    /// overlay mount that changes which entry a path resolves to.
+    /// </summary>
+    internal long CatalogVersion { get; set; }
+
+    long IAssetCatalogVersion.CatalogVersion => CatalogVersion;
 
     /// <summary>Gets the number of <see cref="LoadAsset{T}"/> calls.</summary>
     internal int LoadAssetCount => _loadAssetPaths.Count;
@@ -79,6 +88,13 @@ internal sealed class FakeTextureAssets : IAssets
     /// <param name="payload">The payload bytes.</param>
     internal void CompletePayload(string path, byte[] payload)
         => PayloadSource(path).SetResult(payload);
+
+    /// <summary>
+    /// Forgets a descriptor load so the next request starts a fresh controllable task. Tests use
+    /// this after changing the catalog version to model a path that now resolves to new content.
+    /// </summary>
+    /// <param name="path">The canonical descriptor path.</param>
+    internal void ResetDescriptor(string path) => _descriptors.Remove(path);
 
     /// <inheritdoc/>
     public Task<T> LoadAsset<T>(string assetPath)

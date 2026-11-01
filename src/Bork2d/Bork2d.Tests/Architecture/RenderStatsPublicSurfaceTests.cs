@@ -41,6 +41,8 @@ public sealed class RenderStatsPublicSurfaceTests
             "Int32 NonEmptyCameras",
             "Int32 TexturePages",
             "Int32 TexturePageCapacity",
+            "Int32 TextureUploadsPending",
+            "Int64 TextureUploadBytesPending",
             "Int64 SkippedSprites",
             "Int64 ValidationErrors",
             "Int64 ValidationWarnings",

@@ -33,6 +33,8 @@ public sealed class FrameRenderStatsTests
             passStats,
             texturePages: 3,
             texturePageCapacity: 256,
+            textureUploadsPending: 2,
+            textureUploadBytesPending: 8192,
             validationErrors: 1,
             validationWarnings: 2);
 
@@ -45,6 +47,8 @@ public sealed class FrameRenderStatsTests
         Assert.Equal(2, stats.NonEmptyCameras);
         Assert.Equal(3, stats.TexturePages);
         Assert.Equal(256, stats.TexturePageCapacity);
+        Assert.Equal(2, stats.TextureUploadsPending);
+        Assert.Equal(8192, stats.TextureUploadBytesPending);
         Assert.Equal(4, stats.SkippedSprites);
         Assert.Equal(1, stats.ValidationErrors);
         Assert.Equal(2, stats.ValidationWarnings);
@@ -71,6 +75,8 @@ public sealed class FrameRenderStatsTests
             passStats,
             texturePages: 1,
             texturePageCapacity: 256,
+            textureUploadsPending: 0,
+            textureUploadBytesPending: 0,
             validationErrors: 0,
             validationWarnings: 0);
 

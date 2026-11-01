@@ -10,7 +10,8 @@ namespace Bork2d.Tests.Render.Textures;
 /// <summary>
 /// Deterministic tests for the texture-page state machine with a fake <see cref="IAssets"/> and a
 /// fake GPU seam (M8 §6.5): page-key dedupe, pending skip, content validation, the placeholder and
-/// its sizing rule, no retry after failure, capacity policy, counters, and allocation-free lookups.
+/// its sizing rule, failure until a mount retries it, catalog-aware retirement, the per-frame upload
+/// budget and its priority order, capacity policy, counters, and allocation-free lookups.
 /// </summary>
 public sealed class TexturePageStoreTests
 {
@@ -274,7 +275,7 @@ public sealed class TexturePageStoreTests
     }
 
     [Fact]
-    public void AFailedPathIsNeverRetried()
+    public void AFailedPathIsNotRetriedWithinTheSameCatalog()
     {
         Harness harness = CreateHarness();
         harness.Assets.CompleteDescriptor("textures/broken", Descriptor(2, 2, "textures/broken-raw"));
@@ -426,6 +427,244 @@ public sealed class TexturePageStoreTests
     }
 
     [Fact]
+    public void TheUploadBudgetStartsOnlyTheAllowedBytesAndALaterPumpContinuesTheQueue()
+    {
+        Harness harness = CreateHarness(uploadBudget: 128);
+        StagePage(harness, "textures/a", Descriptor(4, 4, "textures/a-raw"), Payload(4, 4));
+        StagePage(harness, "textures/b", Descriptor(4, 4, "textures/b-raw"), Payload(4, 4));
+        StagePage(harness, "textures/c", Descriptor(4, 4, "textures/c-raw"), Payload(4, 4));
+        StagePage(harness, "textures/d", Descriptor(4, 4, "textures/d-raw"), Payload(4, 4));
+
+        harness.Store.Pump();
+
+        // Four 64-byte pages with a 128-byte budget: exactly two uploads start.
+        Assert.Equal(3, harness.Gpu.Uploads.Count);
+        Assert.Equal(2, harness.Store.PendingUploadCount);
+        Assert.Equal(128, harness.Store.PendingUploadBytes);
+        Assert.Equal(3, harness.Store.TexturePageCount);
+        Assert.Equal(TexturePageLookupKind.Ready, harness.Store.EnsurePage("textures/a").Kind);
+        Assert.Equal(TexturePageLookupKind.Pending, harness.Store.EnsurePage("textures/c").Kind);
+
+        harness.Store.Pump();
+
+        Assert.Equal(5, harness.Gpu.Uploads.Count);
+        Assert.Equal(0, harness.Store.PendingUploadCount);
+        Assert.Equal(0, harness.Store.PendingUploadBytes);
+        Assert.Equal(5, harness.Store.TexturePageCount);
+        Assert.All(
+            new[] { "textures/a", "textures/b", "textures/c", "textures/d" },
+            path => Assert.Equal(
+                TexturePageLookupKind.Ready,
+                harness.Store.EnsurePage(path).Kind));
+    }
+
+    [Fact]
+    public void AnOversizedFirstUploadIsAllowedOnce()
+    {
+        Harness harness = CreateHarness(uploadBudget: 16);
+        StagePage(harness, "textures/large", Descriptor(4, 4, "textures/large-raw"), Payload(4, 4));
+        StagePage(harness, "textures/next", Descriptor(4, 4, "textures/next-raw"), Payload(4, 4));
+
+        harness.Store.Pump();
+
+        // The first queued page is 64 bytes against a 16-byte budget and still starts; the second
+        // does not, because a later upload must fit.
+        Assert.Equal(2, harness.Gpu.Uploads.Count);
+        Assert.Equal(1, harness.Store.PendingUploadCount);
+        Assert.Equal(64, harness.Store.PendingUploadBytes);
+
+        harness.Store.Pump();
+
+        Assert.Equal(3, harness.Gpu.Uploads.Count);
+        Assert.Equal(0, harness.Store.PendingUploadCount);
+        Assert.Equal(0, harness.Store.PendingUploadBytes);
+    }
+
+    [Fact]
+    public void TheMostRecentlySeenQueuedPageStartsFirst()
+    {
+        Harness harness = CreateHarness(uploadBudget: 40);
+        StagePage(harness, "textures/a", Descriptor(1, 1, "textures/a-raw"), Payload(1, 1));
+        StagePage(harness, "textures/b", Descriptor(2, 2, "textures/b-raw"), Payload(2, 2));
+        StagePage(harness, "textures/c", Descriptor(3, 3, "textures/c-raw"), Payload(3, 3));
+        StagePage(harness, "textures/d", Descriptor(4, 4, "textures/d-raw"), Payload(4, 4));
+
+        harness.Store.Pump();
+
+        // 4 + 16 + 36 > 40, so only the first two start; c and d stay queued.
+        Assert.Equal(3, harness.Gpu.Uploads.Count);
+        Assert.Equal(2, harness.Store.PendingUploadCount);
+
+        // The planner marks d as seen in this frame; c keeps its older marker.
+        Assert.Equal(TexturePageLookupKind.Pending, harness.Store.EnsurePage("textures/d").Kind);
+        harness.Store.Pump();
+
+        // d is now the first upload of the frame (allowed even though 64 exceeds 40); c waits.
+        Assert.Equal(4, harness.Gpu.Uploads.Count);
+        Assert.Equal(4, harness.Gpu.Uploads[^1].Width);
+        Assert.Equal(1, harness.Store.PendingUploadCount);
+
+        harness.Store.Pump();
+
+        Assert.Equal(5, harness.Gpu.Uploads.Count);
+        Assert.Equal(3, harness.Gpu.Uploads[^1].Width);
+        Assert.Equal(0, harness.Store.PendingUploadCount);
+    }
+
+    [Fact]
+    public void ACatalogChangeReloadsAPathAndTheOldPageIsNotReturned()
+    {
+        Harness harness = CreateHarness();
+        LoadPage(
+            harness,
+            "textures/reloaded",
+            Descriptor(2, 2, "textures/reloaded-v1-raw"),
+            Payload(2, 2));
+        Assert.Equal(1, harness.Store.EnsurePage("textures/reloaded").Index);
+
+        harness.Assets.CatalogVersion++;
+        harness.Assets.ResetDescriptor("textures/reloaded");
+
+        // The first sighting after the mount retires the old page and starts a fresh load.
+        Assert.Equal(
+            TexturePageLookupKind.Pending,
+            harness.Store.EnsurePage("textures/reloaded").Kind);
+        Assert.Equal(2, harness.Assets.LoadAssetCount);
+
+        harness.Assets.CompleteDescriptor(
+            "textures/reloaded",
+            Descriptor(3, 1, "textures/reloaded-v2-raw"));
+        harness.Assets.CompletePayload("textures/reloaded-v2-raw", Payload(3, 1));
+        harness.Store.Pump();
+
+        TexturePageLookup reloaded = harness.Store.EnsurePage("textures/reloaded");
+        Assert.Equal(TexturePageLookupKind.Ready, reloaded.Kind);
+        Assert.Equal(2, reloaded.Index);
+        Assert.Equal(3, reloaded.Width);
+        Assert.Equal(1, reloaded.Height);
+        Assert.Equal(2, harness.Store.TexturePageCount);
+    }
+
+    [Fact]
+    public void ACatalogChangeRetriesAPathThatFailedBeforeTheMount()
+    {
+        Harness harness = CreateHarness();
+        harness.Assets.DescriptorLoadException = new InvalidOperationException("missing");
+
+        TexturePageLookup failed = harness.Store.EnsurePage("textures/retried");
+        Assert.Equal(TexturePageLookupKind.Placeholder, failed.Kind);
+        Assert.Equal(1, harness.Store.FailedPathCount);
+
+        harness.Assets.DescriptorLoadException = null;
+        harness.Assets.CatalogVersion++;
+        harness.Assets.ResetDescriptor("textures/retried");
+
+        Assert.Equal(TexturePageLookupKind.Pending, harness.Store.EnsurePage("textures/retried").Kind);
+        harness.Assets.CompleteDescriptor(
+            "textures/retried",
+            Descriptor(2, 2, "textures/retried-raw"));
+        harness.Assets.CompletePayload("textures/retried-raw", Payload(2, 2));
+        harness.Store.Pump();
+
+        Assert.Equal(0, harness.Store.FailedPathCount);
+        TexturePageLookup lookup = harness.Store.EnsurePage("textures/retried");
+        Assert.Equal(TexturePageLookupKind.Ready, lookup.Kind);
+        Assert.Equal(1, lookup.Index);
+        Assert.Equal(2, harness.Store.TexturePageCount);
+    }
+
+    [Fact]
+    public void ARetiredInFlightUploadFinishesWithoutBecomingReadyOrVisible()
+    {
+        Harness harness = CreateHarness();
+        harness.Gpu.UploadsCompleteImmediately = false;
+
+        harness.Store.EnsurePage("textures/retired");
+        harness.Assets.CompleteDescriptor(
+            "textures/retired",
+            Descriptor(2, 2, "textures/retired-raw"));
+        harness.Assets.CompletePayload("textures/retired-raw", Payload(2, 2));
+        harness.Store.Pump();
+
+        Assert.Equal(1, harness.Store.UploadingCount);
+        Assert.Equal(1, harness.Store.TexturePageCount);
+        Assert.Equal(TexturePageLookupKind.Pending, harness.Store.EnsurePage("textures/retired").Kind);
+
+        harness.Assets.CatalogVersion++;
+        harness.Store.Pump();
+
+        Assert.Equal(0, harness.Store.PendingUploadCount);
+        Assert.Equal(1, harness.Store.UploadingCount);
+        Assert.False(
+            harness.Store.TryGetPageState(
+                "textures/retired",
+                out _,
+                out _),
+            "A retired uploading page must leave the page map.");
+
+        harness.Gpu.SignalUpload(1);
+        harness.Store.Pump();
+
+        Assert.Equal(0, harness.Store.UploadingCount);
+        Assert.Equal(1, harness.Store.TexturePageCount);
+        Assert.False(harness.Store.TryGetPageState("textures/retired", out _, out _));
+
+        // The retired upload still completed so its staging and command resources were released;
+        // it just never became visible or counted as ready.
+        Assert.Equal(2, harness.Gpu.ResidentPageCount);
+
+        TexturePageLookup fresh = harness.Store.EnsurePage("textures/retired");
+        Assert.Equal(TexturePageLookupKind.Pending, fresh.Kind);
+        Assert.Equal(2, harness.Assets.LoadAssetCount);
+    }
+
+    [Fact]
+    public void ACatalogChangeRetiresQueuedUploads()
+    {
+        Harness harness = CreateHarness(uploadBudget: 64);
+        StagePage(harness, "textures/a", Descriptor(4, 4, "textures/a-raw"), Payload(4, 4));
+        StagePage(harness, "textures/b", Descriptor(4, 4, "textures/b-raw"), Payload(4, 4));
+
+        harness.Store.Pump();
+        Assert.Equal(1, harness.Store.PendingUploadCount);
+        Assert.Equal(64, harness.Store.PendingUploadBytes);
+
+        harness.Assets.CatalogVersion++;
+        harness.Store.Pump();
+
+        Assert.Equal(0, harness.Store.PendingUploadCount);
+        Assert.Equal(0, harness.Store.PendingUploadBytes);
+        Assert.Equal(1, harness.Store.TexturePageCount);
+        Assert.Equal(TexturePageLookupKind.Pending, harness.Store.EnsurePage("textures/b").Kind);
+    }
+
+    [Fact]
+    public void NonPositiveBudgetsAreRejectedByTheStore()
+    {
+        var assets = new FakeTextureAssets();
+        var gpu = new FakeTexturePageGpu();
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new TexturePageStore(
+                assets,
+                gpu,
+                DefaultLimit,
+                DefaultMaxDimension,
+                NullLogger.Instance,
+                assets,
+                uploadBudgetBytes: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new TexturePageStore(
+                assets,
+                gpu,
+                DefaultLimit,
+                DefaultMaxDimension,
+                NullLogger.Instance,
+                assets,
+                residencyBudgetBytes: 0));
+    }
+
+    [Fact]
     public void TheSteadyStateLookupAllocatesNothing()
     {
         Harness harness = CreateHarness();
@@ -513,13 +752,34 @@ public sealed class TexturePageStoreTests
 
     private static Harness CreateHarness(
         int limit = DefaultLimit,
-        int maxDimension = DefaultMaxDimension)
+        int maxDimension = DefaultMaxDimension,
+        int uploadBudget = TexturePageStore.DefaultUploadBudgetBytes,
+        long residencyBudget = TexturePageStore.DefaultResidencyBudgetBytes)
     {
         var assets = new FakeTextureAssets();
         var gpu = new FakeTexturePageGpu();
-        var store = new TexturePageStore(assets, gpu, limit, maxDimension, NullLogger.Instance);
+        var store = new TexturePageStore(
+            assets,
+            gpu,
+            limit,
+            maxDimension,
+            NullLogger.Instance,
+            assets,
+            uploadBudget,
+            residencyBudget);
         store.Start();
         return new Harness(store, assets, gpu);
+    }
+
+    private static void StagePage(
+        Harness harness,
+        string path,
+        TextureDescriptor descriptor,
+        byte[] payload)
+    {
+        Assert.Equal(TexturePageLookupKind.Pending, harness.Store.EnsurePage(path).Kind);
+        harness.Assets.CompleteDescriptor(path, descriptor);
+        harness.Assets.CompletePayload(descriptor.Payload.Path!, payload);
     }
 
     private static void LoadPage(

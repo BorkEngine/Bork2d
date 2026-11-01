@@ -160,6 +160,48 @@ public sealed class Bork2dAppBuilderTests
         Assert.Throws<Bork2dException>(() => builder.Build());
     }
 
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(-1L)]
+    [InlineData(long.MinValue)]
+    public void TextureResidencyBudgetMustBePositive(long bytes)
+    {
+        var builder = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(new TestGame<GameLayer>())
+            .WithTextureResidencyBudget(bytes);
+
+        var exception = Assert.Throws<Bork2dException>(() => builder.Build());
+
+        Assert.Contains("greater than zero", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    public void TextureUploadBudgetMustBePositive(int bytesPerFrame)
+    {
+        var builder = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(new TestGame<GameLayer>())
+            .WithTextureUploadBudget(bytesPerFrame);
+
+        var exception = Assert.Throws<Bork2dException>(() => builder.Build());
+
+        Assert.Contains("greater than zero", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TextureBudgetsAreStoredByTheOptions()
+    {
+        var options = new Bork2dAppBuilder<GameLayer>()
+            .WithTextureResidencyBudget(8L * 1024 * 1024)
+            .WithTextureUploadBudget(64 * 1024)
+            .Options;
+
+        Assert.Equal(8L * 1024 * 1024, options.TextureResidencyBudgetBytes);
+        Assert.Equal(64 * 1024, options.TextureUploadBudgetBytes);
+    }
+
     [Fact]
     public void NullPackPathThrows()
     {
@@ -300,6 +342,8 @@ public sealed class Bork2dAppBuilderTests
             ("WithOffscreen", () => builder.WithOffscreen(320, 200)),
             ("WithMaxDeltaTime", () => builder.WithMaxDeltaTime(0.5)),
             ("WithValidation", () => builder.WithValidation(false)),
+            ("WithTextureResidencyBudget", () => builder.WithTextureResidencyBudget(4096)),
+            ("WithTextureUploadBudget", () => builder.WithTextureUploadBudget(1024)),
             ("WithSdlApiFactory", () => builder.WithSdlApiFactory(() => new FakeSdlApi())),
             ("WithRendererFactory", () => builder.WithRendererFactory(
                 new FakeRendererFactory(new FakeRenderer { AutoReady = true }))),
@@ -333,6 +377,8 @@ public sealed class Bork2dAppBuilderTests
         Assert.False(options.Fullscreen);
         Assert.True(options.VSync);
         Assert.Equal(0.25, options.MaxDeltaTime);
+        Assert.Equal(1L << 30, options.TextureResidencyBudgetBytes);
+        Assert.Equal(128 * 1024 * 1024, options.TextureUploadBudgetBytes);
         Assert.Null(options.ConfigureLogging);
         Assert.Null(options.SdlApiFactory);
         Assert.Null(options.RendererFactory);
@@ -441,6 +487,8 @@ public sealed class Bork2dAppBuilderTests
         Assert.True(options.VSync);
         Assert.Equal(60, options.HeadlessTicksPerSecond);
         Assert.Equal(0.25, options.MaxDeltaTime);
+        Assert.Equal(1L << 30, options.TextureResidencyBudgetBytes);
+        Assert.Equal(128 * 1024 * 1024, options.TextureUploadBudgetBytes);
         Assert.Null(options.SdlApiFactory);
         Assert.Equal(Bork2dWindowOptionFlags.None, options.WindowOptionsSet);
     }

@@ -124,6 +124,10 @@ synchronous.
   path; there is no unload.
 - `Browse(prefix)` returns a sorted, materialized snapshot; `Exists(path)` is an exact lookup.
 
+A mount changes which entry a canonical path resolves to. The renderer observes the asset catalog
+version, so a texture path reloads from the new winner on its next sighting and a previously failed
+path is retried; the previous texture pages are retired rather than reused.
+
 Asset paths are canonical runtime keys: lowercase ASCII, `/` separators, no leading/trailing slash,
 no empty or `.`/`..` segments, and segments limited to lowercase letters, digits, `_`, and `-`.
 Public input is normalized (backslashes become `/`, lowercased) before validation. Source

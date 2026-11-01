@@ -117,18 +117,42 @@ attachment.
 
 ## Textures
 
-Texture pages are identity-mapped by canonical `TextureDescriptor` path. Index `0` is a placeholder
-page; sprites with an absent texture reference draw with it. The table starts at 256 entries
-(placeholder plus 255 pages) and doubles when full, up to the smaller of the device's per-stage and
-per-set update-after-bind sampled-image limits (capped at 1,048,576). Reaching the limit is a fatal
-`Bork2dException`; pages are never silently dropped.
+Texture pages are keyed by canonical `TextureDescriptor` path within the current asset catalog.
+Index `0` is a placeholder page; sprites with an absent texture reference draw with it. The table
+starts at 256 entries (placeholder plus 255 pages) and doubles when full, up to the smaller of the
+device's per-stage and per-set update-after-bind sampled-image limits (capped at 1,048,576).
+Reaching the limit is a fatal `Bork2dException`; pages are never silently dropped.
 
 A page moves through `Pending -> Uploading -> Ready`, or `Failed`:
 
 - Loading is asynchronous through the app's `IAssets`; the render thread never waits on it.
-- Pending pages are skipped for that frame.
-- The first successful load for a path wins for the run; later descriptors reuse the page.
-- Failed paths draw the placeholder for the run and are not retried.
+- Pending pages are skipped for that frame. A validated page stays `Pending` while it waits in the
+  upload queue.
+- The first successful load for a path wins within the current catalog; later descriptors reuse the
+  page.
+- Failed paths draw the placeholder and are not retried until the catalog changes.
+
+The page store observes an internal catalog-version seam (the asset service's mounted pack count,
+which only increases) from `EnsurePage` and `Pump`. When a later overlay mount changes it, the store
+retires the current page map, pending loads, queued uploads, and failed-path state. The next
+`EnsurePage` for a path starts a fresh load from the new winning entry, so an overlay-mounted path
+reloads and a previously failed path is retried. Uploads that were already submitted finish so their
+staging and command resources are released, but they never become visible or count as ready. Retired
+images are not freed: they may stay GPU-resident until the residency policy reclaims them. Retired
+descriptor slots are never reused or mutated; every new page takes a fresh index.
+
+Completed descriptor/payload loads are content-validated and queued for upload; `Pump` starts at most
+the per-frame upload budget (default 128 MiB, `WithTextureUploadBudget`) and charges
+`width * height * 4` bytes per page. The rest stay queued for later frames. The first queued upload
+of a frame always starts even when it alone exceeds the budget, so one large texture cannot starve
+forever; later uploads start only while the frame total fits. Queued pages seen most recently by
+`EnsurePage` start first. Because the planner marks visibility during a frame and the next `Pump`
+plans the queue, that priority is a next-frame ordering, not a same-frame guarantee; equal markers
+fall back to first-sighting order.
+
+The builder's texture residency budget (default 1 GiB, `WithTextureResidencyBudget`) is carried to
+the page store for the residency policy. Eviction is not implemented, so every page created since the
+last mount remains GPU-resident.
 
 ## Pipeline and shaders
 
@@ -162,9 +186,11 @@ only the target driver differs.
 ## Diagnostics and capture
 
 The renderer publishes an immutable `RenderStats` for the last completed frame: sequence,
-framebuffer size, draw calls, instances, cameras, non-empty cameras, texture pages/capacity,
-skipped sprites, and cumulative validation errors/warnings. The host installs it as
-`IEngine.RenderStats`; reading it never touches Vulkan. `SkippedSprites` counts the null,
+framebuffer size, draw calls, instances, cameras, non-empty cameras, texture pages/capacity, texture
+uploads pending (count and declared bytes), skipped sprites, and cumulative validation
+errors/warnings. `TextureUploadsPending` counts content-ready pages the frame's pump left queued by
+the upload budget, and `TextureUploadBytesPending` is their declared payload total. The host installs
+it as `IEngine.RenderStats`; reading it never touches Vulkan. `SkippedSprites` counts the null,
 invalid-layer, non-`Quad`, and still-loading sprites; bounds-culled sprites are not skipped, they
 only reduce `Instances`.
 

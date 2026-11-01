@@ -331,15 +331,21 @@ internal sealed class RendererLifecycle
     /// <param name="width">The target/framebuffer width in pixels.</param>
     /// <param name="height">The target/framebuffer height in pixels.</param>
     /// <param name="stats">The planned frame's aggregate render-pass statistics.</param>
-    /// <param name="texturePages">The resident pages, including the placeholder.</param>
+    /// <param name="texturePages">
+    /// The ready pages in the current catalog, including the placeholder; retired images are excluded.
+    /// </param>
     /// <param name="texturePageCapacity">The current bindless page capacity, including the placeholder.</param>
+    /// <param name="textureUploadsPending">The pages queued for upload but not begun by the pump.</param>
+    /// <param name="textureUploadBytesPending">The declared payload bytes of the pending uploads.</param>
     internal void PublishStats(
         long sequence,
         int width,
         int height,
         RenderPassStats stats,
         int texturePages,
-        int texturePageCapacity)
+        int texturePageCapacity,
+        int textureUploadsPending,
+        long textureUploadBytesPending)
     {
         RenderStats renderStats = FrameRenderStats.Create(
             sequence,
@@ -348,6 +354,8 @@ internal sealed class RendererLifecycle
             stats,
             texturePages,
             texturePageCapacity,
+            textureUploadsPending,
+            textureUploadBytesPending,
             Volatile.Read(ref _validationErrorCount),
             Volatile.Read(ref _validationWarningCount));
         _stats.Publish(in renderStats);

@@ -124,6 +124,11 @@ internal sealed class AssetFileSystem : IDisposable
     /// <summary>
     /// Gets the number of mounted packs in the current stack.
     /// </summary>
+    /// <remarks>
+    /// Mounts only append, so the value is a monotonic mount counter. The asset service exposes it
+    /// as its <c>IAssetCatalogVersion</c> so consumers such as the renderer's texture-page cache can
+    /// detect that a later overlay changed what a canonical path resolves to.
+    /// </remarks>
     /// <exception cref="ObjectDisposedException">The filesystem has been disposed.</exception>
     internal int PackCount => CaptureSnapshot().Archives.Length;
 

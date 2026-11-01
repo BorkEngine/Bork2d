@@ -274,7 +274,10 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             _startInfo.Assets,
             _logger,
             _frames,
-            "offscreen");
+            "offscreen",
+            _startInfo.AssetCatalogVersion,
+            _startInfo.TextureUploadBudgetBytes,
+            _startInfo.TextureResidencyBudgetBytes);
         _textures.EnsurePipeline(format);
         if (_lifecycle.Control.IsStopRequested)
         {
@@ -391,7 +394,9 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 (int)target.Extent.Height,
                 _passes.Stats,
                 _textures.Pages?.TexturePageCount ?? 0,
-                _textures.Pages?.TexturePageCapacityInEntries ?? 0);
+                _textures.Pages?.TexturePageCapacityInEntries ?? 0,
+                _textures.Pages?.PendingUploadCount ?? 0,
+                _textures.Pages?.PendingUploadBytes ?? 0);
             _lifecycle.SignalProgress();
             _frameIndex = (_frameIndex + 1) % FramesInFlight;
         }
