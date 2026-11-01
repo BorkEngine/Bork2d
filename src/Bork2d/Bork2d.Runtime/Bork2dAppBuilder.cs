@@ -20,10 +20,16 @@ namespace Bork2d.Runtime;
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
 /// <remarks>
 /// <para>
-/// The builder is configured and built once. It has no thread affinity: configuration and
-/// <see cref="Build"/> may run on any thread. <see cref="Build"/> validates the configuration and
-/// creates the logger, engine, and scene root; it does not create a window, GPU resources, or
-/// threads.
+/// The builder is configured once and is single-use after a successful <see cref="Build"/>: every
+/// configuration method and a second <see cref="Build"/> throw
+/// <see cref="InvalidOperationException"/>. A failed <see cref="Build"/> does not consume the
+/// builder, so the caller may fix the configuration and retry. The built app is owned and disposed
+/// by the caller as before; later builder use cannot reconfigure it.
+/// </para>
+/// <para>
+/// It has no thread affinity: configuration and <see cref="Build"/> may run on any thread.
+/// <see cref="Build"/> validates the configuration and creates the logger, engine, and scene root;
+/// it does not create a window, GPU resources, or threads.
 /// </para>
 /// <para>
 /// The game is injected as a caller-constructed instance. There is no parameterless-constructor
@@ -33,6 +39,7 @@ namespace Bork2d.Runtime;
 public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
 {
     private readonly Bork2dAppOptions<TLayer> _options = new();
+    private bool _built;
 
     /// <summary>
     /// Gets the collected options. Exposed internally for tests; not part of the public API.
@@ -45,8 +52,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <param name="game">The game instance. It must stay alive through <c>Run</c>.</param>
     /// <returns>This builder, for fluent chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="game"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dAppBuilder<TLayer> WithGame(IGame<TLayer> game)
     {
+        ThrowIfBuilt();
         ArgumentNullException.ThrowIfNull(game);
 
         _options.Game = game;
@@ -71,8 +82,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// </remarks>
     /// <exception cref="ArgumentException"><paramref name="path"/> is empty or whitespace.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dAppBuilder<TLayer> WithAssetsPack(string path)
     {
+        ThrowIfBuilt();
         ArgumentNullException.ThrowIfNull(path);
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -103,8 +118,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <see cref="Bork2dException"/>. Calling it more than once is idempotent.
     /// </para>
     /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dAppBuilder<TLayer> WithoutAssets()
     {
+        ThrowIfBuilt();
         _options.WithoutAssetsSelected = true;
         return this;
     }
@@ -121,8 +140,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// default console provider is installed. The app owns and disposes the resulting factory.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="configure"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dAppBuilder<TLayer> WithLogging(Action<ILoggingBuilder> configure)
     {
+        ThrowIfBuilt();
         ArgumentNullException.ThrowIfNull(configure);
         _options.ConfigureLogging = configure;
         return this;
@@ -135,8 +158,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <returns>This builder, for fluent chaining.</returns>
     /// <exception cref="ArgumentException"><paramref name="title"/> is empty or whitespace.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="title"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dAppBuilder<TLayer> WithTitle(string title)
     {
+        ThrowIfBuilt();
         ArgumentNullException.ThrowIfNull(title);
         if (string.IsNullOrWhiteSpace(title))
         {
@@ -154,8 +181,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <param name="width">The positive width in pixels.</param>
     /// <param name="height">The positive height in pixels.</param>
     /// <returns>This builder, for fluent chaining.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dAppBuilder<TLayer> WithSize(int width, int height)
     {
+        ThrowIfBuilt();
         _options.Width = width;
         _options.Height = height;
         _options.WindowOptionsSet |= Bork2dWindowOptionFlags.Size;
@@ -167,8 +198,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// </summary>
     /// <param name="resizable">Whether the window may be resized.</param>
     /// <returns>This builder, for fluent chaining.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dAppBuilder<TLayer> WithResizable(bool resizable)
     {
+        ThrowIfBuilt();
         _options.Resizable = resizable;
         _options.WindowOptionsSet |= Bork2dWindowOptionFlags.Resizable;
         return this;
@@ -179,8 +214,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// </summary>
     /// <param name="fullscreen">Whether the window starts fullscreen.</param>
     /// <returns>This builder, for fluent chaining.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dAppBuilder<TLayer> WithFullscreen(bool fullscreen)
     {
+        ThrowIfBuilt();
         _options.Fullscreen = fullscreen;
         _options.WindowOptionsSet |= Bork2dWindowOptionFlags.Fullscreen;
         return this;
@@ -191,8 +230,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// </summary>
     /// <param name="enabled">Whether vertical sync is preferred.</param>
     /// <returns>This builder, for fluent chaining.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dAppBuilder<TLayer> WithVSync(bool enabled)
     {
+        ThrowIfBuilt();
         _options.VSync = enabled;
         _options.WindowOptionsSet |= Bork2dWindowOptionFlags.VSync;
         return this;
@@ -224,8 +267,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// errors from <see cref="Build"/>.
     /// </para>
     /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dAppBuilder<TLayer> WithHeadless(int ticksPerSecond = 60)
     {
+        ThrowIfBuilt();
         _options.Mode = Bork2dAppMode.Headless;
         _options.HeadlessSelected = true;
         _options.HeadlessTicksPerSecond = ticksPerSecond;
@@ -244,8 +291,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// until <c>IEngine.Exit()</c>. There is no surface, SDL window, input, or readback;
     /// <c>IEngine.Window</c> is a functional facade reporting the fixed target extent.
     /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dAppBuilder<TLayer> WithOffscreen(int width, int height)
     {
+        ThrowIfBuilt();
         _options.Mode = Bork2dAppMode.Offscreen;
         _options.OffscreenSelected = true;
         _options.OffscreenWidth = width;
@@ -262,8 +313,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// The clamp applies to the windowed/offscreen <c>ITime.DeltaTime</c> only. The headless
     /// synthesized step is exactly <c>1 / ticksPerSecond</c> and is never clamped (M7 F7).
     /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dAppBuilder<TLayer> WithMaxDeltaTime(double seconds)
     {
+        ThrowIfBuilt();
         _options.MaxDeltaTime = seconds;
         return this;
     }
@@ -273,8 +328,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// </summary>
     /// <param name="enabled">Whether validation is requested.</param>
     /// <returns>This builder, for fluent chaining.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dAppBuilder<TLayer> WithValidation(bool enabled)
     {
+        ThrowIfBuilt();
         _options.Validation = enabled;
         return this;
     }
@@ -290,8 +349,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// windowed loop and platform with an in-memory fake.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     internal Bork2dAppBuilder<TLayer> WithSdlApiFactory(Func<ISdlApi> factory)
     {
+        ThrowIfBuilt();
         ArgumentNullException.ThrowIfNull(factory);
         _options.SdlApiFactory = factory;
         return this;
@@ -308,8 +371,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// real host lifecycle with a deterministic fake renderer.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     internal Bork2dAppBuilder<TLayer> WithRendererFactory(IRendererFactory factory)
     {
+        ThrowIfBuilt();
         ArgumentNullException.ThrowIfNull(factory);
         _options.RendererFactory = factory;
         return this;
@@ -327,8 +394,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// second; offscreen never sleeps. Tests inject a fake so schedule assertions are deterministic.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="clock"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     internal Bork2dAppBuilder<TLayer> WithSchedulerClock(ISchedulerClock clock)
     {
+        ThrowIfBuilt();
         ArgumentNullException.ThrowIfNull(clock);
         _options.SchedulerClock = clock;
         return this;
@@ -345,8 +416,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// do not need a Vulkan loader or GPU.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     internal Bork2dAppBuilder<TLayer> WithVulkanInstanceFactory(IVulkanInstanceFactory factory)
     {
+        ThrowIfBuilt();
         ArgumentNullException.ThrowIfNull(factory);
         _options.VulkanInstanceFactory = factory;
         return this;
@@ -378,10 +453,22 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// keep the throwing window stub and no input. <see cref="Build"/> creates no SDL state, OS
     /// window, or thread in any mode.
     /// </para>
+    /// <para>
+    /// A successful <see cref="Build"/> consumes the builder: every configuration method and a
+    /// second <see cref="Build"/> throw <see cref="InvalidOperationException"/>. A failed
+    /// <see cref="Build"/> does not consume the builder, so the caller may fix the configuration
+    /// and retry. The built app is owned and disposed by the caller as before; later builder use
+    /// cannot reconfigure it.
+    /// </para>
     /// </remarks>
     /// <exception cref="Bork2dException">The configuration is invalid.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
     public Bork2dApp Build()
     {
+        ThrowIfBuilt();
+
         var game = Validate();
 
         ILoggerFactory loggerFactory = Bork2dLogging.CreateLoggerFactory(_options.ConfigureLogging);
@@ -445,7 +532,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
                 windowProxy,
                 inputProxy,
                 schedulerClock);
-            return new Bork2dApp(runtime);
+
+            var app = new Bork2dApp(runtime);
+
+            // Set only after the app and its runtime exist: a failed Build stays retryable.
+            _built = true;
+            return app;
         }
         catch
         {
@@ -456,6 +548,16 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
             }
 
             throw;
+        }
+    }
+
+    private void ThrowIfBuilt()
+    {
+        if (_built)
+        {
+            throw new InvalidOperationException(
+                "The builder was already built. A successful Build() consumes the builder; create "
+                + "a new builder to configure another app.");
         }
     }
 
