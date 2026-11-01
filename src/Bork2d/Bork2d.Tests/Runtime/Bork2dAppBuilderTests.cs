@@ -275,6 +275,151 @@ public sealed class Bork2dAppBuilderTests
     }
 
     [Fact]
+    public void EveryMutatorThrowsAfterASuccessfulBuildAndLeavesTheAppUnaffected()
+    {
+        var game = new ScriptedGame<GameLayer> { ExitAfterFirstTick = true };
+        var builder = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .WithoutAssets();
+        using var app = builder.Build();
+        var options = builder.Options;
+
+        (string Name, Action Mutate)[] mutators =
+        [
+            ("WithGame", () => builder.WithGame(new TestGame<GameLayer>())),
+            ("WithAssetsPack", () => builder.WithAssetsPack("other.pck")),
+            ("WithoutAssets", () => builder.WithoutAssets()),
+            ("WithLogging", () => builder.WithLogging(_ => { })),
+            ("WithTitle", () => builder.WithTitle("other")),
+            ("WithSize", () => builder.WithSize(320, 200)),
+            ("WithResizable", () => builder.WithResizable(false)),
+            ("WithFullscreen", () => builder.WithFullscreen(true)),
+            ("WithVSync", () => builder.WithVSync(false)),
+            ("WithHeadless", () => builder.WithHeadless(30)),
+            ("WithOffscreen", () => builder.WithOffscreen(320, 200)),
+            ("WithMaxDeltaTime", () => builder.WithMaxDeltaTime(0.5)),
+            ("WithValidation", () => builder.WithValidation(false)),
+            ("WithSdlApiFactory", () => builder.WithSdlApiFactory(() => new FakeSdlApi())),
+            ("WithRendererFactory", () => builder.WithRendererFactory(
+                new FakeRendererFactory(new FakeRenderer { AutoReady = true }))),
+            ("WithSchedulerClock", () => builder.WithSchedulerClock(new FakeSchedulerClock())),
+            ("WithVulkanInstanceFactory", () => builder.WithVulkanInstanceFactory(
+                new FakeVulkanInstanceFactory())),
+        ];
+
+        foreach ((string name, Action mutate) in mutators)
+        {
+            var failure = Record.Exception(mutate);
+
+            Assert.True(
+                failure is InvalidOperationException,
+                $"{name} after a successful Build() must throw InvalidOperationException, "
+                + $"but got {failure?.GetType().Name ?? "no exception"}.");
+        }
+
+        Assert.Same(game, options.Game);
+        Assert.Equal(1, options.GameSetCount);
+        Assert.Equal(Bork2dAppMode.Headless, options.Mode);
+        Assert.True(options.HeadlessSelected);
+        Assert.False(options.OffscreenSelected);
+        Assert.True(options.WithoutAssetsSelected);
+        Assert.False(options.AssetsPackSelected);
+        Assert.Equal("assets.pck", options.AssetsPackPath);
+        Assert.Equal(60, options.HeadlessTicksPerSecond);
+        Assert.Equal(1280, options.Width);
+        Assert.Equal(720, options.Height);
+        Assert.True(options.Resizable);
+        Assert.False(options.Fullscreen);
+        Assert.True(options.VSync);
+        Assert.Equal(0.25, options.MaxDeltaTime);
+        Assert.Null(options.ConfigureLogging);
+        Assert.Null(options.SdlApiFactory);
+        Assert.Null(options.RendererFactory);
+        Assert.Null(options.SchedulerClock);
+        Assert.Null(options.VulkanInstanceFactory);
+        Assert.Equal(Bork2dWindowOptionFlags.None, options.WindowOptionsSet);
+
+        app.Run();
+
+        Assert.Equal(1, game.SetupCount);
+        Assert.Equal(1, game.TickCount);
+        Assert.Equal(1, game.TeardownCount);
+    }
+
+    [Fact]
+    public void MutatorsThrowForBeingBuiltBeforeValidatingArguments()
+    {
+        var builder = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(new TestGame<GameLayer>())
+            .WithHeadless()
+            .WithoutAssets();
+        using var app = builder.Build();
+
+        Assert.Throws<InvalidOperationException>(() => builder.WithGame(null!));
+        Assert.Throws<InvalidOperationException>(() => builder.WithAssetsPack(null!));
+        Assert.Throws<InvalidOperationException>(() => builder.WithLogging(null!));
+        Assert.Throws<InvalidOperationException>(() => builder.WithTitle(null!));
+        Assert.Throws<InvalidOperationException>(() => builder.WithSdlApiFactory(null!));
+        Assert.Throws<InvalidOperationException>(() => builder.WithRendererFactory(null!));
+        Assert.Throws<InvalidOperationException>(() => builder.WithSchedulerClock(null!));
+        Assert.Throws<InvalidOperationException>(() => builder.WithVulkanInstanceFactory(null!));
+    }
+
+    [Fact]
+    public void SecondBuildThrowsAndTheFirstAppRemainsUsable()
+    {
+        var game = new ScriptedGame<GameLayer> { ExitAfterFirstTick = true };
+        var builder = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .WithoutAssets();
+        using var app = builder.Build();
+
+        Assert.Throws<InvalidOperationException>(() => builder.Build());
+
+        app.Run();
+
+        Assert.Equal(1, game.SetupCount);
+        Assert.Equal(1, game.TickCount);
+        Assert.Equal(1, game.TeardownCount);
+    }
+
+    [Fact]
+    public void FailedValidationBuildDoesNotConsumeTheBuilder()
+    {
+        var builder = new Bork2dAppBuilder<GameLayer>()
+            .WithHeadless()
+            .WithoutAssets();
+
+        var failure = Assert.Throws<Bork2dException>(() => builder.Build());
+        Assert.Contains("WithGame", failure.Message, StringComparison.Ordinal);
+
+        builder.WithGame(new TestGame<GameLayer>());
+        using var app = builder.Build();
+
+        Assert.NotNull(app);
+    }
+
+    [Fact]
+    public void FailedResourceCreationBuildDoesNotConsumeTheBuilder()
+    {
+        var builder = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(new TestGame<GameLayer>())
+            .WithHeadless()
+            .WithoutAssets()
+            .WithLogging(_ => throw new InvalidOperationException("logging setup failed"));
+
+        var failure = Assert.Throws<InvalidOperationException>(() => builder.Build());
+        Assert.Equal("logging setup failed", failure.Message);
+
+        builder.WithLogging(_ => { });
+        using var app = builder.Build();
+
+        Assert.NotNull(app);
+    }
+
+    [Fact]
     public void OptionsMatchTheM1Defaults()
     {
         var options = new Bork2dAppBuilder<GameLayer>().Options;
