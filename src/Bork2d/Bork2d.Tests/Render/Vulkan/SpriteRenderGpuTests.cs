@@ -17,14 +17,15 @@ namespace Bork2d.Tests.Render.Vulkan;
 
 /// <summary>
 /// Opt-in real-GPU proof for the M8 sprite draw integration (WP-4): per-camera passes and one
-/// instanced draw per non-empty camera, split-screen and clear modes, zero-camera/no-safety-pass
-/// behavior, the placeholder, fatal malformed sprites, instance-buffer growth, bounds culling,
-/// texture-page growth, and the <c>CaptureFrameAsync</c> contract. No pixel/golden assertions.
+/// instanced draw per non-empty camera, split-screen and clear modes, the full-target frame clear,
+/// the placeholder, fatal malformed sprites, instance-buffer growth, bounds culling, texture-page
+/// growth, and the <c>CaptureFrameAsync</c> contract, including capture readback of the frame clear
+/// and per-camera clears.
 /// </summary>
 /// <remarks>
 /// The tests use an internal <see cref="GeneratedTextureAssets"/> so a valid RGBA8 page path exists
 /// without a baked pack. They skip when the Vulkan loader/device/validation layer is unavailable
-/// (D-M6-05, D-M6-20) and assert relationships and counters only.
+/// (D-M6-05, D-M6-20) and assert relationships, counters, and defined pixel colors only.
 /// </remarks>
 [Collection(RealGpuCollection.Name)]
 [Trait("Category", "Gpu")]
@@ -40,6 +41,8 @@ public sealed class SpriteRenderGpuTests
         new(1f, 1f),
         new(0f, 1f),
     ];
+
+    private static readonly Color _cameraClearColor = new(0.05f, 0.1f, 0.2f, 1f);
 
     [GpuFact]
     public void OffscreenDrawsOneInstancedDrawPerNonEmptyCameraAndPublishesStats()
@@ -110,7 +113,7 @@ public sealed class SpriteRenderGpuTests
     }
 
     [GpuFact]
-    public void ZeroCamerasAndClearModesRecordNoSafetyPassAndStayValidationClean()
+    public async Task ZeroCamerasAndClearModesRecordOneFullTargetClearAndStayValidationClean()
     {
         var assets = new GeneratedTextureAssets();
         using ILoggerFactory loggerFactory = CreateLoggerFactory(out CapturingLoggerProvider provider);
@@ -120,7 +123,13 @@ public sealed class SpriteRenderGpuTests
             renderer = StartOffscreen(assets, 64, 64, loggerFactory);
             var producer = new Producer(renderer);
 
+            // The frame clear is the only pass a zero-camera frame records, so the captured frame is
+            // fully opaque black and no camera or draw is counted.
+            Task<FrameCaptureResult> zeroCapture = renderer.CaptureFrameAsync();
             PublishFrame(renderer, producer, snapshot => { });
+            AssertOpaqueBlack(
+                await zeroCapture.WaitAsync(_timeout),
+                "a zero-camera frame");
             RenderStats zero = renderer.RenderStats;
             Assert.Equal(0, zero.Cameras);
             Assert.Equal(0, zero.NonEmptyCameras);
@@ -128,10 +137,16 @@ public sealed class SpriteRenderGpuTests
             Assert.Equal(0, zero.Instances);
             Assert.Equal(1, zero.TexturePages);
 
+            // An empty Clear.None camera records no pass of its own, so the frame clear alone still
+            // defines every pixel as opaque black.
+            Task<FrameCaptureResult> preserveCapture = renderer.CaptureFrameAsync();
             PublishFrame(
                 renderer,
                 producer,
                 snapshot => AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.None));
+            AssertOpaqueBlack(
+                await preserveCapture.WaitAsync(_timeout),
+                "a Clear.None frame with no draw");
             RenderStats preserve = renderer.RenderStats;
             Assert.Equal(1, preserve.Cameras);
             Assert.Equal(0, preserve.NonEmptyCameras);
@@ -170,6 +185,129 @@ public sealed class SpriteRenderGpuTests
             Assert.Equal(0, drawn.ValidationWarnings);
             Assert.Equal(0, renderer.Counters.ValidationErrorCount);
             Assert.Equal(0, renderer.Counters.ValidationWarningCount);
+            Assert.Null(renderer.FatalException);
+            StopAndAssertClean(renderer);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    [GpuFact]
+    public async Task ColorClearOverAPartialViewportLeavesTheRestOfTheFrameOpaqueBlack()
+    {
+        const int width = 32;
+        const int height = 16;
+        var assets = new GeneratedTextureAssets();
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, width, height, loggerFactory);
+            var producer = new Producer(renderer);
+
+            Task<FrameCaptureResult> capture = renderer.CaptureFrameAsync();
+            PublishFrame(
+                renderer,
+                producer,
+                snapshot => AddCamera(
+                    snapshot,
+                    zIndex: 0,
+                    mask: 1u,
+                    clear: ClearKind.Color,
+                    viewport: new Vector4(0f, 0f, 0.5f, 0.5f)));
+            FrameCaptureResult result = await capture.WaitAsync(_timeout);
+
+            // The camera clear covers exactly the top-left 16x8 pixels; the frame clear defines
+            // everything the viewport does not cover.
+            AssertPixelNear(
+                result,
+                x: 2,
+                y: 2,
+                LinearToSrgbByte(_cameraClearColor.R),
+                LinearToSrgbByte(_cameraClearColor.G),
+                LinearToSrgbByte(_cameraClearColor.B),
+                255,
+                tolerance: 2,
+                "inside the camera viewport");
+            AssertOpaqueBlackPixel(result, x: 17, y: 9, "right of and below the camera viewport");
+            AssertOpaqueBlackPixel(result, x: 2, y: 8, "below the camera viewport");
+            AssertOpaqueBlackPixel(result, x: width - 1, y: height - 1, "the bottom-right pixel");
+
+            Assert.Equal(1, renderer.RenderStats.Cameras);
+            Assert.Equal(0, renderer.RenderStats.DrawCalls);
+            Assert.Null(renderer.FatalException);
+            StopAndAssertClean(renderer);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    [GpuFact]
+    public async Task AlphaBlendedSpriteBlendsAgainstTheFrameClearBlack()
+    {
+        const int width = 32;
+        const int height = 16;
+        const float tintAlpha = 0.5f;
+        var assets = new GeneratedTextureAssets();
+        assets.AddTexture("tex/a");
+        SpriteAsset sprite = MakeSprite("tex/a");
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, width, height, loggerFactory);
+            var producer = new Producer(renderer);
+
+            void Fill(FrameSnapshot snapshot)
+            {
+                AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.None);
+                AddSprite(snapshot, sprite, layer: 1u, tintAlpha: tintAlpha);
+            }
+
+            // Warm the texture page so the captured frame records the draw, not a pending skip.
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                PublishFrame(renderer, producer, Fill);
+                if (renderer.RenderStats.Instances == 1)
+                {
+                    break;
+                }
+            }
+
+            Task<FrameCaptureResult> capture = renderer.CaptureFrameAsync();
+            PublishFrame(renderer, producer, Fill);
+            FrameCaptureResult result = await capture.WaitAsync(_timeout);
+
+            // The generated texture is opaque magenta, so the half-alpha white tint expands in
+            // linear space to (0.5, 0, 0.5) over the frame clear's opaque black and the sRGB target
+            // encodes it; the alpha channel is linear and blends to 0.75.
+            byte blended = LinearToSrgbByte(tintAlpha);
+            byte blendedAlpha = (byte)Math.Clamp(
+                MathF.Round(((tintAlpha * tintAlpha) + (1f - tintAlpha)) * 255f),
+                0f,
+                255f);
+            AssertPixelNear(
+                result,
+                x: width / 2,
+                y: height / 2,
+                blended,
+                0,
+                blended,
+                blendedAlpha,
+                tolerance: 3,
+                "the alpha-blended sprite center over defined black");
+            AssertOpaqueBlackPixel(result, x: 0, y: 0, "the uncovered top-left pixel");
+            AssertOpaqueBlackPixel(result, x: width - 1, y: 0, "the uncovered top-right pixel");
+            AssertOpaqueBlackPixel(result, x: 0, y: height - 1, "the uncovered bottom-left pixel");
+
+            Assert.Equal(1, renderer.RenderStats.DrawCalls);
+            Assert.Equal(1, renderer.RenderStats.Instances);
             Assert.Null(renderer.FatalException);
             StopAndAssertClean(renderer);
         }
@@ -731,23 +869,97 @@ public sealed class SpriteRenderGpuTests
                 viewport ?? new Vector4(0f, 0f, 1f, 1f),
                 mask,
                 clear,
-                new Color(0.05f, 0.1f, 0.2f, 1f)));
+                _cameraClearColor));
 
     private static void AddSprite(
         FrameSnapshot snapshot,
         SpriteAsset asset,
         uint layer,
         int zIndex = 0,
-        float x = 0f)
+        float x = 0f,
+        float tintAlpha = 1f)
         => snapshot.AddSprite(
             new SpriteSnapshot(
                 SpriteRenderData.Freeze(asset),
                 Matrix3x2.CreateTranslation(x, 0f),
-                Color.White,
+                new Color(1f, 1f, 1f, tintAlpha),
                 layer,
                 zIndex,
                 FlipX: false,
                 FlipY: false));
+
+    /// <summary>Asserts that every pixel of a captured frame is opaque black.</summary>
+    private static void AssertOpaqueBlack(FrameCaptureResult result, string because)
+    {
+        ReadOnlySpan<byte> pixels = result.Pixels.Span;
+        for (var offset = 0; offset < pixels.Length; offset += 4)
+        {
+            if (pixels[offset] == 0
+                && pixels[offset + 1] == 0
+                && pixels[offset + 2] == 0
+                && pixels[offset + 3] == 255)
+            {
+                continue;
+            }
+
+            int pixel = offset / 4;
+            Assert.Fail(
+                $"{because}: pixel ({pixel % result.Width}, {pixel / result.Width}) is "
+                    + $"({pixels[offset]}, {pixels[offset + 1]}, {pixels[offset + 2]}, "
+                    + $"{pixels[offset + 3]}), expected opaque black.");
+        }
+    }
+
+    private static void AssertOpaqueBlackPixel(
+        FrameCaptureResult result,
+        int x,
+        int y,
+        string because)
+    {
+        (byte r, byte g, byte b, byte a) = ReadPixel(result, x, y);
+        Assert.True(
+            r == 0 && g == 0 && b == 0 && a == 255,
+            $"{because}: pixel ({x}, {y}) is ({r}, {g}, {b}, {a}), expected opaque black.");
+    }
+
+    private static void AssertPixelNear(
+        FrameCaptureResult result,
+        int x,
+        int y,
+        byte r,
+        byte g,
+        byte b,
+        byte a,
+        int tolerance,
+        string because)
+    {
+        (byte actualR, byte actualG, byte actualB, byte actualA) = ReadPixel(result, x, y);
+        Assert.True(
+            Math.Abs(actualR - r) <= tolerance
+                && Math.Abs(actualG - g) <= tolerance
+                && Math.Abs(actualB - b) <= tolerance
+                && Math.Abs(actualA - a) <= tolerance,
+            $"{because}: pixel ({x}, {y}) is ({actualR}, {actualG}, {actualB}, {actualA}), "
+                + $"expected ({r}, {g}, {b}, {a}) +/- {tolerance}.");
+    }
+
+    private static (byte R, byte G, byte B, byte A) ReadPixel(
+        FrameCaptureResult result,
+        int x,
+        int y)
+    {
+        int offset = ((y * result.Width) + x) * 4;
+        ReadOnlySpan<byte> pixels = result.Pixels.Span;
+        return (pixels[offset], pixels[offset + 1], pixels[offset + 2], pixels[offset + 3]);
+    }
+
+    private static byte LinearToSrgbByte(float linear)
+    {
+        float encoded = linear <= 0.0031308f
+            ? 12.92f * linear
+            : (1.055f * MathF.Pow(linear, 1f / 2.4f)) - 0.055f;
+        return (byte)Math.Clamp(MathF.Round(encoded * 255f), 0f, 255f);
+    }
 
     private static bool IsUnavailable(Exception exception)
     {

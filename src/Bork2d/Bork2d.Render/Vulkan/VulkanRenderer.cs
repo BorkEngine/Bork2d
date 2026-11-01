@@ -795,7 +795,8 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
             throw new Bork2dException($"vkBeginCommandBuffer failed with VkResult {begin}.");
         }
 
-        // A newly acquired image is UNDEFINED; every camera pass runs in COLOR_ATTACHMENT_OPTIMAL.
+        // A newly acquired image is UNDEFINED; the frame clear and every camera pass run in
+        // COLOR_ATTACHMENT_OPTIMAL.
         var range = new ImageSubresourceRange
         {
             AspectMask = ImageAspectFlags.ColorBit,
@@ -830,6 +831,14 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
             device.Device.Handle,
             commandBuffer.Handle,
             _passLabel);
+
+        // A newly acquired image is UNDEFINED and a camera may load instead of clearing, so one
+        // full-target opaque-black clear defines every pixel before any camera pass runs.
+        SpritePassRecorder.RecordFrameClear(
+            device.Api,
+            commandBuffer,
+            swapchain.GetView(imageIndex),
+            swapchain.Extent);
 
         bool capture = frame.Capture.BeginRecord(
             _captures,

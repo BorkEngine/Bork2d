@@ -6,10 +6,17 @@ using Silk.NET.Vulkan;
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// Records the approved per-camera dynamic-rendering passes and one instanced draw per non-empty
-/// camera (M8 §6.8/§6.11).
+/// Records the frame's full-target opaque-black clear and the approved per-camera dynamic-rendering
+/// passes with one instanced draw per non-empty camera (M8 §6.8/§6.11).
 /// </summary>
 /// <remarks>
+/// <para>
+/// Every recorded frame starts with one full-target clear to opaque black, recorded after the
+/// target's initial layout transition and before any camera pass. It is a normal dynamic-rendering
+/// pass with a single sRGB color attachment, no depth/stencil, <c>loadOp=CLEAR</c>, and
+/// <c>storeOp=STORE</c>; it is not a camera and not a draw call, so statistics and draw accounting
+/// are unchanged.
+/// </para>
 /// <para>
 /// Each valid camera owns one <c>vkCmdBeginRendering</c>/<c>vkCmdEndRendering</c> pair over its
 /// rounded pixel rect with a single sRGB color attachment, no depth/stencil, and
@@ -20,16 +27,69 @@ namespace Bork2d.Render.Vulkan;
 /// empty camera records only the pass when it clears.
 /// </para>
 /// <para>
-/// A color-attachment barrier runs before every pass so a later camera's <c>LOAD</c> observes the
-/// earlier cameras' stored output (and, offscreen, the previous submission's output). It is a
-/// synchronization dependency, not a pass: there is no frame-level safety clear or extra render
-/// pass anywhere.
+/// A color-attachment barrier runs before every camera pass so its <c>LOAD</c> observes the frame
+/// clear and the earlier cameras' stored output (and, offscreen, the previous submission's output).
+/// It is a synchronization dependency, not a pass: the frame clear is the only extra render pass.
 /// </para>
 /// </remarks>
 internal static unsafe class SpritePassRecorder
 {
     /// <summary>The vertex count of the shader-generated quad.</summary>
     internal const uint QuadVertexCount = 4;
+
+    /// <summary>
+    /// Records the full-target opaque-black clear that defines every pixel at the start of a frame.
+    /// </summary>
+    /// <param name="vk">The Vulkan API object.</param>
+    /// <param name="commandBuffer">The frame command buffer, already begun.</param>
+    /// <param name="attachmentView">The target image view in <c>COLOR_ATTACHMENT_OPTIMAL</c>.</param>
+    /// <param name="extent">The full target extent in pixels.</param>
+    internal static void RecordFrameClear(
+        Vk vk,
+        CommandBuffer commandBuffer,
+        ImageView attachmentView,
+        Extent2D extent)
+    {
+        var attachment = new RenderingAttachmentInfo
+        {
+            SType = StructureType.RenderingAttachmentInfo,
+            ImageView = attachmentView,
+            ImageLayout = ImageLayout.ColorAttachmentOptimal,
+            LoadOp = AttachmentLoadOp.Clear,
+            StoreOp = AttachmentStoreOp.Store,
+            ClearValue = new ClearValue
+            {
+                Color = new ClearColorValue
+                {
+                    Float32_0 = 0f,
+                    Float32_1 = 0f,
+                    Float32_2 = 0f,
+                    Float32_3 = 1f,
+                },
+            },
+        };
+        var rendering = new RenderingInfo
+        {
+            SType = StructureType.RenderingInfo,
+            RenderArea = new Rect2D
+            {
+                Offset = new Offset2D
+                {
+                    X = 0,
+                    Y = 0,
+                },
+                Extent = extent,
+            },
+            LayerCount = 1,
+            ViewMask = 0,
+            ColorAttachmentCount = 1,
+            PColorAttachments = &attachment,
+            PDepthAttachment = null,
+            PStencilAttachment = null,
+        };
+        vk.CmdBeginRendering(commandBuffer, &rendering);
+        vk.CmdEndRendering(commandBuffer);
+    }
 
     /// <summary>Records every valid camera's pass and draw from a frame plan.</summary>
     /// <param name="vk">The Vulkan API object.</param>

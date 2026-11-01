@@ -70,9 +70,16 @@ snapshot. Each non-empty camera gets one dynamic-rendering pass and exactly one
 `vkCmdDraw(4, instanceCount, 0, firstInstance)`. A quad is a four-vertex triangle strip with no
 vertex buffer: `gl_VertexIndex` selects the corner, and the vertex shader builds the world position
 from the instance matrix, pivot, size, and UVs. The quad is `(maxU - minU) * Scale.X` by
-`(maxV - minV) * Scale.Y` world units; texture pixel dimensions are never used. Clear semantics are
-per camera: `Clear.Color` clears the camera's pixel rect to `ClearColor`; `Clear.None` and
-`Clear.Depth` load the existing content. There is no frame-level safety clear and no depth
+`(maxV - minV) * Scale.Y` world units; texture pixel dimensions are never used.
+
+Every recorded frame starts with one full-target opaque-black clear after the target's initial
+layout transition and before any camera pass: linear `(0, 0, 0, 1)`, `LoadOp = Clear`,
+`StoreOp = Store`, one dynamic-rendering color attachment, and no depth/stencil. The clear covers the
+whole target (the swapchain image extent for windowed, the offscreen target extent for offscreen),
+so every pixel has a defined current-frame value. Camera clear semantics are layered on top:
+`Clear.Color` clears the camera's pixel rect to `ClearColor`; `Clear.None` and `Clear.Depth` load the
+existing content, which the frame clear has already defined. The frame clear is not a camera and not
+a draw call, so `RenderStats` and draw-call/instance accounting are unchanged. There is no depth
 attachment.
 
 ## Textures
@@ -126,11 +133,12 @@ invalid-layer, non-`Quad`, and still-loading sprites; bounds-culled sprites are 
 only reduce `Instances`.
 
 `CaptureFrameAsync` queues a one-shot request. The copy is recorded after the last camera pass and
-before present/discard, so it includes every camera and excludes window chrome. The result is a
-`FrameCaptureResult` whose pixels are row-major, top-left-origin RGBA8, whose dimensions are the
-captured frame's actual extent, and whose format is always `TextureFormat.Rgba8`. The render thread
-swizzles/copies the staging bytes into one `byte[]` per captured frame, and every request served by
-that frame shares the same immutable memory; staging memory itself is pooled per GPU frame.
+before present/discard, so it includes the frame clear and every camera and excludes window chrome.
+The result is a `FrameCaptureResult` whose pixels are row-major, top-left-origin RGBA8, whose
+dimensions are the captured frame's actual extent, and whose format is always `TextureFormat.Rgba8`.
+The render thread swizzles/copies the staging bytes into one `byte[]` per captured frame, and every
+request served by that frame shares the same immutable memory; staging memory itself is pooled per
+GPU frame.
 
 A submitted capture completes from its frame's fence, even when the game never publishes another
 snapshot. At the top of each render loop, before waiting for a new snapshot or draining a minimized
