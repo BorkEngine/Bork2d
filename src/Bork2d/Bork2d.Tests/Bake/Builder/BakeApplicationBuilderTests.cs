@@ -204,13 +204,13 @@ public sealed class BakeApplicationBuilderTests
         Assert.NotNull(project);
         Assert.Empty(diagnostics.GetSorted());
         Assert.True(project.UseDefaultProcessors);
-        Bork2d.Bake.Processors.IBakeAssetProcessor processor =
+        Bork2d.Bake.Processors.BakeProcessorRegistration processor =
             Assert.Single(project.Processors);
         Assert.Equal("texture", processor.Name);
         Assert.Equal(
             new[] { "bmp", "jpeg", "jpg", "png", "tga" },
             processor.Extensions.Order(StringComparer.Ordinal));
-        Assert.Equal(Bork2d.Bake.Processors.BakeSidecarPolicy.Required, processor.Policy);
+        Assert.Equal(SidecarPolicy.Required, processor.Policy);
         Assert.NotNull(processor.SidecarShape);
     }
 
@@ -257,7 +257,7 @@ public sealed class BakeApplicationBuilderTests
         Assert.NotNull(project);
         var processor = Assert.Single(project.Processors);
         Assert.Equal(typeof(FakeSidecarProcessor).FullName, processor.Name);
-        Assert.Equal(Bork2d.Bake.Processors.BakeSidecarPolicy.Required, processor.Policy);
+        Assert.Equal(SidecarPolicy.Required, processor.Policy);
         Assert.NotNull(processor.SidecarShape);
         Assert.Equal(typeof(TestSidecar), processor.SidecarShape!.Type);
     }

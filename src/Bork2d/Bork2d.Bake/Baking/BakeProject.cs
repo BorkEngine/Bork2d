@@ -43,7 +43,7 @@ internal sealed class BakeProject
         BakeTextureFilter textureFilter,
         BakeTextureWrap textureWrap,
         IReadOnlyDictionary<string, BakeAssetTypeRegistration> assetTypes,
-        IReadOnlyList<IBakeAssetProcessor> processors,
+        IReadOnlyList<BakeProcessorRegistration> processors,
         BakeProcessorRegistry processorRegistry,
         bool useDefaultProcessors)
     {
@@ -87,8 +87,8 @@ internal sealed class BakeProject
     /// <summary>Gets the explicitly registered data types keyed by full type name.</summary>
     internal IReadOnlyDictionary<string, BakeAssetTypeRegistration> AssetTypes { get; }
 
-    /// <summary>Gets the registered processors in registration order (executed by WP2+).</summary>
-    internal IReadOnlyList<IBakeAssetProcessor> Processors { get; }
+    /// <summary>Gets the processor registrations in registration order.</summary>
+    internal IReadOnlyList<BakeProcessorRegistration> Processors { get; }
 
     /// <summary>Gets the immutable extension registry built from <see cref="Processors"/>.</summary>
     internal BakeProcessorRegistry ProcessorRegistry { get; }

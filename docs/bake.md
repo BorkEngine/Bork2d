@@ -104,6 +104,15 @@ sidecar policy. Its `Process` method reads the source and emits outputs through 
 
 - `Outputs.AddAsset<T>(path, value)` emits a typed MessagePack asset; the engine serializes it.
 - `Outputs.AddData(path, bytes)` emits an opaque raw payload.
+- `Diagnostics.Error(code, message)` reports a `BK7xxx` failure; the source's outputs are discarded.
+  `Warning` and `Info` report without discarding.
+
+`IAssetProcessor`, `AssetProcessorContext`, `IAssetOutputSink`, `IAssetProcessorDiagnostics`, and
+`SidecarPolicy` are the only processor contract. The processor registry, runner, and sidecar binder
+execute that contract directly. A framework-internal registration wrapper holds only the metadata
+the pipeline needs beyond the contract — the processor's CLR type for incremental hashing and the
+typed-sidecar dispatch for `AssetProcessor<TSidecar>` — and adds no second context, sink,
+diagnostics, or policy model.
 
 Processors run synchronously on the bake thread and may be reused, so they must not keep
 per-source state. They never touch MessagePack or the pack writer directly. A failed source emits

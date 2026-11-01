@@ -1,3 +1,4 @@
+using Bork2d.Bake;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Processors;
 using PolyType;
@@ -22,7 +23,7 @@ public sealed class BakeProcessorRegistryTests
         Assert.NotNull(registry);
         Assert.Equal(["png"], registry.Extensions);
         Assert.True(registry.TryMatch("art/Player.PNG", out BakeProcessorMatch match));
-        Assert.Same(second, match.Processor);
+        Assert.Same(second, match.Processor.Processor);
         Assert.Equal("png", match.Extension);
 
         BakeDiagnostic overrideInfo = Assert.Single(
@@ -46,15 +47,15 @@ public sealed class BakeProcessorRegistryTests
         Assert.Equal(["gz", "tar.gz"], registry.Extensions);
 
         Assert.True(registry.TryMatch("art/archive.tar.gz", out BakeProcessorMatch compound));
-        Assert.Same(tarball, compound.Processor);
+        Assert.Same(tarball, compound.Processor.Processor);
         Assert.Equal("tar.gz", compound.Extension);
 
         Assert.True(registry.TryMatch("art/archive.GZ", out BakeProcessorMatch single));
-        Assert.Same(gzip, single.Processor);
+        Assert.Same(gzip, single.Processor.Processor);
         Assert.Equal("gz", single.Extension);
 
         Assert.True(registry.TryMatch("art/ARCHIVE.TAR.GZ", out BakeProcessorMatch uppercase));
-        Assert.Same(tarball, uppercase.Processor);
+        Assert.Same(tarball, uppercase.Processor.Processor);
     }
 
     [Fact]
@@ -167,7 +168,7 @@ public sealed class BakeProcessorRegistryTests
                 [new RawTestProcessor(
                     "wrong-none",
                     ["png"],
-                    BakeSidecarPolicy.None,
+                    SidecarPolicy.None,
                     ShapeOf<TestSidecar>())],
                 diagnostics,
                 out _));
@@ -184,7 +185,7 @@ public sealed class BakeProcessorRegistryTests
 
         Assert.False(
             BakeProcessorRegistry.TryCreate(
-                [new RawTestProcessor("wrong-required", ["png"], BakeSidecarPolicy.Required)],
+                [new RawTestProcessor("wrong-required", ["png"], SidecarPolicy.Required)],
                 diagnostics,
                 out _));
 
@@ -200,7 +201,7 @@ public sealed class BakeProcessorRegistryTests
 
         Assert.False(
             BakeProcessorRegistry.TryCreate(
-                [new RawTestProcessor("bad-policy", ["png"], (BakeSidecarPolicy)42)],
+                [new RawTestProcessor("bad-policy", ["png"], (SidecarPolicy)42)],
                 diagnostics,
                 out _));
 
@@ -219,7 +220,7 @@ public sealed class BakeProcessorRegistryTests
                 [new RawTestProcessor(
                     "valid-required",
                     ["png"],
-                    BakeSidecarPolicy.Required,
+                    SidecarPolicy.Required,
                     ShapeOf<TestSidecar>())],
                 diagnostics,
                 out BakeProcessorRegistry? registry));
