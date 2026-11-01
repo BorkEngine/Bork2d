@@ -8,7 +8,8 @@ namespace Bork2d.Bake.Baking;
 
 /// <summary>
 /// The complete multi-pack bake pipeline: discovery, per-pack custom-data binding, processor execution,
-/// the generic baked asset index, reference validation, pack composition, and the atomic pack writes.
+/// the generic baked asset index, reference validation, pack composition and staging, and the
+/// transactional publish of the whole pack set.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -20,18 +21,25 @@ namespace Bork2d.Bake.Baking;
 /// receives; the main pack is strict (local entries only).
 /// </para>
 /// <para>
-/// Validation always completes for every pack before <c>PackBuilder</c> writes anything: a source,
-/// processor, collision, or reference failure returns a
-/// <see cref="BakeStatus.DiagnosticsError"/> result and leaves every previous pack (and anything else
-/// in the destination) unchanged. Packs are composed in memory after their own validation and written
-/// only after every pack has validated, so a failed pack cannot corrupt an older pack. Each write is
-/// still atomic.
+/// Every pack validates before any target is touched. After a pack validates it is composed into a
+/// <c>PackBuilder</c> and immediately staged in a unique temporary file next to its target; the builder
+/// is released as soon as the pack is staged. The staged set is published only after every pack has
+/// validated and staged, through a <see cref="PackPublishTransaction"/> that replaces each target via
+/// its own backup and rolls every already-replaced target back on failure. A normal source, processor,
+/// reference, composition, staging, or publish failure therefore leaves every previous pack
+/// byte-identical. A process crash inside the publish window cannot be rolled back; see
+/// <see cref="PackPublishTransaction"/>.
+/// </para>
+/// <para>
+/// Staged packs live on disk and the per-pack state keeps only the index and counts, so exactly one
+/// <c>PackBuilder</c> (and its composed payloads) is alive at a time regardless of the number or size
+/// of the configured packs.
 /// </para>
 /// <para>
 /// Duplicate canonical paths are legal across packs (overlay) and illegal inside one pack. The
 /// pipeline is sequential and deterministic: packs in configuration order, discovery sorted, processor
 /// outputs sorted, indexes sorted, diagnostics through the deterministic sorter. <c>--check</c> stops
-/// after validation, writes no pack, and performs no source-tree writes.
+/// after validation, composes nothing, and writes no pack, staging file, or source-tree change.
 /// </para>
 /// <para>
 /// The result's texture count is the number of shaped processor outputs whose type is
@@ -54,6 +62,24 @@ internal static class BakePipeline
         BakeProject project,
         BakeOptions options,
         BakeDiagnostics diagnostics)
+        => Run(project, options, diagnostics, stagingProbe: null);
+
+    /// <summary>
+    /// Runs one full or check-only bake of every configured pack with an internal staging probe.
+    /// </summary>
+    /// <param name="project">The validated project configuration.</param>
+    /// <param name="options">The resolved invocation inputs.</param>
+    /// <param name="diagnostics">The diagnostics bag to append to.</param>
+    /// <param name="stagingProbe">
+    /// An optional test-only observer of the post-staging state; production callers pass
+    /// <see langword="null"/>.
+    /// </param>
+    /// <returns>The result, including per-pack counts and the deterministically ordered diagnostics.</returns>
+    internal static BakeResult Run(
+        BakeProject project,
+        BakeOptions options,
+        BakeDiagnostics diagnostics,
+        IPackStagingProbe? stagingProbe)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(options);
@@ -92,6 +118,10 @@ internal static class BakePipeline
 
         var packStates = new List<PackState>(outputs.Count);
         BakedAssetIndex? mainIndex = null;
+
+        // A check validates and composes nothing; every other run stages each pack as soon as it
+        // validates and keeps the staged set until every pack has been staged.
+        using PackPublishTransaction? transaction = options.Check ? null : new();
 
         foreach (BakePackOutput output in outputs)
         {
@@ -174,10 +204,9 @@ internal static class BakePipeline
                     diagnostics);
             }
 
-            PackBuilder? builder = null;
             if (!options.Check)
             {
-                builder = PackComposer.Compose(
+                PackBuilder? builder = PackComposer.Compose(
                     index,
                     project,
                     options.Mode.ToCompressionMode(),
@@ -194,6 +223,23 @@ internal static class BakePipeline
                         referenceCount,
                         diagnostics);
                 }
+
+                if (!transaction!.Stage(output.Path, builder, diagnostics))
+                {
+                    return Failure(
+                        BakeStatus.DiagnosticsError,
+                        BakeFailureStage.Pack,
+                        output.Path,
+                        assetCount,
+                        textureCount,
+                        referenceCount,
+                        diagnostics);
+                }
+
+                // Staged bytes are on disk now; drop the builder so composing the next pack cannot
+                // keep this pack's payloads alive.
+                builder = null;
+                stagingProbe?.OnPackStaged(pack.Index, transaction.StagedPackCount, builder);
             }
 
             if (pack.IsMain)
@@ -206,8 +252,7 @@ internal static class BakePipeline
                 assetCount,
                 textureCount,
                 referenceCount,
-                index,
-                builder));
+                index));
         }
 
         if (options.Check)
@@ -218,23 +263,19 @@ internal static class BakePipeline
                 diagnostics);
         }
 
-        // Every pack validated before the first write, so an invalid DLC pack cannot leave a
-        // half-updated pack set. Each individual write is still atomic.
-        foreach (PackState state in packStates)
+        // Every pack validated and staged before the first target is touched, so a failed pack cannot
+        // leave a half-updated pack set. A publish failure rolls every replaced target back.
+        if (!transaction!.Commit(diagnostics, out int failedPackIndex))
         {
-            PackBuilder builder = state.Builder
-                ?? throw new InvalidOperationException("A non-check bake produced no pack builder.");
-            if (!AtomicPackWriter.Write(state.Output.Path, builder, diagnostics))
-            {
-                return Failure(
-                    BakeStatus.DiagnosticsError,
-                    BakeFailureStage.Pack,
-                    state.Output.Path,
-                    state.AssetCount,
-                    state.TextureCount,
-                    state.ReferenceCount,
-                    diagnostics);
-            }
+            PackState failed = packStates[failedPackIndex];
+            return Failure(
+                BakeStatus.DiagnosticsError,
+                BakeFailureStage.Pack,
+                failed.Output.Path,
+                failed.AssetCount,
+                failed.TextureCount,
+                failed.ReferenceCount,
+                diagnostics);
         }
 
         return Success(packStates, packWritten: true, diagnostics);
@@ -364,6 +405,5 @@ internal static class BakePipeline
         int AssetCount,
         int TextureCount,
         int ReferenceCount,
-        BakedAssetIndex Index,
-        PackBuilder? Builder);
+        BakedAssetIndex Index);
 }

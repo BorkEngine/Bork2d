@@ -138,8 +138,19 @@ Exit codes: `0` success or up to date, `1` source diagnostics, `2` usage/configu
 unexpected internal failure. Diagnostics go to `stderr` as `path(line,col): error BKxxxx: message`;
 the summary goes to `stdout`.
 
-The output root defaults to the assets executable's directory. `bake` writes each pack atomically
-and only after every pack has validated, so a failed bake leaves existing packs untouched.
+The output root defaults to the assets executable's directory. `bake` stages every pack as soon as
+that pack validates: the composed pack is written to a unique temporary file next to its target and
+the builder is released before the next pack is composed, so only one `PackBuilder` and its payloads
+are alive at a time and staged packs live on disk. The staged set is published only after every
+configured pack has validated and staged. Publishing replaces one target at a time: an existing target
+is moved to a unique backup, the staged file takes its place, and if any replacement fails every
+already-replaced target is restored from its backup and the failing path is reported as `BK5002`. A
+failed bake therefore leaves every pack byte-identical, and `--check` writes neither targets nor
+staging files.
+
+A normal write failure is fully rolled back. A process crash between the target-to-backup and
+staged-to-target moves cannot be rolled back by the baker; the backup and staging files are then the
+only recovery source and may be left behind.
 
 ## Incremental builds
 

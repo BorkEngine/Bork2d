@@ -1,5 +1,6 @@
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
+using Bork2d.Engine.Assets.Pack;
 using Bork2d.Tests.Bake.Textures;
 using Xunit;
 
@@ -8,7 +9,8 @@ namespace Bork2d.Tests.Bake.Baking;
 /// <summary>
 /// The multi-pack bake contract: ordered packs, the main pack's strict local references, DLC -> main
 /// references, DLC -> DLC rejection, duplicate canonical paths across packs, local overlay precedence,
-/// output-root joining, and failure preservation across all packs.
+/// output-root joining, failure preservation across all packs, and the staged transactional publish
+/// that releases each pack builder as soon as its pack is staged.
 /// </summary>
 public sealed class MultiPackBakeTests
 {
@@ -256,6 +258,145 @@ public sealed class MultiPackBakeTests
         Assert.All(result.Packs, pack => Assert.False(pack.PackWritten));
         Assert.False(File.Exists(Path.Combine(output.RootPath, "assets.pck")));
         Assert.False(File.Exists(Path.Combine(output.RootPath, "dlc1.pck")));
+        Assert.Empty(Directory.GetFiles(output.RootPath, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public void SuccessfulMultiPackBakePublishesEveryTargetAndLeavesNoStagingOrBackupFiles()
+    {
+        using var project = CreateMultiPack("multi-no-leftovers");
+        WriteMainAssets(project);
+        WriteDlcConfig(project, texture: "art/player");
+
+        using var output = TempBakeDirectory.Create();
+        BakeResult result = RunBake(project, output.RootPath);
+
+        Assert.Equal(BakeStatus.Success, result.Status);
+        Assert.True(result.PackWritten);
+
+        string[] files = [.. Directory
+            .GetFiles(output.RootPath, "*", SearchOption.AllDirectories)
+            .Select(Path.GetFullPath)
+            .OrderBy(path => path, StringComparer.Ordinal)];
+        Assert.Equal(
+            new[]
+            {
+                Path.Combine(output.RootPath, "assets.pck"),
+                Path.Combine(output.RootPath, "dlc1.pck"),
+            },
+            files);
+        Assert.All(
+            files,
+            file => Assert.False(
+                file.EndsWith(".tmp", StringComparison.Ordinal)
+                    || file.EndsWith(".bak", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void StagingFailureLeavesThePreviousPackUnchangedAndWritesNoTarget()
+    {
+        using var project = CreateMultiPack(
+            "multi-staging-failure",
+            ("assets.pck", "Assets"),
+            ("dlc/dlc1.pck", "DLC1"));
+        WriteMainAssets(project);
+        WriteDlcConfig(project, texture: "art/player");
+
+        using var output = TempBakeDirectory.Create();
+        string mainPath = Path.Combine(output.RootPath, "assets.pck");
+        BakedPackAssertions.WriteValidPack(mainPath);
+        byte[] before = File.ReadAllBytes(mainPath);
+
+        // The second pack's output directory is occupied by a file, so creating the staging directory
+        // fails after the main pack has already been staged.
+        string blockedDirectory = Path.Combine(output.RootPath, "dlc");
+        File.WriteAllText(blockedDirectory, "not a directory");
+
+        BakeResult result = RunBake(project, output.RootPath);
+
+        Assert.Equal(BakeStatus.DiagnosticsError, result.Status);
+        Assert.False(result.PackWritten);
+        Assert.Equal(BakeFailureStage.Pack, result.FailureStage);
+        Assert.Equal(Path.Combine(output.RootPath, "dlc", "dlc1.pck"), result.PackPath);
+        BakeDiagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(BakeDiagnosticCodes.PackWriteFailed, diagnostic.Code);
+        Assert.Equal(before, File.ReadAllBytes(mainPath));
+        Assert.False(File.Exists(Path.Combine(output.RootPath, "dlc", "dlc1.pck")));
+        Assert.Equal("not a directory", File.ReadAllText(blockedDirectory));
+        Assert.Empty(Directory.GetFiles(output.RootPath, "*.tmp", SearchOption.AllDirectories));
+        Assert.Empty(Directory.GetFiles(output.RootPath, "*.bak", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public void CommitFailureRestoresTheFirstTargetAndLeavesLaterTargetsUntouched()
+    {
+        using var project = CreateMultiPack(
+            "multi-commit-failure",
+            ("assets.pck", "Assets"),
+            ("dlc1.pck", "DLC1"),
+            ("dlc2.pck", "DLC2"));
+        WriteMainAssets(project);
+        WriteDlcConfig(project, texture: "art/player");
+
+        using var output = TempBakeDirectory.Create();
+        BakeResult first = RunBake(project, output.RootPath);
+        Assert.Equal(BakeStatus.Success, first.Status);
+
+        string mainPath = Path.Combine(output.RootPath, "assets.pck");
+        string blockedPath = Path.Combine(output.RootPath, "dlc1.pck");
+        string laterPath = Path.Combine(output.RootPath, "dlc2.pck");
+        byte[] mainBefore = File.ReadAllBytes(mainPath);
+        byte[] laterBefore = File.ReadAllBytes(laterPath);
+
+        // Change the main pack so its new bytes would differ, then make the second target a directory
+        // so the commit fails after the main target has already been replaced.
+        project.WriteAsset(
+            "data/game.toml",
+            BakeProjectFixture.GameToml.Replace(
+                "health = 120",
+                "health = 121",
+                StringComparison.Ordinal));
+        File.Delete(blockedPath);
+        Directory.CreateDirectory(blockedPath);
+
+        BakeResult failed = RunBake(project, output.RootPath);
+
+        Assert.Equal(BakeStatus.DiagnosticsError, failed.Status);
+        Assert.False(failed.PackWritten);
+        Assert.Equal(BakeFailureStage.Pack, failed.FailureStage);
+        Assert.Equal(blockedPath, failed.PackPath);
+        BakeDiagnostic diagnostic = Assert.Single(failed.Diagnostics);
+        Assert.Equal(BakeDiagnosticCodes.PackWriteFailed, diagnostic.Code);
+        Assert.Equal(blockedPath, diagnostic.FilePath);
+        Assert.Equal(mainBefore, File.ReadAllBytes(mainPath));
+        Assert.Equal(laterBefore, File.ReadAllBytes(laterPath));
+        Assert.True(Directory.Exists(blockedPath));
+        Assert.Empty(Directory.GetFiles(output.RootPath, "*.tmp", SearchOption.AllDirectories));
+        Assert.Empty(Directory.GetFiles(output.RootPath, "*.bak", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public void StagingReleasesEveryPackBuilderAndKeepsOnlyTheStagedCount()
+    {
+        using var project = CreateMultiPack("multi-staging-memory");
+        WriteMainAssets(project);
+        WriteDlcConfig(project, texture: "art/player");
+
+        using var output = TempBakeDirectory.Create();
+        var probe = new RecordingStagingProbe(output.RootPath);
+
+        BakeResult result = BakePipeline.Run(
+            project.Project,
+            new BakeOptions(Path.GetFullPath(output.RootPath), BakeMode.Debug, check: false, force: false),
+            new BakeDiagnostics(),
+            probe);
+
+        Assert.Equal(BakeStatus.Success, result.Status);
+        Assert.Equal(new[] { 0, 1 }, probe.PackIndexes);
+        Assert.Equal(new[] { 1, 2 }, probe.StagedPackCounts);
+        Assert.Equal(new[] { 1, 2 }, probe.StagingFileCounts);
+        Assert.Equal(2, probe.RetainedBuilders.Count);
+        Assert.All(probe.RetainedBuilders, builder => Assert.Null(builder));
     }
 
     [Fact]
@@ -339,4 +480,32 @@ public sealed class MultiPackBakeTests
             [bork2d]
             type = "Bork2d.Tests.Bake.Baking.GameConfig"
             """);
+
+    /// <summary>
+    /// Records the pipeline's post-staging state: the staged count, the staging files actually present
+    /// on disk, and the builder reference the pipeline still retains.
+    /// </summary>
+    private sealed class RecordingStagingProbe : IPackStagingProbe
+    {
+        private readonly string _outputRoot;
+
+        internal RecordingStagingProbe(string outputRoot) => _outputRoot = outputRoot;
+
+        internal List<int> PackIndexes { get; } = [];
+
+        internal List<int> StagedPackCounts { get; } = [];
+
+        internal List<int> StagingFileCounts { get; } = [];
+
+        internal List<PackBuilder?> RetainedBuilders { get; } = [];
+
+        public void OnPackStaged(int packIndex, int stagedPackCount, PackBuilder? retainedBuilder)
+        {
+            PackIndexes.Add(packIndex);
+            StagedPackCounts.Add(stagedPackCount);
+            StagingFileCounts.Add(
+                Directory.GetFiles(_outputRoot, "*.tmp", SearchOption.AllDirectories).Length);
+            RetainedBuilders.Add(retainedBuilder);
+        }
+    }
 }

@@ -143,7 +143,8 @@ A pack is a v1 `BORK2DPK` file: a 28-byte prefix, a maximum-quality Zstd-compres
 header carrying entries and uint64 payload offsets, and stored payloads. The header is checksummed
 with XXH3-64. `PackCompressionMode.Debug` stores payloads uncompressed;
 `PackCompressionMode.Release` compresses each payload only when that is strictly smaller. Packs are
-sorted by canonical path and written atomically.
+sorted by canonical path; the bake stages each complete pack and replaces the previous file through a
+unique backup, so a failed write is rolled back.
 
 ## Rendering data
 

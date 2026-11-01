@@ -99,6 +99,7 @@ public sealed class PackCompositionTests
 
         string destinationDirectory = Path.GetDirectoryName(packPath)!;
         Assert.Empty(Directory.GetFiles(destinationDirectory, "*.tmp"));
+        Assert.Empty(Directory.GetFiles(destinationDirectory, "*.bak"));
     }
 
     [Fact]
@@ -128,6 +129,7 @@ public sealed class PackCompositionTests
         Assert.Equal(BakeDiagnosticCodes.PackWriteFailed, diagnostic.Code);
         Assert.Equal(before, File.ReadAllBytes(packPath));
         Assert.Empty(Directory.GetFiles(directory.RootPath, "*.tmp"));
+        Assert.Empty(Directory.GetFiles(directory.RootPath, "*.bak"));
     }
 
     [Fact]
