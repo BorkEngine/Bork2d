@@ -16,8 +16,9 @@ provider package.
 | `Bork2d.Engine.Input` | `IInput`, `KeyCode`, `MouseButton` |
 | `Bork2d.Engine.Platform` | `IWindow`, `ITime` |
 
-`GameEngine`, `Transform`, `Camera`, `SpriteRender`, `AssetService`, `FrameSnapshot`, and the
-projection math are internal. `Bork2d.Engine.Assets.Pack` exposes only the pack writer and its
+`GameEngine`, `Transform`, `Camera`, `SpriteRender`, `AssetService`, `FrameSnapshot`, the typed
+render-data buffers/producers/definitions, `RenderableRegistry`, and the projection math are
+internal. `Bork2d.Engine.Assets.Pack` exposes only the pack writer and its
 compression enum; everything else there is implementation.
 
 ## Game and engine
@@ -119,16 +120,29 @@ sorted by canonical path and written atomically.
 ## Rendering data
 
 `SnapshotCapture` walks the rooted tree once under the engine's structural lock after `IGame.Tick`
-returns and writes value-only `CameraSnapshot`/`SpriteSnapshot` records into the current frame slot.
-The walk is iterative and parent-first: an explicit reusable stack carries each node's evaluated
-parent world matrix, so every node's world matrix is composed exactly once as its local matrix times
-the parent world matrix, and a deep hierarchy cannot exhaust the call stack. Each node is read under
-one acquisition of its per-object lock, and world-matrix composition happens outside that lock.
-Transforms are traversed, but only cameras and sprites are captured; the layer enum is flattened to
-a raw 32-bit mask. Each sprite record carries the immutable `SpriteRenderData` frozen when the asset
-was assigned, never the live `SpriteAsset`. Buffers are slot-private and grow to a high-water mark
-without shrinking; resetting a slot clears the previously used camera and sprite ranges, releasing
-obsolete references without shrinking the buffers, so a warm capture allocates nothing.
+returns and writes value-only records into the current frame slot. The walk is iterative and
+parent-first: an explicit reusable stack carries each node's evaluated parent world matrix, so
+every node's world matrix is composed exactly once as its local matrix times the parent world
+matrix, and a deep hierarchy cannot exhaust the call stack. Each node is read under one acquisition
+of its per-object lock, and world-matrix composition happens outside that lock.
+
+Capture is driven by registered typed producers, not a central type switch. The camera and sprite
+renderables are `CameraRenderableDefinition<TLayer>`/`SpriteRenderableDefinition<TLayer>`; each is
+both the renderable factory and its `IRenderDataProducer`. `RenderableRegistry` assigns every
+producer a render-data slot and keeps the ordered producer list, and `SnapshotCapture` offers each
+traversed node to those producers in registration order: the first match captures the node and
+returns its world matrix, and a node that matches no producer uses the plain transform path so its
+children still compose. The camera and sprite producers own the reserved slots `0` and `1`; a custom
+renderable producer owns a slot at or above `2`. Transforms are traversed, but only renderables
+produce records; the layer enum is flattened to a raw 32-bit mask. Each sprite record carries the
+immutable `SpriteRenderData` frozen when the asset was assigned, never the live `SpriteAsset`.
+
+Frame buffers are compact typed pools (`RenderDataBuffer<T>`) owned by the snapshot through a
+`RenderDataBufferSet`. They start empty, grow to the observed high-water mark, and never shrink;
+resetting a slot clears every buffer's used range (not only cameras and sprites), releasing obsolete
+references without shrinking the buffers, so a warm capture allocates nothing. Adding a renderable
+kind registers one definition/producer, plus the renderer pass for its data; it adds no capture
+switch case and no engine creation method.
 
 Camera projection is pure and shared with the renderer: the camera world matrix is the inverse-view
 source, the rounded pixel viewport supplies the aspect, and the only Y conversion is the negation
