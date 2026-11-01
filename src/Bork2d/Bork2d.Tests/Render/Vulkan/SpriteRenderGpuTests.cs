@@ -97,7 +97,9 @@ public sealed class SpriteRenderGpuTests
             Assert.Equal(2, stats.DrawCalls);
             Assert.Equal(5, stats.Instances);
             Assert.Equal(3, stats.TexturePages);
-            Assert.Equal(TexturePageCapacity.Initial, stats.TexturePageCapacity);
+            Assert.Equal(
+                TexturePageCapacity.StartupCapacity((int)renderer.MaxTexturePages),
+                stats.TexturePageCapacity);
             Assert.Equal(0, stats.SkippedSprites);
             Assert.Equal(0, stats.ValidationErrors);
             Assert.Equal(0, stats.ValidationWarnings);
@@ -470,7 +472,7 @@ public sealed class SpriteRenderGpuTests
     }
 
     [GpuFact]
-    public void TexturePageGrowthBeyondInitialCapacityRewritesDescriptorsAndStaysValidationClean()
+    public void TexturePageGrowthBeyondTheSmallStartupReservationRetiresFrameFencesAndStaysValidationClean()
     {
         const int textureCount = 300;
         var assets = new GeneratedTextureAssets();
@@ -485,8 +487,18 @@ public sealed class SpriteRenderGpuTests
         VulkanOffscreenRenderer? renderer = null;
         try
         {
-            renderer = StartOffscreen(assets, 320, 240, loggerFactory);
+            renderer = StartOffscreen(
+                assets,
+                320,
+                240,
+                loggerFactory,
+                texturePageStartupReservation: TexturePageCapacity.Initial);
             var producer = new Producer(renderer);
+
+            TexturePageStore pages = Assert.IsType<TexturePageStore>(renderer.PageStore);
+            Assert.Equal(TexturePageCapacity.Initial, pages.TexturePageCapacityInEntries);
+            Assert.Equal(TexturePageCapacity.Initial, renderer.TexturePageCapacityHighWater);
+            Assert.Equal(0, pages.GrowthCount);
 
             for (var attempt = 0; attempt < 40; attempt++)
             {
@@ -505,9 +517,9 @@ public sealed class SpriteRenderGpuTests
                 }
             }
 
-            TexturePageStore pages = Assert.IsType<TexturePageStore>(renderer.PageStore);
             Assert.True(pages.GrowthCount >= 1, "The page table never grew past its initial capacity.");
-            Assert.True(pages.TexturePageCapacityInEntries >= 512);
+            Assert.Equal(512, pages.TexturePageCapacityInEntries);
+            Assert.Equal(512, renderer.TexturePageCapacityHighWater);
             Assert.Equal(textureCount + 1, pages.TexturePageCount);
             Assert.Equal(TexturePageStore.DefaultUploadBudgetBytes, pages.UploadBudgetBytes);
             Assert.Equal(TexturePageStore.DefaultResidencyBudgetBytes, pages.ResidencyBudgetBytes);
@@ -515,7 +527,75 @@ public sealed class SpriteRenderGpuTests
             Assert.Equal(textureCount, stats.Instances);
             Assert.Equal(1, stats.DrawCalls);
             Assert.Equal(textureCount + 1, stats.TexturePages);
-            Assert.True(stats.TexturePageCapacity >= 512);
+            Assert.Equal(512, stats.TexturePageCapacity);
+            Assert.Equal(0, stats.ValidationErrors);
+            Assert.Equal(0, stats.ValidationWarnings);
+            Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+            Assert.Equal(0, renderer.Counters.ValidationWarningCount);
+            Assert.Null(renderer.FatalException);
+            StopAndAssertClean(renderer);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    [GpuFact]
+    public void TheDefaultStartupReservationAvoidsTexturePageGrowthForANormalScene()
+    {
+        const int textureCount = 300;
+        var assets = new GeneratedTextureAssets();
+        var sprites = new SpriteAsset[textureCount];
+        for (var index = 0; index < textureCount; index++)
+        {
+            string path = assets.AddTexture($"tex/{index}");
+            sprites[index] = MakeSprite(path);
+        }
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out CapturingLoggerProvider provider);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, 320, 240, loggerFactory);
+            var producer = new Producer(renderer);
+
+            int startupCapacity = TexturePageCapacity.StartupCapacity(
+                (int)renderer.MaxTexturePages);
+            TexturePageStore pages = Assert.IsType<TexturePageStore>(renderer.PageStore);
+            Assert.True(
+                startupCapacity >= textureCount + 1,
+                $"The device's bindless limit of {renderer.MaxTexturePages} cannot reserve "
+                    + $"{textureCount + 1} entries, so the startup reservation cannot hold this scene.");
+            Assert.Equal(startupCapacity, pages.TexturePageCapacityInEntries);
+            Assert.Equal(startupCapacity, renderer.TexturePageCapacityHighWater);
+            Assert.Equal(0, pages.GrowthCount);
+
+            for (var attempt = 0; attempt < 40; attempt++)
+            {
+                PublishFrame(renderer, producer, snapshot =>
+                {
+                    AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color);
+                    for (var index = 0; index < textureCount; index++)
+                    {
+                        AddSprite(snapshot, sprites[index], layer: 1u, zIndex: index, x: index);
+                    }
+                });
+
+                if (renderer.RenderStats.Instances == textureCount)
+                {
+                    break;
+                }
+            }
+
+            Assert.Equal(0, pages.GrowthCount);
+            Assert.Equal(textureCount + 1, pages.TexturePageCount);
+            Assert.Equal(startupCapacity, pages.TexturePageCapacityInEntries);
+            RenderStats stats = renderer.RenderStats;
+            Assert.Equal(textureCount, stats.Instances);
+            Assert.Equal(1, stats.DrawCalls);
+            Assert.Equal(textureCount + 1, stats.TexturePages);
+            Assert.Equal(startupCapacity, stats.TexturePageCapacity);
             Assert.Equal(0, stats.ValidationErrors);
             Assert.Equal(0, stats.ValidationWarnings);
             Assert.Equal(0, renderer.Counters.ValidationErrorCount);
@@ -788,7 +868,8 @@ public sealed class SpriteRenderGpuTests
         int height,
         ILoggerFactory loggerFactory,
         int textureUploadBudgetBytes = TexturePageStore.DefaultUploadBudgetBytes,
-        long textureResidencyBudgetBytes = TexturePageStore.DefaultResidencyBudgetBytes)
+        long textureResidencyBudgetBytes = TexturePageStore.DefaultResidencyBudgetBytes,
+        int texturePageStartupReservation = TexturePageCapacity.StartupReservation)
     {
         var startInfo = new RendererStartInfo
         {
@@ -801,6 +882,7 @@ public sealed class SpriteRenderGpuTests
             Assets = assets,
             TextureUploadBudgetBytes = textureUploadBudgetBytes,
             TextureResidencyBudgetBytes = textureResidencyBudgetBytes,
+            TexturePageStartupReservation = texturePageStartupReservation,
         };
 
         var renderer = Assert.IsType<VulkanOffscreenRenderer>(

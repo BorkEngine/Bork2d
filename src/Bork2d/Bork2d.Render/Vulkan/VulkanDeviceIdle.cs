@@ -4,13 +4,13 @@ using Silk.NET.Vulkan;
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// The shared <c>vkDeviceWaitIdle</c> wrapper used before swapchain recreation, surface recovery, and
-/// texture-page capacity growth.
+/// The shared <c>vkDeviceWaitIdle</c> wrapper used before swapchain recreation and surface recovery.
 /// </summary>
 /// <remarks>
-/// Idle waits are forbidden in the steady-state frame loop; only recreation, growth, and shutdown may
-/// call them (D-M6-15). A non-success result is a renderer fatal with the operation in the message so
-/// the host can attribute the failure.
+/// Idle waits are forbidden in the steady-state frame loop and are not used for texture-page
+/// capacity growth: growth retires the in-flight frame fences instead (D-M6-15). Recreation,
+/// surface recovery, and shutdown may still call them. A non-success result is a renderer fatal
+/// with the operation in the message so the host can attribute the failure.
 /// </remarks>
 internal static class VulkanDeviceIdle
 {

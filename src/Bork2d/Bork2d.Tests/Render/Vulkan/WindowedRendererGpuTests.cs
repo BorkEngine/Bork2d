@@ -210,7 +210,11 @@ public sealed class WindowedRendererGpuTests
             TexturePageStore pages = Assert.IsType<TexturePageStore>(renderer.PageStore);
             Assert.True(pages.IsPlaceholderReady, "The startup placeholder page is not resident.");
             Assert.Equal(1, pages.TexturePageCount);
-            Assert.Equal(TexturePageCapacity.Initial, pages.TexturePageCapacityInEntries);
+            int startupCapacity = TexturePageCapacity.StartupCapacity(
+                (int)renderer.MaxTexturePages);
+            Assert.Equal(startupCapacity, pages.TexturePageCapacityInEntries);
+            Assert.Equal(startupCapacity, renderer.TexturePageCapacityHighWater);
+            Assert.Equal(0, pages.GrowthCount);
             Assert.Equal(0, pages.FailedPathCount);
             _output.WriteLine(
                 $"pages: resident={pages.TexturePageCount}, "

@@ -73,7 +73,7 @@ internal sealed class TexturePageStore
     private readonly List<TexturePage> _pending = [];
     private readonly List<TexturePage> _uploadQueue = [];
     private readonly List<TexturePage> _uploading = [];
-    private int _capacity = TexturePageCapacity.Initial;
+    private int _capacity;
     private int _nextIndex = TexturePageCapacity.PlaceholderIndex + 1;
     private int _readyRealPages;
     private int _failedPaths;
@@ -109,9 +109,16 @@ internal sealed class TexturePageStore
     /// The texture residency budget in bytes. It is stored for the residency/eviction policy and is
     /// not enforced by this type yet.
     /// </param>
+    /// <param name="initialCapacity">
+    /// The startup table capacity, including the placeholder. The renderer passes its startup
+    /// reservation here so a normal run does not grow at the policy's base capacity. It must be at
+    /// least <see cref="TexturePageCapacity.Initial"/> and at most
+    /// <paramref name="effectiveLimit"/>.
+    /// </param>
     /// <exception cref="Bork2dException">The limit cannot support the initial capacity.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// <paramref name="uploadBudgetBytes"/> or <paramref name="residencyBudgetBytes"/> is not positive.
+    /// <paramref name="uploadBudgetBytes"/> or <paramref name="residencyBudgetBytes"/> is not
+    /// positive, or <paramref name="initialCapacity"/> is outside the limit.
     /// </exception>
     internal TexturePageStore(
         IAssets assets,
@@ -121,7 +128,8 @@ internal sealed class TexturePageStore
         ILogger logger,
         IAssetCatalogVersion? catalogVersion = null,
         int uploadBudgetBytes = DefaultUploadBudgetBytes,
-        long residencyBudgetBytes = DefaultResidencyBudgetBytes)
+        long residencyBudgetBytes = DefaultResidencyBudgetBytes,
+        int initialCapacity = TexturePageCapacity.Initial)
     {
         ArgumentNullException.ThrowIfNull(assets);
         ArgumentNullException.ThrowIfNull(gpu);
@@ -130,6 +138,10 @@ internal sealed class TexturePageStore
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(residencyBudgetBytes);
 
         TexturePageCapacity.EnsureSupportsInitialCapacity(effectiveLimit);
+        ArgumentOutOfRangeException.ThrowIfLessThan(
+            initialCapacity,
+            TexturePageCapacity.Initial);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(initialCapacity, effectiveLimit);
         _assets = assets;
         _gpu = gpu;
         _logger = logger;
@@ -139,6 +151,7 @@ internal sealed class TexturePageStore
         _catalogVersionSeen = catalogVersion?.CatalogVersion ?? 0;
         _uploadBudgetBytes = uploadBudgetBytes;
         _residencyBudgetBytes = residencyBudgetBytes;
+        _capacity = initialCapacity;
     }
 
     /// <summary>

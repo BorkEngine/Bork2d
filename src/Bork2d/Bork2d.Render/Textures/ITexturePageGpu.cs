@@ -25,9 +25,10 @@ internal interface ITexturePageGpu
     /// resident page descriptor.
     /// </summary>
     /// <remarks>
-    /// Growth requires all in-flight frames to be idle, so the implementation waits the device
-    /// before recreating the descriptor pools/sets. Calling it with the current capacity is a
-    /// no-op.
+    /// Growth must not replace a descriptor set while a frame using it is in flight, so the
+    /// implementation retires every in-flight frame fence before recreating the descriptor
+    /// pools/sets. It never calls <c>vkDeviceWaitIdle</c> for growth. Calling it with the current
+    /// capacity is a no-op.
     /// </remarks>
     /// <param name="capacity">The new total capacity, including the placeholder.</param>
     void EnsureCapacity(int capacity);

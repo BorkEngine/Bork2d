@@ -48,7 +48,7 @@ internal interface IVulkanFrameSet
     /// <summary>Gets the total instance-buffer growth count recorded for the stop log.</summary>
     int StopLogInstanceGrowths { get; }
 
-    /// <summary>Waits the device idle and recreates every frame's bindless set at a new capacity.</summary>
+    /// <summary>Waits every frame fence and recreates every frame's bindless set at a new capacity.</summary>
     /// <param name="device">The selected logical device.</param>
     /// <param name="capacity">The new bindless page capacity, including the placeholder.</param>
     void EnsureBindlessCapacity(VulkanDevice device, int capacity);

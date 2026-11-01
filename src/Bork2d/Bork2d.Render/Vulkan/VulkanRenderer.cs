@@ -39,8 +39,9 @@ namespace Bork2d.Render.Vulkan;
 /// </para>
 /// <para>
 /// Steady-state frames allocate nothing, log nothing, and never call <c>vkDeviceWaitIdle</c>.
-/// Recreation and shutdown are the only places <c>vkDeviceWaitIdle</c> is allowed (D-M6-15). The
-/// renderer never calls SDL and never destroys the host-owned instance or surface.
+/// Swapchain recreation and shutdown are the only places <c>vkDeviceWaitIdle</c> is allowed
+/// (D-M6-15); texture-page capacity growth retires the in-flight frame fences instead of idling the
+/// device. The renderer never calls SDL and never destroys the host-owned instance or surface.
 /// </para>
 /// </remarks>
 internal sealed unsafe class VulkanRenderer : IRenderer
@@ -137,6 +138,12 @@ internal sealed unsafe class VulkanRenderer : IRenderer
 
     /// <summary>Gets the texture-page cache (GPU tests observe the placeholder and counts).</summary>
     internal TexturePageStore? PageStore => _textures?.Pages;
+
+    /// <summary>Gets the device's effective bindless page limit, or <c>0</c> before the pipeline exists.</summary>
+    internal uint MaxTexturePages => _textures?.MaxTexturePages ?? 0;
+
+    /// <summary>Gets the largest bindless page capacity among the frames (GPU tests/diagnostics).</summary>
+    internal int TexturePageCapacityHighWater => _frames.BindlessCapacityHighWater;
 
     /// <summary>Gets the largest instance-buffer capacity among the frames (GPU tests/diagnostics).</summary>
     internal int InstanceCapacityHighWater => _frames.InstanceCapacityHighWater;
@@ -252,8 +259,11 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             return false;
         }
 
-        CreateFrames();
-        _textures.CreatePageStore();
+        int startupPageCapacity = TexturePageCapacity.StartupCapacity(
+            (int)_textures.MaxTexturePages,
+            _startInfo.TexturePageStartupReservation);
+        CreateFrames(startupPageCapacity);
+        _textures.CreatePageStore(startupPageCapacity);
         _passes = new RenderPassRegistry(
             new SpriteRenderPass(_textures.Pipeline!, _textures.Pages!, _logger));
         _passLabel = instance.CreateDebugLabel("Bork2d windowed passes");
@@ -454,7 +464,8 @@ internal sealed unsafe class VulkanRenderer : IRenderer
 
         // Advance the texture-page state machine once per frame, before recording: completed
         // descriptor/payload loads prepare uploads, completed uploads write their bindless
-        // descriptor, and a capacity growth recreates the frame sets while the device is idle.
+        // descriptor, and a capacity growth retires every in-flight frame fence before recreating
+        // the frame sets.
         _textures!.Pump();
 
         uint imageIndex = 0;
@@ -831,7 +842,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             _swapchain.PresentMode);
     }
 
-    private void CreateFrames()
+    private void CreateFrames(int pageCapacity)
     {
         VulkanDevice device = _device!;
         SpritePipeline pipeline = _textures?.Pipeline
@@ -851,7 +862,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
                 index,
                 device.QueueFamilyIndex,
                 pipeline,
-                TexturePageCapacity.Initial,
+                pageCapacity,
                 device.Limits.MaxStorageBufferRange,
                 _instance,
                 _logger);

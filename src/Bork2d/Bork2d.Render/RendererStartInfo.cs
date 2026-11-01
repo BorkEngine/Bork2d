@@ -87,6 +87,19 @@ internal sealed class RendererStartInfo
     internal int TextureUploadBudgetBytes { get; init; } = TexturePageStore.DefaultUploadBudgetBytes;
 
     /// <summary>
+    /// Gets the maximum texture-page capacity reserved at startup (default 4096 entries, including
+    /// the placeholder). It is clamped to at least the policy's initial capacity and to the device
+    /// limit.
+    /// </summary>
+    /// <remarks>
+    /// This is an internal seam, not part of the public builder surface: GPU tests request a smaller
+    /// reservation to exercise capacity growth. A normal run reserves
+    /// <see cref="TexturePageCapacity.StartupReservation"/> so it does not grow at 256/512.
+    /// </remarks>
+    internal int TexturePageStartupReservation { get; init; } =
+        TexturePageCapacity.StartupReservation;
+
+    /// <summary>
     /// Gets the host callback that creates the replacement surface for the single D-M6-16
     /// recovery, or <see langword="null"/> when recovery is unavailable.
     /// </summary>

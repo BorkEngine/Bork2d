@@ -18,7 +18,8 @@ tick. `RequestStop()` is a request, and `Join()` guarantees no renderer thread s
 - While minimized or at zero extent, the windowed renderer frees the newest snapshot without GPU
   work.
 - Steady-state frames allocate nothing, log nothing, and never call `vkDeviceWaitIdle`.
-  `vkDeviceWaitIdle` is allowed only during recreation and shutdown.
+  `vkDeviceWaitIdle` is allowed only during recreation and shutdown; texture-page capacity growth
+  retires every in-flight frame fence instead.
 
 Windowed and offscreen compose the same internal services instead of duplicating them:
 
@@ -119,9 +120,15 @@ attachment.
 
 Texture pages are keyed by canonical `TextureDescriptor` path within the current asset catalog.
 Index `0` is a placeholder page; sprites with an absent texture reference draw with it. The table
-starts at 256 entries (placeholder plus 255 pages) and doubles when full, up to the smaller of the
-device's per-stage and per-set update-after-bind sampled-image limits (capped at 1,048,576).
-Reaching the limit is a fatal `Bork2dException`; pages are never silently dropped.
+starts at the startup capacity: the device's bindless limit clamped to the 256-entry base capacity
+(placeholder plus 255 pages) and the 4096-entry startup reservation. A normal run therefore starts
+at 4096 entries and does not grow at 256/512. The reservation is an internal
+`RendererStartInfo`/`Bork2dAppOptions` seam (default 4096), not a public builder option. When the
+table is full the capacity doubles, up to the smaller of the device's per-stage and per-set
+update-after-bind sampled-image limits (capped at 1,048,576). Growth waits every in-flight frame
+fence before recreating each frame's descriptor pool/set, so the device is never idled for growth
+and no descriptor set is recreated while a frame using it is in flight. Reaching the limit is a
+fatal `Bork2dException`; pages are never silently dropped.
 
 A page moves through `Pending -> Uploading -> Ready`, or `Failed`:
 

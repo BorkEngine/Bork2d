@@ -19,6 +19,59 @@ public sealed class TexturePageCapacityTests
         Assert.Equal(TexturePageCapacity.Initial, TexturePageCapacity.InitialRealPages + 1);
     }
 
+    [Fact]
+    public void StartupReservationIs4096Entries()
+    {
+        Assert.Equal(4096, TexturePageCapacity.StartupReservation);
+        Assert.True(
+            TexturePageCapacity.StartupReservation > TexturePageCapacity.Initial,
+            "The startup reservation must be larger than the base capacity.");
+    }
+
+    [Theory]
+    [InlineData(512, 512)]
+    [InlineData(1024, 1024)]
+    [InlineData(2048, 2048)]
+    [InlineData(4096, 4096)]
+    [InlineData(8192, 4096)]
+    [InlineData(1 << 20, 4096)]
+    public void StartupCapacityClampsTheDeviceLimitToTheReservation(
+        int effectiveLimit,
+        int expected)
+    {
+        Assert.Equal(expected, TexturePageCapacity.StartupCapacity(effectiveLimit));
+    }
+
+    [Fact]
+    public void StartupCapacityNeverDropsBelowTheInitialCapacity()
+    {
+        Assert.Equal(
+            TexturePageCapacity.Initial,
+            TexturePageCapacity.StartupCapacity(TexturePageCapacity.Initial - 1));
+        Assert.Equal(TexturePageCapacity.Initial, TexturePageCapacity.StartupCapacity(0));
+    }
+
+    [Fact]
+    public void StartupCapacityHonorsASmallerExplicitReservation()
+    {
+        Assert.Equal(512, TexturePageCapacity.StartupCapacity(4096, 512));
+        Assert.Equal(1024, TexturePageCapacity.StartupCapacity(4096, 1024));
+        Assert.Equal(2048, TexturePageCapacity.StartupCapacity(4096, 2048));
+        Assert.Equal(
+            TexturePageCapacity.Initial,
+            TexturePageCapacity.StartupCapacity(4096, TexturePageCapacity.Initial));
+        Assert.Equal(1024, TexturePageCapacity.StartupCapacity(1024, 2048));
+    }
+
+    [Fact]
+    public void StartupCapacityRejectsAReservationBelowTheInitialCapacity()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => TexturePageCapacity.StartupCapacity(
+                4096,
+                TexturePageCapacity.Initial - 1));
+    }
+
     [Theory]
     [InlineData(1024u, 512u, 512)]
     [InlineData(512u, 1024u, 512)]
