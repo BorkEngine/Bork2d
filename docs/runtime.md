@@ -17,10 +17,13 @@ instance/surface, renderer composition, the three host loops, and logging. It ex
 | `WithTitle`, `WithSize`, `WithResizable`, `WithFullscreen`, `WithVSync` | Windowed-only options. |
 | `WithMaxDeltaTime(double)` | Gameplay delta clamp for windowed/offscreen ticks (default `0.25` s). |
 | `WithValidation(bool)` | Requests Vulkan validation layers. Default is on in `DEBUG`, off otherwise. |
+| `WithTextureResidencyBudget(long)` | Texture residency budget in bytes for the residency policy (default 1 GiB, `1073741824`). |
+| `WithTextureUploadBudget(int)` | Maximum texture upload bytes the renderer starts per frame (default 128 MiB, `134217728`). |
 | `WithLogging(Action<ILoggingBuilder>)` | Replaces the default console provider; the callback owns provider configuration. |
 
 `WithHeadless` and `WithOffscreen` are mutually exclusive, and window options are rejected in either
-mode. Configuration errors throw `Bork2dException` from `Build`.
+mode. The texture budgets must be positive. Configuration errors throw `Bork2dException` from
+`Build`.
 
 `Build()` validates the configuration and creates the logger factory, engine, clock, an unstarted
 asset service, and (for windowed apps) detached window/input proxies. Offscreen apps get a

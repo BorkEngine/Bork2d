@@ -350,6 +350,8 @@ public sealed class SpriteRenderGpuTests
 
             TexturePageStore pages = Assert.IsType<TexturePageStore>(renderer.PageStore);
             Assert.True(pages.FailedPathCount >= 1, "The missing texture path was not failed.");
+            Assert.Equal(TexturePageStore.DefaultUploadBudgetBytes, pages.UploadBudgetBytes);
+            Assert.Equal(TexturePageStore.DefaultResidencyBudgetBytes, pages.ResidencyBudgetBytes);
             RenderStats stats = renderer.RenderStats;
             Assert.Equal(1, stats.DrawCalls);
             Assert.Equal(1, stats.Instances);
@@ -507,6 +509,8 @@ public sealed class SpriteRenderGpuTests
             Assert.True(pages.GrowthCount >= 1, "The page table never grew past its initial capacity.");
             Assert.True(pages.TexturePageCapacityInEntries >= 512);
             Assert.Equal(textureCount + 1, pages.TexturePageCount);
+            Assert.Equal(TexturePageStore.DefaultUploadBudgetBytes, pages.UploadBudgetBytes);
+            Assert.Equal(TexturePageStore.DefaultResidencyBudgetBytes, pages.ResidencyBudgetBytes);
             RenderStats stats = renderer.RenderStats;
             Assert.Equal(textureCount, stats.Instances);
             Assert.Equal(1, stats.DrawCalls);
@@ -741,6 +745,32 @@ public sealed class SpriteRenderGpuTests
         }
     }
 
+    [GpuFact]
+    public void TextureBudgetsFromTheStartInfoReachThePageStore()
+    {
+        var assets = new GeneratedTextureAssets();
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(
+                assets,
+                64,
+                64,
+                loggerFactory,
+                textureUploadBudgetBytes: 4096,
+                textureResidencyBudgetBytes: 8192);
+            TexturePageStore pages = Assert.IsType<TexturePageStore>(renderer.PageStore);
+
+            Assert.Equal(4096, pages.UploadBudgetBytes);
+            Assert.Equal(8192, pages.ResidencyBudgetBytes);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
     private static ILoggerFactory CreateLoggerFactory(out CapturingLoggerProvider provider)
     {
         var created = new CapturingLoggerProvider();
@@ -756,7 +786,9 @@ public sealed class SpriteRenderGpuTests
         GeneratedTextureAssets assets,
         int width,
         int height,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        int textureUploadBudgetBytes = TexturePageStore.DefaultUploadBudgetBytes,
+        long textureResidencyBudgetBytes = TexturePageStore.DefaultResidencyBudgetBytes)
     {
         var startInfo = new RendererStartInfo
         {
@@ -767,6 +799,8 @@ public sealed class SpriteRenderGpuTests
             ValidationRequested = true,
             LoggerFactory = loggerFactory,
             Assets = assets,
+            TextureUploadBudgetBytes = textureUploadBudgetBytes,
+            TextureResidencyBudgetBytes = textureResidencyBudgetBytes,
         };
 
         var renderer = Assert.IsType<VulkanOffscreenRenderer>(

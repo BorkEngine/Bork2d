@@ -165,6 +165,8 @@ public sealed class RenderStatsTests
         NonEmptyCameras: 2,
         TexturePages: 4,
         TexturePageCapacity: 256,
+        TextureUploadsPending: 2,
+        TextureUploadBytesPending: 8192,
         SkippedSprites: 1,
         ValidationErrors: 0,
         ValidationWarnings: 0);

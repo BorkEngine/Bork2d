@@ -105,6 +105,9 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     /// and <see cref="RenderStats.ValidationWarnings"/>, which are cumulative for the run.
     /// <see cref="RenderStats.TexturePages"/> and <see cref="RenderStats.TexturePageCapacity"/>
     /// include the placeholder page at index <c>0</c>.
+    /// <see cref="RenderStats.TextureUploadsPending"/> and
+    /// <see cref="RenderStats.TextureUploadBytesPending"/> report the uploads the frame's pump left
+    /// queued by the per-frame upload budget.
     /// </para>
     /// <para>
     /// Callable from any thread. The getter returns <see langword="default"/> before the first

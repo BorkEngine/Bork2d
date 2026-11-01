@@ -339,6 +339,50 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     }
 
     /// <summary>
+    /// Sets the texture residency budget carried to the renderer's page store.
+    /// </summary>
+    /// <param name="bytes">
+    /// The positive budget in bytes. The default is 1 GiB (1,073,741,824 bytes).
+    /// </param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <remarks>
+    /// The budget describes how much texture-page image memory the residency policy may keep
+    /// resident. It is validated and carried now; eviction itself is not implemented, so a page
+    /// created since the last asset mount stays GPU-resident.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
+    public Bork2dAppBuilder<TLayer> WithTextureResidencyBudget(long bytes)
+    {
+        ThrowIfBuilt();
+        _options.TextureResidencyBudgetBytes = bytes;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the maximum texture upload bytes the renderer starts per frame.
+    /// </summary>
+    /// <param name="bytesPerFrame">
+    /// The positive per-frame budget in bytes. The default is 128 MiB (134,217,728 bytes).
+    /// </param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <remarks>
+    /// Each page upload is charged its validated payload size, <c>width * height * 4</c>. The first
+    /// queued upload of a frame always starts even when it alone exceeds the budget, so one large
+    /// texture cannot starve. <see cref="Build"/> rejects a non-positive value.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The builder was already successfully built; a successful <see cref="Build"/> consumes it.
+    /// </exception>
+    public Bork2dAppBuilder<TLayer> WithTextureUploadBudget(int bytesPerFrame)
+    {
+        ThrowIfBuilt();
+        _options.TextureUploadBudgetBytes = bytesPerFrame;
+        return this;
+    }
+
+    /// <summary>
     /// Supplies an internal test seam for the SDL adapter factory. Not part of the public API.
     /// </summary>
     /// <param name="factory">Creates the SDL seam on the OS/window thread.</param>
@@ -626,6 +670,20 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
         {
             throw new Bork2dException(
                 $"Max delta time must be greater than zero; got {_options.MaxDeltaTime}.");
+        }
+
+        if (_options.TextureResidencyBudgetBytes <= 0)
+        {
+            throw new Bork2dException(
+                "The texture residency budget must be greater than zero; got "
+                + $"{_options.TextureResidencyBudgetBytes} bytes.");
+        }
+
+        if (_options.TextureUploadBudgetBytes <= 0)
+        {
+            throw new Bork2dException(
+                "The texture upload budget must be greater than zero; got "
+                + $"{_options.TextureUploadBudgetBytes} bytes per frame.");
         }
 
         if (string.IsNullOrWhiteSpace(_options.AssetsPackPath))

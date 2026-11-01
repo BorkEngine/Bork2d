@@ -31,6 +31,9 @@ internal sealed class RendererTextures : IBindlessPageWriter
     private readonly IAssets _assets;
     private readonly ILogger _logger;
     private readonly IVulkanFrameSet _frames;
+    private readonly IAssetCatalogVersion? _assetCatalogVersion;
+    private readonly long _textureResidencyBudgetBytes;
+    private readonly int _textureUploadBudgetBytes;
     private readonly string _modeDescription;
     private SpritePipeline? _pipeline;
     private VulkanTexturePages? _gpu;
@@ -48,19 +51,29 @@ internal sealed class RendererTextures : IBindlessPageWriter
     /// <param name="logger">The <c>Bork2d.Render</c> logger.</param>
     /// <param name="frames">The renderer's GPU frames in flight; the composition does not own them.</param>
     /// <param name="modeDescription">The renderer mode name used in startup failures.</param>
+    /// <param name="assetCatalogVersion">
+    /// The asset catalog identity seam, or <see langword="null"/> when the assets cannot change.
+    /// </param>
+    /// <param name="textureUploadBudgetBytes">The per-frame texture upload budget in bytes.</param>
+    /// <param name="textureResidencyBudgetBytes">The texture residency budget in bytes.</param>
     internal RendererTextures(
         VulkanDevice device,
         IVulkanInstance? instance,
         IAssets assets,
         ILogger logger,
         IVulkanFrameSet frames,
-        string modeDescription)
+        string modeDescription,
+        IAssetCatalogVersion? assetCatalogVersion = null,
+        int textureUploadBudgetBytes = TexturePageStore.DefaultUploadBudgetBytes,
+        long textureResidencyBudgetBytes = TexturePageStore.DefaultResidencyBudgetBytes)
     {
         ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(assets);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(frames);
         ArgumentException.ThrowIfNullOrEmpty(modeDescription);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(textureUploadBudgetBytes);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(textureResidencyBudgetBytes);
 
         _device = device;
         _instance = instance;
@@ -68,6 +81,9 @@ internal sealed class RendererTextures : IBindlessPageWriter
         _logger = logger;
         _frames = frames;
         _modeDescription = modeDescription;
+        _assetCatalogVersion = assetCatalogVersion;
+        _textureUploadBudgetBytes = textureUploadBudgetBytes;
+        _textureResidencyBudgetBytes = textureResidencyBudgetBytes;
     }
 
     /// <summary>Gets the sprite pipeline owner, or <see langword="null"/> before startup.</summary>
@@ -119,7 +135,10 @@ internal sealed class RendererTextures : IBindlessPageWriter
             _gpu,
             (int)pipeline.MaxTexturePages,
             (int)_device.Limits.MaxImageDimension2D,
-            _logger);
+            _logger,
+            _assetCatalogVersion,
+            _textureUploadBudgetBytes,
+            _textureResidencyBudgetBytes);
         _pages.Start();
     }
 

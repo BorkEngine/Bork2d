@@ -1,6 +1,7 @@
 using System.Reflection;
 using Bork2d.Engine;
 using Bork2d.Render;
+using Bork2d.Render.Textures;
 using Bork2d.Render.Vulkan;
 using Bork2d.Runtime.Sdl;
 using Microsoft.Extensions.Logging;
@@ -13,8 +14,8 @@ namespace Bork2d.Runtime.Hosting;
 /// </summary>
 /// <remarks>
 /// The host consumes the game, the mode, the window options, the maximum delta time (windowed/
-/// offscreen only), the headless tick rate, the asset selection, the internal SDL/renderer/Vulkan
-/// seams, and the scheduler clock seam. Validation happens once in
+/// offscreen only), the headless tick rate, the asset selection, the texture budgets, the internal
+/// SDL/renderer/Vulkan seams, and the scheduler clock seam. Validation happens once in
 /// <see cref="Bork2dAppBuilder{TLayer}.Build"/>.
 /// </remarks>
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
@@ -95,6 +96,20 @@ internal sealed class Bork2dAppOptions<TLayer> where TLayer : struct, Enum
 
     /// <summary>Gets or sets a value indicating whether GPU validation layers are requested.</summary>
     internal bool Validation { get; set; }
+
+    /// <summary>
+    /// Gets or sets the texture residency budget in bytes, carried to the page store for the
+    /// residency/eviction policy. Defaults to 1 GiB.
+    /// </summary>
+    internal long TextureResidencyBudgetBytes { get; set; } =
+        TexturePageStore.DefaultResidencyBudgetBytes;
+
+    /// <summary>
+    /// Gets or sets the maximum texture upload bytes the renderer starts per frame. Defaults to
+    /// 128 MiB.
+    /// </summary>
+    internal int TextureUploadBudgetBytes { get; set; } =
+        TexturePageStore.DefaultUploadBudgetBytes;
 
     /// <summary>
     /// Gets or sets the internal test seam for creating the SDL adapter on the OS/window thread.

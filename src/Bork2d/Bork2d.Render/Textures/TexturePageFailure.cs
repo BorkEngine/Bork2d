@@ -4,8 +4,9 @@ namespace Bork2d.Render.Textures;
 /// Why a texture page's content was rejected (M8 §6.5/§6.12).
 /// </summary>
 /// <remarks>
-/// Every value is a content failure: the path is marked failed for the run, the sprite draws the
-/// placeholder, and the renderer keeps running. Vulkan allocation/copy/queue failures are fatal
+/// Every value is a content failure: the path is marked failed for the current asset catalog, the
+/// sprite draws the placeholder, and the renderer keeps running. A later mount retires the failure,
+/// so the path is retried from the new catalog. Vulkan allocation/copy/queue failures are fatal
 /// <c>Bork2dException</c>s instead and never map to this enum.
 /// </remarks>
 internal enum TexturePageFailure

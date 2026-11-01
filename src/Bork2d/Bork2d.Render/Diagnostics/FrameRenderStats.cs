@@ -21,8 +21,16 @@ internal static class FrameRenderStats
     /// <param name="framebufferWidth">The target/framebuffer width in pixels for this frame.</param>
     /// <param name="framebufferHeight">The target/framebuffer height in pixels for this frame.</param>
     /// <param name="stats">The planned frame's aggregate render-pass statistics.</param>
-    /// <param name="texturePages">The resident pages, including the placeholder.</param>
+    /// <param name="texturePages">
+    /// The ready pages in the current catalog, including the placeholder; retired images are excluded.
+    /// </param>
     /// <param name="texturePageCapacity">The current bindless page capacity, including the placeholder.</param>
+    /// <param name="textureUploadsPending">
+    /// The content-ready pages queued for upload but not begun by this frame's pump.
+    /// </param>
+    /// <param name="textureUploadBytesPending">
+    /// The declared payload bytes of <paramref name="textureUploadsPending"/>.
+    /// </param>
     /// <param name="validationErrors">The cumulative fatal validation errors for the run.</param>
     /// <param name="validationWarnings">The cumulative validation warnings for the run.</param>
     /// <returns>The immutable public snapshot.</returns>
@@ -33,6 +41,8 @@ internal static class FrameRenderStats
         RenderPassStats stats,
         int texturePages,
         int texturePageCapacity,
+        int textureUploadsPending,
+        long textureUploadBytesPending,
         long validationErrors,
         long validationWarnings)
     {
@@ -48,6 +58,8 @@ internal static class FrameRenderStats
             NonEmptyCameras: stats.NonEmptyCameras,
             TexturePages: texturePages,
             TexturePageCapacity: texturePageCapacity,
+            TextureUploadsPending: textureUploadsPending,
+            TextureUploadBytesPending: textureUploadBytesPending,
             SkippedSprites: stats.SkippedSprites,
             ValidationErrors: validationErrors,
             ValidationWarnings: validationWarnings);

@@ -242,7 +242,10 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             _startInfo.Assets,
             _logger,
             _frames,
-            "windowed");
+            "windowed",
+            _startInfo.AssetCatalogVersion,
+            _startInfo.TextureUploadBudgetBytes,
+            _startInfo.TextureResidencyBudgetBytes);
         CreateSwapchain(reason: null);
         if (_lifecycle.Control.IsStopRequested)
         {
@@ -519,7 +522,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             (int)swapchain.Extent.Height,
             _passes.Stats,
             _textures.Pages?.TexturePageCount ?? 0,
-            _textures.Pages?.TexturePageCapacityInEntries ?? 0);
+            _textures.Pages?.TexturePageCapacityInEntries ?? 0,
+            _textures.Pages?.PendingUploadCount ?? 0,
+            _textures.Pages?.PendingUploadBytes ?? 0);
         if (present is Result.Success or Result.SuboptimalKhr)
         {
             _lifecycle.IncrementFramesPresented();

@@ -1,4 +1,5 @@
 using Bork2d.Engine;
+using Bork2d.Engine.Assets;
 using Bork2d.Engine.Scene;
 using Bork2d.Render;
 using Bork2d.Render.Vulkan;
@@ -91,6 +92,9 @@ internal sealed class RendererComposition<TLayer> where TLayer : struct, Enum
             ValidationRequested = _options.Validation,
             LoggerFactory = _loggerFactory,
             Assets = _engine.Assets,
+            AssetCatalogVersion = _engine.Assets as IAssetCatalogVersion,
+            TextureResidencyBudgetBytes = _options.TextureResidencyBudgetBytes,
+            TextureUploadBudgetBytes = _options.TextureUploadBudgetBytes,
             CreateReplacementSurface = platform is null
                 ? null
                 : platform.CreateReplacementSurface,

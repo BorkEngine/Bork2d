@@ -7,9 +7,11 @@ namespace Bork2d.Render.Textures;
 /// bindless index, and the in-flight descriptor/payload loads (M8 §6.5).
 /// </summary>
 /// <remarks>
-/// The record is created on first sighting of a path and lives for the run. A successful load
-/// assigns an index; a failed path keeps its record (<see cref="TexturePageState.Failed"/>) so a
-/// later descriptor for the same path reuses the failure instead of retrying.
+/// The record is created on first sighting of a path. A successful load assigns an index; a failed
+/// path keeps its record (<see cref="TexturePageState.Failed"/>) so a later descriptor for the same
+/// path reuses the failure instead of retrying. A catalog change (a later overlay mount) retires the
+/// whole record set: these records leave the page map and are never reused, while a later
+/// <c>EnsurePage</c> creates a fresh record that reloads the path from the new catalog.
 /// </remarks>
 internal sealed class TexturePage
 {
@@ -43,4 +45,29 @@ internal sealed class TexturePage
 
     /// <summary>Gets or sets the loaded descriptor, or <see langword="null"/> before it loads.</summary>
     internal TextureDescriptor? Descriptor { get; set; }
+
+    /// <summary>
+    /// Gets or sets the validated payload held while the page waits for its upload budget, or
+    /// <see langword="null"/> before validation and after the upload is submitted.
+    /// </summary>
+    internal byte[]? Payload { get; set; }
+
+    /// <summary>Gets or sets the validated payload size in bytes (<c>Width * Height * 4</c>).</summary>
+    internal long PayloadBytes { get; set; }
+
+    /// <summary>
+    /// Gets or sets the store frame sequence in which <c>EnsurePage</c> last saw this path; the
+    /// upload planner starts the most recently seen pages first.
+    /// </summary>
+    internal long LastSeenFrame { get; set; }
+
+    /// <summary>Gets or sets the first-sighting order, which breaks equal-priority upload ties.</summary>
+    internal long LoadSequence { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a catalog change retired this page while it was
+    /// uploading. A retired upload still completes to release its GPU resources but never becomes
+    /// visible or counts as ready.
+    /// </summary>
+    internal bool Retired { get; set; }
 }
