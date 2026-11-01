@@ -6,7 +6,8 @@ namespace Bork2d.Bake.Baking;
 
 /// <summary>
 /// One explicit data-type registration: the compile-time binding and pack-write closures for a type
-/// that may appear in a data TOML's <c>[bork2d].type</c> (D-036/D-038).
+/// that may appear in a data TOML's <c>[bork2d].type</c> (D-036/D-038), plus its semantic validators
+/// in registration order.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,6 +27,7 @@ internal sealed class BakeAssetTypeRegistration
 {
     private readonly Func<BakeBindContext, object?> _bind;
     private readonly Action<PackBuilder, string, object> _write;
+    private readonly List<IBakeAssetValidator> _validators = [];
 
     private BakeAssetTypeRegistration(
         Type type,
@@ -44,6 +46,16 @@ internal sealed class BakeAssetTypeRegistration
 
     /// <summary>Gets the registered type's full name, the <c>[bork2d].type</c> selector.</summary>
     internal string TypeName { get; }
+
+    /// <summary>Gets the validators for this type in registration order.</summary>
+    internal IReadOnlyList<IBakeAssetValidator> Validators => _validators;
+
+    /// <summary>Appends one semantic validator for this type.</summary>
+    /// <typeparam name="T">The registered data type the validator validates.</typeparam>
+    /// <param name="validator">The public validator instance.</param>
+    internal void AddValidator<T>(IAssetValidator<T> validator)
+        where T : IShapeable<T>
+        => _validators.Add(new BakeAssetValidatorRegistration<T>(validator));
 
     /// <summary>Binds a parsed source document into this registration's type.</summary>
     /// <param name="context">The per-source binding context.</param>
