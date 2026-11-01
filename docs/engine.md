@@ -117,9 +117,9 @@ The surface follows Unity 6000.6 `Color`: the three- and four-argument construct
 conversions to and from `Vector4`, component arithmetic, `HSVToRGB`/`RGBToHSV`, `ToString` with the
 `RGBA(r, g, b, a)` form (default `F3`, invariant culture when no provider is given), and the full
 set of Unity presets plus `Transparent` and `Clear` (both transparent black) and both `Gray` and
-`Grey`. Equality is exact .NET component equality: `==`, `Equals(Color)`, and `GetHashCode` agree,
-and no approximate comparison is used. Gamma conversion, `Color32`, and `ColorUtility` are out of
-scope and are not part of the surface.
+`Grey`. Equality is exact .NET component equality: `==` and `Equals(Color)` compare exactly,
+`GetHashCode` is consistent with them, and no approximate comparison is used. Gamma conversion,
+`Color32`, and `ColorUtility` are out of scope and are not part of the surface.
 
 ## Vector2 extensions
 
@@ -169,8 +169,9 @@ distance `0`, a zero-direction ray hits only when its origin is contained, and a
 pointing-away ray misses. `Bork2d.Engine.Mathematics.Ray2D` is the matching mutable ray type: its
 constructor and `Direction` setter normalize the direction (a zero or tiny vector stays zero), and
 `GetPoint(distance)` returns `Origin + Direction * distance`. `Bounds.ToString()` prints
-`Center: (x, y), Extents: (x, y)` and `Ray2D.ToString()` prints `Origin: (x, y), Dir: (x, y)`, both
-with `F2` components and invariant culture when no provider is given.
+`Center: (x, y), Extents: (x, y)` from the raw stored center and extents, and `Ray2D.ToString()`
+prints `Origin: (x, y), Dir: (x, y)` from the raw origin and direction, both with `F2` components
+and invariant culture when no provider is given.
 
 ## Time
 
