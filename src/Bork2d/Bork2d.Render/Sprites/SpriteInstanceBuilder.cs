@@ -41,7 +41,7 @@ internal static class SpriteInstanceBuilder
             Transform1 = new Vector4(world.M31, world.M32, quad.SizeX, quad.SizeY),
             Uv0 = new Vector4(uvs[0].X, uvs[0].Y, uvs[1].X, uvs[1].Y),
             Uv1 = new Vector4(uvs[2].X, uvs[2].Y, uvs[3].X, uvs[3].Y),
-            Tint = new Vector4(sprite.Tint.R, sprite.Tint.G, sprite.Tint.B, sprite.Tint.A),
+            Tint = sprite.Tint,
             Misc = new Vector4(quad.Pivot.X, quad.Pivot.Y, textureIndex, 0f),
         };
     }

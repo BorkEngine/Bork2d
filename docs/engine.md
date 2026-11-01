@@ -10,10 +10,11 @@ provider package.
 | --- | --- |
 | `Bork2d.Engine` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
 | `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `IRenderable`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
-| `Bork2d.Engine.Rendering` | `Bounds`, `Color`, `RenderStats`, `ClearKind`, `FrameCaptureResult` |
+| `Bork2d.Engine.Rendering` | `Color` (immutable linear RGBA), `RenderStats`, `ClearKind`, `FrameCaptureResult` |
 | `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `TextureDescriptor`, `AssetRef<T>`, `DataRef`, enums |
 | `Bork2d.Engine.Assets.Pack` | `PackBuilder`, `PackCompressionMode` (tooling only) |
 | `Bork2d.Engine.Input` | `IInput`, `KeyCode`, `MouseButton` |
+| `Bork2d.Engine.Mathematics` | `Bounds`, `Ray2D`, `Vector2Extensions`, `Vector2ApproximatelyExtensions` |
 | `Bork2d.Engine.Platform` | `IWindow`, `ITime` |
 
 `GameEngine`, `Transform`, `Camera`, `SpriteRender`, `AssetService`, `FrameSnapshot`, the typed
@@ -103,6 +104,83 @@ instance to change the rendered result.
 
 Layer enums must be `int`-backed `[Flags]` enums with 1-32 named single-bit values; `None = 0` is
 allowed. Invalid layer types fail at build/host creation.
+
+## Color
+
+`Color` is an immutable linear RGBA value type in `Bork2d.Engine.Rendering`. It stores its four
+components in one `System.Numerics.Vector4`, so the value is exactly 16 bytes and the basic
+arithmetic operators run through the vector operators. `R`, `G`, `B`, `A`, the get-only indexer,
+`Grayscale` (`0.299*R + 0.587*G + 0.114*B`), and `MaxColorComponent` expose the components without
+allowing mutation; `Lerp` clamps its ratio to `[0, 1]` and `LerpUnclamped` does not.
+
+`ToOkLab` converts the linear RGB components to OkLab with the standard linear sRGB (D65) matrices,
+ignores alpha, and applies no sRGB gamma decode. `FromOkLab` converts OkLab back to the same linear
+space, sets alpha from its optional `alpha` argument (default `1`), and applies no sRGB gamma
+encode. Neither conversion clamps to the `[0, 1]` gamut, so an out-of-gamut OkLab color keeps its
+negative or greater-than-one linear components. `LerpOkLab` converts both colors to OkLab,
+interpolates `L`, `a`, `b`, and alpha linearly with the same ratio, and converts back without a gamut
+clamp, clamping `t` to `[0, 1]`; `LerpOkLabUnclamped` is the same without the `t` clamp and may
+extrapolate. There is no separate OkLab type; the conversions use `out` parameters on `Color`.
+
+The surface follows Unity 6000.6 `Color`: the three- and four-argument constructors, implicit
+conversions to and from `Vector4`, component arithmetic, `HSVToRGB`/`RGBToHSV`, `ToString` with the
+`RGBA(r, g, b, a)` form (default `F3`, invariant culture when no provider is given), and the full
+set of Unity presets plus `Transparent` and `Clear` (both transparent black) and both `Gray` and
+`Grey`. Equality is exact .NET component equality: `==` and `Equals(Color)` compare exactly,
+`GetHashCode` is consistent with them, and no approximate comparison is used. Gamma conversion,
+`Color32`, and `ColorUtility` are out of scope and are not part of the surface.
+
+## Vector2 extensions
+
+`Vector2` remains `System.Numerics.Vector2`. `Bork2d.Engine.Mathematics.Vector2Extensions` adds the
+Unity 6000.6 surface as C# 14 extension members, so there is no second vector type and no existing
+public signature changes. Import `using Bork2d.Engine.Mathematics;` to use `Magnitude`,
+`SqrMagnitude`, `Normalized`, `Vector2.Up`/`Down`/`Left`/`Right`, `Angle`, `SignedAngle`,
+`ClampMagnitude`, `MoveTowards`, `Perpendicular`, `Scale`, `LerpUnclamped`, `LerpClamped`,
+`NormalizeOrZero`, `ApproximatelyEquals`, and `SmoothDamp`, plus the mutating `Set`, `Scale`, and
+`Normalize`.
+
+Members that `System.Numerics.Vector2` already provides keep their .NET semantics and are not
+redeclared: `Lerp` is unclamped, static `Normalize` returns NaN components for a zero vector, `==`,
+`Equals`, `GetHashCode`, and `ToString` are exact or unchanged, and there are no implicit
+conversions between `Vector2` and `Vector3`. Unity's clamped interpolation, zero-safe
+normalization, and approximate equality are available as `LerpClamped`, `NormalizeOrZero`, and
+`ApproximatelyEquals`. `SmoothDamp` takes an explicit `deltaTime`; there is no ambient frame clock.
+
+The static `ApproximatelyEquals(Vector2, Vector2)` lives in `Vector2ApproximatelyExtensions`
+because C# extension blocks lower a same-named static and instance member to colliding static
+methods. Both call forms work in the same namespace: `Vector2.ApproximatelyEquals(a, b)` and
+`a.ApproximatelyEquals(b)`.
+
+## Bounds and Ray2D
+
+`Bork2d.Engine.Mathematics.Bounds` is the 2D adaptation of Unity 6000.6 `Bounds`: a mutable
+world-space axis-aligned box stored as a center and half extents (two `Vector2` fields, 16 bytes).
+`Center`, `Size`, `Extents`, `Min`, and `Max` are settable, and the value exposes Unity's mutating
+`Encapsulate`, `Expand`, and `SetMinMax` helpers plus `ClosestPoint`, `Contains`, `Intersects`,
+`SqrDistance`, and `IntersectRay`. Construct it from a center and a full size with
+`new Bounds(center, size)`, or from two corners with `Bounds.FromMinMax(min, max)`. The type lives in
+the mathematics namespace; `IRenderable.Bounds` and the renderer's culling bounds use it from there.
+
+`Bounds.Empty` is the default value and means "no bounds" or "unknown bounds". A box without
+positive area is empty: the default value, a zero-area box, an inverted box (a minimum beyond the
+maximum on either axis), and any box with a non-finite center or extent. This is a deliberate
+divergence from Unity, which has no empty sentinel and treats a zero-size box as valid, because the
+engine uses empty bounds as "unknown, never cull". Queries are empty-safe: `Contains`, `Intersects`,
+and `IntersectRay` return `false` for an empty operand, `ClosestPoint` returns `Vector2.Zero`, and
+`SqrDistance` returns `float.PositiveInfinity`. The `Center`, `Size`, and `Extents` getters return
+`Vector2.Zero` for an empty box, while `Min` and `Max` return the raw stored edges so the mutating
+helpers can grow an empty box. Equality and hashing use the raw center and extents, and the value
+implements `IEquatable<Bounds>` and `IFormattable`.
+
+`Bounds.IntersectRay` uses a 2D slab test in world units: a ray origin inside the box reports
+distance `0`, a zero-direction ray hits only when its origin is contained, and a parallel or
+pointing-away ray misses. `Bork2d.Engine.Mathematics.Ray2D` is the matching mutable ray type: its
+constructor and `Direction` setter normalize the direction (a zero or tiny vector stays zero), and
+`GetPoint(distance)` returns `Origin + Direction * distance`. `Bounds.ToString()` prints
+`Center: (x, y), Extents: (x, y)` from the raw stored center and extents, and `Ray2D.ToString()`
+prints `Origin: (x, y), Dir: (x, y)` from the raw origin and direction, both with `F2` components
+and invariant culture when no provider is given.
 
 ## Time
 

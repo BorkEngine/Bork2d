@@ -1,5 +1,6 @@
 using System.Numerics;
 using Bork2d.Engine.Assets;
+using Bork2d.Engine.Mathematics;
 
 namespace Bork2d.Engine.Rendering;
 
@@ -101,7 +102,7 @@ internal static class SpriteBounds
         Vector2 corner1 = TransformCorner(1f, 0f, pivot, sizeX, sizeY, world);
         Vector2 corner2 = TransformCorner(0f, 1f, pivot, sizeX, sizeY, world);
         Vector2 corner3 = TransformCorner(1f, 1f, pivot, sizeX, sizeY, world);
-        var bounds = new Bounds(
+        Bounds bounds = Bounds.FromMinMax(
             Vector2.Min(Vector2.Min(corner0, corner1), Vector2.Min(corner2, corner3)),
             Vector2.Max(Vector2.Max(corner0, corner1), Vector2.Max(corner2, corner3)));
 

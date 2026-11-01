@@ -17,7 +17,7 @@ public sealed class ColorMarshalerTests
     [Fact]
     public async Task ColorMemberRoundTripsThroughTheMarshaler()
     {
-        var color = new Color(R: 1f, G: 0.5f, B: 0.25f, A: 1f);
+        var color = new Color(r: 1f, g: 0.5f, b: 0.25f, a: 1f);
         var value = new ColorPackData { Tint = color };
 
         using var directory = TempPackDirectory.CreateUnderTemp();

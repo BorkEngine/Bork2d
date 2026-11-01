@@ -1,7 +1,7 @@
 using System.Numerics;
 using Bork2d.Engine.Assets;
+using Bork2d.Engine.Mathematics;
 using Bork2d.Engine.Platform;
-using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
 using Bork2d.Runtime.Window;
 using Bork2d.Tests.TestDoubles;
