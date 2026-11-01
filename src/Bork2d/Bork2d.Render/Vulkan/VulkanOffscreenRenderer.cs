@@ -636,6 +636,14 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer, IBindlessPageW
             commandBuffer.Handle,
             _passLabel);
 
+        // A camera may load instead of clearing, so one full-target opaque-black clear defines
+        // every pixel before any camera pass runs.
+        SpritePassRecorder.RecordFrameClear(
+            device.Api,
+            commandBuffer,
+            target.GetView(imageIndex),
+            target.Extent);
+
         bool capture = frame.Capture.BeginRecord(
             _captures,
             (int)target.Extent.Width,
