@@ -16,7 +16,7 @@ namespace Bork2d.Render.Vulkan;
 /// uses a semaphore can never race a later submit that reuses it. <see cref="Dispose"/> is
 /// idempotent and never throws (D-M6-27).
 /// </remarks>
-internal sealed unsafe class WindowedFrame : IDisposable
+internal sealed unsafe class WindowedFrame : IVulkanFrame
 {
     private readonly Vk _vk;
     private readonly Device _device;
@@ -62,6 +62,15 @@ internal sealed unsafe class WindowedFrame : IDisposable
 
     /// <summary>Gets the frame's pooled readback staging and pending capture requests (M8 §6.9).</summary>
     internal FrameCapture Capture { get; }
+
+    /// <inheritdoc/>
+    Fence IVulkanFrame.Fence => Fence;
+
+    /// <inheritdoc/>
+    FrameInstanceResources IVulkanFrame.InstanceResources => InstanceResources;
+
+    /// <inheritdoc/>
+    FrameCapture IVulkanFrame.Capture => Capture;
 
     /// <summary>Creates one frame's Vulkan objects.</summary>
     /// <param name="vk">The Vulkan API object.</param>
