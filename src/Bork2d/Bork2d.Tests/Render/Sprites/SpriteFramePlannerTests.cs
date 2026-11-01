@@ -402,6 +402,13 @@ public sealed class SpriteFramePlannerTests
         SpriteFramePlan warm = fixture.Planner.Plan(snapshot, 1920, 1080, fixture.Instances);
         Assert.Equal(spriteCount, warm.InstanceCount);
 
+        // Let tiered JIT finish and every pooled buffer reach its high-water mark before the
+        // measurement; the first large plan can otherwise allocate on a cold test-host thread.
+        for (var warmup = 0; warmup < 5; warmup++)
+        {
+            _ = fixture.Planner.Plan(snapshot, 1920, 1080, fixture.Instances);
+        }
+
         long before = GC.GetAllocatedBytesForCurrentThread();
         var total = 0;
         for (var iteration = 0; iteration < 10; iteration++)
