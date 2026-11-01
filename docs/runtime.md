@@ -35,11 +35,22 @@ remains owned and disposed by the caller as before; later builder use cannot rec
 
 ## Host loops
 
+Windowed and offscreen runs execute one shared rendered-run lifecycle; only narrow mode hooks
+differ. The lifecycle starts assets, starts the mode platform (windowed only), creates and starts
+the renderer without waiting and installs the exit wake callback, attaches the renderer and
+proxies, runs `Setup` unless an exit/close is already pending, waits once for renderer readiness
+after a successful `Setup`, runs the backpressured tick loop, runs `Teardown` once when `Setup`
+succeeded, stops and joins the renderer before platform shutdown, stops assets, and detaches the
+proxies. The windowed hooks own SDL/platform startup and shutdown, the window/input proxies, the
+input freeze/text handoff, and the minimized tick cap; the offscreen hooks own only the fixed
+target. Headless remains a separate paced lifecycle.
+
 ### Windowed
 
 1. Open the base pack, start the asset loader, then create the SDL window, Vulkan instance, and
    surface on the OS thread.
-2. Start the renderer thread without waiting, and call `Setup` immediately.
+2. Start the renderer thread without waiting, install the exit wake callback, attach the renderer
+   and the window/input proxies, and call `Setup` immediately unless an exit/close is pending.
 3. Wait for renderer readiness before the first tick.
 4. Repeat: acquire a snapshot slot, freeze input, advance the clock, dispatch text, call `Tick`,
    capture the scene, publish. The acquire blocks while all three slots are occupied.
@@ -52,10 +63,11 @@ minimized, tick starts are capped at 30 per second; no cap applies once the loop
 
 ### Offscreen
 
-The same handoff loop without SDL, input, or presentation. It renders against a fixed sRGB target
-and discards each frame. `IEngine.Window` is a functional facade reporting the fixed target extent;
-its title, fullscreen, and cursor setters store inert state and no member throws. It stops on
-`Exit` or a renderer fatal.
+The same handoff loop without SDL, input, or presentation, driven by the same rendered-run
+lifecycle and therefore the same `Setup`/readiness/`Teardown` ordering and error precedence. It
+renders against a fixed sRGB target and discards each frame. `IEngine.Window` is a functional
+facade reporting the fixed target extent; its title, fullscreen, and cursor setters store inert
+state and no member throws. It stops on `Exit` or a renderer fatal and has no platform close path.
 
 ### Headless
 
@@ -90,6 +102,8 @@ extent through `IEngine.Window` instead of an SDL window.
   facade stays functional. `IEngine.RenderStats` stays readable and may keep the last values.
 - A platform start failure precedes `Setup`. A renderer factory/start/readiness failure still lets
   `Setup` finish, runs zero ticks, attempts `Teardown`, joins the renderer, and rethrows.
+  Windowed and offscreen share the readiness boundary: the wait happens once, after a successful
+  `Setup` and before the first tick, and a readiness fatal is recorded as a renderer failure.
 - A `Setup` failure wins over a renderer failure and runs no `Teardown`. Tick/capture/text/`Teardown`
   failures propagate with the documented precedence; renderer cleanup failures during normal
   shutdown are logged and do not change the run's outcome.

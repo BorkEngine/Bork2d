@@ -70,6 +70,13 @@ snapshot; it only runs the paced game loop.
 | Offscreen | Functional window facade reporting the fixed target extent; no input | Fixed sRGB Vulkan target; frames discarded | Same handoff loop; stops on `Exit` or renderer fatal. |
 | Headless | None; `IEngine.Window` is a throwing stub | None, no GPU or SDL | Absolute-deadline paced loop with a synthesized clock; stops on `Exit`. |
 
+Windowed and offscreen run through one internal rendered-run lifecycle: assets, platform startup,
+renderer startup and attachment, the `Setup`/readiness boundary, the backpressured tick loop,
+`Teardown`, renderer stop/join, platform shutdown, asset stop, proxy detach, and the mode-specific
+failure precedence. The mode hosts contribute only the SDL platform/proxies/input/minimized cap
+(windowed) or the fixed target (offscreen). Headless uses its own paced lifecycle with no renderer,
+platform, or snapshot ring.
+
 ## Assets and tooling
 
 Assets are built ahead of time, not loaded from loose files at runtime:
