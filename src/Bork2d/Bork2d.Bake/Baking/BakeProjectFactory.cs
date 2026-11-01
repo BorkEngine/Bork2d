@@ -21,7 +21,9 @@ namespace Bork2d.Bake.Baking;
 /// <para>
 /// Semantic failures are <c>BK1xxx</c> diagnostics, never exceptions. The builder records its own
 /// registration issues in the definition; the factory copies them into the diagnostics bag first, so
-/// one run reports every configuration problem it can.
+/// one run reports every configuration problem it can. The data-type registrations — including their
+/// semantic validators — are carried into the project unchanged; validators run later, per bound
+/// asset.
 /// </para>
 /// </remarks>
 internal static class BakeProjectFactory
@@ -207,7 +209,7 @@ internal static class BakeProjectFactory
             definition.TextureFilter,
             definition.TextureWrap,
             assetTypes,
-            definition.Processors,
+            processorRegistry.Processors,
             processorRegistry,
             definition.UseDefaultProcessors);
 

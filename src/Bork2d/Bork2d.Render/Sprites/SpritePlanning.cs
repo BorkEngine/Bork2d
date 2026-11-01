@@ -1,22 +1,25 @@
+using System.Numerics;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Rendering;
 
 namespace Bork2d.Render.Sprites;
 
 /// <summary>
-/// Pure, allocation-free sprite ordering, filtering, and skip classification (M8 §6.4/§6.8).
+/// Pure, allocation-free sprite ordering, visibility, and skip classification (M8 §6.4/§6.8).
 /// </summary>
 /// <remarks>
 /// <para>
 /// Sorting runs once per snapshot on an index array so the snapshot itself is never copied or
-/// reordered: ascending <c>Layer</c>, then ascending <c>ZIndex</c>. Equal keys are unspecified;
-/// the heap sort is deterministic for a given input but is not a stable sort, so callers must not
-/// rely on the order of equal keys.
+/// reordered: sprites ascend by <c>Layer</c>, then <c>ZIndex</c>; cameras ascend by <c>ZIndex</c>.
+/// Equal keys are unspecified; the heap sort is deterministic for a given input but is not a stable
+/// sort, so callers must not rely on the order of equal keys. Both orderings share one generic
+/// index sorter with struct comparers, so the heap mechanics exist once and neither path allocates.
 /// </para>
 /// <para>
-/// The per-camera filter is <c>(CullingMask &amp; Layer) != 0</c>. Null sprites, zero/multi-bit
-/// layers, known non-<c>Quad</c> topologies, and still-loading texture pages are skipped; an
-/// unknown topology or malformed field is fatal and never silently repaired.
+/// The per-camera filter is the shared <see cref="IsVisible"/> rule: <c>(CullingMask &amp; Layer)
+/// != 0</c> and non-empty world bounds that intersect the camera's world bounds. Null sprites,
+/// zero/multi-bit layers, known non-<c>Quad</c> topologies, and still-loading texture pages are
+/// skipped; an unknown topology or malformed field is fatal and never silently repaired.
 /// </para>
 /// </remarks>
 internal static class SpritePlanning
@@ -35,6 +38,26 @@ internal static class SpritePlanning
         => layer != 0 && (layer & (layer - 1)) == 0;
 
     /// <summary>
+    /// Returns whether a camera's culling mask and world bounds let it emit a sprite.
+    /// </summary>
+    /// <remarks>
+    /// The layer test runs first: a sprite outside the camera's mask is never a visibility candidate,
+    /// so it is not counted as culled. Empty sprite bounds (unknown bounds from direct snapshot
+    /// producers or absent data) and empty camera bounds (an overflowed or non-finite visible
+    /// rectangle) never cull, which keeps the rule conservative. The production planner and the
+    /// deterministic visibility tests share this method, so they cannot drift apart.
+    /// </remarks>
+    /// <param name="cullingMask">The camera culling mask.</param>
+    /// <param name="cameraBounds">The camera's world-space AABB.</param>
+    /// <param name="sprite">The captured sprite.</param>
+    /// <returns><see langword="true"/> when the camera may emit the sprite.</returns>
+    internal static bool IsVisible(uint cullingMask, in Bounds cameraBounds, in SpriteSnapshot sprite)
+        => LayerMatches(cullingMask, sprite.Layer)
+            && (sprite.Bounds.IsEmpty
+                || cameraBounds.IsEmpty
+                || sprite.Bounds.Intersects(cameraBounds));
+
+    /// <summary>
     /// Sorts sprite indices by <c>(Layer, ZIndex)</c> ascending without allocating or touching the
     /// snapshot.
     /// </summary>
@@ -45,31 +68,23 @@ internal static class SpritePlanning
     /// </param>
     /// <exception cref="ArgumentException">The index buffer is too small.</exception>
     internal static void Sort(ReadOnlySpan<SpriteSnapshot> sprites, Span<int> indices)
-    {
-        if (indices.Length < sprites.Length)
-        {
-            throw new ArgumentException(
-                $"The index buffer must hold {sprites.Length} entries.",
-                nameof(indices));
-        }
+        => SortIndices<SpriteSnapshot, SpriteOrder>(sprites, indices);
 
-        for (var index = 0; index < sprites.Length; index++)
-        {
-            indices[index] = index;
-        }
-
-        Span<int> ordered = indices[..sprites.Length];
-        for (var root = (ordered.Length / 2) - 1; root >= 0; root--)
-        {
-            SiftDown(sprites, ordered, root, ordered.Length);
-        }
-
-        for (var end = ordered.Length - 1; end > 0; end--)
-        {
-            (ordered[0], ordered[end]) = (ordered[end], ordered[0]);
-            SiftDown(sprites, ordered, root: 0, end);
-        }
-    }
+    /// <summary>
+    /// Sorts camera indices by <c>ZIndex</c> ascending without allocating or touching the snapshot.
+    /// </summary>
+    /// <remarks>
+    /// Cameras apply in this order; equal <c>ZIndex</c> values are unspecified. The sort shares the
+    /// sprite order's preallocated-index heap mechanics, so a warm plan allocates nothing.
+    /// </remarks>
+    /// <param name="cameras">The captured cameras in capture order.</param>
+    /// <param name="indices">
+    /// The output index buffer; at least <paramref name="cameras"/>'s length. The remaining entries
+    /// are left untouched.
+    /// </param>
+    /// <exception cref="ArgumentException">The index buffer is too small.</exception>
+    internal static void SortCameras(ReadOnlySpan<CameraSnapshot> cameras, Span<int> indices)
+        => SortIndices<CameraSnapshot, CameraOrder>(cameras, indices);
 
     /// <summary>
     /// Classifies one captured sprite for drawing, in the approved order: null, invalid layer,
@@ -86,8 +101,8 @@ internal static class SpritePlanning
     /// </exception>
     internal static SpriteSkipReason Classify(in SpriteSnapshot sprite, bool texturePending)
     {
-        SpriteAsset? asset = sprite.Sprite;
-        if (asset is null)
+        SpriteRenderData? data = sprite.SpriteData;
+        if (data is null)
         {
             return SpriteSkipReason.Null;
         }
@@ -97,12 +112,12 @@ internal static class SpritePlanning
             return SpriteSkipReason.InvalidLayer;
         }
 
-        SpriteTopology topology = asset.Topology;
+        SpriteTopology topology = data.Topology;
         if (topology is not (SpriteTopology.Quad or SpriteTopology.TriangleStrip
             or SpriteTopology.Triangles))
         {
             throw SpriteQuad.CreateMalformedException(
-                asset,
+                data,
                 "Topology",
                 $"unknown SpriteTopology value {(int)topology}");
         }
@@ -115,95 +130,40 @@ internal static class SpritePlanning
         return texturePending ? SpriteSkipReason.Pending : SpriteSkipReason.None;
     }
 
-    /// <summary>
-    /// Builds the sorted, layer-filtered, statically drawable indices for one camera.
-    /// </summary>
-    /// <param name="sprites">The captured sprites in capture order.</param>
-    /// <param name="sortedIndices">The indices produced by <see cref="Sort"/>.</param>
-    /// <param name="cullingMask">The camera mask; <c>0</c> sees nothing.</param>
-    /// <param name="visibleIndices">The output buffer for drawable snapshot indices.</param>
-    /// <returns>The number of drawable indices written.</returns>
-    /// <exception cref="ArgumentException">The output buffer is too small.</exception>
-    /// <exception cref="Bork2d.Engine.Bork2dException">A visible sprite has an unknown topology.</exception>
-    internal static int FilterVisible(
-        ReadOnlySpan<SpriteSnapshot> sprites,
-        ReadOnlySpan<int> sortedIndices,
-        uint cullingMask,
-        Span<int> visibleIndices)
+    private static void SortIndices<TSource, TOrder>(ReadOnlySpan<TSource> items, Span<int> indices)
+        where TOrder : struct, IIndexOrder<TSource>
     {
-        var count = 0;
-        for (var index = 0; index < sortedIndices.Length; index++)
-        {
-            int snapshotIndex = sortedIndices[index];
-            SpriteSnapshot sprite = sprites[snapshotIndex];
-            if (!LayerMatches(cullingMask, sprite.Layer))
-            {
-                continue;
-            }
-
-            if (Classify(sprite, texturePending: false) != SpriteSkipReason.None)
-            {
-                continue;
-            }
-
-            if (count == visibleIndices.Length)
-            {
-                throw new ArgumentException(
-                    $"The visible-index buffer must hold {sortedIndices.Length} entries.",
-                    nameof(visibleIndices));
-            }
-
-            visibleIndices[count++] = snapshotIndex;
-        }
-
-        return count;
-    }
-
-    /// <summary>
-    /// Sorts camera indices by <c>ZIndex</c> ascending without allocating or touching the snapshot.
-    /// </summary>
-    /// <remarks>
-    /// Cameras apply in this order; equal <c>ZIndex</c> values are unspecified. The sort is the same
-    /// preallocated-index heap sort as <see cref="Sort"/>, so a warm plan allocates nothing.
-    /// </remarks>
-    /// <param name="cameras">The captured cameras in capture order.</param>
-    /// <param name="indices">
-    /// The output index buffer; at least <paramref name="cameras"/>'s length. The remaining entries
-    /// are left untouched.
-    /// </param>
-    /// <exception cref="ArgumentException">The index buffer is too small.</exception>
-    internal static void SortCameras(ReadOnlySpan<CameraSnapshot> cameras, Span<int> indices)
-    {
-        if (indices.Length < cameras.Length)
+        if (indices.Length < items.Length)
         {
             throw new ArgumentException(
-                $"The index buffer must hold {cameras.Length} entries.",
+                $"The index buffer must hold {items.Length} entries.",
                 nameof(indices));
         }
 
-        for (var index = 0; index < cameras.Length; index++)
+        for (var index = 0; index < items.Length; index++)
         {
             indices[index] = index;
         }
 
-        Span<int> ordered = indices[..cameras.Length];
+        Span<int> ordered = indices[..items.Length];
         for (var root = (ordered.Length / 2) - 1; root >= 0; root--)
         {
-            SiftDownCameras(cameras, ordered, root, ordered.Length);
+            SiftDown<TSource, TOrder>(items, ordered, root, ordered.Length);
         }
 
         for (var end = ordered.Length - 1; end > 0; end--)
         {
             (ordered[0], ordered[end]) = (ordered[end], ordered[0]);
-            SiftDownCameras(cameras, ordered, root: 0, end);
+            SiftDown<TSource, TOrder>(items, ordered, root: 0, end);
         }
     }
 
-    private static void SiftDownCameras(
-        ReadOnlySpan<CameraSnapshot> cameras,
+    private static void SiftDown<TSource, TOrder>(
+        ReadOnlySpan<TSource> items,
         Span<int> indices,
         int root,
         int count)
+        where TOrder : struct, IIndexOrder<TSource>
     {
         while (true)
         {
@@ -215,12 +175,12 @@ internal static class SpritePlanning
 
             int right = child + 1;
             if (right < count
-                && cameras[indices[right]].ZIndex > cameras[indices[child]].ZIndex)
+                && TOrder.Compare(in items[indices[right]], in items[indices[child]]) > 0)
             {
                 child = right;
             }
 
-            if (cameras[indices[child]].ZIndex <= cameras[indices[root]].ZIndex)
+            if (TOrder.Compare(in items[indices[child]], in items[indices[root]]) <= 0)
             {
                 return;
             }
@@ -230,40 +190,33 @@ internal static class SpritePlanning
         }
     }
 
-    private static void SiftDown(
-        ReadOnlySpan<SpriteSnapshot> sprites,
-        Span<int> indices,
-        int root,
-        int count)
+    /// <summary>Orders one snapshot type by its render order key.</summary>
+    /// <typeparam name="TSource">The captured record type.</typeparam>
+    private interface IIndexOrder<TSource>
     {
-        while (true)
+        /// <summary>Compares two captured records by their sort key.</summary>
+        /// <param name="left">The left record.</param>
+        /// <param name="right">The right record.</param>
+        /// <returns>A negative, zero, or positive value in ascending key order.</returns>
+        static abstract int Compare(in TSource left, in TSource right);
+    }
+
+    /// <summary>Orders sprites by ascending <c>Layer</c>, then ascending <c>ZIndex</c>.</summary>
+    private readonly struct SpriteOrder : IIndexOrder<SpriteSnapshot>
+    {
+        /// <inheritdoc/>
+        public static int Compare(in SpriteSnapshot left, in SpriteSnapshot right)
         {
-            int child = (root * 2) + 1;
-            if (child >= count)
-            {
-                return;
-            }
-
-            int right = child + 1;
-            if (right < count
-                && Compare(sprites[indices[right]], sprites[indices[child]]) > 0)
-            {
-                child = right;
-            }
-
-            if (Compare(sprites[indices[child]], sprites[indices[root]]) <= 0)
-            {
-                return;
-            }
-
-            (indices[root], indices[child]) = (indices[child], indices[root]);
-            root = child;
+            int layer = left.Layer.CompareTo(right.Layer);
+            return layer != 0 ? layer : left.ZIndex.CompareTo(right.ZIndex);
         }
     }
 
-    private static int Compare(in SpriteSnapshot left, in SpriteSnapshot right)
+    /// <summary>Orders cameras by ascending <c>ZIndex</c>.</summary>
+    private readonly struct CameraOrder : IIndexOrder<CameraSnapshot>
     {
-        int layer = left.Layer.CompareTo(right.Layer);
-        return layer != 0 ? layer : left.ZIndex.CompareTo(right.ZIndex);
+        /// <inheritdoc/>
+        public static int Compare(in CameraSnapshot left, in CameraSnapshot right)
+            => left.ZIndex.CompareTo(right.ZIndex);
     }
 }

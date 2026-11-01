@@ -37,7 +37,7 @@ namespace Bork2d.Engine.Assets.Loading;
 /// itself (D-M3-14).
 /// </para>
 /// </remarks>
-internal sealed class AssetService : IAssets, IDisposable
+internal sealed class AssetService : IAssets, IAssetCatalogVersion, IDisposable
 {
     private const string Category = "Bork2d.Engine.Assets";
     private const string DataKind = "data";
@@ -346,6 +346,9 @@ internal sealed class AssetService : IAssets, IDisposable
             mount.SuppliedPath,
             mount.EntryCount);
     }
+
+    /// <inheritdoc/>
+    long IAssetCatalogVersion.CatalogVersion => _fileSystem.PackCount;
 
     /// <inheritdoc/>
     public IReadOnlyList<AssetInfo> Browse(string? prefix = null)

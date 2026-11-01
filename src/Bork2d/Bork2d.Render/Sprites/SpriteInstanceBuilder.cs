@@ -25,9 +25,9 @@ internal static class SpriteInstanceBuilder
         in SpriteQuad quad,
         uint textureIndex)
     {
-        SpriteAsset asset = sprite.Sprite
+        SpriteRenderData data = sprite.SpriteData
             ?? throw new ArgumentException("A null sprite has no instance.", nameof(sprite));
-        Vector2[] uvs = asset.Uvs
+        Vector2[] uvs = data.Uvs
             ?? throw new ArgumentException("The sprite has no UVs.", nameof(sprite));
         if (uvs.Length != 4)
         {

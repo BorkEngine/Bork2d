@@ -81,7 +81,7 @@ internal static class BakeAssemblyClosure
             direct.Add(registration.Type.Assembly);
         }
 
-        foreach (IBakeAssetProcessor processor in project.Processors)
+        foreach (BakeProcessorRegistration processor in project.Processors)
         {
             direct.Add(processor.ProcessorType.Assembly);
         }

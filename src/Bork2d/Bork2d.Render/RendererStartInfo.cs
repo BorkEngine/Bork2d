@@ -1,4 +1,5 @@
 using Bork2d.Engine.Assets;
+using Bork2d.Render.Textures;
 using Bork2d.Render.Vulkan;
 using Microsoft.Extensions.Logging;
 
@@ -63,6 +64,40 @@ internal sealed class RendererStartInfo
     /// missing value is a renderer-creation failure (M8 §6.12).
     /// </remarks>
     internal required IAssets Assets { get; init; }
+
+    /// <summary>
+    /// Gets the asset catalog identity seam the texture-page cache observes, or
+    /// <see langword="null"/> when the asset implementation cannot change its catalog.
+    /// </summary>
+    /// <remarks>
+    /// A later overlay mount changes this value; the texture-page store then retires the pages whose
+    /// content predates the mount and reloads a path on its next sighting.
+    /// </remarks>
+    internal IAssetCatalogVersion? AssetCatalogVersion { get; init; }
+
+    /// <summary>
+    /// Gets the texture residency budget in bytes (default 1 GiB). It is carried to the page store
+    /// for the residency/eviction policy.
+    /// </summary>
+    internal long TextureResidencyBudgetBytes { get; init; } = TexturePageStore.DefaultResidencyBudgetBytes;
+
+    /// <summary>
+    /// Gets the maximum texture upload bytes the renderer starts per frame (default 128 MiB).
+    /// </summary>
+    internal int TextureUploadBudgetBytes { get; init; } = TexturePageStore.DefaultUploadBudgetBytes;
+
+    /// <summary>
+    /// Gets the maximum texture-page capacity reserved at startup (default 4096 entries, including
+    /// the placeholder). It is clamped to at least the policy's initial capacity and to the device
+    /// limit.
+    /// </summary>
+    /// <remarks>
+    /// This is an internal seam, not part of the public builder surface: GPU tests request a smaller
+    /// reservation to exercise capacity growth. A normal run reserves
+    /// <see cref="TexturePageCapacity.StartupReservation"/> so it does not grow at 256/512.
+    /// </remarks>
+    internal int TexturePageStartupReservation { get; init; } =
+        TexturePageCapacity.StartupReservation;
 
     /// <summary>
     /// Gets the host callback that creates the replacement surface for the single D-M6-16

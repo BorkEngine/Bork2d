@@ -1,7 +1,10 @@
+using System.Reflection;
 using Bork2d.Engine;
 using Bork2d.Render;
 using Bork2d.Render.Diagnostics;
+using Bork2d.Render.Textures;
 using Bork2d.Runtime;
+using Bork2d.Runtime.Hosting;
 using Bork2d.Tests.TestDoubles;
 using Bork2d.Tests.TestSupport;
 using Xunit;
@@ -62,6 +65,11 @@ public sealed class RendererHostTests
         Assert.Equal(720, startInfo.Height);
         Assert.True(startInfo.ValidationRequested);
         Assert.Same(game.Engine!.Assets, startInfo.Assets);
+        Assert.Same(game.Engine.Assets, startInfo.AssetCatalogVersion);
+        Assert.Equal(
+            TexturePageStore.DefaultResidencyBudgetBytes,
+            startInfo.TextureResidencyBudgetBytes);
+        Assert.Equal(TexturePageStore.DefaultUploadBudgetBytes, startInfo.TextureUploadBudgetBytes);
         Assert.NotNull(instanceFactory.LastRequest);
         Assert.True(instanceFactory.LastRequest!.ValidationRequested);
         Assert.Equal("Loop test", instanceFactory.LastRequest.ApplicationName);
@@ -83,6 +91,8 @@ public sealed class RendererHostTests
             NonEmptyCameras: 1,
             TexturePages: 2,
             TexturePageCapacity: 256,
+            TextureUploadsPending: 0,
+            TextureUploadBytesPending: 0,
             SkippedSprites: 0,
             ValidationErrors: 0,
             ValidationWarnings: 0);
@@ -257,6 +267,90 @@ public sealed class RendererHostTests
         Assert.Contains(teardownError, aggregate.InnerExceptions);
         Assert.True(renderer.Joined);
         AssertPlatformShutdown(sdl);
+    }
+
+    [Fact]
+    public void TextureBudgetsFlowFromTheBuilderIntoTheRendererStartInfo()
+    {
+        var renderer = new FakeRenderer { AutoReady = true };
+        var factory = new FakeRendererFactory(renderer);
+        var game = new ScriptedGame<GameLayer> { OnSetup = engine => engine.Exit() };
+
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithoutAssets()
+            .WithOffscreen(320, 240)
+            .WithTextureResidencyBudget(8L * 1024 * 1024)
+            .WithTextureUploadBudget(64 * 1024)
+            .WithFakeGraphics(factory)
+            .Build();
+        AppTestSupport.RunToCompletion(app);
+
+        RendererStartInfo startInfo = factory.StartInfo!;
+        Assert.Equal(8L * 1024 * 1024, startInfo.TextureResidencyBudgetBytes);
+        Assert.Equal(64 * 1024, startInfo.TextureUploadBudgetBytes);
+        Assert.Same(game.Engine!.Assets, startInfo.AssetCatalogVersion);
+    }
+
+    [Fact]
+    public void TheDefaultTexturePageStartupReservationIsThePolicyValue()
+    {
+        var renderer = new FakeRenderer { AutoReady = true };
+        var factory = new FakeRendererFactory(renderer);
+        var game = new ScriptedGame<GameLayer> { OnSetup = engine => engine.Exit() };
+        var builder = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithoutAssets()
+            .WithOffscreen(320, 240)
+            .WithFakeGraphics(factory);
+
+        Assert.Equal(
+            TexturePageCapacity.StartupReservation,
+            builder.Options.TexturePageStartupReservation);
+
+        using var app = builder.Build();
+        AppTestSupport.RunToCompletion(app);
+
+        RendererStartInfo startInfo = factory.StartInfo!;
+        Assert.Equal(4096, startInfo.TexturePageStartupReservation);
+    }
+
+    [Fact]
+    public void TheInternalTexturePageStartupReservationFlowsIntoTheStartInfo()
+    {
+        var renderer = new FakeRenderer { AutoReady = true };
+        var factory = new FakeRendererFactory(renderer);
+        var game = new ScriptedGame<GameLayer> { OnSetup = engine => engine.Exit() };
+        var builder = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithoutAssets()
+            .WithOffscreen(320, 240)
+            .WithFakeGraphics(factory);
+        builder.Options.TexturePageStartupReservation = TexturePageCapacity.Initial;
+
+        using var app = builder.Build();
+        AppTestSupport.RunToCompletion(app);
+
+        Assert.Equal(
+            TexturePageCapacity.Initial,
+            factory.StartInfo!.TexturePageStartupReservation);
+    }
+
+    [Fact]
+    public void ThePublicBuilderDoesNotExposeTheTexturePageStartupReservation()
+    {
+        MemberInfo[] publicMembers = typeof(Bork2dAppBuilder<GameLayer>).GetMembers(
+            BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static);
+        Assert.DoesNotContain(
+            publicMembers,
+            member => member.Name.Contains("StartupReservation", StringComparison.Ordinal));
+
+        PropertyInfo? option = typeof(Bork2dAppOptions<GameLayer>).GetProperty(
+            nameof(Bork2dAppOptions<GameLayer>.TexturePageStartupReservation),
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(option);
+        Assert.False(option!.GetMethod!.IsPublic);
+        Assert.False(option.SetMethod!.IsPublic);
     }
 
     [Fact]

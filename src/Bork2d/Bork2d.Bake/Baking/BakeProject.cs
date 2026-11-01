@@ -17,11 +17,12 @@ namespace Bork2d.Bake.Baking;
 /// <para>
 /// <see cref="AssetTypes"/> is the compile-time registration dictionary keyed by
 /// <see cref="Type.FullName"/>. A data TOML's <c>[bork2d].type</c> selects one entry; an unregistered
-/// name is a configuration diagnostic. <see cref="Processors"/> is the registration-order list and
-/// <see cref="ProcessorRegistry"/> is the immutable normalized extension registry built from it; the
-/// pipeline runs those processors over the discovered processor sources. Texture support is the
-/// built-in processor registered by <c>UseDefaultProcessors()</c>; there is no separate texture
-/// pipeline.
+/// name is a configuration diagnostic. Each registration also carries its semantic validators in
+/// registration order; the pipeline runs them after binding and before processors.
+/// <see cref="Processors"/> is the registration-order list and <see cref="ProcessorRegistry"/> is the
+/// immutable normalized extension registry built from it; the pipeline runs those processors over the
+/// discovered processor sources. Texture support is the built-in processor registered by
+/// <c>UseDefaultProcessors()</c>; there is no separate texture pipeline.
 /// </para>
 /// </remarks>
 internal sealed class BakeProject
@@ -43,7 +44,7 @@ internal sealed class BakeProject
         BakeTextureFilter textureFilter,
         BakeTextureWrap textureWrap,
         IReadOnlyDictionary<string, BakeAssetTypeRegistration> assetTypes,
-        IReadOnlyList<IBakeAssetProcessor> processors,
+        IReadOnlyList<BakeProcessorRegistration> processors,
         BakeProcessorRegistry processorRegistry,
         bool useDefaultProcessors)
     {
@@ -87,8 +88,8 @@ internal sealed class BakeProject
     /// <summary>Gets the explicitly registered data types keyed by full type name.</summary>
     internal IReadOnlyDictionary<string, BakeAssetTypeRegistration> AssetTypes { get; }
 
-    /// <summary>Gets the registered processors in registration order (executed by WP2+).</summary>
-    internal IReadOnlyList<IBakeAssetProcessor> Processors { get; }
+    /// <summary>Gets the processor registrations in registration order.</summary>
+    internal IReadOnlyList<BakeProcessorRegistration> Processors { get; }
 
     /// <summary>Gets the immutable extension registry built from <see cref="Processors"/>.</summary>
     internal BakeProcessorRegistry ProcessorRegistry { get; }

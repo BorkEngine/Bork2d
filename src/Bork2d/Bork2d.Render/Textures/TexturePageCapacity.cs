@@ -7,10 +7,12 @@ namespace Bork2d.Render.Textures;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The table starts at 256 entries: index <c>0</c> is the placeholder and <c>1..255</c> are real
-/// pages. When a new real page needs an index and the table is full, the capacity doubles, up to the
-/// effective device limit. The effective limit is the smaller of
-/// <c>maxPerStageDescriptorUpdateAfterBindSampledImages</c> and
+/// The table starts at the startup capacity: the effective device limit clamped to at least
+/// <see cref="Initial"/> (256 entries: index <c>0</c> is the placeholder and <c>1..255</c> are real
+/// pages) and at most <see cref="StartupReservation"/> (4096 entries). A normal run therefore
+/// reserves enough pages up front to avoid a descriptor growth at 256/512. When a new real page
+/// needs an index and the table is full, the capacity doubles, up to the effective device limit. The
+/// effective limit is the smaller of <c>maxPerStageDescriptorUpdateAfterBindSampledImages</c> and
 /// <c>maxDescriptorSetUpdateAfterBindSampledImages</c>, because the bindless binding must satisfy
 /// both and the layout maximum is that same value.
 /// </para>
@@ -27,8 +29,45 @@ internal static class TexturePageCapacity
     /// <summary>The initial total capacity, including the placeholder.</summary>
     internal const int Initial = 256;
 
+    /// <summary>
+    /// The default number of entries reserved at startup, including the placeholder. The startup
+    /// capacity is <see cref="Initial"/> when the device limit is smaller and this value when it is
+    /// larger.
+    /// </summary>
+    internal const int StartupReservation = 4096;
+
     /// <summary>The number of real (non-placeholder) pages the initial capacity holds.</summary>
     internal const int InitialRealPages = Initial - 1;
+
+    /// <summary>
+    /// Computes the startup page capacity: the effective device limit clamped to
+    /// <see cref="Initial"/> and <see cref="StartupReservation"/>.
+    /// </summary>
+    /// <param name="effectiveLimit">The effective device limit, including the placeholder.</param>
+    /// <returns>The startup capacity, including the placeholder.</returns>
+    internal static int StartupCapacity(int effectiveLimit)
+        => StartupCapacity(effectiveLimit, StartupReservation);
+
+    /// <summary>
+    /// Computes the startup page capacity with an explicit reservation.
+    /// </summary>
+    /// <param name="effectiveLimit">The effective device limit, including the placeholder.</param>
+    /// <param name="reservation">
+    /// The maximum capacity reserved at startup. It must be at least <see cref="Initial"/> because
+    /// the renderer cannot start below its initial capacity.
+    /// </param>
+    /// <returns>
+    /// <paramref name="effectiveLimit"/> clamped to <see cref="Initial"/> and
+    /// <paramref name="reservation"/>.
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="reservation"/> is below <see cref="Initial"/>.
+    /// </exception>
+    internal static int StartupCapacity(int effectiveLimit, int reservation)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(reservation, Initial);
+        return Math.Clamp(effectiveLimit, Initial, reservation);
+    }
 
     /// <summary>
     /// The documented implementation cap for the page capacity and the bindless layout maximum.

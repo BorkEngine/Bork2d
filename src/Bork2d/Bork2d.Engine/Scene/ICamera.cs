@@ -8,11 +8,19 @@ namespace Bork2d.Engine.Scene;
 /// </summary>
 /// <typeparam name="TLayer">The game's <see cref="Enum"/>-based render layer flags.</typeparam>
 /// <remarks>
+/// <para>
 /// Cameras are scene entities. They do not implement <see cref="IDisposable"/> and have no
 /// liveness flag: detach with <see cref="ITransform.Parent"/> = <see langword="null"/> or clear
 /// the owning parent to remove one, and re-attach the same instance later.
+/// </para>
+/// <para>
+/// <see cref="IRenderable.Bounds"/> is the world-space AABB of the visible rectangle: the four
+/// view-space corners <c>(±WorldSize.X/2, ±WorldSize.Y/2)</c> transformed by the camera's
+/// view-to-world matrix. It returns <see cref="Bounds.Empty"/> when the camera is invalid or the
+/// app is headless or has shut down, and it never throws for those cases.
+/// </para>
 /// </remarks>
-public interface ICamera<TLayer> : ITransform where TLayer : struct, Enum
+public interface ICamera<TLayer> : IRenderable where TLayer : struct, Enum
 {
     /// <summary>
     /// Gets or sets the normalized viewport <c>(x, y, width, height)</c> with a top-left origin.
@@ -44,10 +52,11 @@ public interface ICamera<TLayer> : ITransform where TLayer : struct, Enum
     /// </summary>
     /// <value>
     /// <c>(2 * Size * aspect, 2 * Size)</c>, where the aspect is the rounded pixel-viewport width
-    /// divided by its height from the engine window's framebuffer size (physical pixels).
+    /// divided by its height from the engine window's framebuffer size (physical pixels; the fixed
+    /// offscreen target extent in offscreen mode).
     /// </value>
     /// <exception cref="InvalidOperationException">
-    /// The camera is invalid, or the app is headless or offscreen so it has no framebuffer.
+    /// The camera is invalid, or the app is headless so it has no framebuffer.
     /// </exception>
     Vector2 WorldSize { get; }
 
@@ -66,7 +75,7 @@ public interface ICamera<TLayer> : ITransform where TLayer : struct, Enum
     /// A component of <paramref name="world"/> is NaN or infinite.
     /// </exception>
     /// <exception cref="InvalidOperationException">
-    /// The camera is invalid, or the app is headless or offscreen so it has no framebuffer.
+    /// The camera is invalid, or the app is headless so it has no framebuffer.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The windowed app has shut down.</exception>
     Vector2 WorldToScreen(Vector2 world);
@@ -84,7 +93,7 @@ public interface ICamera<TLayer> : ITransform where TLayer : struct, Enum
     /// A component of <paramref name="screen"/> is NaN or infinite.
     /// </exception>
     /// <exception cref="InvalidOperationException">
-    /// The camera is invalid, or the app is headless or offscreen so it has no framebuffer.
+    /// The camera is invalid, or the app is headless so it has no framebuffer.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The windowed app has shut down.</exception>
     Vector2 ScreenToWorld(Vector2 screen);

@@ -19,7 +19,9 @@ namespace Bork2d.Engine.Scene;
 /// through the parent chain, and re-parenting assigns the exact local matrix derived from the old
 /// world matrix and the inverse of the new parent's world matrix. A non-uniform scale combined
 /// with rotation therefore survives a re-parent, even though it introduces shear that a T/R/S
-/// triple cannot represent.
+/// triple cannot represent. Detaching adopts the old world matrix directly as the new local
+/// matrix, so it preserves the world transform without inverting the old parent and works even
+/// when the old parent's world matrix is singular.
 /// </para>
 /// <para>
 /// <see cref="LocalPosition"/>, <see cref="LocalRotation"/>, and <see cref="LocalScale"/> are the
@@ -27,13 +29,15 @@ namespace Bork2d.Engine.Scene;
 /// degrees, normalized to <c>[0, 360)</c> on assignment; the internal matrix composes radians
 /// converted at the boundary. The position setter changes only the matrix translation and keeps
 /// the rest of the matrix; the rotation and scale setters recompose from the authored scalars,
-/// so writing either discards shear introduced by a re-parent. A re-parent refreshes the scalar
-/// view from the exact local matrix, normalizing the decomposed rotation to degrees in
+/// so writing either discards shear introduced by a re-parent. A re-parent or detach refreshes the
+/// scalar view from the exact local matrix, normalizing the decomposed rotation to degrees in
 /// <c>[0, 360)</c>, and keeps the authored mirror axis when possible.
 /// </para>
 /// <para>
 /// A parent holds its children strongly and there is no destruction state: detaching keeps the
-/// object and its local matrix valid, and the same instance can be attached again later.
+/// object, its world transform, and its subtree valid, and the same instance can be attached
+/// again later. The parent's child list caches each child's index so removing one child is
+/// <c>O(1)</c> (see <see cref="SceneChildList"/>).
 /// </para>
 /// </remarks>
 internal class Transform : ITransform, ISceneNode
@@ -44,7 +48,7 @@ internal class Transform : ITransform, ISceneNode
     private readonly Lock _structuralLock;
     private readonly Lock _sync = new();
     private ISceneNode? _parent;
-    private List<Transform>? _children;
+    private SceneChildList? _children;
     private Matrix3x2 _localMatrix = Matrix3x2.Identity;
     private Vector2 _localPosition = Vector2.Zero;
     private float _localRotation;
@@ -64,6 +68,16 @@ internal class Transform : ITransform, ISceneNode
     /// Gets the per-object property lock.
     /// </summary>
     internal Lock Sync => _sync;
+
+    /// <summary>
+    /// Gets or sets this node's cached position in its parent's child list.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SceneChildList"/> maintains the value under the structural lock; <c>-1</c> means
+    /// the node has no parent. Swap-back removal writes the moved child's new slot here so the
+    /// removal path never has to scan the list.
+    /// </remarks>
+    internal int ChildIndex { get; set; } = -1;
 
     public ITransform? Parent
     {
@@ -144,7 +158,7 @@ internal class Transform : ITransform, ISceneNode
     ISceneNode? ISceneNode.ParentNode => Volatile.Read(ref _parent);
 
     /// <summary>
-    /// Gets the local-to-world matrix, composed through the parent chain.
+    /// Gets the local-to-world matrix, composed iteratively through the parent chain.
     /// </summary>
     internal Matrix3x2 WorldMatrix()
     {
@@ -182,21 +196,28 @@ internal class Transform : ITransform, ISceneNode
         return scale;
     }
 
+    /// <summary>
+    /// Gets the local-to-parent matrix for one capture pass with a single per-object lock
+    /// acquisition.
+    /// </summary>
+    /// <remarks>
+    /// This is the capture path for a transform that is not a camera or sprite renderable. The
+    /// caller must hold the structural lock; the returned matrix is composed with the parent's
+    /// world matrix outside this call.
+    /// </remarks>
+    /// <returns>The node's local-to-parent matrix.</returns>
+    internal Matrix3x2 CaptureLocalMatrix()
+    {
+        lock (_sync)
+        {
+            return _localMatrix;
+        }
+    }
+
     public void DetachAll()
     {
         using var scope = _structuralLock.EnterScope();
-        var children = _children;
-        if (children is null || children.Count == 0)
-        {
-            return;
-        }
-
-        for (var index = 0; index < children.Count; index++)
-        {
-            children[index].ClearParentPointer();
-        }
-
-        children.Clear();
+        _children?.DetachAll();
     }
 
     /// <summary>
@@ -235,13 +256,26 @@ internal class Transform : ITransform, ISceneNode
     }
 
     /// <summary>
-    /// Clears this node's parent pointer without touching the owner's child list.
+    /// Clears this node's parent link and adopts <paramref name="world"/> as its local matrix.
     /// </summary>
     /// <remarks>
-    /// Used by an owner that clears its own child list in one pass (for example the scene root's
-    /// <see cref="DetachAll"/>). The caller must hold the structural lock.
+    /// The caller must hold the structural lock and must already have removed the node from its
+    /// parent's child list, or be clearing that list in one pass. The world matrix is passed in
+    /// before the parent link is cleared, so detaching never inverts the old parent and works when
+    /// that parent's world matrix is singular.
     /// </remarks>
-    internal void ClearParentPointer() => Volatile.Write(ref _parent, null);
+    /// <param name="world">The node's world matrix immediately before detachment.</param>
+    internal void DetachToWorld(in Matrix3x2 world)
+    {
+        Volatile.Write(ref _parent, null);
+        ChildIndex = -1;
+
+        lock (_sync)
+        {
+            _localMatrix = world;
+            RefreshAuthoredScalars(world);
+        }
+    }
 
     Matrix3x2 ISceneNode.LocalMatrixCore() => LocalMatrixCore();
 
@@ -251,7 +285,9 @@ internal class Transform : ITransform, ISceneNode
 
     void ISceneNode.RemoveChildCore(Transform child) => RemoveChildCore(child);
 
-    void ISceneNode.VisitChildrenCore(ISceneNodeVisitor visitor) => VisitChildrenCore(visitor);
+    int ISceneNode.ChildCountCore => _children?.Count ?? 0;
+
+    Transform ISceneNode.GetChildCore(int index) => _children!.Get(index);
 
     private void SetParent(ITransform? parent)
     {
@@ -300,31 +336,29 @@ internal class Transform : ITransform, ISceneNode
             }
         }
 
-        var local = Matrix3x2.Identity;
-        if (newParent is not null)
+        if (newParent is null)
         {
-            var world = WorldMatrixCore();
-            var parentWorld = newParent.WorldMatrixCore();
-            if (!Matrix3x2.Invert(parentWorld, out var parentInverse))
-            {
-                throw new Bork2dException(
-                    "Cannot preserve the world transform against a parent with a singular world transform.");
-            }
-
-            local = world * parentInverse;
+            DetachFromCurrentParentPreservingWorld();
+            return;
         }
+
+        var world = WorldMatrixCore();
+        var parentWorld = newParent.WorldMatrixCore();
+        if (!Matrix3x2.Invert(parentWorld, out var parentInverse))
+        {
+            throw new Bork2dException(
+                "Cannot preserve the world transform against a parent with a singular world transform.");
+        }
+
+        var local = world * parentInverse;
 
         DetachFromCurrentParentCore();
         Volatile.Write(ref _parent, newParent);
-
-        if (newParent is not null)
+        newParent.AddChildCore(this);
+        lock (_sync)
         {
-            newParent.AddChildCore(this);
-            lock (_sync)
-            {
-                _localMatrix = local;
-                RefreshAuthoredScalars(local);
-            }
+            _localMatrix = local;
+            RefreshAuthoredScalars(local);
         }
     }
 
@@ -340,46 +374,27 @@ internal class Transform : ITransform, ISceneNode
         Volatile.Write(ref _parent, null);
     }
 
-    private void AddChildCore(Transform child)
+    private void DetachFromCurrentParentPreservingWorld()
     {
-        (_children ??= new List<Transform>()).Add(child);
-    }
-
-    private void VisitChildrenCore(ISceneNodeVisitor visitor)
-    {
-        var children = _children;
-        if (children is null)
+        var parent = _parent;
+        if (parent is null)
         {
             return;
         }
 
-        for (var index = 0; index < children.Count; index++)
-        {
-            visitor.Visit(children[index]);
-        }
+        var world = WorldMatrixCore();
+        parent.RemoveChildCore(this);
+        DetachToWorld(world);
+    }
+
+    private void AddChildCore(Transform child)
+    {
+        (_children ??= new SceneChildList()).Add(child);
     }
 
     private void RemoveChildCore(Transform child)
     {
-        var children = _children;
-        if (children is null)
-        {
-            return;
-        }
-
-        var index = children.IndexOf(child);
-        if (index < 0)
-        {
-            return;
-        }
-
-        var last = children.Count - 1;
-        if (index != last)
-        {
-            children[index] = children[last];
-        }
-
-        children.RemoveAt(last);
+        _children?.Remove(child);
     }
 
     private static Lock StructuralLockOf(ISceneNode node) => node switch
@@ -393,11 +408,31 @@ internal class Transform : ITransform, ISceneNode
     private bool SharesStructuralLock(ISceneNode node)
         => StructuralLockOf(node) == _structuralLock;
 
-    private Matrix3x2 WorldMatrixCore()
+    /// <summary>
+    /// Gets the local-to-world matrix without acquiring the structural lock.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The caller must hold the structural lock. The composition is iterative: the node's local
+    /// matrix is multiplied by each ancestor's local matrix up to the root, so a deep hierarchy
+    /// cannot exhaust the call stack.
+    /// </para>
+    /// <para>
+    /// Each node's local matrix is read under its own per-object lock, in the structural-then-
+    /// per-object order. Used by scene structural operations and by the shared child list while it
+    /// detaches direct children in one pass.
+    /// </para>
+    /// </remarks>
+    /// <returns>The local-to-world matrix.</returns>
+    internal Matrix3x2 WorldMatrixCore()
     {
-        var local = LocalMatrixCore();
-        var parent = _parent;
-        return parent is null ? local : local * parent.WorldMatrixCore();
+        var world = LocalMatrixCore();
+        for (var ancestor = _parent; ancestor is not null; ancestor = ancestor.ParentNode)
+        {
+            world *= ancestor.LocalMatrixCore();
+        }
+
+        return world;
     }
 
     private Matrix3x2 LocalMatrixCore()
@@ -409,13 +444,22 @@ internal class Transform : ITransform, ISceneNode
     }
 
     /// <summary>
+    /// Gets the local-to-parent matrix without acquiring the per-object lock.
+    /// </summary>
+    /// <remarks>
+    /// The caller must hold <see cref="Sync"/>. Used by a derived renderable's capture method,
+    /// which copies its own fields and this matrix in one critical section.
+    /// </remarks>
+    internal Matrix3x2 LocalMatrixUnderLock => _localMatrix;
+
+    /// <summary>
     /// Refreshes the authored scalar cache from an exact local matrix.
     /// </summary>
     /// <remarks>
     /// The caller must hold <see cref="_sync"/>. The decomposed rotation is converted to degrees
     /// and normalized to <c>[0, 360)</c>. The determinant convention puts a reflection on the Y
     /// scale; if the object was authored with a negative X scale, the reflection is moved back to
-    /// X (with the matching half-turn) so the authored mirror axis survives a re-parent.
+    /// X (with the matching half-turn) so the authored mirror axis survives a re-parent or detach.
     /// </remarks>
     private void RefreshAuthoredScalars(in Matrix3x2 local)
     {

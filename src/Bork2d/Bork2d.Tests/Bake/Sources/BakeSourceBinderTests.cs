@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Text;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Sources;
@@ -59,7 +60,7 @@ public sealed class BakeSourceBinderTests
         BoundAsset sprite = assets.Single(asset => asset.AssetPath == "sprites/player");
         var spriteAsset = Assert.IsType<SpriteAsset>(sprite.Value);
         Assert.Equal("art/player", spriteAsset.Texture.Path);
-        Assert.Equal(16f, spriteAsset.Scale);
+        Assert.Equal(new Vector2(16f, 16f), spriteAsset.Scale);
         Assert.Equal(SpriteTopology.Triangles, spriteAsset.Topology);
         Assert.Equal(new ushort[] { 0, 1, 2, 0, 2, 3 }, spriteAsset.Indices);
         Assert.Single(sprite.References);
@@ -209,7 +210,7 @@ public sealed class BakeSourceBinderTests
             """
             texture = "art/player"
             uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
-            scale = 16.0
+            scale = [16.0, 16.0]
             pivot = [0.5, 0.5]
             topology = "triangles"
             indices = [0, 1, 2, 0, 2, 3]

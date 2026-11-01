@@ -25,9 +25,10 @@ internal interface ITexturePageGpu
     /// resident page descriptor.
     /// </summary>
     /// <remarks>
-    /// Growth requires all in-flight frames to be idle, so the implementation waits the device
-    /// before recreating the descriptor pools/sets. Calling it with the current capacity is a
-    /// no-op.
+    /// Growth must not replace a descriptor set while a frame using it is in flight, so the
+    /// implementation retires every in-flight frame fence before recreating the descriptor
+    /// pools/sets. It never calls <c>vkDeviceWaitIdle</c> for growth. Calling it with the current
+    /// capacity is a no-op.
     /// </remarks>
     /// <param name="capacity">The new total capacity, including the placeholder.</param>
     void EnsureCapacity(int capacity);
@@ -61,6 +62,20 @@ internal interface ITexturePageGpu
     /// </summary>
     /// <param name="pageIndex">The page index passed to <see cref="Upload"/>.</param>
     void WaitForUpload(int pageIndex);
+
+    /// <summary>
+    /// Destroys one page's view, image, and image-memory range so the slot and its bytes can be
+    /// reused.
+    /// </summary>
+    /// <remarks>
+    /// The caller owns the frame-safety rule: it retires a page only after
+    /// <see cref="TexturePageStore"/>'s reclaim safety age proved no in-flight frame can sample it,
+    /// and never the placeholder. The implementation rewrites the slot to the placeholder before
+    /// destroying the view, returns the image-memory range to the image pool for reuse, and drops
+    /// the page from the resident set. Retiring an index that is not resident is a no-op.
+    /// </remarks>
+    /// <param name="pageIndex">The bindless page index to reclaim; never the placeholder.</param>
+    void RetirePage(int pageIndex);
 
     /// <summary>Gets the number of resident page images (including the placeholder).</summary>
     int ResidentPageCount { get; }

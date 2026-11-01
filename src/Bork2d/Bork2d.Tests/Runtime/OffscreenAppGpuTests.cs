@@ -1,3 +1,4 @@
+using System.Numerics;
 using Bork2d.Engine;
 using Bork2d.Render;
 using Bork2d.Render.Diagnostics;
@@ -46,7 +47,20 @@ public sealed class OffscreenAppGpuTests
         var factory = new RecordingRendererFactory(new VulkanRendererFactory());
         double? lastTime = null;
         double? lastDelta = null;
+        Vector2? setupWindowSize = null;
+        Vector2? setupWorldSize = null;
+        Vector2? setupScreen = null;
+        Vector2? setupRoundTrip = null;
         var game = new ScriptedGame<GameLayer>();
+        game.OnSetup = engine =>
+        {
+            setupWindowSize = engine.Window.Size;
+            var camera = engine.CreateCamera(engine.Root);
+            camera.Size = 5f;
+            setupWorldSize = camera.WorldSize;
+            setupScreen = camera.WorldToScreen(Vector2.Zero);
+            setupRoundTrip = camera.ScreenToWorld(setupScreen.Value);
+        };
         game.OnTick = () =>
         {
             var engine = game.Engine!;
@@ -88,6 +102,17 @@ public sealed class OffscreenAppGpuTests
         Assert.Equal(1, game.TeardownCount);
         Assert.True(lastTime > 0d, "Offscreen ITime must advance per tick.");
         Assert.True(lastDelta >= 0d);
+
+        // The real offscreen app exposes its target extent through IEngine.Window, so the camera
+        // helpers project without a surface.
+        Assert.Equal(new Vector2(320f, 240f), setupWindowSize);
+        Assert.Equal(new Vector2(320f, 240f), game.Engine!.Window.Size);
+        Assert.Equal(2f * 5f * (320f / 240f), setupWorldSize!.Value.X, 4);
+        Assert.Equal(10f, setupWorldSize.Value.Y, 4);
+        Assert.Equal(160f, setupScreen!.Value.X, 3);
+        Assert.Equal(120f, setupScreen.Value.Y, 3);
+        Assert.Equal(0f, setupRoundTrip!.Value.X, 3);
+        Assert.Equal(0f, setupRoundTrip.Value.Y, 3);
 
         // One published snapshot per completed tick, including the Exit tick (Q4=D1).
         SnapshotRingCounters ring = renderer.SnapshotCounters;

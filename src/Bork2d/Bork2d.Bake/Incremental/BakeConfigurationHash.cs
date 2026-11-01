@@ -60,7 +60,7 @@ internal static class BakeConfigurationHash
         }
 
         fields.Add(Format(project.Processors.Count));
-        foreach (IBakeAssetProcessor processor in project.Processors)
+        foreach (BakeProcessorRegistration processor in project.Processors)
         {
             Type processorType = processor.ProcessorType;
             fields.Add(processor.Name);

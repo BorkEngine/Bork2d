@@ -1,3 +1,4 @@
+using System.Numerics;
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
 using Bork2d.Tests.Assets.Pack;
@@ -193,6 +194,30 @@ public sealed class AssetServiceLifecycleTests
     }
 
     [Fact]
+    public void CatalogVersionIncrementsOnEachMountAndNotOnAFailedMount()
+    {
+        using var directory = TempPackDirectory.CreateUnderTemp();
+        string basePath = directory.WritePack(
+            "base.pck",
+            builder => builder.AddRaw("data/base", [1]));
+        string overlayPath = directory.WritePack(
+            "overlay.pck",
+            builder => builder.AddRaw("data/overlay", [2]));
+        string malformedPath = directory.WriteBytes("malformed.pck", [9, 9, 9, 9]);
+
+        using var host = new AssetServiceHost(basePath);
+        host.Start();
+        var catalog = Assert.IsAssignableFrom<IAssetCatalogVersion>(host.Service);
+        Assert.Equal(1, catalog.CatalogVersion);
+
+        host.Service.LoadPack(overlayPath);
+        Assert.Equal(2, catalog.CatalogVersion);
+
+        Assert.Throws<Bork2dException>(() => host.Service.LoadPack(malformedPath));
+        Assert.Equal(2, catalog.CatalogVersion);
+    }
+
+    [Fact]
     public async Task BadOverlayLeavesTheStackUnchanged()
     {
         using var directory = TempPackDirectory.CreateUnderTemp();
@@ -225,7 +250,7 @@ public sealed class AssetServiceLifecycleTests
             .WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(SpriteTestSupport.TexturePath, sprite.Texture.Path);
-        Assert.Equal(16f, sprite.Scale);
+        Assert.Equal(new Vector2(16f, 16f), sprite.Scale);
         Assert.Equal(SpriteTopology.Quad, sprite.Topology);
 
         Assert.Throws<ArgumentNullException>(() =>

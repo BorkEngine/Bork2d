@@ -55,7 +55,7 @@ public sealed class SnapshotCaptureTests
     }
 
     [Fact]
-    public void SpritePropertiesAreCopiedIncludingTheAssetReferenceAndFlips()
+    public void SpritePropertiesAreCopiedIncludingTheFrozenRenderDataAndFlips()
     {
         var engine = CreateEngine();
         var asset = new SpriteAsset();
@@ -71,13 +71,63 @@ public sealed class SnapshotCaptureTests
 
         Assert.Equal(1, snapshot.SpriteCount);
         SpriteSnapshot captured = snapshot.Sprites[0];
-        Assert.Same(asset, captured.Sprite);
+        Assert.Same(SpriteRenderData.Freeze(asset), captured.SpriteData);
         Assert.Equal((uint)GameLayer.Player, captured.Layer);
         Assert.Equal(Color.Yellow, captured.Tint);
         Assert.Equal(-4, captured.ZIndex);
         Assert.True(captured.FlipX);
         Assert.False(captured.FlipY);
         Assert.Equal(Matrix3x2.Identity, captured.WorldMatrix);
+    }
+
+    [Fact]
+    public void MutatingTheAssetAfterAssignmentDoesNotChangeTheCapturedData()
+    {
+        var engine = CreateEngine();
+        var asset = new SpriteAsset
+        {
+            Texture = "textures/player",
+            Uvs =
+            [
+                new Vector2(0.1f, 0.2f),
+                new Vector2(0.9f, 0.2f),
+                new Vector2(0.9f, 0.8f),
+                new Vector2(0.1f, 0.8f),
+            ],
+            Scale = new Vector2(2f, 3f),
+            Pivot = new Vector2(0.25f, 0.75f),
+            Topology = SpriteTopology.Quad,
+            Indices = null,
+        };
+        var sprite = engine.CreateSpriteRender(engine.Root);
+        sprite.Sprite = asset;
+        SpriteRenderData frozen = Assert.IsType<SpriteRenderData>(Capture(engine).Sprites[0].SpriteData);
+
+        asset.Uvs![0] = new Vector2(-1f, -1f);
+        asset.Uvs = [new Vector2(0f, 0f)];
+        asset.Scale = new Vector2(99f, 99f);
+        asset.Pivot = new Vector2(1f, 0f);
+        asset.Topology = SpriteTopology.Triangles;
+        asset.Indices = [0, 1, 2];
+        asset.Texture = "textures/other";
+
+        SpriteRenderData after = Assert.IsType<SpriteRenderData>(Capture(engine).Sprites[0].SpriteData);
+
+        Assert.Same(frozen, after);
+        Assert.Equal("textures/player", after.Texture.Path);
+        Assert.Equal(new Vector2(2f, 3f), after.Scale);
+        Assert.Equal(new Vector2(0.25f, 0.75f), after.Pivot);
+        Assert.Equal(SpriteTopology.Quad, after.Topology);
+        Assert.Null(after.Indices);
+        Assert.Equal(
+            new[]
+            {
+                new Vector2(0.1f, 0.2f),
+                new Vector2(0.9f, 0.2f),
+                new Vector2(0.9f, 0.8f),
+                new Vector2(0.1f, 0.8f),
+            },
+            after.Uvs);
     }
 
     [Fact]
@@ -90,7 +140,7 @@ public sealed class SnapshotCaptureTests
         var snapshot = Capture(engine);
 
         Assert.Equal(1, snapshot.SpriteCount);
-        Assert.Null(snapshot.Sprites[0].Sprite);
+        Assert.Null(snapshot.Sprites[0].SpriteData);
     }
 
     [Fact]
@@ -133,6 +183,111 @@ public sealed class SnapshotCaptureTests
             * Matrix3x2.CreateTranslation(100f, 50f);
         TestAssertions.Close(expected, snapshot.Sprites[0].WorldMatrix);
         TestAssertions.Close(new Vector2(100f, 52f), snapshot.Sprites[0].WorldMatrix.Translation);
+    }
+
+    [Fact]
+    public void CapturedWorldMatricesMatchTheIterativeWorldMatrixForEveryNode()
+    {
+        var engine = CreateEngine();
+
+        var rig = engine.CreateTransform(engine.Root);
+        rig.LocalPosition = new Vector2(10f, -5f);
+        rig.LocalRotation = 35f;
+        rig.LocalScale = new Vector2(2f, 0.5f);
+
+        var turret = engine.CreateTransform(rig);
+        turret.LocalPosition = new Vector2(1f, 2f);
+        turret.LocalRotation = -20f;
+        turret.LocalScale = new Vector2(1.5f, 3f);
+
+        var barrel = engine.CreateTransform(turret);
+        barrel.LocalPosition = new Vector2(0.5f, -1f);
+        barrel.LocalRotation = 10f;
+        barrel.LocalScale = new Vector2(0.75f, 2f);
+
+        var spriteA = engine.CreateSpriteRender(barrel);
+        spriteA.LocalPosition = new Vector2(3f, 4f);
+        spriteA.LocalRotation = 15f;
+        spriteA.LocalScale = new Vector2(2f, 0.5f);
+        spriteA.ZIndex = 0;
+
+        var spriteB = engine.CreateSpriteRender(rig);
+        spriteB.LocalPosition = new Vector2(-2f, 1f);
+        spriteB.LocalRotation = 80f;
+        spriteB.LocalScale = new Vector2(1.25f, 0.5f);
+        spriteB.ZIndex = 1;
+
+        var spriteC = engine.CreateSpriteRender(engine.Root);
+        spriteC.LocalPosition = new Vector2(7f, -3f);
+        spriteC.LocalRotation = -45f;
+        spriteC.LocalScale = new Vector2(-1.5f, 1f);
+        spriteC.ZIndex = 2;
+
+        var spriteD = engine.CreateSpriteRender(turret);
+        spriteD.LocalPosition = new Vector2(0f, 0f);
+        spriteD.LocalScale = new Vector2(1f, 1f);
+        spriteD.ZIndex = 3;
+
+        var cameraA = engine.CreateCamera(rig);
+        cameraA.LocalPosition = new Vector2(0f, 0f);
+        cameraA.LocalRotation = 90f;
+        cameraA.ZIndex = 0;
+
+        var cameraB = engine.CreateCamera(barrel);
+        cameraB.LocalPosition = new Vector2(-5f, 2f);
+        cameraB.LocalRotation = 180f;
+        cameraB.ZIndex = 1;
+
+        var expectedSprites = new Dictionary<int, Matrix3x2>
+        {
+            [0] = ((Transform)spriteA).WorldMatrix(),
+            [1] = ((Transform)spriteB).WorldMatrix(),
+            [2] = ((Transform)spriteC).WorldMatrix(),
+            [3] = ((Transform)spriteD).WorldMatrix(),
+        };
+        var expectedCameras = new Dictionary<int, Matrix3x2>
+        {
+            [0] = ((Transform)cameraA).WorldMatrix(),
+            [1] = ((Transform)cameraB).WorldMatrix(),
+        };
+
+        var snapshot = Capture(engine);
+
+        Assert.Equal(expectedSprites.Count, snapshot.SpriteCount);
+        Assert.Equal(expectedCameras.Count, snapshot.CameraCount);
+        foreach (SpriteSnapshot captured in snapshot.Sprites)
+        {
+            TestAssertions.Close(expectedSprites[captured.ZIndex], captured.WorldMatrix);
+        }
+
+        foreach (CameraSnapshot captured in snapshot.Cameras)
+        {
+            TestAssertions.Close(expectedCameras[captured.ZIndex], captured.WorldMatrix);
+        }
+    }
+
+    [Fact]
+    public void ADeepChainIsCapturedAndEvaluatedWithoutRecursion()
+    {
+        const int depth = 50_000;
+        var engine = CreateEngine();
+        ITransform deepest = engine.Root;
+        for (var index = 0; index < depth; index++)
+        {
+            var child = engine.CreateTransform(deepest);
+            child.LocalPosition = new Vector2(1f, 0f);
+            deepest = child;
+        }
+
+        var sprite = engine.CreateSpriteRender(deepest);
+        sprite.LocalPosition = new Vector2(2f, 3f);
+
+        var snapshot = Capture(engine);
+
+        var expected = new Vector2(depth + 2f, 3f);
+        Assert.Equal(1, snapshot.SpriteCount);
+        TestAssertions.Close(expected, snapshot.Sprites[0].WorldMatrix.Translation);
+        TestAssertions.Close(new Vector2(depth, 0f), ((Transform)deepest).WorldMatrix().Translation);
     }
 
     [Fact]

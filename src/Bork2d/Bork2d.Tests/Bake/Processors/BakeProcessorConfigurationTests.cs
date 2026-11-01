@@ -1,6 +1,7 @@
 using Bork2d.Bake;
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
+using Bork2d.Bake.Incremental;
 using Bork2d.Bake.Processors;
 using Bork2d.Tests.Bake;
 using PolyType;
@@ -121,6 +122,70 @@ public sealed class BakeProcessorConfigurationTests
         Assert.Equal(BakeSeverity.Info, info.Severity);
         Assert.Contains("first", info.Message, StringComparison.Ordinal);
         Assert.Contains("second", info.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RegistrationMetadataIsPreservedForHashingAndExtensionOverride()
+    {
+        using var directory = TempBakeDirectory.Create();
+        directory.CreateDirectory("Assets");
+        var second = new TestSidecarProcessor(
+            "second",
+            ".PNG",
+            _ => new TestSidecar { Value = 3 });
+        BakeProject project = CreateProject(
+            directory.RootPath,
+            [new TestProcessor("first", "png"), second]);
+
+        BakeProcessorRegistration registration = project.Processors[1];
+        Assert.Same(second, registration.Processor);
+        Assert.Equal("second", registration.Name);
+        Assert.Equal(typeof(TestSidecarProcessor), registration.ProcessorType);
+        Assert.Equal([".PNG"], registration.Extensions);
+        Assert.Equal(SidecarPolicy.Required, registration.Policy);
+        Assert.NotNull(registration.SidecarShape);
+        Assert.Equal(typeof(TestSidecar), registration.SidecarShape!.Type);
+
+        // The registry normalizes the declared extension for matching without changing the
+        // registration metadata the incremental hash consumes.
+        Assert.Equal(["png"], project.ProcessorRegistry.Extensions);
+        Assert.True(project.ProcessorRegistry.TryMatch("art/Player.PNG", out BakeProcessorMatch match));
+        Assert.Same(registration, match.Processor);
+
+        BakeProject equivalent = CreateProject(
+            directory.RootPath,
+            [
+                new TestProcessor("first", "png"),
+                new TestSidecarProcessor("second", ".PNG", _ => new TestSidecar { Value = 3 }),
+            ]);
+        Assert.Equal(BakeConfigurationHash.Compute(project), BakeConfigurationHash.Compute(equivalent));
+
+        BakeProject renamed = CreateProject(
+            directory.RootPath,
+            [
+                new TestProcessor("first", "png"),
+                new TestSidecarProcessor("renamed", ".PNG", _ => new TestSidecar { Value = 3 }),
+            ]);
+        Assert.NotEqual(BakeConfigurationHash.Compute(project), BakeConfigurationHash.Compute(renamed));
+    }
+
+    private static BakeProject CreateProject(
+        string projectRoot,
+        IReadOnlyList<IAssetProcessor> processors)
+    {
+        BakeApplicationBuilder builder = new BakeApplicationBuilder()
+            .WithProjectRoot(projectRoot)
+            .WithPack("assets.pck", "Assets");
+
+        foreach (IAssetProcessor processor in processors)
+        {
+            builder.AddProcessor(processor);
+        }
+
+        var diagnostics = new BakeDiagnostics();
+        BakeProject? project = builder.CreateProject(diagnostics);
+        Assert.NotNull(project);
+        return project!;
     }
 
     private static ITypeShape ShapeOf<T>()

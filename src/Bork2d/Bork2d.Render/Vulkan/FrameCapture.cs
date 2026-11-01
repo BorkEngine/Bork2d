@@ -1,4 +1,6 @@
 using Bork2d.Engine;
+using Bork2d.Engine.Assets;
+using Bork2d.Engine.Rendering;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
 using Buffer = Silk.NET.Vulkan.Buffer;
@@ -17,10 +19,13 @@ namespace Bork2d.Render.Vulkan;
 /// extent grows; that recreation happens between frames, never while the frame is in flight.
 /// </para>
 /// <para>
-/// Requests complete when the frame's fence is observed (frame reuse or shutdown), not by blocking
-/// the render thread on the GPU. Each request receives its own <c>byte[]</c>: the staging bytes are
-/// swizzled from <c>B8G8R8A8</c> to <c>RGBA8</c> when the target format is BGRA, and copied directly
-/// for <c>R8G8B8A8</c>. <see cref="Destroy"/> is idempotent and never throws.
+/// Requests complete when the frame's fence is observed (the renderer's independent retirement pass,
+/// frame reuse, or shutdown), not by blocking the render thread on the GPU. The staging bytes are
+/// swizzled from <c>B8G8R8A8</c> to <c>RGBA8</c> when the target format is BGRA and copied directly
+/// for <c>R8G8B8A8</c>, into one <see cref="byte"/> array per captured frame; every request served
+/// by that frame receives the same shared immutable <see cref="FrameCaptureResult"/>, so the result
+/// dimensions/format are the captured frame's actual extent and
+/// <see cref="TextureFormat.Rgba8"/>. <see cref="Destroy"/> is idempotent and never throws.
 /// </para>
 /// </remarks>
 internal sealed unsafe class FrameCapture
@@ -139,9 +144,11 @@ internal sealed unsafe class FrameCapture
     /// Completes every attached request from the fence-observed staging bytes.
     /// </summary>
     /// <remarks>
-    /// The renderer calls this once the frame's fence has signaled (frame reuse or shutdown). A
-    /// request whose frame never recorded a copy, or recorded one but was never submitted, is
-    /// faulted instead of returning uninitialized bytes.
+    /// The renderer calls this once the frame's fence has signaled (the independent retirement pass,
+    /// frame reuse, or shutdown). The staging bytes are swizzled/copied into one array for the
+    /// captured frame, and every request that frame serves receives the same shared immutable
+    /// result. A request whose frame never recorded a copy, or recorded one but was never submitted,
+    /// is faulted instead of returning uninitialized bytes.
     /// </remarks>
     internal void Complete()
     {
@@ -164,6 +171,7 @@ internal sealed unsafe class FrameCapture
         }
 
         int length = _width * _height * 4;
+        byte[]? pixels = null;
         for (var index = 0; index < _requests.Count; index++)
         {
             CaptureRequest request = _requests[index];
@@ -172,7 +180,10 @@ internal sealed unsafe class FrameCapture
                 continue;
             }
 
-            request.Complete(CopyPixels(length));
+            // One allocation per captured frame, shared by every request it serves; a cancelled
+            // request therefore allocates nothing.
+            pixels ??= CopyPixels(length);
+            request.Complete(new FrameCaptureResult(pixels, _width, _height, TextureFormat.Rgba8));
             CompletedRequestCount++;
         }
 

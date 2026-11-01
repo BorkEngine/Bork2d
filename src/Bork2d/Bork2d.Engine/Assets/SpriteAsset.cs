@@ -9,8 +9,16 @@ namespace Bork2d.Engine.Assets;
 /// <remarks>
 /// <para>
 /// A sprite references a texture descriptor through <see cref="Texture"/> and carries four
-/// normalized UVs, a pixels-per-world-unit scale, a normalized pivot, a topology, and optional
-/// indices. There is no vertices array; the renderer generates the quad corners from these values.
+/// normalized UVs, a per-axis world scale, a normalized pivot, a topology, and optional indices.
+/// There is no vertices array; the renderer generates the quad corners from these values.
+/// </para>
+/// <para>
+/// Assigning the asset to a sprite renderable freezes these fields once, and the renderer reads
+/// only that frozen copy. Mutating the asset after assignment — including <see cref="Uvs"/>,
+/// <see cref="Indices"/>, <see cref="Scale"/>, <see cref="Pivot"/>, <see cref="Topology"/>, or
+/// <see cref="Texture"/> — does not change the drawn sprite or any published snapshot, and
+/// re-assigning the same asset keeps the first frozen values. Load or create a new asset instance
+/// to change the rendered result.
 /// </para>
 /// <para>
 /// Load with <see cref="IAssets.LoadAsset{T}(string)"/> using the canonical sprite path. The
@@ -34,9 +42,14 @@ public sealed partial class SpriteAsset
     public Vector2[]? Uvs { get; set; }
 
     /// <summary>
-    /// Gets or sets the scale in pixels per world unit.
+    /// Gets or sets the per-axis world scale in world units per normalized UV span.
     /// </summary>
-    public float Scale { get; set; }
+    /// <remarks>
+    /// A full UV quad's world size is <c>(maxU - minU) * Scale.X</c> by
+    /// <c>(maxV - minV) * Scale.Y</c>; texture pixel dimensions never affect the geometry. Both
+    /// components must be finite and greater than zero.
+    /// </remarks>
+    public Vector2 Scale { get; set; }
 
     /// <summary>
     /// Gets or sets the normalized pivot inside the quad; the default is the center.

@@ -30,7 +30,7 @@ public sealed class SpriteAssetBakeTests
         const string toml = """
             texture = "textures/player"
             uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
-            scale = 16.0
+            scale = [16.0, 16.0]
             pivot = [0.25, 0.75]
             topology = "triangles"
             indices = [0, 1, 2, 0, 2, 3]
@@ -56,7 +56,7 @@ public sealed class SpriteAssetBakeTests
                 new Vector2(0f, 1f),
             },
             sprite.Uvs);
-        Assert.Equal(16f, sprite.Scale);
+        Assert.Equal(new Vector2(16f, 16f), sprite.Scale);
         Assert.Equal(new Vector2(0.25f, 0.75f), sprite.Pivot);
         Assert.Equal(SpriteTopology.Triangles, sprite.Topology);
         Assert.Equal(new ushort[] { 0, 1, 2, 0, 2, 3 }, sprite.Indices);
@@ -107,7 +107,7 @@ public sealed class SpriteAssetBakeTests
         const string toml = """
             texture = "textures/player"
             uvs = [[0.0, 0.0]]
-            scale = -1.0
+            scale = [-1.0, -1.0]
             pivot = [2.0, -2.0]
             topology = "triangles"
             """;
@@ -122,7 +122,7 @@ public sealed class SpriteAssetBakeTests
         Assert.Empty(diagnostics.GetSorted());
         var sprite = Assert.IsType<SpriteAsset>(value);
         Assert.Single(sprite.Uvs!);
-        Assert.Equal(-1f, sprite.Scale);
+        Assert.Equal(new Vector2(-1f, -1f), sprite.Scale);
         Assert.Equal(new Vector2(2f, -2f), sprite.Pivot);
         Assert.Null(sprite.Indices);
         Assert.Single(context.References);

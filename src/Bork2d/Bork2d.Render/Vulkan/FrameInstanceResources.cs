@@ -26,7 +26,7 @@ namespace Bork2d.Render.Vulkan;
 /// <see cref="SpritePipeline"/> layout, allocated with a variable descriptor count equal to the
 /// current page capacity and the <c>PARTIALLY_BOUND | UPDATE_AFTER_BIND |
 /// VARIABLE_DESCRIPTOR_COUNT</c> flags. Page descriptors are written by <see cref="WritePage"/> as
-/// pages become ready and rewritten after a capacity growth (the renderer waits the device idle,
+/// pages become ready and rewritten after a capacity growth (the frame set waits every frame fence,
 /// calls <see cref="RecreateBindless(int)"/>, and then rewrites every resident page).
 /// <see cref="Destroy"/> is best-effort, idempotent, and never throws (D-M6-27).
 /// </para>
@@ -336,9 +336,9 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     /// Recreates the descriptor pool/set with a new variable descriptor count.
     /// </summary>
     /// <remarks>
-    /// The caller must have waited the device idle first (capacity growth happens between frames
-    /// with all in-flight frames idle), and must rewrite every resident page descriptor afterwards
-    /// because the new set is empty.
+    /// The caller must have waited every in-flight frame fence first (capacity growth happens
+    /// between frames), and must rewrite every resident page descriptor afterwards because the new
+    /// set is empty.
     /// </remarks>
     /// <param name="pageCapacity">The new bindless page capacity, including the placeholder.</param>
     /// <exception cref="Bork2dException">The pool or set could not be created.</exception>

@@ -23,14 +23,14 @@ internal sealed class BakeProcessorRegistry
 {
     private const string ReservedExtension = "toml";
 
-    private readonly Dictionary<string, IBakeAssetProcessor> _byExtension;
+    private readonly Dictionary<string, BakeProcessorRegistration> _byExtension;
     private readonly string[] _extensions;
     private readonly string[] _extensionsByMatchLength;
-    private readonly IBakeAssetProcessor[] _processors;
+    private readonly BakeProcessorRegistration[] _processors;
 
     private BakeProcessorRegistry(
-        Dictionary<string, IBakeAssetProcessor> byExtension,
-        IBakeAssetProcessor[] processors)
+        Dictionary<string, BakeProcessorRegistration> byExtension,
+        BakeProcessorRegistration[] processors)
     {
         _byExtension = byExtension;
         _processors = processors;
@@ -42,14 +42,14 @@ internal sealed class BakeProcessorRegistry
 
     /// <summary>Gets the registry with no processors; used by isolated tests and empty projects.</summary>
     internal static BakeProcessorRegistry Empty { get; } = new(
-        new Dictionary<string, IBakeAssetProcessor>(StringComparer.Ordinal),
+        new Dictionary<string, BakeProcessorRegistration>(StringComparer.Ordinal),
         []);
 
     /// <summary>Gets the normalized, distinct extensions in ordinal order.</summary>
     internal IReadOnlyList<string> Extensions => _extensions;
 
-    /// <summary>Gets the processors in registration order.</summary>
-    internal IReadOnlyList<IBakeAssetProcessor> Processors => _processors;
+    /// <summary>Gets the processor registrations in registration order.</summary>
+    internal IReadOnlyList<BakeProcessorRegistration> Processors => _processors;
 
     /// <summary>Gets a value indicating whether no processor is registered.</summary>
     internal bool IsEmpty => _byExtension.Count == 0;
@@ -60,7 +60,7 @@ internal sealed class BakeProcessorRegistry
     /// <param name="registry">The created registry when every registration is valid.</param>
     /// <returns><see langword="true"/> when every processor registration is valid.</returns>
     internal static bool TryCreate(
-        IReadOnlyList<IBakeAssetProcessor> processors,
+        IReadOnlyList<IAssetProcessor> processors,
         BakeDiagnostics diagnostics,
         out BakeProcessorRegistry? registry)
     {
@@ -69,11 +69,11 @@ internal sealed class BakeProcessorRegistry
 
         registry = null;
 
-        var byExtension = new Dictionary<string, IBakeAssetProcessor>(StringComparer.Ordinal);
-        var registered = new List<IBakeAssetProcessor>(processors.Count);
+        var byExtension = new Dictionary<string, BakeProcessorRegistration>(StringComparer.Ordinal);
+        var registered = new List<BakeProcessorRegistration>(processors.Count);
         bool valid = true;
 
-        foreach (IBakeAssetProcessor? processor in processors)
+        foreach (IAssetProcessor? processor in processors)
         {
             if (processor is null)
             {
@@ -86,10 +86,11 @@ internal sealed class BakeProcessorRegistry
                 continue;
             }
 
-            string name = Describe(processor);
-            registered.Add(processor);
+            var registration = new BakeProcessorRegistration(processor);
+            string name = Describe(registration);
+            registered.Add(registration);
 
-            if (string.IsNullOrWhiteSpace(processor.Name))
+            if (string.IsNullOrWhiteSpace(registration.Name))
             {
                 diagnostics.Add(
                     BakeSeverity.Error,
@@ -99,16 +100,16 @@ internal sealed class BakeProcessorRegistry
                 valid = false;
             }
 
-            if (processor.Policy is not BakeSidecarPolicy.None and not BakeSidecarPolicy.Required)
+            if (registration.Policy is not SidecarPolicy.None and not SidecarPolicy.Required)
             {
                 diagnostics.Add(
                     BakeSeverity.Error,
                     BakeDiagnosticCodes.ProcessorRegistrationInvalid,
                     $"The processor '{name}' declares the unsupported sidecar policy "
-                        + $"'{processor.Policy}'; only None and Required are valid.");
+                        + $"'{registration.Policy}'; only None and Required are valid.");
                 valid = false;
             }
-            else if (processor.Policy == BakeSidecarPolicy.None && processor.SidecarShape is not null)
+            else if (registration.Policy == SidecarPolicy.None && registration.SidecarShape is not null)
             {
                 diagnostics.Add(
                     BakeSeverity.Error,
@@ -117,7 +118,7 @@ internal sealed class BakeProcessorRegistry
                         + "processor without a sidecar must return null from SidecarShape.");
                 valid = false;
             }
-            else if (processor.Policy == BakeSidecarPolicy.Required && processor.SidecarShape is null)
+            else if (registration.Policy == SidecarPolicy.Required && registration.SidecarShape is null)
             {
                 diagnostics.Add(
                     BakeSeverity.Error,
@@ -127,7 +128,7 @@ internal sealed class BakeProcessorRegistry
                 valid = false;
             }
 
-            IReadOnlyList<string> extensions = processor.Extensions;
+            IReadOnlyList<string> extensions = registration.Extensions;
             if (extensions is null || extensions.Count == 0)
             {
                 diagnostics.Add(
@@ -159,7 +160,7 @@ internal sealed class BakeProcessorRegistry
                     continue;
                 }
 
-                if (byExtension.TryGetValue(extension, out IBakeAssetProcessor? existing))
+                if (byExtension.TryGetValue(extension, out BakeProcessorRegistration? existing))
                 {
                     diagnostics.Add(
                         BakeSeverity.Info,
@@ -168,7 +169,7 @@ internal sealed class BakeProcessorRegistry
                             + $"'{Describe(existing)}'.");
                 }
 
-                byExtension[extension] = processor;
+                byExtension[extension] = registration;
             }
         }
 
@@ -270,7 +271,7 @@ internal sealed class BakeProcessorRegistry
         return true;
     }
 
-    private static string Describe(IBakeAssetProcessor processor)
+    private static string Describe(BakeProcessorRegistration processor)
     {
         if (!string.IsNullOrWhiteSpace(processor.Name))
         {

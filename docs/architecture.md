@@ -41,6 +41,17 @@ Microsoft.Extensions.Logging.Abstractions, System.IO.Hashing).
 No member requires the process main thread. Scene structure is serialized by one engine-owned lock;
 per-object property access uses a per-object lock, with structural-then-object lock ordering.
 
+The two render target drivers stay separate: `VulkanRenderer` owns swapchain acquire/present,
+resize, recovery, and the minimized drain; `VulkanOffscreenRenderer` owns the fixed sRGB target, its
+one-time layout transition, and the discard path. They compose four shared compositions instead of
+duplicating renderer machinery: one `RendererLifecycle` (render thread, readiness, status/stop
+reason, one-shot fatal, snapshot handoff delegations, counters, stats board), one
+`RendererCaptureService` (bounded capture queue, frame-fence retirement, stop/fatal close), one
+`RendererTextures` (sprite pipeline per output format, texture-page store, bindless page writes), and
+one `RenderPassRegistry` (the ordered render passes and the aggregate frame statistics). A small
+`IVulkanFrame`/frame-set seam adapts the two frame types to those services. There is no renderer
+inheritance hierarchy.
+
 ## Frame handoff
 
 Windowed and offscreen runs publish one snapshot per tick and render one GPU frame per consumed
@@ -49,7 +60,9 @@ snapshot:
 1. The tick thread acquires a free slot from the three-slot ring. This blocks only when all three
    slots are occupied, which bounds run-ahead.
 2. It freezes input, advances the clock, dispatches text, and calls `IGame.Tick`.
-3. It walks the rooted scene once and captures every camera and sprite renderable into the slot as
+3. It walks the rooted scene once with an iterative, parent-first traversal that composes one world
+   matrix and takes one per-object lock per node, and runs the registered typed renderable producers,
+   which capture every camera, sprite, and custom renderable into its typed buffer in the slot as
    value-only records.
 4. It publishes the slot as the newest snapshot. A newer publish supersedes the previous `Ready`
    slot, never a `Rendering` one.
@@ -65,8 +78,15 @@ snapshot; it only runs the paced game loop.
 | Mode | Window / input | Renderer | Loop |
 | --- | --- | --- | --- |
 | Windowed (default) | SDL window; input available | Vulkan swapchain | Backpressured by the ring; stops on `Exit`, close, renderer fatal, or platform fatal. |
-| Offscreen | None | Fixed sRGB Vulkan target; frames discarded | Same handoff loop; stops on `Exit` or renderer fatal. |
-| Headless | None | None, no GPU or SDL | Absolute-deadline paced loop with a synthesized clock; stops on `Exit`. |
+| Offscreen | Functional window facade reporting the fixed target extent; no input | Fixed sRGB Vulkan target; frames discarded | Same handoff loop; stops on `Exit` or renderer fatal. |
+| Headless | None; `IEngine.Window` is a throwing stub | None, no GPU or SDL | Absolute-deadline paced loop with a synthesized clock; stops on `Exit`. |
+
+Windowed and offscreen run through one internal rendered-run lifecycle: assets, platform startup,
+renderer startup and attachment, the `Setup`/readiness boundary, the backpressured tick loop,
+`Teardown`, renderer stop/join, platform shutdown, asset stop, proxy detach, and the mode-specific
+failure precedence. The mode hosts contribute only the SDL platform/proxies/input/minimized cap
+(windowed) or the fixed target (offscreen). Headless uses its own paced lifecycle with no renderer,
+platform, or snapshot ring.
 
 ## Assets and tooling
 
@@ -75,7 +95,7 @@ Assets are built ahead of time, not loaded from loose files at runtime:
 1. A game-owned assets executable configures `BakeApplicationBuilder` and registers data types and
    processors.
 2. The bake discovers sources under ordered pack roots, binds TOML, runs processors, validates
-   references, and writes one or more packs atomically.
+   references, stages every pack, and publishes the staged set with rollback on failure.
 3. The runtime mounts the base pack (and any later overlays), resolving a canonical path to the
    winning entry.
 4. The asset loader thread decompresses and deserializes on demand.
@@ -85,14 +105,20 @@ Assets are built ahead of time, not loaded from loose files at runtime:
 ## Invariants
 
 - **Scene ownership.** The root is a read-only identity transform. Parents hold children strongly;
-  scene entities have no `Dispose` or liveness flag. Detach with `Parent = null` and re-attach the
-  same object later.
+  scene entities have no `Dispose` or liveness flag. Detach with `Parent = null` or `DetachAll()`
+  and the detached node keeps its world transform; re-attach the same object later.
 - **Coordinates.** World space is +X right, +Y up, in absolute world units. `Camera.Size` is the
   half visible height; viewports are normalized with a top-left origin.
-- **Layers.** A layer type is an `int`-backed `[Flags]` enum with 1-32 named single-bit values
-  (`None = 0` allowed). A sprite uses exactly one bit; a camera culls with a mask.
+- **Layers and culling.** A layer type is an `int`-backed `[Flags]` enum with 1-32 named single-bit
+  values (`None = 0` allowed). A sprite uses exactly one bit; a camera culls with a mask. After the
+  mask, culling is a conservative world-space AABB test: the camera's visible rectangle and the
+  sprite's drawn quad are converted to world AABBs, and a sprite is skipped only when its known
+  bounds do not intersect the camera's. Empty bounds mean "unknown" and never cull; there is no
+  spatial index and no culling toggle.
 - **Snapshots.** Capture contains no live scene entities. The only object reference that crosses
-  the tick/render boundary is the loaded `SpriteAsset`.
+  the tick/render boundary is immutable sprite render data, frozen from the loaded `SpriteAsset`
+  when it was assigned; the mutable asset itself is never captured. Reusing a slot clears every
+  typed render-data buffer's used range, so it retains no obsolete render data.
 - **AOT.** Generated shapes are required; there is no reflection-shape fallback or runtime TOML.
   Runtime projects enable trim and AOT analyzers.
 - **Tooling isolation.** The bake tooling, TOML parser, image decoder, and shader compiler never

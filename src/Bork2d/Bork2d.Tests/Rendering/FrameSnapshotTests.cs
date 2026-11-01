@@ -1,4 +1,5 @@
 using System.Numerics;
+using Bork2d.Engine;
 using Bork2d.Engine.Rendering;
 using Xunit;
 
@@ -110,9 +111,39 @@ public sealed class FrameSnapshotTests
         Assert.Equal(9, snapshot.Sprites[0].ZIndex);
     }
 
+    [Fact]
+    public void CustomTypedBufferLivesInItsOwnSlotAndResetClearsIt()
+    {
+        var snapshot = new FrameSnapshot();
+        snapshot.AddCamera(Camera());
+        RenderDataBuffer<TestRecord> custom = snapshot.GetBuffer<TestRecord>(
+            FrameSnapshot.ReservedSlotCount);
+        custom.Add(new TestRecord(7));
+        custom.Add(new TestRecord(9));
+        var capacity = custom.Capacity;
+
+        snapshot.Reset();
+
+        Assert.Equal(0, snapshot.CameraCount);
+        Assert.Equal(0, custom.Count);
+        Assert.Equal(capacity, custom.Capacity);
+        Assert.Equal(0, snapshot.GetBuffer<TestRecord>(FrameSnapshot.ReservedSlotCount).Count);
+    }
+
+    [Fact]
+    public void ReservedSlotsRejectADifferentDataType()
+    {
+        var snapshot = new FrameSnapshot();
+
+        Assert.Throws<Bork2dException>(
+            () => snapshot.GetBuffer<TestRecord>(FrameSnapshot.CameraSlot));
+    }
+
     private static CameraSnapshot Camera(int zIndex = 0)
         => new(zIndex, Matrix3x2.Identity, 1f, new Vector4(0f, 0f, 1f, 1f), 1u, ClearKind.Color, Color.Black);
 
     private static SpriteSnapshot Sprite(int zIndex = 0)
         => new(null, Matrix3x2.Identity, Color.White, 1u, zIndex, FlipX: false, FlipY: false);
+
+    private readonly record struct TestRecord(int Value);
 }

@@ -17,6 +17,6 @@ internal enum BakeStatus
     /// <summary>The invocation or output configuration is invalid (CLI exit 2).</summary>
     ConfigurationError,
 
-    /// <summary>Source, processor, reference, or pack diagnostics failed the bake (CLI exit 1).</summary>
+    /// <summary>Source, validation, processor, reference, or pack diagnostics failed the bake (CLI exit 1).</summary>
     DiagnosticsError,
 }

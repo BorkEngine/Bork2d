@@ -1,5 +1,4 @@
 using Bork2d.Bake.Diagnostics;
-using Bork2d.Bake.Processors;
 using Bork2d.Bake.Textures;
 using Bork2d.Engine.Assets;
 using PolyType;
@@ -12,11 +11,11 @@ namespace Bork2d.Bake.Baking;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The definition records the order of packs and processors, the explicit data-type registrations,
-/// the texture defaults, and any semantic configuration issue found while the builder is being
-/// configured (for example a duplicate <c>RegisterAsset&lt;T&gt;()</c>). The builder never throws for
-/// a semantic error; the issues are surfaced by the command handler as <c>BK1xxx</c> diagnostics with
-/// exit code <c>2</c>.
+/// The definition records the order of packs and processors, the explicit data-type registrations and
+/// their validators, the texture defaults, and any semantic configuration issue found while the builder
+/// is being configured (for example a duplicate <c>RegisterAsset&lt;T&gt;()</c>). The builder never
+/// throws for a semantic error; the issues are surfaced by the command handler as <c>BK1xxx</c>
+/// diagnostics with exit code <c>2</c>.
 /// </para>
 /// <para>
 /// Programmer errors (a null or empty method argument) are thrown immediately by the public builder;
@@ -27,8 +26,9 @@ internal sealed class BakeProjectDefinition
 {
     private readonly List<BakePackDefinition> _packs = [];
     private readonly Dictionary<string, BakeAssetTypeRegistration> _assetTypes = new(StringComparer.Ordinal);
-    private readonly List<IBakeAssetProcessor> _processors = [];
+    private readonly List<IAssetProcessor> _processors = [];
     private readonly List<BakeDiagnostic> _issues = [];
+    private bool _defaultAssetsUsed;
 
     /// <summary>Gets or sets the configured project root, or <see langword="null"/> when unset.</summary>
     internal string? ProjectRoot { get; private set; }
@@ -40,7 +40,7 @@ internal sealed class BakeProjectDefinition
     internal IReadOnlyDictionary<string, BakeAssetTypeRegistration> AssetTypes => _assetTypes;
 
     /// <summary>Gets the registered processors in registration order.</summary>
-    internal IReadOnlyList<IBakeAssetProcessor> Processors => _processors;
+    internal IReadOnlyList<IAssetProcessor> Processors => _processors;
 
     /// <summary>Gets a value indicating whether <c>UseDefaultProcessors()</c> was called.</summary>
     internal bool UseDefaultProcessors { get; private set; }
@@ -86,24 +86,46 @@ internal sealed class BakeProjectDefinition
                 + "RegisterAsset<T>() exactly once per type.");
     }
 
-    /// <summary>Registers <c>Bork2d.Engine.Assets.SpriteAsset</c>; idempotent.</summary>
+    /// <summary>
+    /// Registers one explicit data type and appends one semantic validator for it.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="AddAsset{T}"/>, registering a type that already exists is not a duplicate: the
+    /// validator is appended to that registration so every validator runs in registration order.
+    /// </remarks>
+    /// <typeparam name="T">The shapeable data type.</typeparam>
+    /// <param name="validator">The public validator instance.</param>
+    internal void AddAssetValidator<T>(IAssetValidator<T> validator)
+        where T : IShapeable<T>
+    {
+        ArgumentNullException.ThrowIfNull(validator);
+        GetOrAddAssetRegistration<T>().AddValidator(validator);
+    }
+
+    /// <summary>
+    /// Registers <c>Bork2d.Engine.Assets.SpriteAsset</c> and its built-in validator; idempotent.
+    /// </summary>
     internal void UseDefaultAssets()
     {
-        string spriteTypeName = typeof(SpriteAsset).FullName
-            ?? throw new InvalidOperationException("SpriteAsset has no full name.");
-
-        if (!_assetTypes.ContainsKey(spriteTypeName))
+        if (_defaultAssetsUsed)
         {
-            AddAsset<SpriteAsset>();
+            return;
         }
+
+        _defaultAssetsUsed = true;
+        GetOrAddAssetRegistration<SpriteAsset>().AddValidator(new SpriteAssetValidator());
     }
 
     /// <summary>Records that the default processor registration was requested; idempotent.</summary>
     internal void RequestDefaultProcessors() => UseDefaultProcessors = true;
 
     /// <summary>Adds one registered processor.</summary>
-    /// <param name="processor">The internal processor adapter.</param>
-    internal void AddProcessor(IBakeAssetProcessor processor) => _processors.Add(processor);
+    /// <param name="processor">The public processor instance.</param>
+    internal void AddProcessor(IAssetProcessor processor)
+    {
+        ArgumentNullException.ThrowIfNull(processor);
+        _processors.Add(processor);
+    }
 
     /// <summary>Sets the texture defaults used when a texture sidecar is missing.</summary>
     /// <param name="filter">The default sampler filter.</param>
@@ -127,4 +149,17 @@ internal sealed class BakeProjectDefinition
             Column: null,
             AssetPath: null,
             MemberPath: null));
+
+    private BakeAssetTypeRegistration GetOrAddAssetRegistration<T>()
+        where T : IShapeable<T>
+    {
+        BakeAssetTypeRegistration candidate = BakeAssetTypeRegistration.Create<T>();
+        if (_assetTypes.TryGetValue(candidate.TypeName, out BakeAssetTypeRegistration? existing))
+        {
+            return existing;
+        }
+
+        _assetTypes.Add(candidate.TypeName, candidate);
+        return candidate;
+    }
 }

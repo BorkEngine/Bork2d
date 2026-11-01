@@ -168,7 +168,11 @@ internal sealed class RendererControlChannel : IDisposable
             }
 
             // Reset before re-checking so a post racing with the wait cannot be lost.
-            _wake.Reset();
+            if (!TryResetWake())
+            {
+                return false;
+            }
+
             if (IsStopRequested || Volatile.Read(ref _disposed) != 0)
             {
                 return false;
@@ -210,7 +214,11 @@ internal sealed class RendererControlChannel : IDisposable
                 return true;
             }
 
-            _wake.Reset();
+            if (!TryResetWake())
+            {
+                return false;
+            }
+
             if (IsStopRequested || Volatile.Read(ref _disposed) != 0)
             {
                 return false;
@@ -273,6 +281,20 @@ internal sealed class RendererControlChannel : IDisposable
         }
 
         _wake.Dispose();
+    }
+
+    private bool TryResetWake()
+    {
+        try
+        {
+            _wake.Reset();
+            return true;
+        }
+        catch (ObjectDisposedException)
+        {
+            // Dispose can race with the reset between the disposed check and this call.
+            return false;
+        }
     }
 
     private void Post(int index)

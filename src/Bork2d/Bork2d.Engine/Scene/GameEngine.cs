@@ -21,9 +21,17 @@ namespace Bork2d.Engine.Scene;
 /// requires a particular thread.
 /// </para>
 /// <para>
+/// Renderable creation and capture are registry-driven: the engine constructs one
+/// <see cref="RenderableRegistry"/> with the camera and sprite definitions, delegates
+/// <see cref="CreateCamera"/> and <see cref="CreateSpriteRender"/> to it, and passes its ordered
+/// producer list to the capture pass. Adding a renderable kind therefore registers a definition
+/// instead of editing the engine's creation methods or a capture switch.
+/// </para>
+/// <para>
 /// The window and input implementations are injected by the composition root: a windowed app gets
-/// internal proxies that the runtime host attaches to a live platform before <c>Setup</c>, while
-/// headless and offscreen apps get the throwing window stub and no input. The exit flag is a
+/// internal proxies that the runtime host attaches to a live platform before <c>Setup</c>, an
+/// offscreen app gets a functional window facade reporting the fixed target extent, and a headless
+/// app gets the throwing window stub. Offscreen and headless apps have no input. The exit flag is a
 /// three-state token so <see cref="Exit"/> becomes a no-op once the host has stopped the run; the
 /// host may install a wake callback that is invoked once on the active-to-requested transition so a
 /// tick blocked on the snapshot ring returns without starting another tick (M7 Q9=I1).
@@ -45,14 +53,15 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     private readonly Lock _renderStatsLock = new();
     private readonly Lock _captureLock = new();
     private readonly SceneRoot _root;
-    private readonly SnapshotCapture<TLayer> _capture;
+    private readonly RenderableRegistry _renderables;
+    private readonly SnapshotCapture _capture;
     private readonly IInput? _input;
     private readonly ILoggerFactory _loggerFactory;
     private int _exitState;
     private Action? _exitCallback;
     private Func<RenderStats>? _renderStatsSource;
     private RenderStats _renderStats;
-    private Func<CancellationToken, Task<byte[]>>? _captureSource;
+    private Func<CancellationToken, Task<FrameCaptureResult>>? _captureSource;
     private int _captureState = CaptureUnavailable;
 
     internal GameEngine(
@@ -69,7 +78,11 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
         LayerValidation.Validate<TLayer>();
 
         _root = new SceneRoot(_structuralLock);
-        _capture = new SnapshotCapture<TLayer>(_structuralLock, _root);
+        _renderables = new RenderableRegistry(
+            FrameSnapshot.ReservedSlotCount,
+            new CameraRenderableDefinition<TLayer>(_structuralLock, window),
+            new SpriteRenderableDefinition<TLayer>(_structuralLock));
+        _capture = new SnapshotCapture(_structuralLock, _root, _renderables.Producers);
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _input = input;
         Time = time;
@@ -142,9 +155,9 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
         => Volatile.Write(ref _renderStatsSource, source);
 
     /// <inheritdoc/>
-    public Task<byte[]> CaptureFrameAsync(CancellationToken cancellationToken = default)
+    public Task<FrameCaptureResult> CaptureFrameAsync(CancellationToken cancellationToken = default)
     {
-        Func<CancellationToken, Task<byte[]>>? source;
+        Func<CancellationToken, Task<FrameCaptureResult>>? source;
         int state;
         lock (_captureLock)
         {
@@ -176,7 +189,7 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     /// delegate must be thread-safe and non-blocking; it is invoked outside every engine lock.
     /// </remarks>
     /// <param name="source">The renderer capture delegate, or <see langword="null"/> to clear it.</param>
-    internal void SetCaptureSource(Func<CancellationToken, Task<byte[]>>? source)
+    internal void SetCaptureSource(Func<CancellationToken, Task<FrameCaptureResult>>? source)
     {
         lock (_captureLock)
         {
@@ -246,17 +259,15 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     public ICamera<TLayer> CreateCamera(ITransform parent)
     {
         var parentNode = RequireEngineNode(parent);
-        var camera = new Camera<TLayer>(_structuralLock, Window);
-        camera.AttachAsNewChild(parentNode);
-        return camera;
+        return (ICamera<TLayer>)_renderables.Create(typeof(Camera<TLayer>), parentNode);
     }
 
     public ISpriteRender<TLayer> CreateSpriteRender(ITransform parent)
     {
         var parentNode = RequireEngineNode(parent);
-        var sprite = new SpriteRender<TLayer>(_structuralLock);
-        sprite.AttachAsNewChild(parentNode);
-        return sprite;
+        return (ISpriteRender<TLayer>)_renderables.Create(
+            typeof(SpriteRender<TLayer>),
+            parentNode);
     }
 
     public void Exit()
@@ -319,8 +330,10 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     /// </para>
     /// <para>
     /// The engine reuses one internal capture object, so a warm capture allocates nothing. The
-    /// traversal is unordered, holds the structural lock, reads per-object properties under their
-    /// own locks, and evaluates world matrices on the calling (tick) thread.
+    /// traversal is iterative and parent-first under the structural lock: each node is read under
+    /// one per-object lock acquisition, and its world matrix is composed once by the registered
+    /// producer that matches it (or by the plain transform fallback). The engine's camera and
+    /// sprite producers are registered first and fill the reserved snapshot buffers.
     /// </para>
     /// </remarks>
     /// <param name="snapshot">The slot-owned snapshot to reset and fill.</param>

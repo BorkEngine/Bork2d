@@ -18,9 +18,13 @@ namespace Bork2d.Render.Textures;
 /// mip/layer, created in <c>UNDEFINED</c> and moved to <c>SHADER_READ_ONLY_OPTIMAL</c> by the upload
 /// barrier chain. Samplers come from the shared <see cref="SpritePipeline"/> cache (no per-page
 /// sampler). Uploads never block the render thread; only the startup placeholder waits its fence.
+/// </para>
+/// <para>
 /// Capacity growth recreates the per-frame descriptor sets through <see cref="IBindlessPageWriter"/>
-/// after the renderer waited the device idle, then rewrites the placeholder and every resident
-/// page.
+/// after the frame writer retires every in-flight frame fence, then rewrites the placeholder and
+/// every resident page. <see cref="RetirePage"/> reclaims one page the residency policy proved no
+/// in-flight frame can sample: it rewrites that bindless slot to the placeholder, destroys the view
+/// and image, and returns the image-memory range to <see cref="TextureImagePool"/> for reuse.
 /// </para>
 /// <para>
 /// All objects are render-thread-owned. <see cref="Destroy"/> waits/discards pending uploads, then
@@ -115,9 +119,9 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
             return;
         }
 
-        // The renderer waits the device idle and recreates the per-frame descriptor pools/sets; the
-        // sets are empty afterwards, so every resident descriptor (including the placeholder) is
-        // written again.
+        // The frame writer retires every in-flight frame fence and recreates the per-frame
+        // descriptor pools/sets; the sets are empty afterwards, so every resident descriptor
+        // (including the placeholder) is written again.
         _writer.EnsureCapacity(capacity);
         _capacity = capacity;
         foreach (ResidentPage page in _resident)
@@ -173,10 +177,14 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
         ImageView view = default;
         StagingLease lease = default;
         CommandSlot? command = null;
+        DeviceMemory memory = default;
+        ulong offset = 0;
+        ulong memoryBytes = 0;
         try
         {
             MemoryRequirements requirements = vk.GetImageMemoryRequirements(logicalDevice, image);
-            _imagePool.Allocate(requirements, out DeviceMemory memory, out ulong offset);
+            _imagePool.Allocate(requirements, out memory, out offset);
+            memoryBytes = requirements.Size;
             result = vk.BindImageMemory(logicalDevice, image, memory, offset);
             if (result != Result.Success)
             {
@@ -231,7 +239,15 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
             LabelImage(pageIndex, image, view);
             _pending.Add(
                 pageIndex,
-                new PendingUpload(image, view, sampler, lease, command));
+                new PendingUpload(
+                    image,
+                    view,
+                    sampler,
+                    lease,
+                    command,
+                    memory,
+                    offset,
+                    memoryBytes));
             command = null;
         }
         catch
@@ -252,6 +268,11 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
             }
 
             vk.DestroyImage(logicalDevice, image, null);
+            if (memory.Handle != 0)
+            {
+                _imagePool.Free(memory, offset, memoryBytes);
+            }
+
             throw;
         }
     }
@@ -277,7 +298,14 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
 
         _staging.Release(pending.Staging);
         ReleaseCommandSlot(pending.Command);
-        var resident = new ResidentPage(pageIndex, pending.Image, pending.View, pending.Sampler);
+        var resident = new ResidentPage(
+            pageIndex,
+            pending.Image,
+            pending.View,
+            pending.Sampler,
+            pending.Memory,
+            pending.Offset,
+            pending.MemoryBytes);
         _resident.Add(resident);
         _writer.WritePage(resident.Index, resident.View, resident.Sampler);
     }
@@ -306,6 +334,61 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
         }
 
         CompleteUpload(pageIndex);
+    }
+
+    /// <inheritdoc/>
+    public void RetirePage(int pageIndex)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _destroyed) != 0, this);
+        if (pageIndex == TexturePageCapacity.PlaceholderIndex)
+        {
+            // The placeholder is the permanent fallback every other slot can be rewritten to; it is
+            // never reclaimed.
+            _logger.LogWarning("Vulkan texture page retirement refused for the placeholder page.");
+            return;
+        }
+
+        int residentIndex = -1;
+        for (var index = 0; index < _resident.Count; index++)
+        {
+            if (_resident[index].Index == pageIndex)
+            {
+                residentIndex = index;
+                break;
+            }
+        }
+
+        if (residentIndex < 0)
+        {
+            // Already retired, or never resident (for example an upload that was torn down): there
+            // is nothing safe to free.
+            _logger.LogWarning(
+                "Vulkan texture page {PageIndex} was retired while not resident; no image is freed.",
+                pageIndex);
+            return;
+        }
+
+        ResidentPage page = _resident[residentIndex];
+        _resident.RemoveAt(residentIndex);
+
+        // Point the slot at the placeholder before destroying the view: the descriptor array stays
+        // valid for every frame recorded after this point, and a reused slot only ever references a
+        // live image.
+        for (var index = 0; index < _resident.Count; index++)
+        {
+            ResidentPage placeholder = _resident[index];
+            if (placeholder.Index != TexturePageCapacity.PlaceholderIndex)
+            {
+                continue;
+            }
+
+            _writer.WritePage(pageIndex, placeholder.View, placeholder.Sampler);
+            break;
+        }
+
+        DestroyView(_device.Api, _device.Device, page.View);
+        DestroyImage(_device.Api, _device.Device, page.Image);
+        _imagePool.Free(page.Memory, page.Offset, page.MemoryBytes);
     }
 
     /// <inheritdoc/>
@@ -702,7 +785,17 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
         ImageView View,
         Sampler Sampler,
         StagingLease Staging,
-        CommandSlot Command);
+        CommandSlot Command,
+        DeviceMemory Memory,
+        ulong Offset,
+        ulong MemoryBytes);
 
-    private readonly record struct ResidentPage(int Index, Image Image, ImageView View, Sampler Sampler);
+    private readonly record struct ResidentPage(
+        int Index,
+        Image Image,
+        ImageView View,
+        Sampler Sampler,
+        DeviceMemory Memory,
+        ulong Offset,
+        ulong MemoryBytes);
 }

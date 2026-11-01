@@ -84,25 +84,135 @@ public sealed class TransformHierarchyTests
     }
 
     [Fact]
-    public void DetachingKeepsLocalValues()
+    public void DetachingPreservesTheWorldTransform()
     {
         var engine = TestEngineFactory.Create();
         var parent = engine.CreateTransform(engine.Root);
         parent.LocalPosition = new Vector2(4f, 1f);
         parent.LocalRotation = 23f;
-        parent.LocalScale = new Vector2(2f, 2f);
+        parent.LocalScale = new Vector2(2f, 3f);
 
         var child = engine.CreateTransform(parent);
         child.LocalPosition = new Vector2(1f, 2f);
         child.LocalRotation = 17f;
         child.LocalScale = new Vector2(0.5f, 0.25f);
 
+        var worldMatrix = ((Transform)child).WorldMatrix();
+        var worldPosition = ((Transform)child).WorldPosition();
+        var worldRotation = ((Transform)child).WorldRotation();
+        var worldScale = ((Transform)child).WorldScale();
+
         child.Parent = null;
 
         Assert.Null(child.Parent);
-        TestAssertions.Close(new Vector2(1f, 2f), child.LocalPosition);
-        TestAssertions.Close(17f, child.LocalRotation);
-        TestAssertions.Close(new Vector2(0.5f, 0.25f), child.LocalScale);
+        TestAssertions.Close(worldMatrix, ((Transform)child).WorldMatrix());
+        TestAssertions.Close(worldPosition, ((Transform)child).WorldPosition());
+        TestAssertions.Close(worldRotation, ((Transform)child).WorldRotation());
+        TestAssertions.Close(worldScale, ((Transform)child).WorldScale());
+        TestAssertions.Close(worldPosition, child.LocalPosition);
+        TestAssertions.Close(worldRotation, child.LocalRotation);
+        TestAssertions.Close(worldScale, child.LocalScale);
+    }
+
+    [Fact]
+    public void DetachingFromASingularParentPreservesTheWorldTransform()
+    {
+        var engine = TestEngineFactory.Create();
+        var parent = engine.CreateTransform(engine.Root);
+        parent.LocalPosition = new Vector2(3f, -2f);
+        parent.LocalRotation = 30f;
+        parent.LocalScale = new Vector2(0f, 2f);
+        Assert.False(
+            Matrix3x2.Invert(((Transform)parent).WorldMatrix(), out _),
+            "The old parent's world matrix must be singular for this test.");
+
+        var child = engine.CreateTransform(parent);
+        child.LocalPosition = new Vector2(1f, 2f);
+        child.LocalRotation = 15f;
+        child.LocalScale = new Vector2(0.5f, 3f);
+
+        var worldMatrix = ((Transform)child).WorldMatrix();
+        var worldPosition = ((Transform)child).WorldPosition();
+
+        child.Parent = null;
+
+        Assert.Null(child.Parent);
+        TestAssertions.Close(worldMatrix, ((Transform)child).WorldMatrix());
+        TestAssertions.Close(worldPosition, ((Transform)child).WorldPosition());
+        TestAssertions.Close(worldPosition, child.LocalPosition);
+    }
+
+    [Fact]
+    public void DetachAllPreservesEachDirectChildsWorldTransform()
+    {
+        var engine = TestEngineFactory.Create();
+        var parent = engine.CreateTransform(engine.Root);
+        parent.LocalPosition = new Vector2(3f, -1f);
+        parent.LocalRotation = 37f;
+        parent.LocalScale = new Vector2(2f, 0.5f);
+
+        var first = engine.CreateTransform(parent);
+        first.LocalPosition = new Vector2(1f, 2f);
+        first.LocalRotation = 15f;
+        first.LocalScale = new Vector2(0.5f, 3f);
+
+        var second = engine.CreateTransform(parent);
+        second.LocalPosition = new Vector2(-2f, 0.5f);
+        second.LocalRotation = 80f;
+        second.LocalScale = new Vector2(1.5f, 0.25f);
+
+        var grandchild = engine.CreateTransform(first);
+        grandchild.LocalPosition = new Vector2(0.5f, -0.5f);
+        grandchild.LocalRotation = 10f;
+        grandchild.LocalScale = new Vector2(2f, 2f);
+
+        var firstWorld = ((Transform)first).WorldMatrix();
+        var secondWorld = ((Transform)second).WorldMatrix();
+        var grandchildWorld = ((Transform)grandchild).WorldMatrix();
+
+        parent.DetachAll();
+
+        Assert.Same(engine.Root, parent.Parent);
+        Assert.Null(first.Parent);
+        Assert.Null(second.Parent);
+        Assert.Same(first, grandchild.Parent);
+        TestAssertions.Close(firstWorld, ((Transform)first).WorldMatrix());
+        TestAssertions.Close(secondWorld, ((Transform)second).WorldMatrix());
+        TestAssertions.Close(grandchildWorld, ((Transform)grandchild).WorldMatrix());
+        TestAssertions.Close(firstWorld.Translation, first.LocalPosition);
+        TestAssertions.Close(secondWorld.Translation, second.LocalPosition);
+    }
+
+    [Fact]
+    public void ChildIndexTracksSwapRemovalAndIsResetByDetach()
+    {
+        var engine = TestEngineFactory.Create();
+        var parent = engine.CreateTransform(engine.Root);
+        var first = engine.CreateTransform(parent);
+        var middle = engine.CreateTransform(parent);
+        var last = engine.CreateTransform(parent);
+
+        Assert.Equal(0, ((Transform)first).ChildIndex);
+        Assert.Equal(1, ((Transform)middle).ChildIndex);
+        Assert.Equal(2, ((Transform)last).ChildIndex);
+
+        middle.Parent = null;
+
+        Assert.Null(middle.Parent);
+        Assert.Equal(-1, ((Transform)middle).ChildIndex);
+        Assert.Equal(0, ((Transform)first).ChildIndex);
+        Assert.Equal(1, ((Transform)last).ChildIndex);
+
+        first.Parent = null;
+
+        Assert.Null(first.Parent);
+        Assert.Equal(-1, ((Transform)first).ChildIndex);
+        Assert.Equal(0, ((Transform)last).ChildIndex);
+
+        parent.DetachAll();
+
+        Assert.Null(last.Parent);
+        Assert.Equal(-1, ((Transform)last).ChildIndex);
     }
 
     [Fact]

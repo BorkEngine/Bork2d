@@ -56,6 +56,77 @@ public sealed class SpritePlanningTests
     }
 
     [Fact]
+    public void SortCamerasOrdersByZIndex()
+    {
+        CameraSnapshot[] cameras = [Camera(zIndex: 5), Camera(zIndex: 1), Camera(zIndex: 3)];
+        var indices = new int[cameras.Length];
+
+        SpritePlanning.SortCameras(cameras, indices);
+
+        Assert.Equal(new[] { 1, 2, 0 }, indices);
+    }
+
+    [Fact]
+    public void SortCamerasRejectsAShortIndexBuffer()
+    {
+        CameraSnapshot[] cameras = [Camera(zIndex: 0), Camera(zIndex: 1)];
+
+        Assert.Throws<ArgumentException>(() => SpritePlanning.SortCameras(cameras, new int[1]));
+    }
+
+    [Fact]
+    public void SharedIndexSorterOrdersBothSnapshotTypesByKeyOnly()
+    {
+        // Equal keys are explicitly unspecified, so this asserts the key sequence and a complete
+        // permutation instead of relying on a stable tie order.
+        SpriteSnapshot[] sprites =
+        [
+            Snapshot(layer: 2, zIndex: 7),
+            Snapshot(layer: 1, zIndex: 0),
+            Snapshot(layer: 1, zIndex: 0),
+            Snapshot(layer: 2, zIndex: 7),
+        ];
+        var spriteIndices = new int[sprites.Length];
+        SpritePlanning.Sort(sprites, spriteIndices);
+
+        for (var position = 1; position < spriteIndices.Length; position++)
+        {
+            SpriteSnapshot previous = sprites[spriteIndices[position - 1]];
+            SpriteSnapshot current = sprites[spriteIndices[position]];
+            Assert.True(
+                previous.Layer < current.Layer
+                    || (previous.Layer == current.Layer && previous.ZIndex <= current.ZIndex),
+                "Sprite indices must ascend by (Layer, ZIndex).");
+        }
+
+        Assert.Equal(
+            Enumerable.Range(0, sprites.Length).Order(),
+            spriteIndices.Order());
+
+        CameraSnapshot[] cameras =
+        [
+            Camera(zIndex: 2),
+            Camera(zIndex: 2),
+            Camera(zIndex: 1),
+            Camera(zIndex: 2),
+        ];
+        var cameraIndices = new int[cameras.Length];
+        SpritePlanning.SortCameras(cameras, cameraIndices);
+
+        for (var position = 1; position < cameraIndices.Length; position++)
+        {
+            Assert.True(
+                cameras[cameraIndices[position - 1]].ZIndex
+                    <= cameras[cameraIndices[position]].ZIndex,
+                "Camera indices must ascend by ZIndex.");
+        }
+
+        Assert.Equal(
+            Enumerable.Range(0, cameras.Length).Order(),
+            cameraIndices.Order());
+    }
+
+    [Fact]
     public void LayerMatchUsesTheMaskBit()
     {
         Assert.True(SpritePlanning.LayerMatches(0b0101, 0b0001));
@@ -123,52 +194,37 @@ public sealed class SpritePlanningTests
     }
 
     [Fact]
-    public void FilterUsesTheCameraMaskAndKeepsSortOrder()
+    public void VisibilityRuleUsesTheLayerMaskAndNeverCullsUnknownBounds()
     {
-        SpriteSnapshot[] sprites =
-        [
-            NullSnapshot(layer: 1, zIndex: 0),
-            Snapshot(layer: 1, zIndex: 2),
-            Snapshot(layer: 2, zIndex: 1),
-            Snapshot(layer: 4, zIndex: 3),
-            Snapshot(layer: 0, zIndex: 4),
-            Snapshot(layer: 3, zIndex: 5),
-        ];
-        var sorted = new int[sprites.Length];
-        var visible = new int[sprites.Length];
-        SpritePlanning.Sort(sprites, sorted);
+        SpriteSnapshot sprite = Snapshot(layer: 1);
+        var cameraBounds = new Bounds(new Vector2(-10f, -10f), new Vector2(10f, 10f));
 
-        int count = SpritePlanning.FilterVisible(sprites, sorted, 0b0011, visible);
+        Assert.True(SpritePlanning.IsVisible(0b1, cameraBounds, sprite));
+        Assert.False(SpritePlanning.IsVisible(0b10, cameraBounds, sprite));
+        Assert.False(SpritePlanning.IsVisible(0, cameraBounds, sprite));
 
-        Assert.Equal(2, count);
-        Assert.Equal(1, visible[0]);
-        Assert.Equal(2, visible[1]);
+        // Empty sprite bounds and empty camera bounds both mean "unknown" and never cull.
+        Assert.True(SpritePlanning.IsVisible(0b1, Bounds.Empty, sprite));
+        SpriteSnapshot outside = Bounded(
+            0b1,
+            new Bounds(new Vector2(100f, -1f), new Vector2(105f, 1f)));
+        Assert.True(SpritePlanning.IsVisible(0b1, Bounds.Empty, outside));
+        Assert.False(SpritePlanning.IsVisible(0b1, cameraBounds, outside));
+
+        // Bounds that only touch the camera edge still intersect.
+        SpriteSnapshot touching = Bounded(
+            0b1,
+            new Bounds(new Vector2(10f, -1f), new Vector2(15f, 1f)));
+        Assert.True(SpritePlanning.IsVisible(0b1, cameraBounds, touching));
+
+        SpriteSnapshot overlapping = Bounded(
+            0b1,
+            new Bounds(new Vector2(5f, 5f), new Vector2(15f, 15f)));
+        Assert.True(SpritePlanning.IsVisible(0b1, cameraBounds, overlapping));
     }
 
     [Fact]
-    public void ZeroMaskSeesNothing()
-    {
-        SpriteSnapshot[] sprites = [Snapshot(layer: 1), Snapshot(layer: 2)];
-        var sorted = new int[sprites.Length];
-        var visible = new int[sprites.Length];
-        SpritePlanning.Sort(sprites, sorted);
-
-        Assert.Equal(0, SpritePlanning.FilterVisible(sprites, sorted, 0, visible));
-    }
-
-    [Fact]
-    public void FilterRejectsAShortVisibleBuffer()
-    {
-        SpriteSnapshot[] sprites = [Snapshot(layer: 1), Snapshot(layer: 1)];
-        var sorted = new int[sprites.Length];
-        SpritePlanning.Sort(sprites, sorted);
-
-        Assert.Throws<ArgumentException>(
-            () => SpritePlanning.FilterVisible(sprites, sorted, 1, new int[1]));
-    }
-
-    [Fact]
-    public void QuadSizeUsesTheUvSpanAndPixelsPerUnitScale()
+    public void QuadSizeUsesTheUvSpanAndPerAxisWorldScale()
     {
         SpriteAsset asset = Asset(
             uvs:
@@ -178,23 +234,23 @@ public sealed class SpritePlanningTests
                 new Vector2(0.75f, 0.9f),
                 new Vector2(0.25f, 0.9f),
             ],
-            scale: 10f,
+            scale: new Vector2(2f, 5f),
             pivot: new Vector2(0.25f, 0.75f));
 
-        SpriteQuad quad = SpriteQuad.Resolve(asset, 4, 8, flipX: false, flipY: false);
+        SpriteQuad quad = SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), flipX: false, flipY: false);
 
-        Assert.Equal(0.2f, quad.WorldWidth, 5);
-        Assert.Equal(0.64f, quad.WorldHeight, 5);
-        Assert.Equal(0.2f, quad.SizeX, 5);
-        Assert.Equal(0.64f, quad.SizeY, 5);
+        Assert.Equal(1f, quad.WorldWidth, 5);
+        Assert.Equal(4f, quad.WorldHeight, 5);
+        Assert.Equal(1f, quad.SizeX, 5);
+        Assert.Equal(4f, quad.SizeY, 5);
         Assert.Equal(new Vector2(0.25f, 0.75f), quad.Pivot);
     }
 
     [Fact]
     public void FlipsMirrorTheSignedSizeWithoutChangingThePivot()
     {
-        SpriteAsset asset = Asset(scale: 8f);
-        SpriteQuad quad = SpriteQuad.Resolve(asset, 16, 16, flipX: true, flipY: false);
+        SpriteAsset asset = Asset(scale: new Vector2(2f));
+        SpriteQuad quad = SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), flipX: true, flipY: false);
 
         Assert.Equal(-2f, quad.SizeX, 5);
         Assert.Equal(2f, quad.SizeY, 5);
@@ -213,25 +269,31 @@ public sealed class SpritePlanningTests
                 new Vector2(1.5f, 1.5f),
                 new Vector2(-0.5f, 1.5f),
             ],
-            scale: 10f);
+            scale: new Vector2(10f));
 
-        SpriteQuad quad = SpriteQuad.Resolve(asset, 4, 4, flipX: false, flipY: false);
+        SpriteQuad quad = SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), flipX: false, flipY: false);
 
-        Assert.Equal(0.8f, quad.WorldWidth, 5);
-        Assert.Equal(0.8f, quad.WorldHeight, 5);
+        Assert.Equal(20f, quad.WorldWidth, 5);
+        Assert.Equal(20f, quad.WorldHeight, 5);
     }
 
     [Theory]
-    [InlineData(0f)]
-    [InlineData(-1f)]
-    [InlineData(float.NaN)]
-    [InlineData(float.PositiveInfinity)]
-    public void InvalidScaleIsFatal(float scale)
+    [InlineData(0f, 1f)]
+    [InlineData(1f, 0f)]
+    [InlineData(-1f, 1f)]
+    [InlineData(1f, -1f)]
+    [InlineData(float.NaN, 1f)]
+    [InlineData(1f, float.NaN)]
+    [InlineData(float.PositiveInfinity, 1f)]
+    [InlineData(1f, float.PositiveInfinity)]
+    [InlineData(float.NegativeInfinity, 1f)]
+    [InlineData(1f, float.NegativeInfinity)]
+    public void InvalidScaleIsFatal(float x, float y)
     {
-        SpriteAsset asset = Asset(scale: scale);
+        SpriteAsset asset = Asset(scale: new Vector2(x, y));
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Scale", exception.Message, StringComparison.Ordinal);
         Assert.Contains("textures/player", exception.Message, StringComparison.Ordinal);
@@ -244,7 +306,7 @@ public sealed class SpritePlanningTests
         asset.Uvs = null;
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Uvs", exception.Message, StringComparison.Ordinal);
     }
@@ -256,7 +318,7 @@ public sealed class SpritePlanningTests
         asset.Uvs = [new Vector2(0f, 0f), new Vector2(1f, 1f)];
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Uvs", exception.Message, StringComparison.Ordinal);
     }
@@ -274,7 +336,7 @@ public sealed class SpritePlanningTests
         ];
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Uvs", exception.Message, StringComparison.Ordinal);
     }
@@ -291,7 +353,7 @@ public sealed class SpritePlanningTests
         SpriteAsset asset = Asset(pivot: new Vector2(x, y));
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Pivot", exception.Message, StringComparison.Ordinal);
     }
@@ -303,7 +365,7 @@ public sealed class SpritePlanningTests
         asset.Topology = (SpriteTopology)99;
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Topology", exception.Message, StringComparison.Ordinal);
     }
@@ -315,7 +377,7 @@ public sealed class SpritePlanningTests
         asset.Indices = [0, 1, 2];
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpriteQuad.Resolve(asset, 1, 1, false, false));
+            () => SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), false, false));
 
         Assert.Contains("Indices", exception.Message, StringComparison.Ordinal);
         Assert.Contains("textures/player", exception.Message, StringComparison.Ordinal);
@@ -323,7 +385,7 @@ public sealed class SpritePlanningTests
 
     private static SpriteAsset Asset(
         Vector2[]? uvs = null,
-        float scale = 16f,
+        Vector2? scale = null,
         Vector2? pivot = null)
     {
         return new SpriteAsset
@@ -337,7 +399,7 @@ public sealed class SpritePlanningTests
                     new Vector2(1f, 1f),
                     new Vector2(0f, 1f),
                 ],
-            Scale = scale,
+            Scale = scale ?? new Vector2(16f),
             Pivot = pivot ?? new Vector2(0.5f, 0.5f),
             Topology = SpriteTopology.Quad,
             Indices = null,
@@ -350,7 +412,7 @@ public sealed class SpritePlanningTests
         int zIndex = 0)
     {
         return new SpriteSnapshot(
-            asset ?? Asset(),
+            SpriteRenderData.Freeze(asset ?? Asset()),
             Matrix3x2.Identity,
             Color.White,
             layer,
@@ -370,4 +432,17 @@ public sealed class SpritePlanningTests
             false,
             false);
     }
+
+    private static SpriteSnapshot Bounded(uint layer, in Bounds bounds, int zIndex = 0)
+        => Snapshot(layer: layer, zIndex: zIndex) with { Bounds = bounds };
+
+    private static CameraSnapshot Camera(int zIndex)
+        => new(
+            ZIndex: zIndex,
+            WorldMatrix: Matrix3x2.Identity,
+            Size: 10f,
+            Viewport: new Vector4(0f, 0f, 1f, 1f),
+            CullingMask: 1,
+            Clear: ClearKind.None,
+            ClearColor: Color.Black);
 }

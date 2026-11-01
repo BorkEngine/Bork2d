@@ -25,10 +25,15 @@ namespace Bork2d.Tests.Render.Vulkan;
 /// stop with a frame in flight joins cleanly, every slot ends Free, and validation is clean.
 /// </summary>
 /// <remarks>
-/// The test thread acts as the OS/window thread. Frame/snapshot progress is observed through the
-/// renderer's event-based bounded waits; there is no sleep, spin, or exact frame-equality assertion
-/// (nodes: relationships only, Q19=S3). It skips when the Vulkan loader, desktop session, device,
-/// or validation layer is unavailable.
+/// The test thread owns the SDL window and the Vulkan instance, but it does not call native SDL
+/// window resizing or fullscreen APIs: on Windows those calls expect the window's message loop and
+/// can block indefinitely on an xUnit worker thread. The test posts the same extent/fullscreen state
+/// that the runtime host posts after an OS window event, so the renderer's swapchain-recreation and
+/// drain paths are exercised without depending on SDL window-manager behavior. Native window-manager
+/// behavior belongs to the runtime/platform tests, not this renderer test. Frame/snapshot progress is
+/// observed through the renderer's event-based bounded waits; there is no sleep, spin, or exact
+/// frame-equality assertion (nodes: relationships only, Q19=S3). It skips when the Vulkan loader,
+/// desktop session, device, or validation layer is unavailable.
 /// </remarks>
 [Collection(RealGpuCollection.Name)]
 [Trait("Category", "Gpu")]
@@ -160,7 +165,7 @@ public sealed class WindowedRendererGpuTests
                     new Vector2(1f, 1f),
                     new Vector2(0f, 1f),
                 ],
-                Scale = 8f,
+                Scale = new Vector2(8f),
                 Pivot = new Vector2(0.5f, 0.5f),
                 Topology = SpriteTopology.Quad,
             };
@@ -210,7 +215,11 @@ public sealed class WindowedRendererGpuTests
             TexturePageStore pages = Assert.IsType<TexturePageStore>(renderer.PageStore);
             Assert.True(pages.IsPlaceholderReady, "The startup placeholder page is not resident.");
             Assert.Equal(1, pages.TexturePageCount);
-            Assert.Equal(TexturePageCapacity.Initial, pages.TexturePageCapacityInEntries);
+            int startupCapacity = TexturePageCapacity.StartupCapacity(
+                (int)renderer.MaxTexturePages);
+            Assert.Equal(startupCapacity, pages.TexturePageCapacityInEntries);
+            Assert.Equal(startupCapacity, renderer.TexturePageCapacityHighWater);
+            Assert.Equal(0, pages.GrowthCount);
             Assert.Equal(0, pages.FailedPathCount);
             _output.WriteLine(
                 $"pages: resident={pages.TexturePageCount}, "
@@ -257,30 +266,35 @@ public sealed class WindowedRendererGpuTests
                 $"after {initialSnapshots} snapshots: {Describe(renderer.Counters)}; "
                     + $"ring={DescribeRing(renderer)}");
 
-            // Capture contract: one RGBA8 array for the frame that recorded the copy. The copy is
-            // recorded on the next frame and completes at a later frame-fence reuse.
-            Task<byte[]> captureTask = renderer.CaptureFrameAsync();
-            for (var frame = 0; frame < 4 && !captureTask.IsCompleted; frame++)
-            {
-                producer.PublishOne();
-                WaitFor(
-                    renderer,
-                    () => renderer.Counters.FramesPresented >= producer.Published,
-                    "A capture frame was not presented",
-                    _timeout);
-            }
+            // Capture contract: each captured frame allocates one RGBA8 result shared by every
+            // request it serves, and the dimensions are that frame's actual extent. Both requests
+            // are queued before the next snapshot, so the same frame serves them.
+            long captureSequence = renderer.RenderStats.FrameSequence;
+            Task<FrameCaptureResult> firstCapture = renderer.CaptureFrameAsync();
+            Task<FrameCaptureResult> secondCapture = renderer.CaptureFrameAsync();
+            producer.PublishOne();
+            WaitFor(
+                renderer,
+                () => renderer.RenderStats.FrameSequence > captureSequence,
+                "A capture frame was not presented",
+                _timeout);
 
-            byte[] captured = await captureTask.WaitAsync(_timeout);
+            FrameCaptureResult firstResult = await firstCapture.WaitAsync(_timeout);
+            FrameCaptureResult secondResult = await secondCapture.WaitAsync(_timeout);
             RenderStats captureStats = renderer.RenderStats;
-            Assert.Equal(
-                captureStats.FramebufferWidth * captureStats.FramebufferHeight * 4,
-                captured.Length);
+            Assert.Equal(captureStats.FramebufferWidth, firstResult.Width);
+            Assert.Equal(captureStats.FramebufferHeight, firstResult.Height);
+            Assert.Equal(TextureFormat.Rgba8, firstResult.Format);
+            Assert.Equal(firstResult.Width * firstResult.Height * 4, firstResult.Pixels.Length);
+            Assert.Equal(firstResult.Pixels, secondResult.Pixels);
             Assert.Equal(1, captureStats.DrawCalls);
             _output.WriteLine(
-                $"capture: bytes={captured.Length}, extent={captureStats.FramebufferWidth}x"
-                    + $"{captureStats.FramebufferHeight}");
+                $"capture: bytes={firstResult.Pixels.Length}, "
+                    + $"extent={firstResult.Width}x{firstResult.Height}, "
+                    + $"format={firstResult.Format}");
 
             Resize(window, renderer, producer);
+            await AssertCaptureUsesTheResizedExtent(renderer, producer);
             Fullscreen(window, renderer);
             Minimize(window, renderer, producer);
 
@@ -375,46 +389,24 @@ public sealed class WindowedRendererGpuTests
         long recreationsBefore = renderer.Counters.SwapchainRecreations;
         long framesBefore = renderer.Counters.FramesPresented;
 
-        ReadOnlySpan<(int Width, int Height)> sizes =
-        [
-            (960, 600),
-            (1280, 720),
-            (800, 480),
-        ];
-        foreach ((int width, int height) in sizes)
+        // Drive the renderer's resize contract with the same posted extent the host supplies after an
+        // OS resize event. Calling SDL_SetWindowSize from this worker thread deadlocks inside SDL on
+        // Windows because the window's native message loop is not running here.
+        SdlWindowSize drawable = window.GetVulkanDrawableSize();
+        if (drawable.IsEmpty)
         {
-            window.SetSize(width, height);
-            SdlWindowSize drawable = window.GetVulkanDrawableSize();
-            if (drawable.IsEmpty)
-            {
-                continue;
-            }
-
-            renderer.PostWindowExtent(new WindowExtent(drawable.Width, drawable.Height));
+            throw new InvalidOperationException(
+                "SDL_Vulkan_GetDrawableSize reported a zero extent before the resize check.");
         }
 
-        bool recreated = renderer.WaitForProgress(
-            counters => counters.SwapchainRecreations > recreationsBefore,
-            TimeSpan.FromSeconds(10));
-        if (!recreated)
-        {
-            // Some remote desktop sessions ignore SDL_SetWindowSize; post a distinct extent so the
-            // renderer's recreation path is still exercised.
-            SdlWindowSize drawable = window.GetVulkanDrawableSize();
-            renderer.PostWindowExtent(
-                new WindowExtent(
-                    drawable.Width > 128 ? drawable.Width - 64 : drawable.Width + 64,
-                    drawable.Height > 128 ? drawable.Height - 64 : drawable.Height + 64));
-            WaitFor(
-                renderer,
-                () => renderer.Counters.SwapchainRecreations > recreationsBefore,
-                "Resize did not recreate the swapchain",
-                _timeout);
-        }
-        else
-        {
-            _output.WriteLine($"after resize (bounded wait): {Describe(renderer.Counters)}");
-        }
+        int resizedWidth = drawable.Width > 128 ? drawable.Width - 64 : drawable.Width + 64;
+        int resizedHeight = drawable.Height > 128 ? drawable.Height - 64 : drawable.Height + 64;
+        renderer.PostWindowExtent(new WindowExtent(resizedWidth, resizedHeight));
+        WaitFor(
+            renderer,
+            () => renderer.Counters.SwapchainRecreations > recreationsBefore,
+            "Resize did not recreate the swapchain",
+            _timeout);
 
         producer.PublishOne();
         WaitFor(
@@ -425,67 +417,61 @@ public sealed class WindowedRendererGpuTests
         _output.WriteLine($"after resize: {Describe(renderer.Counters)}");
     }
 
+    private async Task AssertCaptureUsesTheResizedExtent(
+        VulkanRenderer renderer,
+        TestSnapshotProducer producer)
+    {
+        long sequence = renderer.RenderStats.FrameSequence;
+        Task<FrameCaptureResult> capture = renderer.CaptureFrameAsync();
+        producer.PublishOne();
+        WaitFor(
+            renderer,
+            () => renderer.RenderStats.FrameSequence > sequence,
+            "A post-resize capture frame was not presented",
+            _timeout);
+
+        FrameCaptureResult result = await capture.WaitAsync(_timeout);
+        RenderStats stats = renderer.RenderStats;
+        Assert.Equal(stats.FramebufferWidth, result.Width);
+        Assert.Equal(stats.FramebufferHeight, result.Height);
+        Assert.Equal(TextureFormat.Rgba8, result.Format);
+        Assert.Equal(result.Width * result.Height * 4, result.Pixels.Length);
+        _output.WriteLine(
+            $"post-resize capture: extent={result.Width}x{result.Height}, "
+                + $"stats={stats.FramebufferWidth}x{stats.FramebufferHeight}");
+    }
+
     private void Fullscreen(ISdlWindow window, VulkanRenderer renderer)
     {
         long recreationsBefore = renderer.Counters.SwapchainRecreations;
-        var entered = false;
-        try
+        SdlWindowSize drawable = window.GetVulkanDrawableSize();
+        if (drawable.IsEmpty)
         {
-            window.SetFullscreen(true);
-            entered = true;
-        }
-        catch (Bork2dException exception)
-        {
-            _output.WriteLine($"Fullscreen is not supported by this desktop session: {exception.Message}");
-            return;
+            throw new InvalidOperationException(
+                "SDL_Vulkan_GetDrawableSize reported a zero extent before the fullscreen check.");
         }
 
-        try
-        {
-            SdlWindowSize fullscreenDrawable = window.GetVulkanDrawableSize();
-            renderer.PostFullscreen(true);
-            if (!fullscreenDrawable.IsEmpty)
-            {
-                renderer.PostWindowExtent(
-                    new WindowExtent(fullscreenDrawable.Width, fullscreenDrawable.Height));
-            }
+        // Post the renderer's fullscreen state and a distinct extent instead of calling
+        // SDL_SetWindowFullscreen; the native call has the same missing-message-loop hazard as
+        // SDL_SetWindowSize on this test thread.
+        int fullscreenWidth = drawable.Width > 128 ? drawable.Width - 64 : drawable.Width + 64;
+        int fullscreenHeight = drawable.Height > 128 ? drawable.Height - 64 : drawable.Height + 64;
+        renderer.PostFullscreen(true);
+        renderer.PostWindowExtent(new WindowExtent(fullscreenWidth, fullscreenHeight));
+        WaitFor(
+            renderer,
+            () => renderer.Counters.SwapchainRecreations > recreationsBefore,
+            "Entering fullscreen did not recreate the swapchain",
+            _timeout);
 
-            WaitFor(
-                renderer,
-                () => renderer.Counters.SwapchainRecreations > recreationsBefore,
-                "Entering fullscreen did not recreate the swapchain",
-                _timeout);
-
-            window.SetFullscreen(false);
-            SdlWindowSize restoredDrawable = window.GetVulkanDrawableSize();
-            renderer.PostFullscreen(false);
-            if (!restoredDrawable.IsEmpty)
-            {
-                renderer.PostWindowExtent(
-                    new WindowExtent(restoredDrawable.Width, restoredDrawable.Height));
-            }
-
-            WaitFor(
-                renderer,
-                () => renderer.Counters.SwapchainRecreations > recreationsBefore,
-                "Leaving fullscreen did not recreate the swapchain",
-                _timeout);
-            _output.WriteLine($"after fullscreen: {Describe(renderer.Counters)}");
-        }
-        finally
-        {
-            if (entered)
-            {
-                try
-                {
-                    window.SetFullscreen(false);
-                }
-                catch (Bork2dException)
-                {
-                    // Best effort; the session is torn down after the renderer joins.
-                }
-            }
-        }
+        renderer.PostFullscreen(false);
+        renderer.PostWindowExtent(new WindowExtent(drawable.Width, drawable.Height));
+        WaitFor(
+            renderer,
+            () => renderer.Counters.SwapchainRecreations > recreationsBefore,
+            "Leaving fullscreen did not recreate the swapchain",
+            _timeout);
+        _output.WriteLine($"after fullscreen: {Describe(renderer.Counters)}");
     }
 
     private void Minimize(
@@ -645,13 +631,13 @@ public sealed class WindowedRendererGpuTests
     private sealed class TestSnapshotProducer
     {
         private readonly VulkanRenderer _renderer;
-        private readonly SpriteAsset _sprite;
+        private readonly SpriteRenderData _sprite;
         private long _published;
 
         internal TestSnapshotProducer(VulkanRenderer renderer, SpriteAsset sprite)
         {
             _renderer = renderer;
-            _sprite = sprite;
+            _sprite = SpriteRenderData.Freeze(sprite);
         }
 
         internal long Published => _published;

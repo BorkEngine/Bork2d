@@ -9,7 +9,7 @@ namespace Bork2d.Bake;
 
 /// <summary>
 /// Configures the build-time asset pipeline for one assets executable: packs and roots, texture
-/// defaults, explicit data-type registrations, and processors.
+/// defaults, explicit data-type registrations and validators, and processors.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -19,10 +19,12 @@ namespace Bork2d.Bake;
 /// <see cref="WithProjectRoot"/>; the build target passes <c>$(MSBuildProjectDirectory)</c>.
 /// </para>
 /// <para>
-/// <see cref="RegisterAsset{T}"/> is the only data-type registration and closes over the compiled
-/// <c>[GenerateShape]</c> metadata, so binding uses generic calls rather than reflection.
-/// <see cref="UseDefaultAssets"/> registers the engine authoring types and
-/// <see cref="UseDefaultProcessors"/> records the built-in processor registration.
+/// The <see cref="RegisterAsset{T}()"/> and
+/// <see cref="RegisterAsset{T}(IAssetValidator{T})"/> overloads are the only data-type registrations
+/// and close over the compiled <c>[GenerateShape]</c> metadata, so binding uses generic calls rather
+/// than reflection. <see cref="UseDefaultAssets"/> registers the engine authoring types and their
+/// built-in validators, while <see cref="UseDefaultProcessors"/> records the built-in processor
+/// registration.
 /// </para>
 /// <para>
 /// Semantic configuration errors (a missing pack, a duplicate root or pack path, an escaping path, a
@@ -61,8 +63,8 @@ public sealed class BakeApplicationBuilder
         return this;
     }
 
-    /// <summary>Registers the engine-provided authoring asset types; idempotent.</summary>
-    /// <remarks>This currently registers <c>Bork2d.Engine.Assets.SpriteAsset</c>.</remarks>
+    /// <summary>Registers the engine-provided authoring asset types and their built-in validators; idempotent.</summary>
+    /// <remarks>This currently registers <c>Bork2d.Engine.Assets.SpriteAsset</c> and its built-in validator.</remarks>
     /// <returns>This builder.</returns>
     public BakeApplicationBuilder UseDefaultAssets()
     {
@@ -77,6 +79,34 @@ public sealed class BakeApplicationBuilder
         where T : IShapeable<T>
     {
         _definition.AddAsset<T>();
+        return this;
+    }
+
+    /// <summary>
+    /// Registers one data type if necessary and appends one semantic validator for it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The type is registered when it does not exist yet, without the duplicate-type diagnostic that a
+    /// second <see cref="RegisterAsset{T}()"/> reports. When the type is already registered, the
+    /// validator is appended after the existing validators, so every validator for an asset runs in
+    /// registration order.
+    /// </para>
+    /// <para>
+    /// Validators run after a custom-data source binds and before processor output, index construction,
+    /// pack composition, or staging. A validator error fails the pack at the validation stage and
+    /// leaves every target byte-identical; warnings and infos are reported without failing.
+    /// </para>
+    /// </remarks>
+    /// <typeparam name="T">The data type, which must carry a compiled <c>[GenerateShape]</c>.</typeparam>
+    /// <param name="validator">The validator instance.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="validator"/> is <see langword="null"/>.</exception>
+    public BakeApplicationBuilder RegisterAsset<T>(IAssetValidator<T> validator)
+        where T : IShapeable<T>
+    {
+        ArgumentNullException.ThrowIfNull(validator);
+        _definition.AddAssetValidator(validator);
         return this;
     }
 
@@ -99,8 +129,7 @@ public sealed class BakeApplicationBuilder
         if (!_definition.UseDefaultProcessors)
         {
             _definition.RequestDefaultProcessors();
-            _definition.AddProcessor(
-                new BakeProcessorAdapter(new TextureProcessor(_definition.TextureDefaults)));
+            _definition.AddProcessor(new TextureProcessor(_definition.TextureDefaults));
         }
 
         return this;
@@ -136,7 +165,7 @@ public sealed class BakeApplicationBuilder
     public BakeApplicationBuilder AddProcessor(IAssetProcessor processor)
     {
         ArgumentNullException.ThrowIfNull(processor);
-        _definition.AddProcessor(new BakeProcessorAdapter(processor));
+        _definition.AddProcessor(processor);
         return this;
     }
 

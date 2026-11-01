@@ -13,27 +13,47 @@ instance/surface, renderer composition, the three host loops, and logging. It ex
 | `WithAssetsPack(string)` | Base pack path (default `assets.pck`). Opened by `Run`, not `Build`. |
 | `WithoutAssets()` | Starts with an empty asset filesystem; overlays may still be mounted later. |
 | `WithHeadless(int ticksPerSecond = 60)` | Selects the no-window, no-GPU mode. |
-| `WithOffscreen(int width, int height)` | Selects windowless rendering to a fixed target. |
+| `WithOffscreen(int width, int height)` | Selects offscreen rendering to a fixed sRGB target. |
 | `WithTitle`, `WithSize`, `WithResizable`, `WithFullscreen`, `WithVSync` | Windowed-only options. |
 | `WithMaxDeltaTime(double)` | Gameplay delta clamp for windowed/offscreen ticks (default `0.25` s). |
 | `WithValidation(bool)` | Requests Vulkan validation layers. Default is on in `DEBUG`, off otherwise. |
+| `WithTextureResidencyBudget(long)` | Texture residency budget in bytes for the residency policy (default 1 GiB, `1073741824`). |
+| `WithTextureUploadBudget(int)` | Maximum texture upload bytes the renderer starts per frame (default 128 MiB, `134217728`). |
 | `WithLogging(Action<ILoggingBuilder>)` | Replaces the default console provider; the callback owns provider configuration. |
 
 `WithHeadless` and `WithOffscreen` are mutually exclusive, and window options are rejected in either
-mode. Configuration errors throw `Bork2dException` from `Build`.
+mode. The texture budgets must be positive. Configuration errors throw `Bork2dException` from
+`Build`.
 
 `Build()` validates the configuration and creates the logger factory, engine, clock, an unstarted
-asset service, and (for windowed apps) detached window/input proxies. It does not open a pack,
-create a window, render, or start a thread. `Run()` starts the base pack, platform, renderer, and
-game, and is callable once from any thread.
+asset service, and (for windowed apps) detached window/input proxies. Offscreen apps get a
+functional window facade reporting the target extent; headless apps get the throwing window stub. It
+does not open a pack, create an OS window, render, or start a thread. `Run()` starts the base pack,
+platform, renderer, and game, and is callable once from any thread.
+
+A successful `Build()` consumes the builder: every later configuration method and a second `Build()`
+throw `InvalidOperationException`. A failed `Build()`, from either validation or resource creation,
+does not consume the builder, so the caller can fix the configuration and retry. The built app
+remains owned and disposed by the caller as before; later builder use cannot reconfigure it.
 
 ## Host loops
+
+Windowed and offscreen runs execute one shared rendered-run lifecycle; only narrow mode hooks
+differ. The lifecycle starts assets, starts the mode platform (windowed only), creates and starts
+the renderer without waiting and installs the exit wake callback, attaches the renderer and
+proxies, runs `Setup` unless an exit/close is already pending, waits once for renderer readiness
+after a successful `Setup`, runs the backpressured tick loop, runs `Teardown` once when `Setup`
+succeeded, stops and joins the renderer before platform shutdown, stops assets, and detaches the
+proxies. The windowed hooks own SDL/platform startup and shutdown, the window/input proxies, the
+input freeze/text handoff, and the minimized tick cap; the offscreen hooks own only the fixed
+target. Headless remains a separate paced lifecycle.
 
 ### Windowed
 
 1. Open the base pack, start the asset loader, then create the SDL window, Vulkan instance, and
    surface on the OS thread.
-2. Start the renderer thread without waiting, and call `Setup` immediately.
+2. Start the renderer thread without waiting, install the exit wake callback, attach the renderer
+   and the window/input proxies, and call `Setup` immediately unless an exit/close is pending.
 3. Wait for renderer readiness before the first tick.
 4. Repeat: acquire a snapshot slot, freeze input, advance the clock, dispatch text, call `Tick`,
    capture the scene, publish. The acquire blocks while all three slots are occupied.
@@ -46,8 +66,11 @@ minimized, tick starts are capped at 30 per second; no cap applies once the loop
 
 ### Offscreen
 
-The same handoff loop without SDL, a window, input, or presentation. It renders against a fixed
-sRGB target and discards each frame. It stops on `Exit` or a renderer fatal.
+The same handoff loop without SDL, input, or presentation, driven by the same rendered-run
+lifecycle and therefore the same `Setup`/readiness/`Teardown` ordering and error precedence. It
+renders against a fixed sRGB target and discards each frame. `IEngine.Window` is a functional
+facade reporting the fixed target extent; its title, fullscreen, and cursor setters store inert
+state and no member throws. It stops on `Exit` or a renderer fatal and has no platform close path.
 
 ### Headless
 
@@ -68,7 +91,8 @@ Input is frozen at each tick start, so every read during one `Tick` sees the sam
 and release helpers are true for exactly one tick (a press and release inside one interval reports
 both edges with `IsKeyDown` false). Focus loss synthesizes releases for held keys/buttons and clears
 wheel and pending text; focus regain re-seeds state without creating press edges. Input is available
-only in windowed mode and never crosses to the render thread.
+only in windowed mode and never crosses to the render thread. Offscreen apps expose the fixed target
+extent through `IEngine.Window` instead of an SDL window.
 
 ## Lifecycle and failures
 
@@ -76,10 +100,13 @@ only in windowed mode and never crosses to the render thread.
 - `Dispose()` is idempotent and may run before or after `Run`, but throws while a run is active.
   Disposal detaches the root's direct children, detaches proxies, and disposes the stopped asset
   service and logger factory. It never calls `Teardown` again.
-- After a run, every `IAssets`, window, and input member on a retained reference throws
-  `ObjectDisposedException`. `IEngine.RenderStats` stays readable and may keep the last values.
+- After a run, every `IAssets` and input member on a retained reference throws
+  `ObjectDisposedException`; so does every window member of a windowed app. The offscreen window
+  facade stays functional. `IEngine.RenderStats` stays readable and may keep the last values.
 - A platform start failure precedes `Setup`. A renderer factory/start/readiness failure still lets
   `Setup` finish, runs zero ticks, attempts `Teardown`, joins the renderer, and rethrows.
+  Windowed and offscreen share the readiness boundary: the wait happens once, after a successful
+  `Setup` and before the first tick, and a readiness fatal is recorded as a renderer failure.
 - A `Setup` failure wins over a renderer failure and runs no `Teardown`. Tick/capture/text/`Teardown`
   failures propagate with the documented precedence; renderer cleanup failures during normal
   shutdown are logged and do not change the run's outcome.

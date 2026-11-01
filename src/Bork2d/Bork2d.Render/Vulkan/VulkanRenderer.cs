@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Bork2d.Engine;
 using Bork2d.Engine.Rendering;
 using Bork2d.Render.Diagnostics;
@@ -6,7 +5,6 @@ using Bork2d.Render.Handoff;
 using Bork2d.Render.Sprites;
 using Bork2d.Render.Textures;
 using Microsoft.Extensions.Logging;
-using Silk.NET.Core;
 using Silk.NET.Vulkan;
 using Silk.NET.Vulkan.Extensions.KHR;
 using Semaphore = Silk.NET.Vulkan.Semaphore;
@@ -26,6 +24,13 @@ namespace Bork2d.Render.Vulkan;
 /// <see cref="IRenderer"/>; it drives the snapshot handoff through the slot API in M7 WP-4.
 /// </para>
 /// <para>
+/// The renderer keeps only the swapchain driver: surface/present selection, acquire/present,
+/// resize/recreation, single surface recovery, and the minimized drain. Thread lifecycle, readiness,
+/// counters, snapshot handoff, captures, and texture setup/teardown come from the shared
+/// <see cref="RendererLifecycle"/>, <see cref="RendererCaptureService"/>, and
+/// <see cref="RendererTextures"/> compositions.
+/// </para>
+/// <para>
 /// With no <c>Ready</c> snapshot the render thread blocks on the combined snapshot/control wait; it
 /// never repeats or re-presents the previous snapshot. A snapshot slot is held until the consuming
 /// GPU frame's fence is observed and is released when that frame is reused or during the
@@ -34,55 +39,31 @@ namespace Bork2d.Render.Vulkan;
 /// </para>
 /// <para>
 /// Steady-state frames allocate nothing, log nothing, and never call <c>vkDeviceWaitIdle</c>.
-/// Recreation and shutdown are the only places <c>vkDeviceWaitIdle</c> is allowed (D-M6-15). The
-/// renderer never calls SDL and never destroys the host-owned instance or surface.
+/// Swapchain recreation and shutdown are the only places <c>vkDeviceWaitIdle</c> is allowed
+/// (D-M6-15); texture-page capacity growth retires the in-flight frame fences instead of idling the
+/// device. The renderer never calls SDL and never destroys the host-owned instance or surface.
 /// </para>
 /// </remarks>
-internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
+internal sealed unsafe class VulkanRenderer : IRenderer
 {
     private const int FramesInFlight = 2;
-    private const string ThreadName = "Bork2d.Render";
-    private const ulong CleanupFenceTimeoutNanoseconds = 1_000_000_000;
 
     private readonly RendererStartInfo _startInfo;
     private readonly ILogger _logger;
-    private readonly RendererControlChannel _control = new();
-    private readonly SnapshotConsumer _consumer = new(new SnapshotRing(), FramesInFlight);
-    private readonly SnapshotControlWait _wait;
-    private readonly ManualResetEventSlim _ready = new(initialState: false);
-    private readonly ManualResetEventSlim _progress = new(initialState: false);
-    private readonly RenderStatsBoard _stats = new();
-    private readonly CaptureRequestQueue _captures = new();
+    private readonly VulkanFrameSet<WindowedFrame> _frames;
+    private readonly RendererCaptureService _captures;
+    private readonly RendererLifecycle _lifecycle;
 
-    private WindowedFrame?[] _frames = [];
-    private Thread? _thread;
+    private RendererTextures? _textures;
     private VulkanDevice? _device;
     private WindowedSwapchain? _swapchain;
-    private SpritePipeline? _spritePipeline;
-    private TexturePageStore? _pages;
-    private SpriteFramePlanner? _planner;
+    private RenderPassRegistry? _passes;
     private KhrSurface? _surfaceApi;
     private KhrSwapchain? _swapchainApi;
     private IVulkanInstance? _instance;
     private nint _surfaceHandle;
     private nint _passLabel;
     private int _frameIndex;
-    private int _started;
-    private int _status = (int)RendererStatus.NotStarted;
-    private int _stopReason = (int)RendererStopReason.None;
-    private int _readyFlag;
-    private long _framesPresented;
-    private long _swapchainRecreations;
-    private long _lastFrameNumber;
-    private int _lastPresentResult;
-    private int _validationErrorCount;
-    private int _validationWarningCount;
-    private int _loggedPageCount;
-    private int _loggedPageCapacity;
-    private int _loggedPageGrowths;
-    private int _loggedFailedPaths;
-    private int _loggedInstanceCapacity;
-    private int _loggedInstanceGrowths;
     private Result _lastResult = Result.Success;
     private WindowExtent _requestedExtent;
     private bool _fullscreen;
@@ -107,46 +88,41 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
         _startInfo = startInfo;
         _logger = startInfo.LoggerFactory.CreateLogger(RenderLog.Category);
         _requestedExtent = new WindowExtent(startInfo.Width, startInfo.Height);
-        _wait = new SnapshotControlWait(_consumer.Ring, _control);
+        _frames = new VulkanFrameSet<WindowedFrame>("Vulkan frame fence", _logger);
+        _captures = new RendererCaptureService(_frames, nameof(VulkanRenderer), "windowed");
+        _lifecycle = new RendererLifecycle(_logger, _captures, FramesInFlight);
     }
 
     /// <inheritdoc/>
-    public bool IsReady => Volatile.Read(ref _readyFlag) != 0;
+    public bool IsReady => _lifecycle.IsReady;
 
     /// <inheritdoc/>
-    public RendererStatus Status => (RendererStatus)Volatile.Read(ref _status);
+    public RendererStatus Status => _lifecycle.Status;
 
     /// <inheritdoc/>
-    public RendererStopReason StopReason => (RendererStopReason)Volatile.Read(ref _stopReason);
+    public RendererStopReason StopReason => _lifecycle.StopReason;
 
     /// <inheritdoc/>
-    public RendererCounters Counters => new(
-        FramesPresented: Volatile.Read(ref _framesPresented),
-        FramesDiscarded: 0,
-        SwapchainRecreations: Volatile.Read(ref _swapchainRecreations),
-        ValidationErrorCount: Volatile.Read(ref _validationErrorCount),
-        ValidationWarningCount: Volatile.Read(ref _validationWarningCount),
-        LastFrameNumber: Volatile.Read(ref _lastFrameNumber),
-        LastPresentResult: Volatile.Read(ref _lastPresentResult));
+    public RendererCounters Counters => _lifecycle.Counters;
 
     /// <inheritdoc/>
-    public RenderStats RenderStats => _stats.Current;
+    public RenderStats RenderStats => _lifecycle.RenderStats;
 
     /// <inheritdoc/>
-    public Exception? FatalException => _control.FatalException;
+    public Exception? FatalException => _lifecycle.FatalException;
 
     /// <inheritdoc/>
-    public SnapshotRingCounters SnapshotCounters => _consumer.Counters;
+    public SnapshotRingCounters SnapshotCounters => _lifecycle.SnapshotCounters;
 
     /// <inheritdoc/>
-    public long SuspendedConsumptions => _consumer.SuspendedConsumptions;
+    public long SuspendedConsumptions => _lifecycle.SuspendedConsumptions;
 
     /// <inheritdoc/>
-    public Task<byte[]> CaptureFrameAsync(CancellationToken cancellationToken = default)
+    public Task<FrameCaptureResult> CaptureFrameAsync(CancellationToken cancellationToken = default)
         => _captures.Request(cancellationToken);
 
     /// <summary>Gets the renderer's snapshot ring (GPU tests observe slot state through it).</summary>
-    internal SnapshotRing SnapshotRing => _consumer.Ring;
+    internal SnapshotRing SnapshotRing => _lifecycle.Consumer.Ring;
 
     /// <summary>
     /// Gets a value indicating whether the instance the windowed renderer was started with has the
@@ -155,189 +131,64 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
     internal bool ValidationEnabled => _instance?.ValidationEnabled == true;
 
     /// <summary>Gets a value indicating whether every GPU frame owns its empty instance resources.</summary>
-    internal bool HasInstanceResources
-    {
-        get
-        {
-            if (_frames.Length != FramesInFlight)
-            {
-                return false;
-            }
-
-            for (var index = 0; index < FramesInFlight; index++)
-            {
-                if (_frames[index]?.InstanceResources is null)
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-    }
+    internal bool HasInstanceResources => _frames.HasInstanceResources;
 
     /// <summary>Gets a value indicating whether the sprite pipeline was created at startup.</summary>
-    internal bool HasSpritePipeline => _spritePipeline is not null;
+    internal bool HasSpritePipeline => _textures?.Pipeline is not null;
 
     /// <summary>Gets the texture-page cache (GPU tests observe the placeholder and counts).</summary>
-    internal TexturePageStore? PageStore => _pages;
+    internal TexturePageStore? PageStore => _textures?.Pages;
+
+    /// <summary>Gets the device's effective bindless page limit, or <c>0</c> before the pipeline exists.</summary>
+    internal uint MaxTexturePages => _textures?.MaxTexturePages ?? 0;
+
+    /// <summary>Gets the largest bindless page capacity among the frames (GPU tests/diagnostics).</summary>
+    internal int TexturePageCapacityHighWater => _frames.BindlessCapacityHighWater;
 
     /// <summary>Gets the largest instance-buffer capacity among the frames (GPU tests/diagnostics).</summary>
-    internal int InstanceCapacityHighWater
-    {
-        get
-        {
-            var capacity = 0;
-            for (var index = 0; index < _frames.Length; index++)
-            {
-                FrameInstanceResources? resources = _frames[index]?.InstanceResources;
-                if (resources is not null)
-                {
-                    capacity = Math.Max(capacity, resources.InstanceCapacity);
-                }
-            }
-
-            return capacity;
-        }
-    }
+    internal int InstanceCapacityHighWater => _frames.InstanceCapacityHighWater;
 
     /// <summary>Gets the total number of instance-buffer growths across the frames.</summary>
-    internal int InstanceGrowthCount
-    {
-        get
-        {
-            var growths = 0;
-            for (var index = 0; index < _frames.Length; index++)
-            {
-                growths += _frames[index]?.InstanceResources.GrowthCount ?? 0;
-            }
-
-            return growths;
-        }
-    }
+    internal int InstanceGrowthCount => _frames.InstanceGrowthCount;
 
     /// <inheritdoc/>
-    void IBindlessPageWriter.EnsureCapacity(int capacity)
-    {
-        // Growth happens between frames: the device is idle and every in-flight frame's fence has
-        // signaled before the per-frame descriptor pools/sets are recreated.
-        WaitForDeviceIdle("texture page capacity growth");
-
-        for (var index = 0; index < _frames.Length; index++)
-        {
-            _frames[index]?.InstanceResources.MarkFenceSignaled();
-            _frames[index]?.InstanceResources.RecreateBindless(capacity);
-        }
-    }
+    public SnapshotSlot? AcquireSnapshotSlot() => _lifecycle.AcquireSnapshotSlot();
 
     /// <inheritdoc/>
-    void IBindlessPageWriter.WritePage(int pageIndex, ImageView imageView, Sampler sampler)
-    {
-        for (var index = 0; index < _frames.Length; index++)
-        {
-            _frames[index]?.InstanceResources.WritePage(pageIndex, imageView, sampler);
-        }
-    }
+    public void PublishSnapshot(SnapshotSlot slot) => _lifecycle.PublishSnapshot(slot);
 
     /// <inheritdoc/>
-    public SnapshotSlot? AcquireSnapshotSlot() => _consumer.Ring.Acquire();
+    public void AbandonSnapshotSlot(SnapshotSlot slot) => _lifecycle.AbandonSnapshotSlot(slot);
 
     /// <inheritdoc/>
-    public void PublishSnapshot(SnapshotSlot slot) => _consumer.Ring.Publish(slot);
+    public void WakeSnapshotWait() => _lifecycle.WakeSnapshotWait();
 
     /// <inheritdoc/>
-    public void AbandonSnapshotSlot(SnapshotSlot slot) => _consumer.Ring.Abandon(slot);
+    public void Start() => _lifecycle.Start(Startup, RunFrames, Cleanup, PublishFatal, LogStopped);
 
     /// <inheritdoc/>
-    public void WakeSnapshotWait() => _consumer.Ring.SignalExit();
+    public void WaitForReady() => _lifecycle.WaitForReady();
 
     /// <inheritdoc/>
-    public void Start()
-    {
-        if (Interlocked.Exchange(ref _started, 1) != 0)
-        {
-            throw new InvalidOperationException("The Vulkan renderer was already started.");
-        }
-
-        SetStatus(RendererStatus.Starting);
-        var thread = new Thread(ThreadMain)
-        {
-            IsBackground = true,
-            Name = ThreadName,
-        };
-        _thread = thread;
-        thread.Start();
-    }
+    public bool WaitForReady(TimeSpan timeout) => _lifecycle.WaitForReady(timeout);
 
     /// <inheritdoc/>
-    public void WaitForReady()
-    {
-        if (IsReady)
-        {
-            return;
-        }
-
-        _ready.Wait();
-    }
+    public void PostWindowExtent(WindowExtent extent) => _lifecycle.Control.PostExtent(extent);
 
     /// <inheritdoc/>
-    public bool WaitForReady(TimeSpan timeout) => IsReady || _ready.Wait(timeout);
+    public void PostFullscreen(bool fullscreen) => _lifecycle.Control.PostFullscreen(fullscreen);
 
     /// <inheritdoc/>
-    public void PostWindowExtent(WindowExtent extent) => _control.PostExtent(extent);
+    public void PostMinimized(bool minimized) => _lifecycle.Control.PostMinimized(minimized);
 
     /// <inheritdoc/>
-    public void PostFullscreen(bool fullscreen) => _control.PostFullscreen(fullscreen);
+    public void RequestStop() => _lifecycle.RequestStop();
 
     /// <inheritdoc/>
-    public void PostMinimized(bool minimized) => _control.PostMinimized(minimized);
+    public void Join() => _lifecycle.Join();
 
     /// <inheritdoc/>
-    public void RequestStop()
-    {
-        Volatile.Write(ref _readyFlag, 0);
-        _consumer.Ring.Stop();
-        _captures.Close(CreateCaptureClosedException());
-        _control.RequestStop();
-        if (Volatile.Read(ref _stopReason) != (int)RendererStopReason.Fatal)
-        {
-            SetStopReason(RendererStopReason.Requested);
-            RendererStatus status = Status;
-            if (status is RendererStatus.Starting or RendererStatus.Ready)
-            {
-                SetStatus(RendererStatus.Stopping);
-            }
-        }
-
-        _ready.Set();
-        SignalProgress();
-    }
-
-    /// <inheritdoc/>
-    public void Join()
-    {
-        _thread?.Join();
-        DrainSnapshotsAfterJoin();
-    }
-
-    /// <inheritdoc/>
-    public bool Join(TimeSpan timeout)
-    {
-        Thread? thread = _thread;
-        if (thread is null)
-        {
-            DrainSnapshotsAfterJoin();
-            return true;
-        }
-
-        if (!thread.Join(timeout))
-        {
-            return false;
-        }
-
-        DrainSnapshotsAfterJoin();
-        return true;
-    }
+    public bool Join(TimeSpan timeout) => _lifecycle.Join(timeout);
 
     /// <summary>
     /// Waits at most <paramref name="timeout"/> for a renderer predicate (GPU tests only;
@@ -347,35 +198,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
     /// <param name="timeout">The bounded wait.</param>
     /// <returns><see langword="true"/> when the predicate held; <see langword="false"/> on timeout.</returns>
     internal bool WaitForProgress(Func<bool> predicate, TimeSpan timeout)
-    {
-        ArgumentNullException.ThrowIfNull(predicate);
-
-        var stopwatch = Stopwatch.StartNew();
-        while (true)
-        {
-            if (predicate())
-            {
-                return true;
-            }
-
-            _progress.Reset();
-            if (predicate())
-            {
-                return true;
-            }
-
-            TimeSpan remaining = timeout - stopwatch.Elapsed;
-            if (remaining <= TimeSpan.Zero)
-            {
-                return false;
-            }
-
-            if (!_progress.Wait(remaining))
-            {
-                return predicate();
-            }
-        }
-    }
+        => _lifecycle.WaitForProgress(predicate, timeout);
 
     /// <summary>
     /// Waits at most <paramref name="timeout"/> for the counters to satisfy a predicate
@@ -385,129 +208,96 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
     /// <param name="timeout">The bounded wait.</param>
     /// <returns><see langword="true"/> when the predicate held; <see langword="false"/> on timeout.</returns>
     internal bool WaitForProgress(Func<RendererCounters, bool> predicate, TimeSpan timeout)
-        => WaitForProgress(() => predicate(Counters), timeout);
+        => _lifecycle.WaitForProgress(predicate, timeout);
 
-    /// <summary>
-    /// Frees every non-<c>Writing</c> slot once the render thread has joined.
-    /// </summary>
-    /// <remarks>
-    /// Join is the quiescent point (Q9=I1): a fatal mid-tick may publish after the renderer's
-    /// cleanup, so the ring cannot be fully drained until the render thread is gone. A slot still
-    /// <c>Writing</c> belongs to a producer and is never touched.
-    /// </remarks>
-    private void DrainSnapshotsAfterJoin()
+    /// <summary>Runs on the render thread: creates the windowed Vulkan objects and marks readiness.</summary>
+    /// <returns><see langword="false"/> when a stop was requested before readiness.</returns>
+    private bool Startup()
     {
-        try
+        IVulkanInstance instance = _startInfo.Instance
+            ?? throw new Bork2dException(
+                "Windowed Vulkan rendering requires a non-null Vulkan instance.");
+        _instance = instance;
+        if (_startInfo.SurfaceHandle == 0)
         {
-            _consumer.Ring.DrainAfterRenderThreadJoined();
+            throw new Bork2dException(
+                "Windowed Vulkan rendering requires a non-zero surface handle.");
         }
-        catch (Exception exception)
+
+        _surfaceHandle = _startInfo.SurfaceHandle;
+        if (_lifecycle.Control.IsStopRequested)
         {
-            _logger.LogError(exception, "Vulkan snapshot-ring drain after join failed.");
+            return false;
         }
-    }
 
-    private void ThreadMain()
-    {
-        var faulted = false;
-        try
+        // D-M6-06: Start returned long ago; selection and swapchain creation run here.
+        _device = VulkanDeviceSelector.Select(
+            instance,
+            requirePresent: true,
+            _surfaceHandle,
+            _logger);
+        if (_lifecycle.Control.IsStopRequested)
         {
-            _instance = _startInfo.Instance
-                ?? throw new Bork2dException(
-                    "Windowed Vulkan rendering requires a non-null Vulkan instance.");
-            if (_startInfo.SurfaceHandle == 0)
-            {
-                throw new Bork2dException(
-                    "Windowed Vulkan rendering requires a non-zero surface handle.");
-            }
-
-            _surfaceHandle = _startInfo.SurfaceHandle;
-            if (_control.IsStopRequested)
-            {
-                SetStopReason(RendererStopReason.Requested);
-                return;
-            }
-
-            // D-M6-06: Start returned long ago; selection and swapchain creation run here.
-            _device = VulkanDeviceSelector.Select(
-                _instance,
-                requirePresent: true,
-                _surfaceHandle,
-                _logger);
-            if (_control.IsStopRequested)
-            {
-                SetStopReason(RendererStopReason.Requested);
-                return;
-            }
-
-            _surfaceApi = LoadSurfaceExtension();
-            _swapchainApi = LoadSwapchainExtension();
-            CreateSwapchain(reason: null);
-            if (_control.IsStopRequested)
-            {
-                SetStopReason(RendererStopReason.Requested);
-                return;
-            }
-
-            CreateFrames();
-            CreatePageStore();
-            _planner = new SpriteFramePlanner(_pages!, _logger);
-            _passLabel = _instance.CreateDebugLabel("Bork2d windowed passes");
-            UpdateValidationCounters();
-            if (_control.IsStopRequested)
-            {
-                SetStopReason(RendererStopReason.Requested);
-                return;
-            }
-
-            Volatile.Write(ref _readyFlag, 1);
-            SetStatus(RendererStatus.Ready);
-            _ready.Set();
-            LogStarted();
-
-            RunFrames();
-            SetStopReason(RendererStopReason.Requested);
+            return false;
         }
-        catch (Exception exception)
+
+        _surfaceApi = LoadSurfaceExtension();
+        _swapchainApi = LoadSwapchainExtension();
+        _textures = new RendererTextures(
+            _device,
+            instance,
+            _startInfo.Assets,
+            _logger,
+            _frames,
+            "windowed",
+            _startInfo.AssetCatalogVersion,
+            _startInfo.TextureUploadBudgetBytes,
+            _startInfo.TextureResidencyBudgetBytes);
+        CreateSwapchain(reason: null);
+        if (_lifecycle.Control.IsStopRequested)
         {
-            faulted = true;
-            PublishFatal(exception);
+            return false;
         }
-        finally
-        {
-            Cleanup();
-            Volatile.Write(ref _readyFlag, 0);
-            if (faulted)
-            {
-                SetStopReason(RendererStopReason.Fatal);
-                SetStatus(RendererStatus.Faulted);
-            }
-            else
-            {
-                SetStatus(RendererStatus.Stopped);
-            }
 
-            LogStopped();
-            _ready.Set();
-            SignalProgress();
+        int startupPageCapacity = TexturePageCapacity.StartupCapacity(
+            (int)_textures.MaxTexturePages,
+            _startInfo.TexturePageStartupReservation);
+        CreateFrames(startupPageCapacity);
+        _textures.CreatePageStore(startupPageCapacity);
+        _passes = new RenderPassRegistry(
+            new SpriteRenderPass(_textures.Pipeline!, _textures.Pages!, _logger));
+        _passLabel = instance.CreateDebugLabel("Bork2d windowed passes");
+        _lifecycle.UpdateValidationCounters(instance);
+        if (_lifecycle.Control.IsStopRequested)
+        {
+            return false;
         }
+
+        _lifecycle.MarkReady();
+        LogStarted();
+        return true;
     }
 
     private void RunFrames()
     {
         while (true)
         {
-            ObserveValidation();
-            if (IsStopping())
+            _lifecycle.ObserveValidation(_instance);
+            if (_lifecycle.IsStopping)
             {
                 return;
             }
 
             DrainControlMessages();
-            if (IsStopping())
+            if (_lifecycle.IsStopping)
             {
                 return;
             }
+
+            // Complete captures from their own frame fences before waiting for a new snapshot or
+            // draining a minimized frame: a submitted capture must not depend on the game
+            // publishing another snapshot.
+            _captures.RetireCompletedCaptures(_device!);
 
             if (_minimized || _requestedExtent.IsZeroOrMinimized)
             {
@@ -516,7 +306,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
                     continue;
                 }
 
-                if (_wait.Wait() == SnapshotWaitOutcome.Stopped)
+                if (_lifecycle.Wait.Wait() == SnapshotWaitOutcome.Stopped)
                 {
                     return;
                 }
@@ -546,7 +336,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
                         continue;
                     }
 
-                    if (_wait.Wait() == SnapshotWaitOutcome.Stopped)
+                    if (_lifecycle.Wait.Wait() == SnapshotWaitOutcome.Stopped)
                     {
                         return;
                     }
@@ -570,9 +360,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
 
                 case SwapchainAction.Present:
                     // Q7=G1: with no consumed snapshot there is no GPU frame; wait, never repeat.
-                    if (!_consumer.HasReadySnapshot)
+                    if (!_lifecycle.Consumer.HasReadySnapshot)
                     {
-                        if (_wait.Wait() == SnapshotWaitOutcome.Stopped)
+                        if (_lifecycle.Wait.Wait() == SnapshotWaitOutcome.Stopped)
                         {
                             return;
                         }
@@ -590,8 +380,6 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
         }
     }
 
-    private bool IsStopping() => _control.IsStopRequested || _consumer.IsStopped;
-
     /// <summary>
     /// Drains the newest Ready snapshot without GPU work while minimized or at zero extent
     /// (Q8=H1). Returns <see langword="true"/> when a snapshot was dropped.
@@ -608,18 +396,18 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
             _minimizedLogged = true;
         }
 
-        if (!_consumer.DrainSuspended())
+        if (!_lifecycle.Consumer.DrainSuspended())
         {
             return false;
         }
 
-        SignalProgress();
+        _lifecycle.SignalProgress();
         return true;
     }
 
     private void DrainControlMessages()
     {
-        while (_control.TryDequeue(out RendererControlMessage message))
+        while (_lifecycle.Control.TryDequeue(out RendererControlMessage message))
         {
             switch (message.MessageKind)
             {
@@ -667,9 +455,8 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
         // The frame fence has signaled: the frame's instance buffer is free to grow, its recorded
         // capture (if any) can complete, and the snapshot the frame held is retired before the
         // newest Ready snapshot is taken. With no snapshot there is no GPU frame.
-        frame.InstanceResources.MarkFenceSignaled();
-        frame.Capture.Complete();
-        SnapshotSlot? slot = _consumer.TakeForFreeFrame(_frameIndex);
+        _captures.CompleteFrame(frame);
+        SnapshotSlot? slot = _lifecycle.Consumer.TakeForFreeFrame(_frameIndex);
         if (slot is null)
         {
             return;
@@ -677,8 +464,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
 
         // Advance the texture-page state machine once per frame, before recording: completed
         // descriptor/payload loads prepare uploads, completed uploads write their bindless
-        // descriptor, and a capacity growth recreates the frame sets while the device is idle.
-        _pages!.Pump();
+        // descriptor, and a capacity growth retires every in-flight frame fence before recreating
+        // the frame sets.
+        _textures!.Pump();
 
         uint imageIndex = 0;
         Result acquire = _swapchainApi!.AcquireNextImage(
@@ -690,26 +478,26 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
             ref imageIndex);
         if (acquire == Result.ErrorDeviceLost)
         {
-            _consumer.ReleaseTaken(slot);
+            _lifecycle.Consumer.ReleaseTaken(slot);
             throw CreateFatalForResult(acquire);
         }
 
         if (acquire is Result.ErrorOutOfDateKhr or Result.ErrorSurfaceLostKhr)
         {
             // The snapshot never became a GPU frame: free it immediately (never wait a fence).
-            _consumer.ReleaseTaken(slot);
+            _lifecycle.Consumer.ReleaseTaken(slot);
             _lastResult = acquire;
             return;
         }
 
         if (acquire != Result.Success && acquire != Result.SuboptimalKhr)
         {
-            _consumer.ReleaseTaken(slot);
+            _lifecycle.Consumer.ReleaseTaken(slot);
             throw new Bork2dException(
                 $"vkAcquireNextImageKHR failed with VkResult {acquire}.");
         }
 
-        Interlocked.Increment(ref _lastFrameNumber);
+        _lifecycle.IncrementLastFrameNumber();
 
         Result resetFences = device.Api.ResetFences(device.Device, 1, &fence);
         if (resetFences != Result.Success)
@@ -726,24 +514,32 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
                 $"vkResetCommandBuffer failed with VkResult {resetCommandBuffer}.");
         }
 
-        SpriteFramePlan plan = _planner!.Plan(
+        _passes!.Plan(
             slot.Snapshot,
             (int)swapchain.Extent.Width,
             (int)swapchain.Extent.Height,
             frame.InstanceResources);
-        RecordFrame(frame, imageIndex, swapchain, device, plan);
+        RecordFrame(frame, imageIndex, swapchain, device);
         Submit(frame, imageIndex, swapchain, device);
         frame.InstanceResources.MarkSubmitted();
         frame.Capture.MarkSubmitted();
-        _consumer.AttachToFrame(_frameIndex, slot);
+        _lifecycle.Consumer.AttachToFrame(_frameIndex, slot);
 
         Result present = Present(imageIndex, device, swapchain);
-        Volatile.Write(ref _lastPresentResult, (int)present);
-        PublishStats(slot.Snapshot.Sequence, swapchain, plan);
+        _lifecycle.SetLastPresentResult((int)present);
+        _lifecycle.PublishStats(
+            slot.Snapshot.Sequence,
+            (int)swapchain.Extent.Width,
+            (int)swapchain.Extent.Height,
+            _passes.Stats,
+            _textures.Pages?.TexturePageCount ?? 0,
+            _textures.Pages?.TexturePageCapacityInEntries ?? 0,
+            _textures.Pages?.PendingUploadCount ?? 0,
+            _textures.Pages?.PendingUploadBytes ?? 0);
         if (present is Result.Success or Result.SuboptimalKhr)
         {
-            Interlocked.Increment(ref _framesPresented);
-            SignalProgress();
+            _lifecycle.IncrementFramesPresented();
+            _lifecycle.SignalProgress();
         }
 
         if (present == Result.ErrorDeviceLost)
@@ -775,8 +571,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
         WindowedFrame frame,
         uint imageIndex,
         WindowedSwapchain swapchain,
-        VulkanDevice device,
-        SpriteFramePlan plan)
+        VulkanDevice device)
     {
         CommandBuffer commandBuffer = frame.CommandBuffer;
         var beginInfo = new CommandBufferBeginInfo
@@ -790,7 +585,8 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
             throw new Bork2dException($"vkBeginCommandBuffer failed with VkResult {begin}.");
         }
 
-        // A newly acquired image is UNDEFINED; every camera pass runs in COLOR_ATTACHMENT_OPTIMAL.
+        // A newly acquired image is UNDEFINED; the frame clear and every camera pass run in
+        // COLOR_ATTACHMENT_OPTIMAL.
         var range = new ImageSubresourceRange
         {
             AspectMask = ImageAspectFlags.ColorBit,
@@ -826,21 +622,27 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
             commandBuffer.Handle,
             _passLabel);
 
-        bool capture = frame.Capture.BeginRecord(
-            _captures,
+        // A newly acquired image is UNDEFINED and a camera may load instead of clearing, so one
+        // full-target opaque-black clear defines every pixel before any camera pass runs.
+        SpritePassRecorder.RecordFrameClear(
+            device.Api,
+            commandBuffer,
+            swapchain.GetView(imageIndex),
+            swapchain.Extent);
+
+        bool capture = _captures.BeginRecord(
+            frame,
             (int)swapchain.Extent.Width,
             (int)swapchain.Extent.Height,
             swapchain.Format);
-        SpritePassRecorder.RecordPasses(
-            device.Api,
-            commandBuffer,
-            _spritePipeline!,
-            _spritePipeline!.GetOrCreatePipeline(swapchain.Format),
-            frame.InstanceResources.DescriptorSet,
-            swapchain.GetView(imageIndex),
-            swapchain.GetImage(imageIndex),
-            plan.Cameras,
-            plan.CameraPlanCount);
+        _passes!.Record(
+            new RenderPassRecordContext(
+                device.Api,
+                commandBuffer,
+                swapchain.GetView(imageIndex),
+                swapchain.GetImage(imageIndex),
+                frame.InstanceResources.DescriptorSet,
+                swapchain.Format));
 
         if (capture)
         {
@@ -871,33 +673,6 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
             throw new Bork2dException($"vkEndCommandBuffer failed with VkResult {end}.");
         }
     }
-
-    private void PublishStats(long sequence, WindowedSwapchain swapchain, SpriteFramePlan plan)
-    {
-        RenderStats stats = FrameRenderStats.Create(
-            sequence,
-            (int)swapchain.Extent.Width,
-            (int)swapchain.Extent.Height,
-            plan,
-            _pages?.TexturePageCount ?? 0,
-            _pages?.TexturePageCapacityInEntries ?? 0,
-            Volatile.Read(ref _validationErrorCount),
-            Volatile.Read(ref _validationWarningCount));
-        _stats.Publish(in stats);
-    }
-
-    private void CompleteCaptures()
-    {
-        for (var index = 0; index < _frames.Length; index++)
-        {
-            _frames[index]?.Capture.Complete();
-        }
-    }
-
-    private ObjectDisposedException CreateCaptureClosedException()
-        => new(
-            nameof(VulkanRenderer),
-            "The windowed renderer stopped before the capture request could be served.");
 
     private void Submit(
         WindowedFrame frame,
@@ -994,33 +769,22 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
         // The sprite pipeline needs the final swapchain color format; a recreation that selects a
         // different format creates that format's pipeline lazily. Creation failure is fatal and the
         // new swapchain is already the current one, so cleanup owns it.
-        EnsureSpritePipeline();
+        _textures!.EnsurePipeline(created.Format);
 
         _lastResult = Result.Success;
         if (reason is not null)
         {
-            Interlocked.Increment(ref _swapchainRecreations);
-            SignalProgress();
+            _lifecycle.IncrementSwapchainRecreations();
+            _lifecycle.SignalProgress();
         }
-    }
-
-    /// <summary>
-    /// Creates the sprite pipeline owner on first use and the pipeline for the current swapchain
-    /// format. Failure propagates as a renderer startup/recreation failure (D-M6-14).
-    /// </summary>
-    private void EnsureSpritePipeline()
-    {
-        SpritePipeline pipeline = _spritePipeline
-            ??= SpritePipeline.Create(_device!, _instance, _logger);
-        pipeline.GetOrCreatePipeline(_swapchain!.Format);
     }
 
     private void Recreate(SwapchainRecreateReason reason)
     {
-        WaitForDeviceIdle("swapchain recreation");
+        VulkanDeviceIdle.Wait(_device!, "swapchain recreation");
 
         // vkDeviceWaitIdle completed every in-flight fence: their snapshot slots are free.
-        ReleaseHeldSnapshots("swapchain recreation");
+        _lifecycle.ReleaseHeldSnapshots("swapchain recreation");
         CreateSwapchain(reason);
         _lastResult = Result.Success;
     }
@@ -1036,8 +800,8 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
 
         _surfaceRecoveryAttempted = true;
         Result lostResult = _lastResult;
-        WaitForDeviceIdle("surface recovery");
-        ReleaseHeldSnapshots("surface recovery");
+        VulkanDeviceIdle.Wait(_device!, "surface recovery");
+        _lifecycle.ReleaseHeldSnapshots("surface recovery");
         _swapchain?.Dispose();
         _swapchain = null;
 
@@ -1078,24 +842,17 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
             _swapchain.PresentMode);
     }
 
-    private void WaitForDeviceIdle(string operation)
+    private void CreateFrames(int pageCapacity)
     {
         VulkanDevice device = _device!;
-        Result result = device.Api.DeviceWaitIdle(device.Device);
-        if (result != Result.Success)
-        {
-            throw new Bork2dException(
-                $"vkDeviceWaitIdle failed with VkResult {result} during {operation}.");
-        }
-    }
-
-    private void CreateFrames()
-    {
-        VulkanDevice device = _device!;
-        SpritePipeline pipeline = _spritePipeline
+        SpritePipeline pipeline = _textures?.Pipeline
             ?? throw new Bork2dException(
                 "The windowed renderer cannot create frames without the sprite pipeline.");
-        _frames = new WindowedFrame?[FramesInFlight];
+        var frames = new WindowedFrame?[FramesInFlight];
+
+        // Attach before creating: a mid-loop failure must leave the already-created frames visible
+        // to cleanup, exactly like the per-renderer frame array did.
+        _frames.Attach(frames);
         for (var index = 0; index < FramesInFlight; index++)
         {
             WindowedFrame frame = WindowedFrame.Create(
@@ -1105,55 +862,16 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
                 index,
                 device.QueueFamilyIndex,
                 pipeline,
-                TexturePageCapacity.Initial,
+                pageCapacity,
                 device.Limits.MaxStorageBufferRange,
                 _instance,
                 _logger);
-            _frames[index] = frame;
+            frames[index] = frame;
             _instance!.SetObjectName(
                 device.Device.Handle,
                 ObjectType.CommandBuffer,
                 frame.CommandBuffer.Handle,
                 $"Bork2d frame {index} command buffer");
-        }
-    }
-
-    /// <summary>
-    /// Creates the texture-page cache, uploads the placeholder (waiting its fence at startup), and
-    /// makes it resident at index 0. Failure is a renderer startup failure.
-    /// </summary>
-    private void CreatePageStore()
-    {
-        VulkanDevice device = _device!;
-        SpritePipeline pipeline = _spritePipeline
-            ?? throw new Bork2dException(
-                "The windowed renderer cannot create texture pages without the sprite pipeline.");
-        var gpu = new VulkanTexturePages(device, pipeline, this, _instance, _logger);
-        _pages = new TexturePageStore(
-            _startInfo.Assets,
-            gpu,
-            (int)pipeline.MaxTexturePages,
-            (int)device.Limits.MaxImageDimension2D,
-            _logger);
-        _pages.Start();
-    }
-
-    /// <summary>
-    /// Releases every snapshot slot the renderer holds after the device became idle, before the
-    /// swapchain is recreated or recovered (Q8/Q9; every slot must end Free).
-    /// </summary>
-    private void ReleaseHeldSnapshots(string operation)
-    {
-        try
-        {
-            _consumer.ReleaseAll();
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(
-                exception,
-                "Vulkan snapshot-slot release failed during {Operation}.",
-                operation);
         }
     }
 
@@ -1223,27 +941,6 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
             $"The windowed renderer received an unexpected VkResult {result}.");
     }
 
-    private void ObserveValidation()
-    {
-        UpdateValidationCounters();
-        if (_instance?.FatalException is { } fatal)
-        {
-            throw fatal as Bork2dException
-                ?? new Bork2dException("Vulkan validation reported a fatal error.", fatal);
-        }
-    }
-
-    private void UpdateValidationCounters()
-    {
-        if (_instance is not { } instance)
-        {
-            return;
-        }
-
-        Volatile.Write(ref _validationErrorCount, instance.ValidationErrorCount);
-        Volatile.Write(ref _validationWarningCount, instance.ValidationWarningCount);
-    }
-
     private void PublishFatal(Exception exception)
     {
         var fatal = exception as Bork2dException
@@ -1251,23 +948,17 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
                 "The Vulkan renderer failed: " + exception.Message,
                 exception);
 
-        // A renderer fatal wakes a blocked producer, stops further acquisition, and faults pending
-        // capture requests (M8 §6.12).
-        _consumer.Ring.Stop();
-        _captures.Close(fatal);
-        _control.PublishFatal(fatal);
-        SetStopReason(RendererStopReason.Fatal);
-        SetStatus(RendererStatus.Faulted);
+        _lifecycle.PublishFatal(fatal);
         _logger.LogError(fatal, "Vulkan renderer fatal failure.");
     }
 
     private void Cleanup()
     {
-        UpdateValidationCounters();
+        _lifecycle.UpdateValidationCounters(_instance);
         VulkanDevice? device = _device;
         if (device is not null)
         {
-            WaitForFrameFences(device);
+            _frames.WaitForFences(device);
             try
             {
                 Result idle = device.Api.DeviceWaitIdle(device.Device);
@@ -1303,104 +994,26 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
         // Every frame fence was observed and the device is idle: no GPU frame references a
         // snapshot slot any more, so every held slot returns to Free before teardown. Capture
         // requests recorded on those frames complete here; queued ones fault.
-        ReleaseHeldSnapshots("shutdown");
+        _lifecycle.ReleaseHeldSnapshots("shutdown");
 
-        CompleteCaptures();
-        _captures.Close(CreateCaptureClosedException());
+        _captures.CompleteAll();
+        _captures.CloseForStop();
 
-        CapturePageCounters();
-        CaptureInstanceCounters();
+        _textures?.CaptureStopCounters();
+        _frames.CaptureStopCounters();
 
         _swapchain?.Dispose();
         _swapchain = null;
 
         // Frame descriptor sets/pools are destroyed before the page images/views they reference,
         // and the pages before the pipeline that owns their samplers and the device itself.
-        for (var index = 0; index < _frames.Length; index++)
-        {
-            _frames[index]?.Dispose();
-            _frames[index] = null;
-        }
-
-        _pages?.Destroy();
-        _pages = null;
-
-        _spritePipeline?.Destroy();
-        _spritePipeline = null;
+        _frames.DisposeFrames();
+        _textures?.Destroy();
 
         _device?.Destroy();
         _device = null;
         _surfaceApi = null;
         _swapchainApi = null;
-    }
-
-    private void WaitForFrameFences(VulkanDevice device)
-    {
-        for (var index = 0; index < _frames.Length; index++)
-        {
-            WindowedFrame? frame = _frames[index];
-            if (frame is null)
-            {
-                continue;
-            }
-
-            Fence fence = frame.Fence;
-            try
-            {
-                Result result = device.Api.WaitForFences(
-                    device.Device,
-                    1,
-                    &fence,
-                    true,
-                    CleanupFenceTimeoutNanoseconds);
-                if (result != Result.Success)
-                {
-                    _logger.LogWarning(
-                        "Vulkan frame fence wait returned {Result} during shutdown.",
-                        result);
-                }
-            }
-            catch (Exception exception)
-            {
-                _logger.LogError(exception, "Vulkan frame fence wait failed during shutdown.");
-            }
-        }
-    }
-
-    /// <summary>Records the page counters before the page store is destroyed for the stop log.</summary>
-    private void CapturePageCounters()
-    {
-        TexturePageStore? pages = _pages;
-        if (pages is null)
-        {
-            return;
-        }
-
-        _loggedPageCount = pages.TexturePageCount;
-        _loggedPageCapacity = pages.TexturePageCapacityInEntries;
-        _loggedPageGrowths = pages.GrowthCount;
-        _loggedFailedPaths = pages.FailedPathCount;
-    }
-
-    /// <summary>Records the instance-buffer high-water marks before the frames are destroyed.</summary>
-    private void CaptureInstanceCounters()
-    {
-        var capacity = 0;
-        var growths = 0;
-        for (var index = 0; index < _frames.Length; index++)
-        {
-            FrameInstanceResources? resources = _frames[index]?.InstanceResources;
-            if (resources is null)
-            {
-                continue;
-            }
-
-            capacity = Math.Max(capacity, resources.InstanceCapacity);
-            growths += resources.GrowthCount;
-        }
-
-        _loggedInstanceCapacity = capacity;
-        _loggedInstanceGrowths = growths;
     }
 
     private void LogStarted()
@@ -1411,6 +1024,8 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
             return;
         }
 
+        TexturePageStore? pages = _textures?.Pages;
+        RendererCounters counters = _lifecycle.Counters;
         _logger.LogInformation(
             "Vulkan renderer started: mode={Mode}, extent={Width}x{Height}, format={Format}, "
                 + "colorSpace={ColorSpace}, presentMode={PresentMode}, images={ImageCount}, "
@@ -1436,22 +1051,24 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
             "on",
             HasInstanceResources ? "on" : "off",
             FrameInstanceResources.InitialCapacity,
-            _pages?.TexturePageCount ?? 0,
-            _pages?.TexturePageCapacityInEntries ?? 0,
-            _spritePipeline?.MaxTexturePages ?? 0,
-            _pages?.IsPlaceholderReady == true ? "on" : "off",
+            pages?.TexturePageCount ?? 0,
+            pages?.TexturePageCapacityInEntries ?? 0,
+            _textures?.MaxTexturePages ?? 0,
+            pages?.IsPlaceholderReady == true ? "on" : "off",
             _instance?.ValidationEnabled == true ? "on" : "off",
-            Volatile.Read(ref _framesPresented),
+            counters.FramesPresented,
             0,
-            Volatile.Read(ref _swapchainRecreations),
-            Volatile.Read(ref _validationErrorCount),
-            Volatile.Read(ref _validationWarningCount),
-            StopReason);
+            counters.SwapchainRecreations,
+            _lifecycle.ValidationErrorCount,
+            _lifecycle.ValidationWarningCount,
+            _lifecycle.StopReason);
     }
 
     private void LogStopped()
     {
-        SnapshotRingCounters snapshots = _consumer.Counters;
+        RendererCounters counters = _lifecycle.Counters;
+        SnapshotRingCounters snapshots = _lifecycle.SnapshotCounters;
+        RenderStats stats = _lifecycle.RenderStats;
         _logger.LogInformation(
             "Vulkan renderer stopped: mode={Mode}, reason={Reason}, "
                 + "snapshotsPublished={SnapshotsPublished}, snapshotsConsumed={SnapshotsConsumed}, "
@@ -1468,56 +1085,30 @@ internal sealed unsafe class VulkanRenderer : IRenderer, IBindlessPageWriter
                 + "validationErrors={ValidationErrors}, validationWarnings={ValidationWarnings}, "
                 + "lastFrameNumber={LastFrameNumber}, lastPresentResult={LastPresentResult}.",
             nameof(RendererMode.Windowed),
-            StopReason,
+            _lifecycle.StopReason,
             snapshots.Published,
             snapshots.Consumed,
             snapshots.Superseded,
             snapshots.BackpressureWaits,
             snapshots.MaxLive,
-            _consumer.SuspendedConsumptions,
-            Volatile.Read(ref _framesPresented),
+            _lifecycle.SuspendedConsumptions,
+            counters.FramesPresented,
             0,
-            Volatile.Read(ref _swapchainRecreations),
-            _loggedPageCount,
-            _loggedPageCapacity,
-            _loggedPageGrowths,
-            _loggedFailedPaths,
-            _loggedInstanceCapacity,
-            _loggedInstanceGrowths,
-            _stats.Current.DrawCalls,
-            _stats.Current.Instances,
-            _stats.Current.Cameras,
-            _stats.Current.NonEmptyCameras,
-            _stats.Current.SkippedSprites,
-            Volatile.Read(ref _validationErrorCount),
-            Volatile.Read(ref _validationWarningCount),
-            Volatile.Read(ref _lastFrameNumber),
-            Volatile.Read(ref _lastPresentResult));
+            counters.SwapchainRecreations,
+            _textures?.StopLogPageCount ?? 0,
+            _textures?.StopLogPageCapacity ?? 0,
+            _textures?.StopLogPageGrowths ?? 0,
+            _textures?.StopLogFailedPaths ?? 0,
+            _frames.StopLogInstanceCapacity,
+            _frames.StopLogInstanceGrowths,
+            stats.DrawCalls,
+            stats.Instances,
+            stats.Cameras,
+            stats.NonEmptyCameras,
+            stats.SkippedSprites,
+            _lifecycle.ValidationErrorCount,
+            _lifecycle.ValidationWarningCount,
+            counters.LastFrameNumber,
+            counters.LastPresentResult);
     }
-
-    private void SetStatus(RendererStatus status) => Volatile.Write(ref _status, (int)status);
-
-    private void SetStopReason(RendererStopReason reason)
-    {
-        while (true)
-        {
-            var current = (RendererStopReason)Volatile.Read(ref _stopReason);
-            if (current == RendererStopReason.Fatal
-                || (current == RendererStopReason.Requested
-                    && reason != RendererStopReason.Fatal))
-            {
-                return;
-            }
-
-            if (Interlocked.CompareExchange(
-                ref _stopReason,
-                (int)reason,
-                (int)current) == (int)current)
-            {
-                return;
-            }
-        }
-    }
-
-    private void SignalProgress() => _progress.Set();
 }
