@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using Bork2d.Engine.Assets;
+using Bork2d.Engine.Mathematics;
 using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
 

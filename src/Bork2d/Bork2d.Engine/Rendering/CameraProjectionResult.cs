@@ -1,4 +1,5 @@
 using System.Numerics;
+using Bork2d.Engine.Mathematics;
 
 namespace Bork2d.Engine.Rendering;
 
@@ -62,7 +63,7 @@ internal readonly record struct CameraProjectionResult(
         Vector2 corner1 = Vector2.Transform(new Vector2(half.X, -half.Y), ViewToWorld);
         Vector2 corner2 = Vector2.Transform(new Vector2(half.X, half.Y), ViewToWorld);
         Vector2 corner3 = Vector2.Transform(new Vector2(-half.X, half.Y), ViewToWorld);
-        var bounds = new Bounds(
+        Bounds bounds = Bounds.FromMinMax(
             Vector2.Min(Vector2.Min(corner0, corner1), Vector2.Min(corner2, corner3)),
             Vector2.Max(Vector2.Max(corner0, corner1), Vector2.Max(corner2, corner3)));
 
