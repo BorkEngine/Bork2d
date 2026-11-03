@@ -1,3 +1,4 @@
+using System.Numerics;
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Input;
@@ -52,6 +53,9 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     private readonly Lock _structuralLock = new();
     private readonly Lock _renderStatsLock = new();
     private readonly Lock _captureLock = new();
+    private readonly Lock _globalUniformLock = new();
+    private readonly Dictionary<string, GlobalUniformValue> _globalUniforms =
+        new(StringComparer.Ordinal);
     private readonly SceneRoot _root;
     private readonly RenderableRegistry _renderables;
     private readonly SnapshotCapture _capture;
@@ -270,6 +274,60 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
             parentNode);
     }
 
+    /// <inheritdoc/>
+    public void SetGlobalUniform(string name, float value)
+        => SetGlobalUniformCore(name, ShaderUniformType.Float, new Vector4(value, 0f, 0f, 0f));
+
+    /// <inheritdoc/>
+    public void SetGlobalUniform(string name, Vector2 value)
+        => SetGlobalUniformCore(name, ShaderUniformType.Vector2, new Vector4(value.X, value.Y, 0f, 0f));
+
+    /// <inheritdoc/>
+    public void SetGlobalUniform(string name, Vector3 value)
+        => SetGlobalUniformCore(
+            name,
+            ShaderUniformType.Vector3,
+            new Vector4(value.X, value.Y, value.Z, 0f));
+
+    /// <inheritdoc/>
+    public void SetGlobalUniform(string name, Vector4 value)
+        => SetGlobalUniformCore(name, ShaderUniformType.Vector4, value);
+
+    /// <inheritdoc/>
+    public void SetGlobalUniform(string name, Color value)
+        => SetGlobalUniformCore(name, ShaderUniformType.Color, value);
+
+    /// <inheritdoc/>
+    public void ResetGlobalUniforms()
+    {
+        lock (_globalUniformLock)
+        {
+            _globalUniforms.Clear();
+        }
+    }
+
+    private void SetGlobalUniformCore(string name, ShaderUniformType type, Vector4 value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        lock (_globalUniformLock)
+        {
+            if (_globalUniforms.TryGetValue(name, out GlobalUniformValue existing))
+            {
+                if (existing.Type != type)
+                {
+                    throw new ArgumentException(
+                        $"Global uniform '{name}' is already set as {existing.Type}, not {type}.",
+                        nameof(name));
+                }
+
+                _globalUniforms[name] = new GlobalUniformValue(type, value);
+                return;
+            }
+
+            _globalUniforms.Add(name, new GlobalUniformValue(type, value));
+        }
+    }
+
     public void Exit()
     {
         // Compare-exchange from Active so a caller racing the end of the run cannot resurrect a
@@ -341,6 +399,18 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     internal void CaptureSnapshot(FrameSnapshot snapshot, long sequence)
     {
         _capture.Capture(snapshot, sequence, Time.Time, Time.DeltaTime);
+
+        // User globals are engine state, not renderable producers: append them after the scene walk
+        // under their own lock. Dictionary enumeration and the value record copies allocate nothing,
+        // so a warm capture stays allocation-free.
+        lock (_globalUniformLock)
+        {
+            foreach (KeyValuePair<string, GlobalUniformValue> pair in _globalUniforms)
+            {
+                snapshot.AddGlobalUniform(
+                    new GlobalUniformSnapshot(pair.Key, pair.Value.Type, pair.Value.Value));
+            }
+        }
     }
 
     private static ISceneNode RequireEngineNode(ITransform parent)

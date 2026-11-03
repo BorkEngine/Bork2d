@@ -40,6 +40,8 @@ Microsoft.Extensions.Logging.Abstractions, System.IO.Hashing).
 
 No member requires the process main thread. Scene structure is serialized by one engine-owned lock;
 per-object property access uses a per-object lock, with structural-then-object lock ordering.
+Engine-wide user shader uniforms use a separate dedicated lock and never the structural lock, so
+setting a global never blocks scene capture or per-object work.
 
 The two render target drivers stay separate: `VulkanRenderer` owns swapchain acquire/present,
 resize, recovery, and the minimized drain; `VulkanOffscreenRenderer` owns the fixed sRGB target, its
@@ -63,7 +65,8 @@ snapshot:
 3. It walks the rooted scene once with an iterative, parent-first traversal that composes one world
    matrix and takes one per-object lock per node, and runs the registered typed renderable producers,
    which capture every camera, sprite, and custom renderable into its typed buffer in the slot as
-   value-only records.
+   value-only records. After the walk it copies the engine-wide user shader uniforms into their own
+   value-only snapshot buffer.
 4. It publishes the slot as the newest snapshot. A newer publish supersedes the previous `Ready`
    slot, never a `Rendering` one.
 5. The render thread takes the latest `Ready` snapshot, plans the frame, records it, and releases
@@ -115,10 +118,11 @@ Assets are built ahead of time, not loaded from loose files at runtime:
   sprite's drawn quad are converted to world AABBs, and a sprite is skipped only when its known
   bounds do not intersect the camera's. Empty bounds mean "unknown" and never cull; there is no
   spatial index and no culling toggle.
-- **Snapshots.** Capture contains no live scene entities. The only object reference that crosses
-  the tick/render boundary is immutable sprite render data, frozen from the loaded `SpriteAsset`
-  when it was assigned; the mutable asset itself is never captured. Reusing a slot clears every
-  typed render-data buffer's used range, so it retains no obsolete render data.
+- **Snapshots.** Capture contains no live scene entities. The only object references that cross the
+  tick/render boundary are immutable sprite render data and immutable shader render data, frozen from
+  the loaded `SpriteAsset`/`ShaderAsset` when it was assigned; the mutable assets themselves are
+  never captured. Reusing a slot clears every typed render-data buffer's used range and the user
+  global-uniform buffer, so it retains no obsolete render data or names.
 - **AOT.** Generated shapes are required; there is no reflection-shape fallback or runtime TOML.
   Runtime projects enable trim and AOT analyzers.
 - **Tooling isolation.** The bake tooling, TOML parser, image decoder, and shader compiler never

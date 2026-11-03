@@ -17,8 +17,14 @@ namespace Bork2d.Engine.Rendering;
 /// </para>
 /// <para>
 /// The snapshot is asset-agnostic: each sprite carries the immutable <see cref="Assets.SpriteRenderData"/>
-/// frozen when its asset was assigned, and no live scene entity or mutable
-/// <see cref="Assets.SpriteAsset"/> crosses the boundary.
+/// frozen when its asset was assigned and the immutable <see cref="Assets.ShaderRenderData"/> frozen
+/// when its shader was assigned, and no live scene entity, mutable <see cref="Assets.SpriteAsset"/>,
+/// or mutable <see cref="Assets.ShaderAsset"/> crosses the boundary.
+/// </para>
+/// <para>
+/// Engine-wide user uniforms live in their own value-only buffer and are not a renderable producer
+/// slot. <see cref="Reset"/> clears that buffer too, so a reused snapshot retains no stale uniform
+/// name or value.
 /// </para>
 /// </remarks>
 internal sealed class FrameSnapshot
@@ -36,6 +42,7 @@ internal sealed class FrameSnapshot
     internal const int ReservedSlotCount = 2;
 
     private readonly RenderDataBufferSet _buffers = new();
+    private readonly RenderDataBuffer<GlobalUniformSnapshot> _globalUniforms = new();
 
     internal FrameSnapshot()
     {
@@ -62,6 +69,9 @@ internal sealed class FrameSnapshot
     /// <summary>Gets the number of captured sprites.</summary>
     internal int SpriteCount => _buffers.Get<SpriteSnapshot>(SpriteSlot).Count;
 
+    /// <summary>Gets the number of captured engine-wide user uniforms.</summary>
+    internal int GlobalUniformCount => _globalUniforms.Count;
+
     /// <summary>
     /// Gets the current camera buffer capacity. Starts at zero, grows to the high-water mark, and
     /// never shrinks (Q6=Z1).
@@ -81,6 +91,9 @@ internal sealed class FrameSnapshot
     /// <summary>Gets the captured sprites in capture order (unordered, renderer sorts in M8).</summary>
     internal ReadOnlySpan<SpriteSnapshot> Sprites
         => _buffers.Get<SpriteSnapshot>(SpriteSlot).Items;
+
+    /// <summary>Gets the captured engine-wide user uniforms in capture order.</summary>
+    internal ReadOnlySpan<GlobalUniformSnapshot> GlobalUniforms => _globalUniforms.Items;
 
     /// <summary>
     /// Gets the typed buffer for a renderable producer's slot, creating it on first use.
@@ -109,6 +122,7 @@ internal sealed class FrameSnapshot
     internal void Reset()
     {
         _buffers.Reset();
+        _globalUniforms.Reset();
         Sequence = 0;
         Time = 0;
         DeltaTime = 0;
@@ -127,4 +141,12 @@ internal sealed class FrameSnapshot
     /// <param name="sprite">The sprite values to copy.</param>
     internal void AddSprite(in SpriteSnapshot sprite)
         => _buffers.Get<SpriteSnapshot>(SpriteSlot).Add(sprite);
+
+    /// <summary>
+    /// Appends one user global uniform to the non-renderable global buffer, growing it when the
+    /// high-water mark rises.
+    /// </summary>
+    /// <param name="uniform">The value-only global uniform to copy.</param>
+    internal void AddGlobalUniform(in GlobalUniformSnapshot uniform)
+        => _globalUniforms.Add(uniform);
 }

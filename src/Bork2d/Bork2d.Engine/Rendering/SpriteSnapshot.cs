@@ -19,6 +19,13 @@ namespace Bork2d.Engine.Rendering;
 /// <see cref="Layer"/> is the flattened single-bit mask. Invalid values (<c>0</c> and multi-bit)
 /// are captured as-is (Q3=C2); M8 skips them at draw time with the diagnostic.
 /// </para>
+/// <para>
+/// The shader fields are value-only and use safe defaults: <see cref="ShaderData"/> is
+/// <see langword="null"/> for a sprite without a custom shader, the four uniform lanes are zero when
+/// no shader is assigned, and the four extra texture references are absent when none were
+/// captured. <see cref="AdditionalTextureCount"/> keeps the total reference count even when it
+/// exceeds four, so the renderer can warn about the entries that did not fit.
+/// </para>
 /// </remarks>
 /// <param name="SpriteData">
 /// The frozen sprite render data, or <see langword="null"/> when nothing is drawn.
@@ -47,4 +54,43 @@ internal readonly record struct SpriteSnapshot(
     /// snapshot producers conservative.
     /// </remarks>
     internal Bounds Bounds { get; init; } = Bounds.Empty;
+
+    /// <summary>
+    /// Gets the frozen custom shader metadata, or <see langword="null"/> when the sprite uses the
+    /// built-in shader.
+    /// </summary>
+    internal ShaderRenderData? ShaderData { get; init; }
+
+    /// <summary>Gets the first <see cref="Vector4"/> lane of the instance uniform block.</summary>
+    internal Vector4 Uniform0 { get; init; }
+
+    /// <summary>Gets the second <see cref="Vector4"/> lane of the instance uniform block.</summary>
+    internal Vector4 Uniform1 { get; init; }
+
+    /// <summary>Gets the third <see cref="Vector4"/> lane of the instance uniform block.</summary>
+    internal Vector4 Uniform2 { get; init; }
+
+    /// <summary>Gets the fourth <see cref="Vector4"/> lane of the instance uniform block.</summary>
+    internal Vector4 Uniform3 { get; init; }
+
+    /// <summary>Gets the first captured additional texture reference, or an absent reference.</summary>
+    internal AssetRef<TextureDescriptor> ExtraTexture0 { get; init; }
+
+    /// <summary>Gets the second captured additional texture reference, or an absent reference.</summary>
+    internal AssetRef<TextureDescriptor> ExtraTexture1 { get; init; }
+
+    /// <summary>Gets the third captured additional texture reference, or an absent reference.</summary>
+    internal AssetRef<TextureDescriptor> ExtraTexture2 { get; init; }
+
+    /// <summary>Gets the fourth captured additional texture reference, or an absent reference.</summary>
+    internal AssetRef<TextureDescriptor> ExtraTexture3 { get; init; }
+
+    /// <summary>
+    /// Gets the total number of additional texture references the renderable held at capture.
+    /// </summary>
+    /// <remarks>
+    /// Only the first four references fit in <see cref="ExtraTexture0"/> through
+    /// <see cref="ExtraTexture3"/>; a larger value tells the renderer how many were ignored.
+    /// </remarks>
+    internal int AdditionalTextureCount { get; init; }
 }
