@@ -11,7 +11,7 @@ namespace Bork2d.Render.Vulkan;
 /// <para>
 /// Passes are registered in one ordered <see cref="RenderPassRegistry"/>. <see cref="Plan"/> runs in
 /// registration order and may only read the snapshot and the frame's target format, write its own
-/// plan and the per-frame global block, and add its counts to the shared
+/// plan and the per-run global uniform blocks, and add its counts to the shared
 /// <see cref="RenderPassStats"/>; <see cref="Record"/> runs in the same order, so the recorded draw
 /// order is deterministic. A new renderable kind adds an engine producer and one pass here; no
 /// central frame-loop plan/record switch changes.

@@ -9,11 +9,13 @@ namespace Bork2d.Render.Sprites;
 /// (M8 §6.4/§6.6, shader ABI v2).
 /// </summary>
 /// <remarks>
-/// The builder is pure and allocation-free. It assumes the caller already validated the sprite and
-/// resolved its quad; <c>flags</c> stays zero because flips are encoded as the sign of
-/// <c>sizeX</c>/<c>sizeY</c>. The four instance-parameter lanes are copied from the snapshot's
-/// frozen uniform block, and the additional bindless texture indices are zero in this milestone
-/// (the default parameter) until resolved indices are supplied.
+/// The builder is pure and allocation-free. It assumes the caller already validated the sprite,
+/// resolved its quad, and resolved its shader binding and additional textures. <c>flags</c> stays
+/// zero because flips are encoded as the sign of <c>sizeX</c>/<c>sizeY</c>. The four
+/// instance-parameter lanes are copied from the snapshot's frozen uniform block (the planner seeds
+/// the default shader's declared defaults for a sprite without a custom shader), and the four
+/// additional bindless texture indices are the resolved positional slots, with <c>0</c> for an
+/// absent or failed extra texture.
 /// </remarks>
 internal static class SpriteInstanceBuilder
 {
@@ -22,7 +24,7 @@ internal static class SpriteInstanceBuilder
     /// <param name="quad">The resolved world-unit quad.</param>
     /// <param name="textureIndex">The bindless page index; <c>0</c> is the placeholder.</param>
     /// <param name="extraTextureIndices">
-    /// The four additional bindless texture indices, or the zero default when none are resolved.
+    /// The four resolved additional bindless texture indices; <c>0</c> is the placeholder.
     /// </param>
     /// <returns>The instance record to write into the mapped buffer.</returns>
     internal static SpriteInstance Create(

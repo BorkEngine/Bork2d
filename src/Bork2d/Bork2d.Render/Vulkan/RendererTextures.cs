@@ -114,12 +114,12 @@ internal sealed class RendererTextures : IBindlessPageWriter
     internal int StopLogFailedPaths => _stopLogFailedPaths;
 
     /// <summary>
-    /// Creates the sprite pipeline owner, the default shader store, and the pipeline for the output
+    /// Creates the sprite pipeline owner, the shader catalog, and the pipeline for the output
     /// format on first use; a later format creates only that format's default pipeline.
     /// </summary>
     /// <param name="format">The target's sRGB output color format.</param>
     /// <exception cref="Bork2dException">
-    /// The vertex module, shader asset/module, or graphics pipeline is missing or invalid.
+    /// The vertex module, default shader asset/module, or graphics pipeline is missing or invalid.
     /// </exception>
     internal void EnsurePipeline(Format format)
     {
@@ -130,10 +130,10 @@ internal sealed class RendererTextures : IBindlessPageWriter
                 ShaderStore.VertexSpirVPath,
                 "the built-in sprite vertex module");
             _pipeline = SpritePipeline.Create(_device, _instance, _logger, vertexSpirV);
-            _shaders = ShaderStore.Create(_assets, _pipeline);
+            _shaders = ShaderStore.Create(_assets, _pipeline, _assetCatalogVersion, _logger);
         }
 
-        _pipeline.GetOrCreatePipeline(format, _shaders!.FragmentModule);
+        _shaders!.EnsureDefaultPipeline(format);
     }
 
     /// <summary>
@@ -167,10 +167,15 @@ internal sealed class RendererTextures : IBindlessPageWriter
     }
 
     /// <summary>
-    /// Advances the texture-page state machine once per frame, before recording, so completed loads
-    /// prepare uploads and completed uploads write their bindless descriptor.
+    /// Advances the shader catalog and the texture-page state machine once per frame, before
+    /// recording, so completed loads prepare the next frame's modules/uploads and completed uploads
+    /// write their bindless descriptor.
     /// </summary>
-    internal void Pump() => _pages!.Pump();
+    internal void Pump()
+    {
+        _shaders!.Pump();
+        _pages!.Pump();
+    }
 
     /// <summary>Records the page counters before the page store is destroyed for the stop log.</summary>
     internal void CaptureStopCounters()

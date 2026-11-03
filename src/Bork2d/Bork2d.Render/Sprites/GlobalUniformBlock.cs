@@ -11,12 +11,13 @@ namespace Bork2d.Render.Sprites;
 /// <para>
 /// The block is exactly 144 bytes and matches the fragment prologue's
 /// <c>vec4 time; vec4 globals[8];</c> declaration. <see cref="Time"/> carries the frame's
-/// <c>ITime.Time</c> in <c>X</c>; the remaining time components and every user global slot are zero
-/// in this milestone (no global user values are applied yet).
+/// <c>ITime.Time</c> in <c>X</c>; the remaining time components are zero. Each user global slot holds
+/// the engine-wide value with the same ordinal name and type when the run's shader declares one, or
+/// that declaration's shader default when no engine value exists.
 /// </para>
 /// <para>
-/// The renderer writes one block per frame into the frame's host-visible dynamic uniform buffer and
-/// binds it with a dynamic offset; every camera in the frame uses block zero in this milestone.
+/// The renderer writes one block per planned shader run into the frame's host-visible dynamic uniform
+/// buffer and binds it with the run's own dynamic offset.
 /// </para>
 /// </remarks>
 [StructLayout(LayoutKind.Sequential)]

@@ -10,9 +10,11 @@ namespace Bork2d.Render.Diagnostics;
 /// <remarks>
 /// The mapping is pure and allocation-free so the renderer publishes it once per completed frame and
 /// deterministic tests can assert the relationships without a GPU:
-/// <c>DrawCalls == NonEmptyCameras &lt;= Cameras</c>, <c>Instances</c> is the aggregate total, and
-/// <c>SkippedSprites</c> excludes placeholder-drawn sprites. Validation counters are cumulative for
-/// the run; every other value describes the frame that was just submitted/presented.
+/// <c>NonEmptyCameras &lt;= DrawCalls</c>, because every shader run records one draw and a camera has
+/// at least one run when it draws; <c>Instances</c> is the aggregate total, and <c>SkippedSprites</c>
+/// counts null, invalid-layer, non-Quad, and pending shader/texture sprites (placeholder-drawn
+/// sprites are not skipped). Validation counters are cumulative for the run; every other value
+/// describes the frame that was just submitted/presented.
 /// </remarks>
 internal static class FrameRenderStats
 {

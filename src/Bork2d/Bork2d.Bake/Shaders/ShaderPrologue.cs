@@ -52,6 +52,47 @@ internal static class ShaderPrologue
         #define BORK2D_TEXTURE2 (bork2dTextures[nonuniformEXT(vExtraTextureIndices[2])])
         #define BORK2D_TEXTURE3 (bork2dTextures[nonuniformEXT(vExtraTextureIndices[3])])
         #define BORK2D_TIME (bork2dGlobals.time.x)
+
+        #define main bork2d_user_main
+        """;
+
+    /// <summary>
+    /// The fixed wrapper appended after the user source: it restores the engine <c>main</c>, calls
+    /// the user body, and consumes every fixed-interface input in a branch that cannot be reached
+    /// for valid engine data.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A custom shader that does not reference every prologue input can have those inputs optimized
+    /// out of its SPIR-V, which makes the engine-owned vertex stage's outputs appear unconsumed and
+    /// produces a Vulkan <c>WARNING-Shader-OutputNotConsumed</c>. The wrapper guarantees the module
+    /// keeps a use of every declared input without changing any valid frame's pixels.
+    /// </para>
+    /// <para>
+    /// The guard is the same one the built-in default shader used before the wrapper existed: every
+    /// bindless index is below the engine's 1,048,576-entry cap (<c>0x00100000</c>), so an OR of the
+    /// four extra indices above <c>0x003FFFFF</c> is impossible and the branch body never runs.
+    /// </para>
+    /// </remarks>
+    internal const string Epilogue = """
+        #undef main
+
+        void main()
+        {
+            bork2d_user_main();
+
+            uint extra = vExtraTextureIndices[0] | vExtraTextureIndices[1]
+                | vExtraTextureIndices[2] | vExtraTextureIndices[3];
+            if (extra > 0x003FFFFFu)
+            {
+                vec4 keepAlive = texture(
+                    bork2dTextures[nonuniformEXT(vExtraTextureIndices[0])], vUv) * vTint;
+                keepAlive += vec4(vWorldPosition.x, vLocalPosition.x, float(vTextureIndex), 0.0);
+                keepAlive += vInstanceParams[0] + vInstanceParams[1]
+                    + vInstanceParams[2] + vInstanceParams[3];
+                outColor += keepAlive;
+            }
+        }
         """;
 
     /// <summary>Builds the prologue for the given packed uniform declarations.</summary>
@@ -79,6 +120,20 @@ internal static class ShaderPrologue
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// Composes the complete fragment source the compiler sees: the fixed prologue, the user source,
+    /// and the fixed wrapper.
+    /// </summary>
+    /// <param name="prologue">The prologue built for the declared uniforms.</param>
+    /// <param name="source">The user fragment source, which defines <c>void main()</c>.</param>
+    /// <returns>The combined source to compile.</returns>
+    internal static string Compose(string prologue, string source)
+    {
+        ArgumentNullException.ThrowIfNull(prologue);
+        ArgumentNullException.ThrowIfNull(source);
+        return prologue + "\n" + source + "\n" + Epilogue;
     }
 
     /// <summary>Counts the prologue lines so a compiler line can be mapped back to the source.</summary>

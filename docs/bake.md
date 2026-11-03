@@ -111,6 +111,16 @@ fragment interface, and the `main` entry point. A source therefore contains only
 and `void main()`; a `#version` or `#extension` directive (after optional leading whitespace) is a
 bake error. The source is read as strict UTF-8.
 
+The prefix defines `main` as `bork2d_user_main`, and the processor appends a fixed epilogue after the
+source that undefines the macro and supplies the real `void main()`. The epilogue calls the user body
+and then references every fixed-interface input in a branch that cannot be reached for valid engine
+data: it ORs the four extra bindless indices and compares them against `0x003FFFFF`, above the
+engine's 1,048,576-entry bindless cap. This keeps a user source that does not consume every varying
+from making the engine-owned vertex stage's outputs appear unconsumed (a Vulkan
+`WARNING-Shader-OutputNotConsumed`), and the branch body never runs, so no valid frame's pixels
+change. The epilogue suffix is not part of the prologue line count used to map shaderc diagnostics
+back to the source; the `#define main` line is part of the prefix and is included in that offset.
+
 The fixed interface is versioned by the shader layout version `2`:
 
 | Input | Meaning |
@@ -335,7 +345,7 @@ Codes are stable once a range is released. A diagnostic renders as
 `bake` records a schema-3 manifest at `<project root>/obj/bork2d/bake/manifest.json`. It tracks the
 tool version, configuration hash, registered type/processor assembly closure, mode, every input
 path/hash, and every output path/hash. The configuration hash includes the shader tool marker
-`shaderc-2.23.0/layout-2/prologue-2/packer-1`, so upgrading shaderc or changing the fragment layout,
+`shaderc-2.23.0/layout-2/prologue-3/packer-1`, so upgrading shaderc or changing the fragment layout,
 prologue, or uniform packer invalidates a manifest written by the earlier tool. When all match, the
 bake prints an up-to-date summary and writes nothing. Any changed source, registration, processor,
 pack path, mode, or output triggers a full bake; `--force` bypasses the check, and

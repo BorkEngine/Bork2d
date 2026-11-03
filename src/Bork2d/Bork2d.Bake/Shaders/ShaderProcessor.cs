@@ -96,7 +96,7 @@ internal sealed class ShaderProcessor : AssetProcessor<ShaderSidecar>
         string prologue = ShaderPrologue.Build(
             layout.InstanceUniforms,
             layout.GlobalUniforms);
-        string combined = prologue + "\n" + source;
+        string combined = ShaderPrologue.Compose(prologue, source);
         string fileName = context.SourceFileName;
         if (!GlslCompiler.TryCompileFragment(
                 combined,
