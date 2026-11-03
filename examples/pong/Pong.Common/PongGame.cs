@@ -68,9 +68,11 @@ public sealed class PongGame : IGame<GameLayer>
         Ball.ZIndex = BallZIndex;
         Ball.Tint = Color.White;
         Ball.Shader = ballShader;
-        Ball.SetUniform("uPhase", BallPulsePhase);
+        Ball.SetUniform("lastHit", (float)engine.Time.Time);
 
         Simulation = new PongSimulation(settings, ComputeHalfWidth(engine), CourtHalfHeight);
+        Simulation.OnBallBounce += () => Ball.SetUniform("lastHit", (float)engine.Time.Time);
+
         _title = null;
         ApplySimulation();
         UpdateTitle(engine, Simulation);

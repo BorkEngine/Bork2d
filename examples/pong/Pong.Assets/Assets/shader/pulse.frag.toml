@@ -1,2 +1,2 @@
 [uniforms]
-uPhase = { type = "float", default = 0.0 }
+lastHit = { type = "float", default = 0.0 }
