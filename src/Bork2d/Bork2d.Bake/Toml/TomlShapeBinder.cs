@@ -199,6 +199,14 @@ internal static class TomlShapeBinder
             return true;
         }
 
+        if (type == typeof(TomlNumberOrArray))
+        {
+            // A sidecar uniform default is a scalar number or an array of numbers. The binder has no
+            // union leaf, so this explicit tooling leaf carries both shapes.
+            value = ReadNumberOrArray(context, node);
+            return true;
+        }
+
         if (type == typeof(long) || type == typeof(int) || type == typeof(short)
             || type == typeof(sbyte) || type == typeof(byte) || type == typeof(ushort)
             || type == typeof(uint) || type == typeof(ulong) || type == typeof(nint)
@@ -260,6 +268,57 @@ internal static class TomlShapeBinder
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Reads a scalar number or an array of numbers into a <see cref="TomlNumberOrArray"/> leaf.
+    /// </summary>
+    /// <remarks>
+    /// The member path of a rejected array element keeps its index, so a bad element is reported at
+    /// that element's value span with the normal <c>BK2004</c> type-mismatch code.
+    /// </remarks>
+    private static TomlNumberOrArray? ReadNumberOrArray(
+        BakeBindContext context,
+        in BakeBindNode node)
+    {
+        switch (node.Value)
+        {
+            case long integer:
+                return new TomlNumberOrArray([integer]);
+
+            case double real:
+                return new TomlNumberOrArray([real]);
+
+            case TomlArray array:
+                var values = new List<double>(array.Count);
+                for (int i = 0; i < array.Count; i++)
+                {
+                    switch (array[i])
+                    {
+                        case long integerElement:
+                            values.Add(integerElement);
+                            break;
+
+                        case double realElement:
+                            values.Add(realElement);
+                            break;
+
+                        default:
+                            context.AddError(
+                                BakeDiagnosticCodes.BinderTypeMismatch,
+                                $"'{node.MemberPath}[{i}]' must be a number; got {Describe(array[i])}.",
+                                node.Path.Element(i),
+                                $"{node.MemberPath}[{i}]");
+                            return null;
+                    }
+                }
+
+                return new TomlNumberOrArray(values);
+
+            default:
+                AddTypeMismatch(context, node, "a number or an array of numbers");
+                return null;
+        }
     }
 
     private static object? Read<T>(

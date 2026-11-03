@@ -54,6 +54,13 @@ namespace Bork2d.Bake.Diagnostics;
 /// fails the pack before composition or staging.
 /// </description>
 /// </item>
+/// <item>
+/// <term><c>BK9xxx</c></term>
+/// <description>
+/// Fragment shader sources and their metadata: unreadable or forbidden source, shaderc compilation
+/// failure, invalid sidecar names/types/defaults/slots, and uniform block overflow.
+/// </description>
+/// </item>
 /// </list>
 /// </remarks>
 internal static class BakeDiagnosticCodes
@@ -234,4 +241,25 @@ internal static class BakeDiagnosticCodes
     /// missing/empty index buffer or an index outside <c>0..3</c>.
     /// </summary>
     internal const string SpriteTopologyInvalid = "BK8004";
+
+    /// <summary>
+    /// A fragment shader source could not be read, is not valid UTF-8, or contains a forbidden
+    /// <c>#version</c>/<c>#extension</c> directive.
+    /// </summary>
+    internal const string ShaderSourceInvalid = "BK9001";
+
+    /// <summary>Shaderc rejected the combined prologue and shader source; no outputs are emitted.</summary>
+    internal const string ShaderCompileFailed = "BK9002";
+
+    /// <summary>
+    /// A shader sidecar declaration is invalid: an unknown type, a reserved or duplicate name, a bad
+    /// default component count/value, or too many/duplicate/invalid texture slots.
+    /// </summary>
+    internal const string ShaderMetadataInvalid = "BK9003";
+
+    /// <summary>
+    /// The declared instance uniforms do not fit the 16-float block, or the declared global uniforms
+    /// exceed the eight <c>vec4</c> slots. The bake never truncates.
+    /// </summary>
+    internal const string ShaderUniformOverflow = "BK9004";
 }

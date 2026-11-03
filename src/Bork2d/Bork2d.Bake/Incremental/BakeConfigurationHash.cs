@@ -1,6 +1,7 @@
 using System.Globalization;
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Processors;
+using Bork2d.Bake.Shaders;
 
 namespace Bork2d.Bake.Incremental;
 
@@ -16,14 +17,17 @@ namespace Bork2d.Bake.Incremental;
 /// and sorted normalized extensions.
 /// </para>
 /// <para>
-/// Fields are framed by <see cref="BakeHash.HashTextFields"/> and use a version marker, so a later
-/// hash-shape change invalidates older manifests instead of colliding with them. Processor and
-/// type assembly contents are hashed separately by <see cref="BakeAssemblyClosure"/>.
+/// The shader tool marker (<see cref="ShaderToolInfo.ConfigurationMarker"/>) is always part of the
+/// hash, so upgrading shaderc or changing the fragment layout, prologue, or packer invalidates a
+/// manifest written by the earlier tool. Fields are framed by <see cref="BakeHash.HashTextFields"/>
+/// and use a version marker, so a later hash-shape change invalidates older manifests instead of
+/// colliding with them. Processor and type assembly contents are hashed separately by
+/// <see cref="BakeAssemblyClosure"/>.
 /// </para>
 /// </remarks>
 internal static class BakeConfigurationHash
 {
-    private const string HashShape = "bork2d.bake.configuration.v1";
+    private const string HashShape = "bork2d.bake.configuration.v2";
 
     /// <summary>Computes the configuration hash of a validated project.</summary>
     /// <param name="project">The validated project configuration.</param>
@@ -35,6 +39,7 @@ internal static class BakeConfigurationHash
         var fields = new List<string>
         {
             HashShape,
+            ShaderToolInfo.ConfigurationMarker,
             project.ProjectRoot,
             Format(project.Packs.Count),
         };

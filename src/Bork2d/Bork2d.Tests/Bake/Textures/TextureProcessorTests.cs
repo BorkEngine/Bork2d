@@ -560,7 +560,7 @@ public sealed class TextureProcessorTests
     }
 
     [Fact]
-    public void UseDefaultProcessorsRegistersTheBuiltInTextureProcessor()
+    public void UseDefaultProcessorsRegistersTheBuiltInProcessors()
     {
         using var directory = TempBakeDirectory.Create();
         directory.CreateDirectory("Assets");
@@ -576,11 +576,21 @@ public sealed class TextureProcessorTests
         Assert.NotNull(project);
         Assert.Empty(diagnostics.GetSorted());
         Assert.True(project.UseDefaultProcessors);
-        BakeProcessorRegistration processor = Assert.Single(project.Processors);
-        Assert.Equal("texture", processor.Name);
-        Assert.Equal(["bmp", "jpeg", "jpg", "png", "tga"], processor.Extensions.Order(StringComparer.Ordinal));
-        Assert.Equal(SidecarPolicy.Required, processor.Policy);
-        Assert.NotNull(processor.SidecarShape);
+        Assert.Equal(["texture", "shader"], project.Processors.Select(processor => processor.Name));
+
+        BakeProcessorRegistration texture = project.Processors[0];
+        Assert.Equal("texture", texture.Name);
+        Assert.Equal(
+            ["bmp", "jpeg", "jpg", "png", "tga"],
+            texture.Extensions.Order(StringComparer.Ordinal));
+        Assert.Equal(SidecarPolicy.Required, texture.Policy);
+        Assert.NotNull(texture.SidecarShape);
+
+        BakeProcessorRegistration shader = project.Processors[1];
+        Assert.Equal("shader", shader.Name);
+        Assert.Equal(["frag"], shader.Extensions);
+        Assert.Equal(SidecarPolicy.Required, shader.Policy);
+        Assert.NotNull(shader.SidecarShape);
     }
 
     [Fact]
