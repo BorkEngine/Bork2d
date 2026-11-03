@@ -160,7 +160,7 @@ public sealed class AppAssetRuntimeTests
     [InlineData("Headless")]
     [InlineData("Offscreen")]
     [InlineData("Windowed")]
-    public void WithoutAssetsStartsAnEmptyVfsInEveryMode(string mode)
+    public void WithoutAssetsStartsWithOnlyTheBuiltInPackInEveryMode(string mode)
     {
         var sdl = new FakeSdlApi();
         var game = new ScriptedGame<GameLayer>();
@@ -174,7 +174,8 @@ public sealed class AppAssetRuntimeTests
         {
             service = Assert.IsType<AssetService>(engine.Assets);
 
-            // An empty VFS still starts the one loader thread (D-M3-02/§17.11).
+            // The base filesystem is empty but the embedded built-in pack is mounted; the one loader
+            // thread still starts (D-M3-02/§17.11).
             Assert.NotNull(service.LoaderThread);
             browse = engine.Assets.Browse();
             exists = engine.Assets.Exists("data/missing");
@@ -187,7 +188,12 @@ public sealed class AppAssetRuntimeTests
 
         AppTestSupport.RunToCompletion(app);
 
-        Assert.Empty(browse!);
+        Assert.Equal(
+            new[] { "shader/sprite", "shader/sprite-spv", "shader/vertex-spv" },
+            browse!.Select(info => info.Path));
+        Assert.All(
+            browse!,
+            info => Assert.Equal(AssetService.BuiltInPackDisplayPath, info.PackPath));
         Assert.False(exists!.Value);
         Assert.Equal(AssetErrorKind.NotFound, AssetErrorOf(spriteTask!));
         Assert.Equal(AssetErrorKind.NotFound, AssetErrorOf(dataTask!));
@@ -257,7 +263,16 @@ public sealed class AppAssetRuntimeTests
 
         AppTestSupport.RunToCompletion(app);
 
-        Assert.Equal(new[] { "data/overlay", "data/overlay-config" }, browse!.Select(info => info.Path));
+        Assert.Equal(
+            new[]
+            {
+                "data/overlay",
+                "data/overlay-config",
+                "shader/sprite",
+                "shader/sprite-spv",
+                "shader/vertex-spv",
+            },
+            browse!.Select(info => info.Path));
         Assert.Equal(overlayPath, packPath);
         Assert.Equal(new byte[] { 7, 8, 9 }, overlayBytes);
         Assert.Equal("overlay", overlayConfig!.Name);
@@ -349,7 +364,10 @@ public sealed class AppAssetRuntimeTests
         Assert.Contains(browse!, info => info.Path == "textures/raw/player");
         Assert.Contains(browse!, info => info.Path == "data/config");
         Assert.Single(browse!, info => info.Path == "data/shared");
-        Assert.Equal(5, browse!.Count);
+        Assert.Contains(browse!, info => info.Path == "shader/sprite");
+        Assert.Contains(browse!, info => info.Path == "shader/sprite-spv");
+        Assert.Contains(browse!, info => info.Path == "shader/vertex-spv");
+        Assert.Equal(8, browse!.Count);
         Assert.Equal(overlayPath, sharedPackPath);
         Assert.Equal(new byte[] { 2, 3 }, sharedBytes);
         Assert.Equal("overlay", config!.Name);
@@ -615,6 +633,8 @@ public sealed class AppAssetRuntimeTests
             .ToArray();
 
         Assert.Contains(assets, entry => entry.Level == LogLevel.Information
+            && entry.Message.Contains("Mounted built-in asset pack", StringComparison.Ordinal));
+        Assert.Contains(assets, entry => entry.Level == LogLevel.Information
             && entry.Message.Contains("Asset service started", StringComparison.Ordinal)
             && entry.Message.Contains("mode Pack", StringComparison.Ordinal)
             && entry.Message.Contains(basePath, StringComparison.Ordinal)
@@ -628,8 +648,9 @@ public sealed class AppAssetRuntimeTests
             && entry.Message.Contains("Asset loaded", StringComparison.Ordinal)
             && entry.Message.Contains("data/base", StringComparison.Ordinal));
 
-        // One start, one overlay, one load, one stop: nothing is emitted per tick or per frame.
-        Assert.Equal(4, assets.Length);
+        // One built-in mount, one start, one overlay, one load, one stop: nothing is emitted per tick
+        // or per frame.
+        Assert.Equal(5, assets.Length);
         Assert.DoesNotContain(assets, entry => entry.Message.Contains("Tick", StringComparison.Ordinal));
         Assert.DoesNotContain(assets, entry => entry.Level == LogLevel.Error);
     }

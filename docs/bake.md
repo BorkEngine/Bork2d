@@ -249,6 +249,32 @@ per-source state. They never touch MessagePack or the pack writer directly. A fa
 no outputs. See [CircleProcessor.cs](../examples/pong/Pong.Assets/Processors/CircleProcessor.cs)
 for a worked custom processor.
 
+## Built-in asset pack
+
+The engine's own shader assets live under
+[src/Bork2d/BuiltInAssets/Assets](../src/Bork2d/BuiltInAssets/Assets) and are baked by the build-only
+[Bork2d.BuiltInAssets](../build/Bork2d.BuiltInAssets/Bork2d.BuiltInAssets.csproj) generator. The
+generator configures the ordinary builder with `WithPack("bork2d-builtin.pck", "Assets")`,
+`UseDefaultProcessors()`, and one tool-only processor for the engine-owned vertex stage, runs the
+normal `bake` command into a unique temporary output directory, and writes the pack as a generated C#
+byte array. `Bork2d.Runtime` compiles that file into its assembly and mounts the pack below the game
+packs; no loose pack file is published.
+
+The source tree uses the same processors as game content. `shader/sprite.frag` and its checked-in
+empty `shader/sprite.frag.toml` sidecar produce the `shader/sprite` `ShaderAsset` and the
+`shader/sprite-spv` payload, exactly like a game shader; the sidecar is committed so a clean build
+never creates or mutates a source file. The tool-only `builtin-vertex` processor owns `.vert`: it
+reads the source as strict UTF-8, compiles it through the shared `GlslCompiler`, and emits
+`shader/vertex-spv`. `.vert` is not registered by `UseDefaultProcessors()`, so it is not a
+user-facing source type.
+
+[build/Bork2d.BuiltInAssets.targets](../build/Bork2d.BuiltInAssets.targets) is imported by
+`Bork2d.Runtime.csproj`. Before `CoreCompile` it restores and builds the generator out of process,
+regenerates the pack when any built-in source or the tool assembly changes, and adds the generated
+file to the compilation. It works from a clean clone and never writes into the source tree: the pack
+goes to a temporary output directory and the generator removes the bake's incremental state
+afterwards. Generated files are never committed.
+
 ## CLI
 
 The assets executable is the CLI:

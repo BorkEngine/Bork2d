@@ -23,4 +23,9 @@
         <InternalsVisibleTo Include="Bork2d.Tests" />
     </ItemGroup>
 
+    <!-- Build-time built-in shader pack -> embedded C#. The generator is JIT and build-only; the
+         generated pack is compiled into this assembly, so the runtime needs no pack file, tooling,
+         shader compiler, or filesystem I/O at startup. -->
+    <Import Project="..\..\..\build\Bork2d.BuiltInAssets.targets" />
+
 </Project>

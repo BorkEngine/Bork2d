@@ -31,6 +31,7 @@
     <ItemGroup>
         <!-- Bake tooling is internal by default; the public builder, the editor, and tests see it.
              There is no host or CLI grant: both were removed in WP1. -->
+        <InternalsVisibleTo Include="Bork2d.BuiltInAssets" />
         <InternalsVisibleTo Include="Bork2d.Editor" />
         <InternalsVisibleTo Include="Bork2d.Tests" />
     </ItemGroup>

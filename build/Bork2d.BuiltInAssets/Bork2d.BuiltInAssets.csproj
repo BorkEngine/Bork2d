@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <RootNamespace>Bork2d.BuiltInAssets</RootNamespace>
+        <AssemblyName>Bork2d.BuiltInAssets</AssemblyName>
+        <!-- Build-time JIT tooling only: never AOT-compatible and never referenced by a runtime
+             project. The generated pack is embedded as C# by Bork2d.Runtime's build target. -->
+        <IsAotCompatible>false</IsAotCompatible>
+        <PublishAot>false</PublishAot>
+        <IsPackable>false</IsPackable>
+        <!-- The fragment/vertex compiler path lives in Bork2d.Bake, which is unsafe. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- The tool reuses the ordinary bake pipeline, its processors, and the shared GLSL
+             compiler, so the built-in pack is produced exactly like game content. -->
+        <ProjectReference Include="..\..\src\Bork2d\Bork2d.Bake\Bork2d.Bake.csproj" />
+        <ProjectReference Include="..\..\src\Bork2d\Bork2d.Engine\Bork2d.Engine.csproj" />
+    </ItemGroup>
+
+</Project>

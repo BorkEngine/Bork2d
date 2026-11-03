@@ -278,8 +278,11 @@ public sealed class Bork2dAppTests
         Assert.Throws<NotSupportedException>(() => { _ = engine.Window.IsMinimized; });
         Assert.Throws<NotSupportedException>(() => { _ = engine.Input; });
 
-        // The real asset service is empty but present (D-M3-14).
-        Assert.Empty(browse!);
+        // The real asset service has no game base pack, but the embedded built-in shader pack is
+        // mounted and the service is present (D-M3-14).
+        Assert.Equal(
+            new[] { "shader/sprite", "shader/sprite-spv", "shader/vertex-spv" },
+            browse!.Select(info => info.Path));
         Assert.False(exists!.Value);
 
         var notFoundSprite = Assert.Throws<AssetException>(
