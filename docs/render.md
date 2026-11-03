@@ -83,7 +83,9 @@ engine producer and one pass, not a central plan/record switch.
 
 The sprite pass plans its data in one allocation-free pass:
 
-1. Sort sprite indices by ascending `(Layer, ZIndex)`.
+1. Build compact 12-byte `(Layer, ZIndex, captureIndex)` keys and sort those by ascending
+   `(Layer, ZIndex)`, then emit the sorted index order. Sorting keys instead of full captured
+   records keeps a 50,000-sprite frame's ordering pass cache-friendly and allocation-free.
 2. Classify each sprite once from its frozen render data: a null sprite, zero/multi-bit layer,
    non-`Quad` topology, a still-loading main texture page, or a still-loading custom shader is
    skipped; malformed fields are fatal. The custom shader binding resolves through the shader

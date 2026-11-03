@@ -93,6 +93,7 @@ internal sealed class SpriteFramePlanner
     private readonly int[] _layerStarts = new int[LayerBitCount];
     private readonly int[] _layerCounts = new int[LayerBitCount];
     private int[] _spriteIndices = [];
+    private SpriteSortKey[] _spriteSortKeys = [];
     private SpriteInstance[] _spriteInstances = [];
     private int[] _spriteEntryIds = [];
     private byte[] _visibility = [];
@@ -161,7 +162,10 @@ internal sealed class SpriteFramePlanner
         _defaultEntry = null;
         EnsureSpriteArrays(spriteCount);
         Span<int> spriteOrder = _spriteIndices.AsSpan(0, spriteCount);
-        SpritePlanning.Sort(sprites, spriteOrder);
+        SpritePlanning.Sort(
+            sprites,
+            spriteOrder,
+            _spriteSortKeys.AsSpan(0, spriteCount));
 
         Span<int> layerStarts = _layerStarts;
         Span<int> layerCounts = _layerCounts;
@@ -792,6 +796,7 @@ internal sealed class SpriteFramePlanner
 
         int capacity = Math.Max(count, Math.Max(MinimumCapacity, _spriteIndices.Length * 2));
         Array.Resize(ref _spriteIndices, capacity);
+        Array.Resize(ref _spriteSortKeys, capacity);
         Array.Resize(ref _spriteInstances, capacity);
         Array.Resize(ref _spriteEntryIds, capacity);
         Array.Resize(ref _visibility, capacity);
