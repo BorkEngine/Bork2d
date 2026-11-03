@@ -364,3 +364,10 @@ AOT app to copy the baked packs. Set `Bork2dAssetsProjectDirectory` and
 `Bork2dAssetsExecutable`; when `Bork2dAssetsProjectFile` is set, the targets restore and build the
 assets executable out of process before copying to `$(TargetDir)` and `$(PublishDir)`. This keeps
 the tooling out of the app's output and publish graph, including for a self-contained AOT app.
+
+The mode selects payload compression, not automatic asset watching: Debug packs are uncompressed
+and Release packs use Zstd only when it is strictly smaller. The desktop project has no compile-time
+reference to the asset sources, so an asset-only edit requires a build that reaches the assets
+executable and its copy target. If an IDE skips the project as up to date after such an edit, run a
+rebuild (or the assets project) once; the bake manifest then detects the changed source and rewrites
+the pack.
