@@ -10,8 +10,8 @@ instance/surface, renderer composition, the three host loops, and logging. It ex
 | Method | Effect |
 | --- | --- |
 | `WithGame(IGame<TLayer>)` | Required, exactly once. The game is caller-constructed; there is no reflection or parameterless-constructor constraint. |
-| `WithAssetsPack(string)` | Base pack path (default `assets.pck`). Opened by `Run`, not `Build`. |
-| `WithoutAssets()` | Starts with an empty asset filesystem; overlays may still be mounted later. |
+| `WithAssetsPack(string)` | Base pack path (default `assets.pck`). Opened by `Run`, not `Build`; mounted above the built-in pack. |
+| `WithoutAssets()` | No game base pack. The embedded built-in shader pack is still mounted; overlays may still be added later. |
 | `WithHeadless(int ticksPerSecond = 60)` | Selects the no-window, no-GPU mode. |
 | `WithOffscreen(int width, int height)` | Selects offscreen rendering to a fixed sRGB target. |
 | `WithTitle`, `WithSize`, `WithResizable`, `WithFullscreen`, `WithVSync` | Windowed-only options. |
@@ -28,13 +28,29 @@ mode. The texture budgets must be positive. Configuration errors throw `Bork2dEx
 `Build()` validates the configuration and creates the logger factory, engine, clock, an unstarted
 asset service, and (for windowed apps) detached window/input proxies. Offscreen apps get a
 functional window facade reporting the target extent; headless apps get the throwing window stub. It
-does not open a pack, create an OS window, render, or start a thread. `Run()` starts the base pack,
-platform, renderer, and game, and is callable once from any thread.
+does not open a pack, create an OS window, render, or start a thread. `Run()` mounts the embedded
+built-in pack, then the base pack, then starts the platform, renderer, and game, and is callable once
+from any thread.
 
 A successful `Build()` consumes the builder: every later configuration method and a second `Build()`
 throw `InvalidOperationException`. A failed `Build()`, from either validation or resource creation,
 does not consume the builder, so the caller can fix the configuration and retry. The built app
 remains owned and disposed by the caller as before; later builder use cannot reconfigure it.
+
+## Built-in shader pack
+
+`Bork2d.Runtime` carries an embedded `bork2d-builtin.pck`. The engine-owned shader sources live under
+`src/Bork2d/BuiltInAssets/Assets`; a build-only generator
+(`build/Bork2d.BuiltInAssets`) bakes them with the ordinary processors and pack writer, and the pack
+is compiled into the runtime assembly as a generated C# byte array. Nothing is read from disk at
+startup, no loose pack file is published, and the generator, bake tooling, and shader compiler never
+enter the runtime or publish graph.
+
+`Run` mounts the built-in pack first, below the game base pack and every `IAssets.LoadPack` overlay,
+and logs the mount. A game pack or overlay therefore shadows a built-in entry by canonical path. This
+holds for `WithoutAssets()` too: the app has no game base pack, but `IAssets.Browse`,
+`IAssets.Exists`, and loads still see the built-in entries. A malformed embedded pack is a
+`Bork2dException` from the asset start, before the window, `Setup`, and `Teardown`.
 
 ## Host loops
 

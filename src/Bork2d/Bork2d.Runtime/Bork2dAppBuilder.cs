@@ -77,8 +77,9 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <remarks>
     /// The pack is not opened by <see cref="Build"/>: a missing or malformed base pack throws
     /// <see cref="Bork2dException"/> from <c>Run</c> before the window, platform, <c>Setup</c>, and
-    /// <c>Teardown</c>. The default is <c>"assets.pck"</c>. Mutually exclusive with
-    /// <see cref="WithoutAssets"/>.
+    /// <c>Teardown</c>. At startup it is mounted above the embedded built-in pack and below any later
+    /// overlay, so a game pack shadows a built-in entry. The default is <c>"assets.pck"</c>. Mutually
+    /// exclusive with <see cref="WithoutAssets"/>.
     /// </remarks>
     /// <exception cref="ArgumentException"><paramref name="path"/> is empty or whitespace.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is <see langword="null"/>.</exception>
@@ -105,12 +106,16 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// <returns>This builder, for fluent chaining.</returns>
     /// <remarks>
     /// <para>
-    /// No base pack is required or opened. <see cref="IAssets.Browse"/> returns an empty list,
-    /// <see cref="IAssets.Exists"/> is <see langword="false"/>, and
-    /// <see cref="IAssets.LoadData"/> and <see cref="IAssets.LoadAsset{T}"/> fault with an
-    /// <c>AssetException</c> whose kind is <c>NotFound</c>. The asset service, including its one
-    /// loader thread, still starts, so <see cref="IAssets.LoadPack"/> can mount overlays on top of
-    /// the empty filesystem later (for example during <c>Setup</c>).
+    /// No game base pack is required or opened. The asset service still starts and branches: the
+    /// embedded built-in shader pack is mounted below the game packs, so the built-in entries remain
+    /// visible in <see cref="IAssets.Browse"/> and <see cref="IAssets.Exists"/>, and
+    /// <see cref="IAssets.LoadPack"/> can mount overlays on top of it later (for example during
+    /// <c>Setup</c>).
+    /// </para>
+    /// <para>
+    /// The filesystem has no game base pack: game content is absent, so
+    /// <see cref="IAssets.LoadData"/> and <see cref="IAssets.LoadAsset{T}"/> for a path the built-in
+    /// pack does not contain fault with an <c>AssetException</c> whose kind is <c>NotFound</c>.
     /// </para>
     /// <para>
     /// Available in windowed, offscreen, and headless modes. It is mutually exclusive with
@@ -488,8 +493,9 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
     /// </para>
     /// <para>
     /// <see cref="Build"/> stays filesystem-free: it does not resolve a pack path, open a file,
-    /// parse a pack, or start the asset loader thread. The base pack (or the
-    /// <see cref="WithoutAssets"/> empty filesystem) is opened by <c>Run</c> before the window and
+    /// parse a pack, or start the asset loader thread. It hands the embedded built-in pack bytes to
+    /// the unstarted asset service; <c>Run</c> mounts that pack first, then opens the base pack (or
+    /// starts with no game base pack for <see cref="WithoutAssets"/>) before the window and
     /// <c>Setup</c>.
     /// </para>
     /// <para>
@@ -554,11 +560,12 @@ public sealed class Bork2dAppBuilder<TLayer> where TLayer : struct, Enum
                 input = null;
             }
 
-            // Unstarted: the constructor allocates the in-memory filesystem only. The base pack is
-            // opened by Run() before the window and Setup (D-M3-01).
+            // Unstarted: the constructor allocates the in-memory filesystem only. Run() mounts the
+            // embedded built-in pack below the game packs and opens the base pack (D-M3-01).
             assetService = new AssetService(
                 _options.WithoutAssetsSelected ? null : _options.AssetsPackPath,
-                loggerFactory);
+                loggerFactory,
+                BuiltInAssets.PackBytes);
 
             var engine = new GameEngine<TLayer>(
                 time,

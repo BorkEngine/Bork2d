@@ -13,7 +13,7 @@ internal sealed class AssetServiceHost : IDisposable
     private readonly ILoggerFactory _loggerFactory;
     private bool _disposed;
 
-    internal AssetServiceHost(string? basePackPath = null)
+    internal AssetServiceHost(string? basePackPath = null, byte[]? builtInPack = null)
     {
         Provider = new CapturingLoggerProvider();
         _loggerFactory = LoggerFactory.Create(builder =>
@@ -22,7 +22,7 @@ internal sealed class AssetServiceHost : IDisposable
             builder.AddProvider(Provider);
         });
 
-        Service = new AssetService(basePackPath, _loggerFactory);
+        Service = new AssetService(basePackPath, _loggerFactory, builtInPack);
     }
 
     internal AssetService Service { get; }

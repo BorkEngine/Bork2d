@@ -10,10 +10,11 @@ namespace Bork2d.Engine.Assets.Vfs;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The stack starts empty. The first <see cref="LoadPack"/> mount is the base pack; every later
-/// mount is placed above it, so a later pack shadows an earlier pack by canonical path. Mounting
-/// the same file more than once is allowed: the later mount wins, and there is no unload,
-/// replacement, loose-file fallback, or retry in v1.
+/// The stack starts empty. The first <see cref="LoadPack(string)"/> mount is the bottom pack; every
+/// later mount is placed above it, so a later pack shadows an earlier pack by canonical path. The
+/// runtime mounts the embedded built-in pack first, then the game base pack, then any overlays, so a
+/// game pack always shadows a built-in entry. Mounting the same file more than once is allowed: the
+/// later mount wins, and there is no unload, replacement, loose-file fallback, or retry in v1.
 /// </para>
 /// <para>
 /// Mounting parses and validates the pack outside the swap lock and publishes a new immutable
@@ -161,6 +162,42 @@ internal sealed class AssetFileSystem : IDisposable
         }
 
         PackArchive archive = PackArchive.Open(packPath);
+        return Mount(archive, packPath);
+    }
+
+    /// <summary>
+    /// Synchronously opens, validates, and mounts a pack supplied as a seekable stream above the
+    /// current stack.
+    /// </summary>
+    /// <remarks>
+    /// The runtime uses this overload for the embedded built-in pack, which has no filesystem path.
+    /// The archive owns and disposes <paramref name="stream"/>, and a failed mount leaves the stack
+    /// unchanged and disposes both the archive and the stream.
+    /// </remarks>
+    /// <param name="stream">The readable, seekable pack stream.</param>
+    /// <param name="displayPath">
+    /// The non-empty pack identifier kept as the supplied path and used in diagnostics.
+    /// </param>
+    /// <returns>Mount details for the start/overlay log events.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="stream"/> or <paramref name="displayPath"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="displayPath"/> is empty or whitespace, or the stream is not readable and
+    /// seekable.
+    /// </exception>
+    /// <exception cref="Bork2dException">The stream is not a valid v1 pack. The stack is unchanged.</exception>
+    /// <exception cref="ObjectDisposedException">The filesystem has been disposed.</exception>
+    internal PackMountInfo LoadPack(Stream stream, string displayPath)
+    {
+        _ = CaptureSnapshot();
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayPath);
+
+        PackArchive archive = PackArchive.Open(stream, displayPath);
+        return Mount(archive, displayPath);
+    }
+
+    private PackMountInfo Mount(PackArchive archive, string suppliedPath)
+    {
         try
         {
             lock (_mountLock)
@@ -172,7 +209,7 @@ internal sealed class AssetFileSystem : IDisposable
 
                 AssetSnapshot current = Volatile.Read(ref _snapshot)
                     ?? throw new ObjectDisposedException(nameof(AssetFileSystem));
-                AssetSnapshot next = CreateSnapshot(current, archive, packPath);
+                AssetSnapshot next = CreateSnapshot(current, archive, suppliedPath);
                 Volatile.Write(ref _snapshot, next);
             }
 
@@ -183,7 +220,7 @@ internal sealed class AssetFileSystem : IDisposable
             }
 
             return new PackMountInfo(
-                packPath,
+                suppliedPath,
                 archive.DisplayPath,
                 PackFormat.CurrentVersion,
                 archive.Entries.Count,

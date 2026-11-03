@@ -1,0 +1,102 @@
+<Project>
+
+    <!--
+        Bork2d.BuiltInAssets.targets - build-time generation of the embedded built-in shader pack for
+        Bork2d.Runtime.
+
+        Import this file from Bork2d.Runtime. Before CoreCompile it restores and builds the build-only
+        Bork2d.BuiltInAssets tool out of process, runs it over the checked-in built-in asset sources
+        (src/Bork2d/BuiltInAssets/Assets) with the ordinary bake processors, and adds the generated C#
+        file (internal static byte array for bork2d-builtin.pck) to this project's compilation.
+
+        The tool is JIT and build-only. It references Bork2d.Bake so it can reuse the bake pipeline and
+        the shared GLSL compiler, but Bork2d.Runtime never references it, and neither the tool nor its
+        packages enter the runtime output or AOT publish graph. The generated file lives under the
+        intermediate output, is never committed, and is never published as a loose pack; no Vulkan SDK
+        is required.
+
+        Properties:
+          Bork2dBuiltInAssetsEnabled            false disables the integration
+          Bork2dBuiltInAssetsProjectFile        tool project; default build/Bork2d.BuiltInAssets
+          Bork2dBuiltInAssetsSourceDirectory    built-in asset project root; default src/Bork2d/BuiltInAssets
+          Bork2dBuiltInAssetsTargetFramework    tool target framework; default net11.0
+          Bork2dDotNetHost                      dotnet host; default dotnet
+
+        The target runs for design-time builds too: the clean-clone CI sequence restores only the
+        solution, then runs the format check with restore disabled, so the generated type must be
+        available to that compilation. RemoveProperties keeps the consuming project's RID/publish
+        settings off the tool restore and build.
+    -->
+
+    <PropertyGroup>
+        <Bork2dBuiltInAssetsEnabled Condition="'$(Bork2dBuiltInAssetsEnabled)' == ''">true</Bork2dBuiltInAssetsEnabled>
+        <Bork2dBuiltInAssetsProjectFile Condition="'$(Bork2dBuiltInAssetsProjectFile)' == ''">$(MSBuildThisFileDirectory)Bork2d.BuiltInAssets\Bork2d.BuiltInAssets.csproj</Bork2dBuiltInAssetsProjectFile>
+        <Bork2dBuiltInAssetsSourceDirectory Condition="'$(Bork2dBuiltInAssetsSourceDirectory)' == ''">$(MSBuildThisFileDirectory)..\src\Bork2d\BuiltInAssets</Bork2dBuiltInAssetsSourceDirectory>
+        <Bork2dBuiltInAssetsTargetFramework Condition="'$(Bork2dBuiltInAssetsTargetFramework)' == ''">net11.0</Bork2dBuiltInAssetsTargetFramework>
+        <Bork2dDotNetHost Condition="'$(Bork2dDotNetHost)' == ''">dotnet</Bork2dDotNetHost>
+        <Bork2dBuiltInAssetsAssembly Condition="'$(Bork2dBuiltInAssetsAssembly)' == ''">$(MSBuildThisFileDirectory)Bork2d.BuiltInAssets\bin\$(Configuration)\$(Bork2dBuiltInAssetsTargetFramework)\Bork2d.BuiltInAssets.dll</Bork2dBuiltInAssetsAssembly>
+    </PropertyGroup>
+
+    <Target Name="Bork2dRestoreBuiltInAssets"
+            Condition="'$(Bork2dBuiltInAssetsEnabled)' != 'false' and '$(_Bork2dRestoreBuiltInAssetsCompleted)' != 'true'">
+        <PropertyGroup>
+            <_Bork2dRestoreBuiltInAssetsCompleted>true</_Bork2dRestoreBuiltInAssetsCompleted>
+        </PropertyGroup>
+        <MSBuild Projects="$(Bork2dBuiltInAssetsProjectFile)"
+                 Targets="Restore"
+                 Properties="Configuration=$(Configuration)"
+                 RemoveProperties="RuntimeIdentifier;SelfContained;OutDir;OutputPath;PublishDir;BaseOutputPath;BaseIntermediateOutputPath" />
+    </Target>
+
+    <Target Name="Bork2dBuildBuiltInAssets"
+            DependsOnTargets="Bork2dRestoreBuiltInAssets"
+            Condition="'$(Bork2dBuiltInAssetsEnabled)' != 'false'">
+        <MSBuild Projects="$(Bork2dBuiltInAssetsProjectFile)"
+                 Targets="Build"
+                 Properties="Configuration=$(Configuration)"
+                 RemoveProperties="RuntimeIdentifier;SelfContained;OutDir;OutputPath;PublishDir;BaseOutputPath;BaseIntermediateOutputPath" />
+        <Error Condition="!Exists('$(Bork2dBuiltInAssetsAssembly)')"
+               Text="Bork2d built-in assets: the tool was not produced at '$(Bork2dBuiltInAssetsAssembly)'." />
+    </Target>
+
+    <!--
+        IntermediateOutputPath is computed by the SDK targets after the project body, so the generated
+        path is resolved inside a target rather than at evaluation time.
+    -->
+    <Target Name="Bork2dPrepareBuiltInAssetsBuild"
+            Condition="'$(Bork2dBuiltInAssetsEnabled)' != 'false'">
+        <PropertyGroup>
+            <!-- MSBuild does not expand a wildcard that still contains '..', so normalize the
+                 configured default before using it in Inputs and on the tool command line. -->
+            <_Bork2dBuiltInAssetsSourceRoot>$([System.IO.Path]::GetFullPath('$(Bork2dBuiltInAssetsSourceDirectory)'))</_Bork2dBuiltInAssetsSourceRoot>
+            <_Bork2dBuiltInAssetsGeneratedFile>$(IntermediateOutputPath)BuiltInAssets\BuiltInAssets.g.cs</_Bork2dBuiltInAssetsGeneratedFile>
+        </PropertyGroup>
+        <ItemGroup>
+            <!-- Every file under the built-in source tree invalidates the generated pack. -->
+            <_Bork2dBuiltInAssetsInputs Include="$(_Bork2dBuiltInAssetsSourceRoot)\Assets\**\*" />
+        </ItemGroup>
+    </Target>
+
+    <Target Name="Bork2dGenerateBuiltInAssets"
+            DependsOnTargets="Bork2dPrepareBuiltInAssetsBuild;Bork2dBuildBuiltInAssets"
+            Condition="'$(Bork2dBuiltInAssetsEnabled)' != 'false'"
+            Inputs="@(_Bork2dBuiltInAssetsInputs);$(Bork2dBuiltInAssetsAssembly)"
+            Outputs="$(_Bork2dBuiltInAssetsGeneratedFile)">
+        <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(_Bork2dBuiltInAssetsGeneratedFile)'))" />
+        <Exec Command="&quot;$(Bork2dDotNetHost)&quot; &quot;$(Bork2dBuiltInAssetsAssembly)&quot; --output &quot;$(_Bork2dBuiltInAssetsGeneratedFile)&quot; --source-root &quot;$(_Bork2dBuiltInAssetsSourceRoot)&quot;"
+              WorkingDirectory="$(MSBuildProjectDirectory)"
+              StandardOutputImportance="high"
+              StandardErrorImportance="high" />
+    </Target>
+
+    <Target Name="Bork2dIncludeBuiltInAssets"
+            DependsOnTargets="Bork2dGenerateBuiltInAssets"
+            BeforeTargets="CoreCompile"
+            Condition="'$(Bork2dBuiltInAssetsEnabled)' != 'false'">
+        <ItemGroup>
+            <Compile Include="$(_Bork2dBuiltInAssetsGeneratedFile)" Condition="Exists('$(_Bork2dBuiltInAssetsGeneratedFile)')" />
+            <FileWrites Include="$(_Bork2dBuiltInAssetsGeneratedFile)" Condition="Exists('$(_Bork2dBuiltInAssetsGeneratedFile)')" />
+        </ItemGroup>
+    </Target>
+
+</Project>
