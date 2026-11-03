@@ -131,6 +131,8 @@ public sealed class DependencyMatrixTests
         AssertInternal(typeof(Bork2d.Engine.Scene.SpriteRender<>));
         AssertInternal(typeof(Bork2d.Engine.Scene.GameEngine<>));
         AssertInternal(typeof(Bork2d.Engine.Assets.Loading.AssetService));
+        AssertInternal(typeof(Bork2d.Engine.Assets.ShaderLayout));
+        AssertInternal(typeof(Bork2d.Engine.Assets.ShaderRenderData));
         AssertInternal(typeof(Bork2d.Engine.Assets.Vfs.AssetFileSystem));
         AssertInternal(typeof(Bork2d.Engine.Assets.Vfs.ResolvedAsset));
         AssertInternal(typeof(Bork2d.Engine.Assets.Pack.PackArchive));
@@ -138,6 +140,8 @@ public sealed class DependencyMatrixTests
         AssertInternal(typeof(Bork2d.Engine.Rendering.FrameSnapshot));
         AssertInternal(typeof(Bork2d.Engine.Rendering.CameraSnapshot));
         AssertInternal(typeof(Bork2d.Engine.Rendering.SpriteSnapshot));
+        AssertInternal(typeof(Bork2d.Engine.Rendering.GlobalUniformSnapshot));
+        AssertInternal(typeof(Bork2d.Engine.Rendering.GlobalUniformValue));
         AssertInternal(typeof(Bork2d.Engine.Rendering.SnapshotCapture));
         AssertInternal(typeof(Bork2d.Engine.Rendering.RenderDataBuffer<>));
         AssertInternal(typeof(Bork2d.Engine.Rendering.RenderDataBufferSet));

@@ -114,6 +114,12 @@ public sealed class RenderStatsPublicSurfaceTests
                 "CreateSpriteRender(ITransform)",
                 "CreateTransform(ITransform)",
                 "Exit()",
+                "ResetGlobalUniforms()",
+                "SetGlobalUniform(String,Color)",
+                "SetGlobalUniform(String,Single)",
+                "SetGlobalUniform(String,Vector2)",
+                "SetGlobalUniform(String,Vector3)",
+                "SetGlobalUniform(String,Vector4)",
             },
             methods);
     }

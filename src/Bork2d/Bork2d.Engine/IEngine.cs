@@ -1,3 +1,4 @@
+using System.Numerics;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Input;
 using Bork2d.Engine.Platform;
@@ -21,6 +22,13 @@ namespace Bork2d.Engine;
 /// Scene entities are owned by <see cref="Root"/> while parented and are never disposed: detach
 /// with <see cref="ITransform.Parent"/> = <see langword="null"/> and re-attach the same object
 /// later.
+/// </para>
+/// <para>
+/// User global shader uniforms are engine-wide inputs shared by every custom shader and captured
+/// with each frame. A name has exactly one <see cref="ShaderUniformType"/> while it is set: setting
+/// an existing name with the same type replaces its value, and a different type throws
+/// <see cref="ArgumentException"/>. Names are matched ordinally. The built-in time input is not a
+/// user global; the frame snapshot captures it separately from <see cref="Time"/>.
 /// </para>
 /// </remarks>
 public interface IEngine<TLayer> where TLayer : struct, Enum
@@ -147,6 +155,95 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     /// <returns>The created sprite renderable.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="parent"/> is <see langword="null"/>.</exception>
     ISpriteRender<TLayer> CreateSpriteRender(ITransform parent);
+
+    /// <summary>
+    /// Sets a user global shader uniform of type <see cref="ShaderUniformType.Float"/>.
+    /// </summary>
+    /// <param name="name">The engine-wide uniform name, matched ordinally.</param>
+    /// <param name="value">The value to store; only the declared component is captured.</param>
+    /// <remarks>
+    /// The value is captured with every later frame until it is replaced or cleared by
+    /// <see cref="ResetGlobalUniforms"/>. Setting an existing name with the same type replaces its
+    /// value. The call may run on any thread.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is <see langword="null"/>, empty, or whitespace; or the name is
+    /// already set with a different <see cref="ShaderUniformType"/>.
+    /// </exception>
+    void SetGlobalUniform(string name, float value);
+
+    /// <summary>
+    /// Sets a user global shader uniform of type <see cref="ShaderUniformType.Vector2"/>.
+    /// </summary>
+    /// <param name="name">The engine-wide uniform name, matched ordinally.</param>
+    /// <param name="value">The value to store.</param>
+    /// <remarks>
+    /// The value is captured with every later frame until it is replaced or cleared by
+    /// <see cref="ResetGlobalUniforms"/>. Setting an existing name with the same type replaces its
+    /// value. The call may run on any thread.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is <see langword="null"/>, empty, or whitespace; or the name is
+    /// already set with a different <see cref="ShaderUniformType"/>.
+    /// </exception>
+    void SetGlobalUniform(string name, Vector2 value);
+
+    /// <summary>
+    /// Sets a user global shader uniform of type <see cref="ShaderUniformType.Vector3"/>.
+    /// </summary>
+    /// <param name="name">The engine-wide uniform name, matched ordinally.</param>
+    /// <param name="value">The value to store.</param>
+    /// <remarks>
+    /// The value is captured with every later frame until it is replaced or cleared by
+    /// <see cref="ResetGlobalUniforms"/>. Setting an existing name with the same type replaces its
+    /// value. The call may run on any thread.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is <see langword="null"/>, empty, or whitespace; or the name is
+    /// already set with a different <see cref="ShaderUniformType"/>.
+    /// </exception>
+    void SetGlobalUniform(string name, Vector3 value);
+
+    /// <summary>
+    /// Sets a user global shader uniform of type <see cref="ShaderUniformType.Vector4"/>.
+    /// </summary>
+    /// <param name="name">The engine-wide uniform name, matched ordinally.</param>
+    /// <param name="value">The value to store.</param>
+    /// <remarks>
+    /// The value is captured with every later frame until it is replaced or cleared by
+    /// <see cref="ResetGlobalUniforms"/>. Setting an existing name with the same type replaces its
+    /// value. The call may run on any thread.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is <see langword="null"/>, empty, or whitespace; or the name is
+    /// already set with a different <see cref="ShaderUniformType"/>.
+    /// </exception>
+    void SetGlobalUniform(string name, Vector4 value);
+
+    /// <summary>
+    /// Sets a user global shader uniform of type <see cref="ShaderUniformType.Color"/>.
+    /// </summary>
+    /// <param name="name">The engine-wide uniform name, matched ordinally.</param>
+    /// <param name="value">The linear RGBA value to store.</param>
+    /// <remarks>
+    /// The value is captured with every later frame until it is replaced or cleared by
+    /// <see cref="ResetGlobalUniforms"/>. Setting an existing name with the same type replaces its
+    /// value. The call may run on any thread.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is <see langword="null"/>, empty, or whitespace; or the name is
+    /// already set with a different <see cref="ShaderUniformType"/>.
+    /// </exception>
+    void SetGlobalUniform(string name, Color value);
+
+    /// <summary>
+    /// Clears every user global shader uniform so later frames capture none.
+    /// </summary>
+    /// <remarks>
+    /// The call is a no-op when no globals are set and may run on any thread. It does not affect the
+    /// frame clock, which is captured separately.
+    /// </remarks>
+    void ResetGlobalUniforms();
 
     /// <summary>
     /// Captures the latest completed frame as a <see cref="FrameCaptureResult"/> (M8 §6.9).
