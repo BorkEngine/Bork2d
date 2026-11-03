@@ -26,7 +26,7 @@ public sealed class SpritePlanningTests
         ];
         var indices = new int[sprites.Length];
 
-        SpritePlanning.Sort(sprites, indices);
+        SpritePlanning.Sort(sprites, indices, new SpriteSortKey[sprites.Length]);
 
         Assert.Equal(new[] { 2, 1, 3, 0 }, indices);
     }
@@ -42,7 +42,7 @@ public sealed class SpritePlanningTests
         SpriteSnapshot before = sprites[0];
         var indices = new int[sprites.Length];
 
-        SpritePlanning.Sort(sprites, indices);
+        SpritePlanning.Sort(sprites, indices, new SpriteSortKey[sprites.Length]);
 
         Assert.Equal(before, sprites[0]);
         Assert.Equal(new[] { 1, 0 }, indices);
@@ -53,7 +53,17 @@ public sealed class SpritePlanningTests
     {
         SpriteSnapshot[] sprites = [Snapshot(), Snapshot()];
 
-        Assert.Throws<ArgumentException>(() => SpritePlanning.Sort(sprites, new int[1]));
+        Assert.Throws<ArgumentException>(
+            () => SpritePlanning.Sort(sprites, new int[1], new SpriteSortKey[sprites.Length]));
+    }
+
+    [Fact]
+    public void SortRejectsAShortKeyBuffer()
+    {
+        SpriteSnapshot[] sprites = [Snapshot(), Snapshot()];
+
+        Assert.Throws<ArgumentException>(
+            () => SpritePlanning.Sort(sprites, new int[sprites.Length], new SpriteSortKey[1]));
     }
 
     [Fact]
@@ -88,7 +98,7 @@ public sealed class SpritePlanningTests
             Snapshot(layer: 2, zIndex: 7),
         ];
         var spriteIndices = new int[sprites.Length];
-        SpritePlanning.Sort(sprites, spriteIndices);
+        SpritePlanning.Sort(sprites, spriteIndices, new SpriteSortKey[sprites.Length]);
 
         for (var position = 1; position < spriteIndices.Length; position++)
         {
