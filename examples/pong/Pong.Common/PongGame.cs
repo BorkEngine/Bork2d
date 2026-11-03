@@ -14,6 +14,11 @@ public sealed class PongGame : IGame<GameLayer>
 
     private const int PaddleZIndex = 10;
     private const int BallZIndex = 20;
+
+    // A fixed phase keeps the ball's time-driven pulse legible from the first frame instead of
+    // starting at the dimmest point of its cycle.
+    private const float BallPulsePhase = 0.75f;
+
     private const string SettingsPath = "game_settings";
     private const float MinimumCourtHalfWidth = PongSimulation.PaddleInset + PongSimulation.PaddleHalfWidth;
 
@@ -45,6 +50,7 @@ public sealed class PongGame : IGame<GameLayer>
         GameSettings settings = engine.Assets.LoadAsset<GameSettings>(SettingsPath).GetAwaiter().GetResult();
         SpriteAsset paddleSprite = engine.Assets.LoadAsset(settings.Paddle).GetAwaiter().GetResult();
         SpriteAsset ballSprite = engine.Assets.LoadAsset(settings.Ball).GetAwaiter().GetResult();
+        ShaderAsset ballShader = engine.Assets.LoadAsset(settings.BallShader).GetAwaiter().GetResult();
 
         ICamera<GameLayer> camera = engine.CreateCamera(engine.Root);
         camera.Size = CourtHalfHeight;
@@ -61,6 +67,8 @@ public sealed class PongGame : IGame<GameLayer>
         Ball.Layer = GameLayer.Ball;
         Ball.ZIndex = BallZIndex;
         Ball.Tint = Color.White;
+        Ball.Shader = ballShader;
+        Ball.SetUniform("uPhase", BallPulsePhase);
 
         Simulation = new PongSimulation(settings, ComputeHalfWidth(engine), CourtHalfHeight);
         _title = null;

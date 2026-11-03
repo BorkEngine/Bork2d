@@ -310,11 +310,12 @@ produce records; the layer enum is flattened to a raw 32-bit mask. Each sprite r
 immutable `SpriteRenderData` frozen when the asset was assigned, never the live `SpriteAsset`, and
 the world-space AABB computed from that data when the capture composed the world matrix. It also
 carries the immutable `ShaderRenderData` frozen when the shader was assigned (or null), the four
-`Vector4` lanes of the instance uniform block built from the frozen declared defaults and matching
-stored overrides, the first four additional texture references, and the total additional-texture
-count. Only stored instance uniforms still declared with the same name and type are applied;
-malformed declarations contribute nothing at capture and are left for the renderer to reject or fall
-back from. The renderer culls with those bounds without reading the scene.
+`Vector4` lanes of the instance uniform block (`SpriteSnapshot.Uniform0` through `Uniform3`) built
+from the frozen declared defaults and matching stored overrides, the first four additional texture
+references (`ExtraTexture0` through `ExtraTexture3`), and the total additional-texture count
+(`AdditionalTextureCount`). Only stored instance uniforms still declared with the same name and type
+are applied; malformed declarations contribute nothing at capture and are left for the renderer to
+reject or fall back from. The renderer culls with those bounds without reading the scene.
 
 Frame buffers are compact typed pools (`RenderDataBuffer<T>`) owned by the snapshot through a
 `RenderDataBufferSet`. They start empty, grow to the observed high-water mark, and never shrink;
