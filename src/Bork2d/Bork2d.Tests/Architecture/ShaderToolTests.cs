@@ -6,12 +6,26 @@ using Xunit;
 namespace Bork2d.Tests.Architecture;
 
 /// <summary>
-/// Proves the shader compiler is build-only and never a runtime dependency (M8 §6.7/§13.9).
+/// Proves the renderer loads its default shaders from the embedded built-in pack at runtime and that
+/// the retired build-time C# shader generator, its target, and its checked-in GLSL sources are gone.
 /// </summary>
 public sealed class ShaderToolTests
 {
+    private static readonly string[] _renderShaderSources =
+    [
+        Path.Combine("src", "Bork2d", "Bork2d.Render", "Shaders", "sprite.vert"),
+        Path.Combine("src", "Bork2d", "Bork2d.Render", "Shaders", "sprite.frag"),
+    ];
+
+    private static readonly string[] _builtInShaderSources =
+    [
+        Path.Combine("src", "Bork2d", "BuiltInAssets", "Assets", "shader", "vertex.vert"),
+        Path.Combine("src", "Bork2d", "BuiltInAssets", "Assets", "shader", "sprite.frag"),
+        Path.Combine("src", "Bork2d", "BuiltInAssets", "Assets", "shader", "sprite.frag.toml"),
+    ];
+
     [Fact]
-    public void RenderReferencesNoShaderCompilerAssembly()
+    public void RenderReferencesNoShaderCompilerAssemblyOrPackage()
     {
         string[] references = typeof(AssemblyReferenceAnchor).Assembly
             .GetReferencedAssemblies()
@@ -19,39 +33,23 @@ public sealed class ShaderToolTests
             .ToArray();
 
         Assert.DoesNotContain("Silk.NET.Shaderc", references);
+        Assert.DoesNotContain("Silk.NET.Shaderc.Native", references);
         Assert.DoesNotContain("Bork2d.ShaderCompiler", references);
     }
 
     [Fact]
-    public void ShaderCompilerPinsTheApprovedPackages()
+    public void TheLegacyShaderCompilerProjectAndTargetAreGone()
     {
-        string projectPath = Path.Combine(
-            RepositoryPaths.Root,
-            "build",
-            "Bork2d.ShaderCompiler",
-            "Bork2d.ShaderCompiler.csproj");
-        Dictionary<string, string> packages = XDocument.Load(projectPath)
-            .Descendants("PackageReference")
-            .ToDictionary(
-                reference => reference.Attribute("Include")!.Value,
-                reference => reference.Attribute("Version")!.Value,
-                StringComparer.Ordinal);
-
-        Assert.Equal("2.23.0", packages["Silk.NET.Shaderc"]);
-        Assert.Equal("2.23.0", packages["Silk.NET.Shaderc.Native"]);
+        Assert.False(
+            Directory.Exists(Path.Combine(RepositoryPaths.Root, "build", "Bork2d.ShaderCompiler")),
+            "The retired build/Bork2d.ShaderCompiler tool directory must not exist.");
+        Assert.False(
+            File.Exists(Path.Combine(RepositoryPaths.Root, "build", "Bork2d.ShaderCompiler.targets")),
+            "The retired build/Bork2d.ShaderCompiler.targets integration must not exist.");
     }
 
     [Fact]
-    public void ShaderCompilerIsOutsideTheRuntimeSolution()
-    {
-        string solution = File.ReadAllText(
-            Path.Combine(RepositoryPaths.Root, "src", "Bork2d", "Bork2d.slnx"));
-
-        Assert.DoesNotContain("Bork2d.ShaderCompiler", solution, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void RenderProjectImportsTheShaderTargetsAndHasNoShaderPackage()
+    public void RenderProjectImportsNoShaderTargetsAndReferencesNoShaderc()
     {
         string projectPath = Path.Combine(
             RepositoryPaths.Root,
@@ -61,15 +59,46 @@ public sealed class ShaderToolTests
             "Bork2d.Render.csproj");
         XDocument project = XDocument.Load(projectPath);
 
-        Assert.Contains(
+        Assert.DoesNotContain(
             project.Descendants("Import"),
             element => element.Attribute("Project")?.Value.Contains(
-                "Bork2d.ShaderCompiler.targets",
+                "Bork2d.ShaderCompiler",
                 StringComparison.Ordinal) == true);
         Assert.DoesNotContain(
             project.Descendants("PackageReference"),
             element => element.Attribute("Include")?.Value.StartsWith(
                 "Silk.NET.Shaderc",
                 StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public void TheLegacyRenderShaderSourcesAreGone()
+    {
+        foreach (string relativePath in _renderShaderSources)
+        {
+            Assert.False(
+                File.Exists(Path.Combine(RepositoryPaths.Root, relativePath)),
+                $"The renderer must not carry a compiled-in shader source at '{relativePath}'.");
+        }
+    }
+
+    [Fact]
+    public void TheBuiltInShaderSourcesLiveUnderBuiltInAssets()
+    {
+        foreach (string relativePath in _builtInShaderSources)
+        {
+            Assert.True(
+                File.Exists(Path.Combine(RepositoryPaths.Root, relativePath)),
+                $"The built-in shader source '{relativePath}' must exist under BuiltInAssets.");
+        }
+    }
+
+    [Fact]
+    public void TheShaderCompilerIsOutsideTheRuntimeSolution()
+    {
+        string solution = File.ReadAllText(
+            Path.Combine(RepositoryPaths.Root, "src", "Bork2d", "Bork2d.slnx"));
+
+        Assert.DoesNotContain("Bork2d.ShaderCompiler", solution, StringComparison.Ordinal);
     }
 }

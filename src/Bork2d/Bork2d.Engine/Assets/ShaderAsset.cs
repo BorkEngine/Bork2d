@@ -11,7 +11,7 @@ namespace Bork2d.Engine.Assets;
 /// <para>
 /// <see cref="SpirV"/> references the compiled module as raw data; the engine never compiles or
 /// reads shader source. <see cref="LayoutVersion"/> identifies the declaration layout schema this
-/// asset was built for; the current version is <c>1</c> (<see cref="ShaderLayout.CurrentVersion"/>).
+/// asset was built for; the current version is <c>2</c> (<see cref="ShaderLayout.CurrentVersion"/>).
 /// <see cref="EntryPoint"/> names the fragment entry point and defaults to <c>main</c>.
 /// </para>
 /// <para>
@@ -47,7 +47,7 @@ public sealed partial class ShaderAsset
     /// Gets or sets the shader layout schema version the declarations were built for.
     /// </summary>
     /// <remarks>
-    /// The engine's current layout version is <c>1</c>. The loader does not validate this value;
+    /// The engine's current layout version is <c>2</c>. The loader does not validate this value;
     /// the renderer rejects or falls back from a version it does not implement.
     /// </remarks>
     public uint LayoutVersion { get; set; }

@@ -59,6 +59,7 @@ public sealed class OffscreenRendererGpuTests
         });
 
         VulkanOffscreenRenderer? renderer = null;
+        using var assets = new TestRendererAssets();
         try
         {
             var startInfo = new RendererStartInfo
@@ -69,7 +70,7 @@ public sealed class OffscreenRendererGpuTests
                 Height = 240,
                 ValidationRequested = true,
                 LoggerFactory = loggerFactory,
-                Assets = new FakeAssets(),
+                Assets = assets,
             };
 
             renderer = Assert.IsType<VulkanOffscreenRenderer>(

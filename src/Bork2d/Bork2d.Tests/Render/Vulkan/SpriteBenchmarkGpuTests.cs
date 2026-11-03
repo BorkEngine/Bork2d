@@ -78,7 +78,7 @@ public sealed class SpriteBenchmarkGpuTests
 #endif
     public void OffscreenFiftyThousandSpritesSustainThe165FpsMedianTarget()
     {
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         string texture = assets.AddTexture("bench/tex");
         SpriteAsset sprite = new()
         {
@@ -139,7 +139,7 @@ public sealed class SpriteBenchmarkGpuTests
         });
 
     private static VulkanOffscreenRenderer StartOffscreen(
-        GeneratedTextureAssets assets,
+        TestRendererAssets assets,
         ILoggerFactory loggerFactory)
     {
         var startInfo = new RendererStartInfo

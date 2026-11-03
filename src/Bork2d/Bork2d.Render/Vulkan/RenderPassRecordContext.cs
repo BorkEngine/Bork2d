@@ -8,7 +8,7 @@ namespace Bork2d.Render.Vulkan;
 /// <remarks>
 /// <para>
 /// A pass reads only the members it needs: the sprite pass records against the attachment
-/// view/image, the frame descriptor set, the target format, the command buffer, and the Vulkan API.
+/// view/image, the frame descriptor sets, the target format, the command buffer, and the Vulkan API.
 /// A future pass may use only some of them, and no member exposes another pass's plan or the
 /// aggregate statistics, so recording cannot mutate planning.
 /// </para>
@@ -21,7 +21,8 @@ namespace Bork2d.Render.Vulkan;
 /// <param name="CommandBuffer">The frame command buffer, already begun.</param>
 /// <param name="AttachmentView">The target image view in <c>COLOR_ATTACHMENT_OPTIMAL</c>.</param>
 /// <param name="AttachmentImage">The target image, for the per-pass color-attachment barrier.</param>
-/// <param name="DescriptorSet">The frame's bindless descriptor set.</param>
+/// <param name="DescriptorSet">The frame's bindless descriptor set (set 0).</param>
+/// <param name="GlobalDescriptorSet">The frame's global uniform descriptor set (set 1).</param>
 /// <param name="TargetFormat">The target's sRGB output color format.</param>
 internal readonly record struct RenderPassRecordContext(
     Vk Vk,
@@ -29,4 +30,5 @@ internal readonly record struct RenderPassRecordContext(
     ImageView AttachmentView,
     Image AttachmentImage,
     DescriptorSet DescriptorSet,
+    DescriptorSet GlobalDescriptorSet,
     Format TargetFormat);

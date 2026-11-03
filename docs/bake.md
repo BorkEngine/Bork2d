@@ -111,7 +111,7 @@ fragment interface, and the `main` entry point. A source therefore contains only
 and `void main()`; a `#version` or `#extension` directive (after optional leading whitespace) is a
 bake error. The source is read as strict UTF-8.
 
-The fixed interface is versioned by the shader layout version `1`:
+The fixed interface is versioned by the shader layout version `2`:
 
 | Input | Meaning |
 | --- | --- |
@@ -123,6 +123,10 @@ The fixed interface is versioned by the shader layout version `1`:
 | `vExtraTextureIndices[4]` | Bindless indices of up to four additional textures. |
 | `vInstanceParams[4]` | The packed per-renderable uniform block. |
 | `outColor` | The linear RGBA output. |
+
+The prologue places the bindless sampler array at set `0`, binding `1` and the global block
+(`vec4 time; vec4 globals[8]`) at set `1`, binding `2`. Layout version `2` is the first version with
+that fixed placement.
 
 The prologue also defines the direct-use macros `BORK2D_MAIN_TEXTURE`, `BORK2D_TEXTURE0` through
 `BORK2D_TEXTURE3`, and `BORK2D_TIME`, plus one macro per sidecar-declared uniform so a declared name
@@ -331,7 +335,7 @@ Codes are stable once a range is released. A diagnostic renders as
 `bake` records a schema-3 manifest at `<project root>/obj/bork2d/bake/manifest.json`. It tracks the
 tool version, configuration hash, registered type/processor assembly closure, mode, every input
 path/hash, and every output path/hash. The configuration hash includes the shader tool marker
-`shaderc-2.23.0/layout-1/prologue-1/packer-1`, so upgrading shaderc or changing the fragment layout,
+`shaderc-2.23.0/layout-2/prologue-2/packer-1`, so upgrading shaderc or changing the fragment layout,
 prologue, or uniform packer invalidates a manifest written by the earlier tool. When all match, the
 bake prints an up-to-date summary and writes nothing. Any changed source, registration, processor,
 pack path, mode, or output triggers a full bake; `--force` bypasses the check, and

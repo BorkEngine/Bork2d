@@ -56,7 +56,7 @@ public sealed class ShaderProcessorTests
     public void IncrementalMarkerVersionsTheCompilerLayoutPrologueAndPacker()
     {
         Assert.Equal(
-            "shaderc-2.23.0/layout-1/prologue-1/packer-1",
+            "shaderc-2.23.0/layout-2/prologue-2/packer-1",
             ShaderToolInfo.ConfigurationMarker);
         Assert.Contains(
             $"layout-{ShaderLayout.CurrentVersion}",
@@ -177,6 +177,14 @@ public sealed class ShaderProcessorTests
         Assert.Contains("layout(location = 5) flat in uint vExtraTextureIndices[4];", prologue, StringComparison.Ordinal);
         Assert.Contains("layout(location = 9) in vec4 vInstanceParams[4];", prologue, StringComparison.Ordinal);
         Assert.Contains("layout(location = 0) out vec4 outColor;", prologue, StringComparison.Ordinal);
+        Assert.Contains(
+            "layout(set = 0, binding = 1) uniform sampler2D bork2dTextures[];",
+            prologue,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "layout(set = 1, binding = 2) uniform Bork2dGlobalBlock",
+            prologue,
+            StringComparison.Ordinal);
         Assert.Contains("#define uPulse (vInstanceParams[0].x)", prologue, StringComparison.Ordinal);
         Assert.Contains("#define uOffset (vInstanceParams[0].zw)", prologue, StringComparison.Ordinal);
         Assert.Contains("#define uDirection (vInstanceParams[1].xyz)", prologue, StringComparison.Ordinal);

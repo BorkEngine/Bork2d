@@ -22,9 +22,10 @@ namespace Bork2d.Render.Vulkan;
 /// rounded pixel rect with a single sRGB color attachment, no depth/stencil, and
 /// <c>storeOp=STORE</c>. <c>Clear.Color</c> uses <c>loadOp=CLEAR</c> with the camera's linear RGBA
 /// color; <c>Clear.None</c>/<c>Clear.Depth</c> use <c>LOAD</c> and never touch depth. A camera with
-/// at least one instance binds the pipeline/descriptor set, pushes the 64-byte view-projection, sets
-/// its viewport/scissor, and issues exactly one <c>vkCmdDraw(4, count, 0, firstInstance)</c>; an
-/// empty camera records only the pass when it clears.
+/// at least one instance binds the pipeline/descriptor set with one global-block dynamic offset,
+/// pushes the 64-byte view-projection, sets its viewport/scissor, and issues exactly one
+/// <c>vkCmdDraw(4, count, 0, firstInstance)</c>; an empty camera records only the pass when it
+/// clears.
 /// </para>
 /// <para>
 /// A color-attachment barrier runs before every camera pass so its <c>LOAD</c> observes the frame
@@ -96,21 +97,28 @@ internal static unsafe class SpritePassRecorder
     /// <param name="commandBuffer">The frame command buffer, already begun.</param>
     /// <param name="spritePipeline">The pipeline owner (pipeline layout for push constants/binding).</param>
     /// <param name="graphicsPipeline">The pipeline for the target's color format.</param>
-    /// <param name="descriptorSet">The frame's bindless descriptor set.</param>
+    /// <param name="descriptorSet">The frame's bindless descriptor set (set 0).</param>
+    /// <param name="globalDescriptorSet">The frame's global uniform descriptor set (set 1).</param>
     /// <param name="attachmentView">The target image view in <c>COLOR_ATTACHMENT_OPTIMAL</c>.</param>
     /// <param name="attachmentImage">The target image (for the per-pass color-attachment barrier).</param>
     /// <param name="cameras">The plan's valid camera array.</param>
     /// <param name="cameraCount">The number of valid cameras in <paramref name="cameras"/>.</param>
+    /// <param name="dynamicOffset">
+    /// The global-uniform-block dynamic offset in bytes; zero in this milestone because the planner
+    /// writes the frame's block at index zero. Task 5 supplies per-run offsets.
+    /// </param>
     internal static void RecordPasses(
         Vk vk,
         CommandBuffer commandBuffer,
         SpritePipeline spritePipeline,
         Pipeline graphicsPipeline,
         DescriptorSet descriptorSet,
+        DescriptorSet globalDescriptorSet,
         ImageView attachmentView,
         Image attachmentImage,
         CameraDrawPlan[] cameras,
-        int cameraCount)
+        int cameraCount,
+        uint dynamicOffset)
     {
         ArgumentNullException.ThrowIfNull(spritePipeline);
         ArgumentNullException.ThrowIfNull(cameras);
@@ -183,8 +191,10 @@ internal static unsafe class SpritePassRecorder
                     spritePipeline,
                     graphicsPipeline,
                     descriptorSet,
+                    globalDescriptorSet,
                     camera,
-                    area);
+                    area,
+                    dynamicOffset);
             }
 
             vk.CmdEndRendering(commandBuffer);
@@ -197,20 +207,25 @@ internal static unsafe class SpritePassRecorder
         SpritePipeline spritePipeline,
         Pipeline graphicsPipeline,
         DescriptorSet descriptorSet,
+        DescriptorSet globalDescriptorSet,
         in CameraDrawPlan camera,
-        in Rect2D area)
+        in Rect2D area,
+        uint dynamicOffset)
     {
         vk.CmdBindPipeline(commandBuffer, PipelineBindPoint.Graphics, graphicsPipeline);
-        DescriptorSet set = descriptorSet;
+        DescriptorSet* sets = stackalloc DescriptorSet[2];
+        sets[0] = descriptorSet;
+        sets[1] = globalDescriptorSet;
+        uint offset = dynamicOffset;
         vk.CmdBindDescriptorSets(
             commandBuffer,
             PipelineBindPoint.Graphics,
             spritePipeline.PipelineLayout,
             0,
+            2,
+            sets,
             1,
-            &set,
-            0,
-            null);
+            &offset);
 
         Matrix4x4 viewProjection = camera.Projection.ViewProjection;
         vk.CmdPushConstants(

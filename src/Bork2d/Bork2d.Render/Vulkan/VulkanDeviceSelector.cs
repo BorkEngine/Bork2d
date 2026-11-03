@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Bork2d.Engine;
 using Bork2d.Render.Diagnostics;
+using Bork2d.Render.Sprites;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Core;
 using Silk.NET.Core.Native;
@@ -398,6 +399,15 @@ internal static unsafe class VulkanDeviceSelector
                         + "support the M8 bindless texture pages.");
             }
 
+            if (limits.MaxUniformBufferRange < GlobalUniformBlock.SizeInBytes)
+            {
+                throw new Bork2dException(
+                    "The selected Vulkan device reports maxUniformBufferRange="
+                        + $"{limits.MaxUniformBufferRange}, which is below the "
+                        + $"{GlobalUniformBlock.SizeInBytes}-byte per-frame global uniform block "
+                        + "the engine requires.");
+            }
+
             Queue queue = vk.GetDeviceQueue(device, queueFamily.Index, 0);
             string[] finalExtensions = [.. enabledExtensions];
 
@@ -412,7 +422,9 @@ internal static unsafe class VulkanDeviceSelector
                     + "maxFramebuffer={MaxFramebufferWidth}x{MaxFramebufferHeight}, "
                     + "maxPerStageDescriptorUpdateAfterBindSampledImages={MaxSampledImages}, "
                     + "maxDescriptorSetUpdateAfterBindSampledImages={MaxSetSampledImages}, "
-                    + "maxStorageBufferRange={MaxStorageBufferRange}.",
+                    + "maxStorageBufferRange={MaxStorageBufferRange}, "
+                    + "maxUniformBufferRange={MaxUniformBufferRange}, "
+                    + "minUniformBufferOffsetAlignment={MinUniformBufferOffsetAlignment}.",
                 candidate.Name,
                 candidate.Type,
                 $"0x{GetVendorId(vk, physicalDevice):X}",
@@ -429,7 +441,9 @@ internal static unsafe class VulkanDeviceSelector
                 limits.MaxFramebufferHeight,
                 limits.MaxPerStageDescriptorUpdateAfterBindSampledImages,
                 limits.MaxDescriptorSetUpdateAfterBindSampledImages,
-                limits.MaxStorageBufferRange);
+                limits.MaxStorageBufferRange,
+                limits.MaxUniformBufferRange,
+                limits.MinUniformBufferOffsetAlignment);
 
             return new VulkanDevice(
                 vk,
@@ -491,7 +505,9 @@ internal static unsafe class VulkanDeviceSelector
             limits.MaxFramebufferHeight,
             indexing.MaxPerStageDescriptorUpdateAfterBindSampledImages,
             indexing.MaxDescriptorSetUpdateAfterBindSampledImages,
-            limits.MaxStorageBufferRange);
+            limits.MaxStorageBufferRange,
+            limits.MaxUniformBufferRange,
+            limits.MinUniformBufferOffsetAlignment);
     }
 
     private static void LogCandidate(ILogger logger, DeviceEvaluation evaluation)

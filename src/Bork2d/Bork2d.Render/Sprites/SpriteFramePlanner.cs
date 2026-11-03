@@ -94,12 +94,18 @@ internal sealed class SpriteFramePlanner
     }
 
     /// <summary>
-    /// Plans one snapshot and writes its instance records into the frame buffer.
+    /// Plans one snapshot, writes the frame's global uniform block, and writes its instance records
+    /// into the frame buffer.
     /// </summary>
     /// <param name="snapshot">The consumed snapshot; read-only and never mutated.</param>
     /// <param name="framebufferWidth">The target/framebuffer width in pixels.</param>
     /// <param name="framebufferHeight">The target/framebuffer height in pixels.</param>
     /// <param name="instances">The frame's instance sink, after its fence has been observed.</param>
+    /// <param name="globals">
+    /// The frame's global uniform sink. Exactly one 144-byte block is written per frame with the
+    /// frame time in <c>time.x</c> and every user global slot zero; all cameras use block zero in
+    /// this milestone.
+    /// </param>
     /// <returns>The refilled plan; valid until the next <see cref="Plan"/> call.</returns>
     /// <exception cref="Bork2dException">
     /// A sprite field is malformed, the accumulated instance total exceeds <see cref="int.MaxValue"/>,
@@ -109,10 +115,14 @@ internal sealed class SpriteFramePlanner
         FrameSnapshot snapshot,
         int framebufferWidth,
         int framebufferHeight,
-        IInstanceBuffer instances)
+        IInstanceBuffer instances,
+        IGlobalUniformBuffer globals)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(instances);
+        ArgumentNullException.ThrowIfNull(globals);
+
+        WriteGlobalBlock(snapshot, globals);
 
         ReadOnlySpan<SpriteSnapshot> sprites = snapshot.Sprites;
         int spriteCount = sprites.Length;
@@ -314,6 +324,18 @@ internal sealed class SpriteFramePlanner
             $"The frame requires {instanceCount} sprite instances, which exceeds the "
                 + $"{int.MaxValue}-record maximum the instance buffer can address. No instance "
                 + "is truncated.");
+
+    private static void WriteGlobalBlock(FrameSnapshot snapshot, IGlobalUniformBuffer globals)
+    {
+        // The frame time is the only global input in this milestone; the eight user slots stay zero
+        // until task 5 applies typed global values. The block is per frame, not per camera.
+        var block = new GlobalUniformBlock
+        {
+            Time = new Vector4((float)snapshot.Time, 0f, 0f, 0f),
+        };
+        globals.EnsureCapacity(1);
+        globals.WriteBlock(0, in block);
+    }
 
     private void WriteInstances(
         ReadOnlySpan<int> visibleIndices,

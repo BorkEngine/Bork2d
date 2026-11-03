@@ -24,14 +24,14 @@ internal static class ShaderToolInfo
     internal const string ShadercVersion = "shaderc-2.23.0";
 
     /// <summary>The fixed-prologue version, bumped when the generated prologue changes.</summary>
-    internal const string PrologueVersion = "prologue-1";
+    internal const string PrologueVersion = "prologue-2";
 
     /// <summary>The uniform packing version, bumped when offset assignment changes.</summary>
     internal const string PackerVersion = "packer-1";
 
     /// <summary>
     /// Gets the marker recorded in the incremental configuration hash:
-    /// <c>shaderc-2.23.0/layout-1/prologue-1/packer-1</c>.
+    /// <c>shaderc-2.23.0/layout-2/prologue-2/packer-1</c>.
     /// </summary>
     internal static string ConfigurationMarker { get; } =
         $"{ShadercVersion}/layout-{ShaderLayout.CurrentVersion}/{PrologueVersion}/{PackerVersion}";

@@ -15,7 +15,7 @@ internal interface IInstanceBuffer
     int InstanceCapacity { get; }
 
     /// <summary>
-    /// Ensures the buffer holds at least <paramref name="requiredInstances"/> 96-byte records.
+    /// Ensures the buffer holds at least <paramref name="requiredInstances"/> 176-byte records.
     /// </summary>
     /// <remarks>
     /// The renderer calls this only after the frame's fence was observed, so no GPU work references

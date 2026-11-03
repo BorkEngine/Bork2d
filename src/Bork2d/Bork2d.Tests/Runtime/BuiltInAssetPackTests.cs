@@ -54,7 +54,7 @@ public sealed class BuiltInAssetPackTests
 
         Assert.Equal("shader/sprite-spv", shader.SpirV.Path);
         Assert.Equal(ShaderLayout.CurrentVersion, shader.LayoutVersion);
-        Assert.Equal(1u, shader.LayoutVersion);
+        Assert.Equal(2u, shader.LayoutVersion);
         Assert.Equal("main", shader.EntryPoint);
         Assert.Empty(shader.InstanceUniforms);
         Assert.Empty(shader.GlobalUniforms);
@@ -92,7 +92,7 @@ public sealed class BuiltInAssetPackTests
             "base.pck",
             builder => builder.AddMessagePack(
                 "shader/sprite",
-                new ShaderAsset { LayoutVersion = 1, EntryPoint = "base" }));
+                new ShaderAsset { LayoutVersion = 2, EntryPoint = "base" }));
 
         using var host = new AssetServiceHost(basePath, BuiltInAssets.PackBytes);
         host.Start();
@@ -119,7 +119,7 @@ public sealed class BuiltInAssetPackTests
             {
                 builder.AddMessagePack(
                     "shader/sprite",
-                    new ShaderAsset { LayoutVersion = 1, EntryPoint = "overlay" });
+                    new ShaderAsset { LayoutVersion = 2, EntryPoint = "overlay" });
                 builder.AddRaw("shader/sprite-spv", [1, 2, 3, 4]);
             });
 

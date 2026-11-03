@@ -8,28 +8,38 @@ using Xunit;
 namespace Bork2d.Tests.Render.Sprites;
 
 /// <summary>
-/// Deterministic tests for the 96-byte instance ABI, the mapped-memory writer, and the instance
-/// builder (M8 §6.6).
+/// Deterministic tests for the 176-byte shader ABI v2 instance record, the mapped-memory writer, and
+/// the instance builder (M8 §6.6).
 /// </summary>
 public sealed class SpriteInstanceTests
 {
     [Fact]
-    public void RecordHasTheApproved96ByteLayout()
+    public void RecordHasTheApproved176ByteLayout()
     {
-        Assert.Equal(96, Marshal.SizeOf<SpriteInstance>());
-        Assert.Equal(96, SpriteInstance.SizeInBytes);
+        Assert.Equal(176, Marshal.SizeOf<SpriteInstance>());
+        Assert.Equal(176, SpriteInstance.SizeInBytes);
         Assert.Equal(0, OffsetOf(nameof(SpriteInstance.Transform0)));
         Assert.Equal(16, OffsetOf(nameof(SpriteInstance.Transform1)));
         Assert.Equal(32, OffsetOf(nameof(SpriteInstance.Uv0)));
         Assert.Equal(48, OffsetOf(nameof(SpriteInstance.Uv1)));
         Assert.Equal(64, OffsetOf(nameof(SpriteInstance.Tint)));
         Assert.Equal(80, OffsetOf(nameof(SpriteInstance.Misc)));
+        Assert.Equal(96, OffsetOf(nameof(SpriteInstance.ExtraTextureIndices)));
+        Assert.Equal(112, OffsetOf(nameof(SpriteInstance.InstanceParams0)));
+        Assert.Equal(128, OffsetOf(nameof(SpriteInstance.InstanceParams1)));
+        Assert.Equal(144, OffsetOf(nameof(SpriteInstance.InstanceParams2)));
+        Assert.Equal(160, OffsetOf(nameof(SpriteInstance.InstanceParams3)));
         Assert.Equal(0, SpriteInstance.Transform0Offset);
         Assert.Equal(16, SpriteInstance.Transform1Offset);
         Assert.Equal(32, SpriteInstance.Uv0Offset);
         Assert.Equal(48, SpriteInstance.Uv1Offset);
         Assert.Equal(64, SpriteInstance.TintOffset);
         Assert.Equal(80, SpriteInstance.MiscOffset);
+        Assert.Equal(96, SpriteInstance.ExtraTextureIndicesOffset);
+        Assert.Equal(112, SpriteInstance.InstanceParams0Offset);
+        Assert.Equal(128, SpriteInstance.InstanceParams1Offset);
+        Assert.Equal(144, SpriteInstance.InstanceParams2Offset);
+        Assert.Equal(160, SpriteInstance.InstanceParams3Offset);
     }
 
     [Fact]
@@ -44,6 +54,11 @@ public sealed class SpriteInstanceTests
             Uv1 = new Vector4(0.5f, 0.6f, 0.7f, 0.8f),
             Tint = new Vector4(0.9f, 0.8f, 0.7f, 0.6f),
             Misc = new Vector4(0.5f, 0.5f, 7f, 0f),
+            ExtraTextureIndices = new Vector4(11f, 12f, 13f, 14f),
+            InstanceParams0 = new Vector4(15f, 16f, 17f, 18f),
+            InstanceParams1 = new Vector4(19f, 20f, 21f, 22f),
+            InstanceParams2 = new Vector4(23f, 24f, 25f, 26f),
+            InstanceParams3 = new Vector4(27f, 28f, 29f, 30f),
         };
 
         SpriteInstanceWriter.Write(mapped, instance);
@@ -55,6 +70,11 @@ public sealed class SpriteInstanceTests
         Assert.Equal(instance.Uv1, written.Uv1);
         Assert.Equal(instance.Tint, written.Tint);
         Assert.Equal(instance.Misc, written.Misc);
+        Assert.Equal(instance.ExtraTextureIndices, written.ExtraTextureIndices);
+        Assert.Equal(instance.InstanceParams0, written.InstanceParams0);
+        Assert.Equal(instance.InstanceParams1, written.InstanceParams1);
+        Assert.Equal(instance.InstanceParams2, written.InstanceParams2);
+        Assert.Equal(instance.InstanceParams3, written.InstanceParams3);
         Assert.Equal(0f, written.Misc.W);
     }
 
@@ -91,7 +111,11 @@ public sealed class SpriteInstanceTests
             flipY: false);
         SpriteQuad quad = SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), flipX: true, flipY: false);
 
-        SpriteInstance instance = SpriteInstanceBuilder.Create(snapshot, quad, textureIndex: 9);
+        SpriteInstance instance = SpriteInstanceBuilder.Create(
+            snapshot,
+            quad,
+            textureIndex: 9,
+            extraTextureIndices: new Vector4(2f, 3f, 4f, 5f));
 
         Assert.Equal(new Vector4(2f, 0f, 0f, 3f), instance.Transform0);
         Assert.Equal(new Vector4(10f, 20f, quad.SizeX, quad.SizeY), instance.Transform1);
@@ -99,7 +123,30 @@ public sealed class SpriteInstanceTests
         Assert.Equal(new Vector4(0.5f, 1f, 0.25f, 1f), instance.Uv1);
         Assert.Equal(new Vector4(0.1f, 0.2f, 0.3f, 0.4f), instance.Tint);
         Assert.Equal(new Vector4(0.25f, 0.75f, 9f, 0f), instance.Misc);
+        Assert.Equal(new Vector4(2f, 3f, 4f, 5f), instance.ExtraTextureIndices);
         Assert.Equal(0f, instance.Misc.W);
+    }
+
+    [Fact]
+    public void BuilderWritesTheSnapshotUniformLanesAndZeroExtraIndicesByDefault()
+    {
+        SpriteAsset asset = Asset();
+        SpriteQuad quad = SpriteQuad.Resolve(SpriteRenderData.Freeze(asset), flipX: false, flipY: false);
+        SpriteSnapshot snapshot = Snapshot(asset, Matrix3x2.Identity) with
+        {
+            Uniform0 = new Vector4(1f, 2f, 3f, 4f),
+            Uniform1 = new Vector4(5f, 6f, 7f, 8f),
+            Uniform2 = new Vector4(9f, 10f, 11f, 12f),
+            Uniform3 = new Vector4(13f, 14f, 15f, 16f),
+        };
+
+        SpriteInstance instance = SpriteInstanceBuilder.Create(snapshot, quad, textureIndex: 1);
+
+        Assert.Equal(snapshot.Uniform0, instance.InstanceParams0);
+        Assert.Equal(snapshot.Uniform1, instance.InstanceParams1);
+        Assert.Equal(snapshot.Uniform2, instance.InstanceParams2);
+        Assert.Equal(snapshot.Uniform3, instance.InstanceParams3);
+        Assert.Equal(Vector4.Zero, instance.ExtraTextureIndices);
     }
 
     [Fact]

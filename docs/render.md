@@ -48,6 +48,9 @@ Useful files: [IRenderer.cs](../src/Bork2d/Bork2d.Render/IRenderer.cs),
 [RendererTextures.cs](../src/Bork2d/Bork2d.Render/Vulkan/RendererTextures.cs),
 [RenderPassRegistry.cs](../src/Bork2d/Bork2d.Render/Vulkan/RenderPassRegistry.cs),
 [SpriteRenderPass.cs](../src/Bork2d/Bork2d.Render/Sprites/SpriteRenderPass.cs),
+[SpriteInstance.cs](../src/Bork2d/Bork2d.Render/Sprites/SpriteInstance.cs),
+[GlobalUniformBlock.cs](../src/Bork2d/Bork2d.Render/Sprites/GlobalUniformBlock.cs),
+[ShaderStore.cs](../src/Bork2d/Bork2d.Render/Shaders/ShaderStore.cs),
 [VulkanFrameSet.cs](../src/Bork2d/Bork2d.Render/Vulkan/VulkanFrameSet.cs),
 [VulkanRenderer.cs](../src/Bork2d/Bork2d.Render/Vulkan/VulkanRenderer.cs),
 [VulkanOffscreenRenderer.cs](../src/Bork2d/Bork2d.Render/Vulkan/VulkanOffscreenRenderer.cs).
@@ -57,8 +60,11 @@ Useful files: [IRenderer.cs](../src/Bork2d/Bork2d.Render/IRenderer.cs),
 A device must support Vulkan 1.3 and the full required feature set: dynamic rendering,
 synchronization 2, runtime descriptor arrays, non-uniform sampled-array indexing, partially bound
 descriptors, sampled-image update-after-bind, update-unused-while-pending, and variable descriptor
-counts. Windowed selection additionally requires a graphics queue family that presents to the
-surface. Discrete GPUs are preferred over integrated, then other types.
+counts. The device must also report a `maxUniformBufferRange` of at least the 144-byte global block;
+a smaller value is a device-selection failure with a clear message. The device's
+`minUniformBufferOffsetAlignment` sets the per-frame global-block stride. Windowed selection
+additionally requires a graphics queue family that presents to the surface. Discrete GPUs are
+preferred over integrated, then other types.
 
 Windowed output uses an sRGB surface format (`B8G8R8A8_SRGB`, then `R8G8B8A8_SRGB`) with
 `SRGB_NONLINEAR`; offscreen uses an sRGB color-attachment format (`R8G8B8A8_SRGB`, then
@@ -77,19 +83,24 @@ engine producer and one pass, not a central plan/record switch.
 
 The sprite pass plans its data in one allocation-free pass:
 
-1. Sort sprite indices by ascending `(Layer, ZIndex)`.
-2. Classify each sprite once from its frozen render data: a null sprite, zero/multi-bit layer,
+1. Write the frame's single 144-byte global block: `time.x` is the frame time, the other time
+   components and the eight user global slots are zero, and the frame's dynamic uniform buffer is
+   ensured to hold one block.
+2. Sort sprite indices by ascending `(Layer, ZIndex)`.
+3. Classify each sprite once from its frozen render data: a null sprite, zero/multi-bit layer,
    non-`Quad` topology, or a still-loading texture page is skipped; malformed fields are fatal.
-3. Ensure each drawable sprite's texture page, resolve its quad geometry from the frozen UVs and
-   per-axis world scale, and build its camera-independent instance record once. The sorted index is
-   compacted into a per-layer range: each single-bit layer maps to one of the 32 mask bits, and each
-   range keeps its ascending `ZIndex` order.
-4. Sort cameras by `ZIndex` and resolve their projections; invalid cameras are skipped.
-5. One camera×sprite visibility pass builds each camera's contiguous visible-index range while
+4. Ensure each drawable sprite's texture page, resolve its quad geometry from the frozen UVs and
+   per-axis world scale, and build its camera-independent 176-byte instance record once. The record
+   carries the snapshot's four instance-uniform lanes, a zeroed `extraTextureIndices` lane in this
+   milestone, and the resolved main texture index. The sorted index is compacted into a per-layer
+   range: each single-bit layer maps to one of the 32 mask bits, and each range keeps its ascending
+   `ZIndex` order.
+5. Sort cameras by `ZIndex` and resolve their projections; invalid cameras are skipped.
+6. One camera×sprite visibility pass builds each camera's contiguous visible-index range while
    counting its instances: only the layer bits set in the camera's culling mask are visited, and a
    sprite whose known world AABB does not intersect the camera's world AABB is skipped. Empty sprite
    bounds mean "unknown" and are never culled, and empty camera bounds never cull either.
-6. Validate the frame's accumulated instance total against `int.MaxValue`, grow the instance buffer
+7. Validate the frame's accumulated instance total against `int.MaxValue`, grow the instance buffer
    once, and copy the precomputed instance records into their per-camera ranges.
 
 Bounds culling is always on and conservative. The camera's world AABB is the AABB of its four
@@ -185,19 +196,62 @@ resident totals.
 
 ## Pipeline and shaders
 
-The sprite pipeline uses descriptor set `0` with binding `0` (per-frame instance storage buffer)
-and binding `1` (bindless combined image sampler array). The layout carries one 64-byte
-view-projection push constant. Graphics state: sRGB color attachment, dynamic viewport/scissor,
-triangle strip, no vertex input, no depth test or write, culling disabled, and straight-alpha
-blending. One graphics pipeline exists per output format; samplers are cached per
-`(Filter, Wrap)`.
+The sprite pipeline uses descriptor set `0` for the draw inputs and descriptor set `1` for the
+per-frame global block:
 
-The GLSL sources are
-[sprite.vert](../src/Bork2d/Bork2d.Render/Shaders/sprite.vert) and
-[sprite.frag](../src/Bork2d/Bork2d.Render/Shaders/sprite.frag). They are compiled to SPIR-V during
-the build by `Bork2d.ShaderCompiler` and embedded as generated C# byte arrays; no Vulkan SDK is
-required, and the runtime does no shader I/O or compilation. The generated file lives under the
-intermediate output, never in the repository or publish output.
+| Set | Binding | Descriptor | Stage | Contents |
+| --- | --- | --- | --- | --- |
+| `0` | `0` | storage buffer | vertex | per-frame array of 176-byte instance records |
+| `0` | `1` | combined image sampler array | fragment | bindless texture pages, partially bound with a variable count |
+| `1` | `2` | dynamic uniform buffer | fragment | per-frame global block: `vec4 time; vec4 globals[8]`, 144 bytes, std140 |
+
+Set `0` keeps the variable/UAB bindless array as its highest binding, and the dynamic global buffer
+is in its own set because Vulkan forbids a dynamic uniform buffer in a set that contains an
+update-after-bind binding. The pipeline layout carries descriptor sets `0` and `1` and one 64-byte
+view-projection push constant. The graphics pipeline uses sRGB color attachments, dynamic
+viewport/scissor, triangle strip, no vertex input, no depth test or write, culling disabled, and
+straight-alpha blending. One graphics pipeline exists per `(fragment shader module, output format)`:
+the default shader has one pipeline per output format, created lazily when that format first
+appears, and samplers are cached per `(Filter, Wrap)`.
+
+The instance record is 176 bytes and eleven `vec4` values with no padding: `transform0`
+(M11, M12, M21, M22), `transform1` (M31, M32, signed sizeX, signed sizeY), `uv0` (top-left,
+top-right), `uv1` (bottom-right, bottom-left), `tint` (linear RGBA), `misc` (pivotX, pivotY, main
+texture index, reserved flags = 0), `extraTextureIndices` (four additional bindless texture indices
+as floats, zero in this milestone), and `instanceParams0` through `instanceParams3` (the 16-float
+custom-shader instance uniform block copied from the snapshot). There is no vertex buffer:
+`gl_VertexIndex` selects the quad corner and `gl_InstanceIndex` selects the record. The built-in
+vertex stage writes these interpolants: location `0` `vUv` (`vec2`), `1` `vTint` (`vec4`),
+`2` `vTextureIndex` (`flat uint`), `3` `vWorldPosition` (`vec2`), `4` `vLocalPosition` (`vec2`),
+`5` `vExtraTextureIndices` (`flat uint[4]`), and `9` `vInstanceParams` (`vec4[4]`). Custom fragment
+shaders declare the same interface through the fixed bake prologue, which places the bindless
+texture array in set `0` binding `1` and the global block in set `1` binding `2`. The built-in default
+shader consumes the full vertex interface in a branch that cannot be reached for valid engine data,
+so pipeline validation sees matched inputs and outputs without changing any frame's pixels.
+
+The default sprite shader is asset content, not a compiled-in array. The built-in pack, mounted
+below every game pack, serves `shader/sprite` as a `ShaderAsset`, `shader/sprite-spv` as its raw
+fragment module, and `shader/vertex-spv` as the engine-owned vertex module. At renderer startup
+`RendererTextures.EnsurePipeline` loads the vertex module through `IAssets`; `ShaderStore` then
+loads the fragment shader asset, validates a non-null `SpirV` reference, `LayoutVersion` 2, the
+`main` entry point, and a non-empty module whose first little-endian word is `0x07230203`, freezes
+the shader declarations, and creates the fragment module. The load is synchronous on the render
+thread before the renderer becomes ready. A missing built-in pack or shader, a malformed asset, or a
+module without the SPIR-V magic is a fatal startup `Bork2dException` naming the asset path and
+reason; there is no fallback shader. The shader store owns the fragment module and the pipeline owns
+the vertex module and every `(module, format)` pipeline.
+
+There is no build-time C# shader generator and no generated SPIR-V array. The retired
+`Bork2d.ShaderCompiler` tool, its targets import, and the checked-in renderer GLSL sources were
+removed; the built-in shader sources live only under
+[src/Bork2d/BuiltInAssets/Assets](../src/Bork2d/BuiltInAssets/Assets) and are baked into the
+embedded pack by the ordinary bake tooling. The runtime does no shader compilation or source I/O; it
+only loads the baked SPIR-V from the asset packs.
+
+The global block is written once per planned frame, not per camera: `time.x` is the frame's
+`ITime.Time`, the remaining time components and the eight user global slots are zero, and every
+camera binds set `1` at block zero with dynamic offset zero in this milestone. The layout version is
+`2`; its fixed fragment prologue places the global block in set `1` binding `2`.
 
 ## Windowed versus offscreen
 

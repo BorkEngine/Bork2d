@@ -25,7 +25,7 @@ internal static class ShaderLayout
     /// <summary>
     /// The shader layout version implemented by this engine build.
     /// </summary>
-    internal const uint CurrentVersion = 1;
+    internal const uint CurrentVersion = 2;
 
     /// <summary>
     /// The number of float lanes in the per-instance uniform block.
