@@ -13,7 +13,8 @@ pipeline, and the Pong example are implemented; there is no editor yet.
 - Windowed, offscreen, and headless modes behind one builder.
 - Tick/render decoupling through a three-slot snapshot ring; no fixed tick rate in
   windowed/offscreen mode.
-- Instanced sprite draws with bindless texture pages, one draw per non-empty camera.
+- Instanced sprite draws with bindless texture pages and baked custom shaders: one draw per non-empty
+  camera on the default shader and one per contiguous shader run otherwise.
 - Baked packs from TOML data, source processors, and sidecars, with an incremental `bake`.
 - MessagePack assets with generated shapes; no reflection or TOML at runtime.
 - Warnings-as-errors, style enforcement, AOT/trim analyzers, and a documentation link check in CI.
@@ -31,7 +32,7 @@ pipeline, and the Pong example are implemented; there is no editor yet.
 | --- | --- |
 | [`src/Bork2d`](src/Bork2d) | Engine solution: engine, renderer, runtime host, bake tooling, tests. |
 | [`examples/pong`](examples/pong) | Playable Pong, the NativeAOT gate, and a custom processor. |
-| [`build`](build) | MSBuild targets for baking, pack copying, and GLSL compilation. |
+| [`build`](build) | MSBuild targets for baking, pack copying, and the embedded built-in shader pack. |
 | [`docs`](docs) | Architecture and project guides. |
 | [`scripts/check-docs.ps1`](scripts/check-docs.ps1) | Markdown link and anchor check. |
 

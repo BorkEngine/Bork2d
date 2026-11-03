@@ -95,7 +95,8 @@ signatures are finalized in the implementation tasks.
 
 #### Goals
 
-- A shader is a baked asset at a canonical `shader/*` path, not a hardcoded renderer feature.
+- A shader is a baked asset at any canonical asset path (for example `shader/*`), not a hardcoded
+  renderer feature.
 - `shader/sprite` is the default and is an ordinary asset that a game pack may shadow.
 - A sprite selects a shader through `ISpriteRender.Shader`; `null` means `shader/sprite`.
 - A sprite can bind one main texture and up to four additional textures.
@@ -768,7 +769,7 @@ same bindless array.
 
 | Source | Processor | Outputs | Sidecar |
 | --- | --- | --- | --- |
-| `.frag` | Fragment shader processor | `ShaderAsset` at `shader/<name>`, SPIR-V data at `shader/<name>-spv` | Optional; defaults to no uniforms and no extra slots. |
+| `.frag` | Fragment shader processor | `ShaderAsset` at the source's base path, SPIR-V data at `<base>-spv` | Optional; defaults to no uniforms and no extra slots. |
 | `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tga` | Texture processor | KTX2 `TextureDescriptor` and payload | Optional; creates a default when missing. |
 | `.svg` | SVG SDF processor | MSDF texture at `<name>-sdf`, `SpriteAsset` at `<name>` | Optional; creates defaults. |
 | `.ttf`, `.otf` | Font processor | MSDF atlas texture at `<name>-atlas`, `FontAsset` at `<name>` | Optional; creates ASCII defaults. |
