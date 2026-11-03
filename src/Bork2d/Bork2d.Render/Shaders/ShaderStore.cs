@@ -26,6 +26,8 @@ namespace Bork2d.Render.Shaders;
 /// validated when the asynchronous load completes. An invalid entry, a failed load, a module
 /// creation failure, or a pipeline creation failure draws with the default shader and logs one
 /// warning per shader path; the frame never crashes. The only fatal failure is the default shader.
+/// The engine-wide global-name registry tracks every live owner of a name: shaders of the same type
+/// may share it, and the claim is released only when its last owner retires or fails.
 /// </para>
 /// <para>
 /// Loads started while planning a frame never complete that frame: <see cref="Pump"/> advances the
@@ -430,7 +432,7 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
 
         try
         {
-            entry.Load = _assets.LoadData(path);
+            entry.Load = StartLoad(path);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -442,6 +444,13 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         }
 
         return entry;
+    }
+
+    private Task<byte[]> StartLoad(string path)
+    {
+        Task<byte[]> load = _assets.LoadData(path);
+        ObserveFault(load);
+        return load;
     }
 
     private bool EnsurePipeline(StoreEntry entry, Format outputFormat, bool fatal)
@@ -478,6 +487,7 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
                     + $"{outputFormat} and its sprites draw with the default shader: "
                     + $"{exception.Message}.");
             entry.State = EntryState.Failed;
+            UnregisterGlobalNames(entry);
             ReleaseModule(entry);
             return false;
         }
@@ -579,7 +589,9 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
 
             try
             {
-                reload.SpirVLoad = _assets.LoadData(asset.SpirV.Path!);
+                Task<byte[]> load = _assets.LoadData(asset.SpirV.Path!);
+                ObserveFault(load);
+                reload.SpirVLoad = load;
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
@@ -672,8 +684,9 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
 
         try
         {
-            _defaultReload = new DefaultReload(
-                _assets.LoadAsset<ShaderAsset>(DefaultShaderPath));
+            Task<ShaderAsset> assetLoad = _assets.LoadAsset<ShaderAsset>(DefaultShaderPath);
+            ObserveFault(assetLoad);
+            _defaultReload = new DefaultReload(assetLoad);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -809,19 +822,32 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     {
         foreach (ShaderUniform declaration in metadata.GlobalUniforms)
         {
-            if (!_globalNames.TryGetValue(declaration.Name, out GlobalNameClaim claim))
+            if (!_globalNames.TryGetValue(declaration.Name, out GlobalNameClaim? claim)
+                || claim.Type == declaration.Type)
             {
                 continue;
             }
 
-            if (ReferenceEquals(claim.Owner, ignoreOwner) || claim.Type == declaration.Type)
+            // The name is claimed with a different type. The ignored owner is the version being
+            // replaced, so only another live owner makes this declaration a conflict.
+            StoreEntry? conflicting = null;
+            foreach (StoreEntry owner in claim.Owners)
+            {
+                if (!ReferenceEquals(owner, ignoreOwner))
+                {
+                    conflicting = owner;
+                    break;
+                }
+            }
+
+            if (conflicting is null)
             {
                 continue;
             }
 
             error = $"its global uniform '{declaration.Name}' is declared as {declaration.Type}, "
                 + $"but the engine-wide name is already registered as {claim.Type} by shader "
-                + $"'{claim.Owner.Entry.Path}'";
+                + $"'{conflicting.Entry.Path}'";
             return false;
         }
 
@@ -833,7 +859,18 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     {
         foreach (ShaderUniform declaration in entry.Entry.Metadata.GlobalUniforms)
         {
-            _globalNames[declaration.Name] = new GlobalNameClaim(declaration.Type, entry);
+            if (!_globalNames.TryGetValue(declaration.Name, out GlobalNameClaim? claim))
+            {
+                claim = new GlobalNameClaim(declaration.Type);
+                _globalNames.Add(declaration.Name, claim);
+            }
+
+            // A name may be shared by several live shaders of the same type; every owner is tracked
+            // so retiring one never drops the name while another still declares it.
+            if (!claim.Owners.Contains(entry))
+            {
+                claim.Owners.Add(entry);
+            }
         }
     }
 
@@ -841,14 +878,18 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     {
         foreach (ShaderUniform declaration in entry.Entry.Metadata.GlobalUniforms)
         {
-            if (_globalNames.TryGetValue(declaration.Name, out GlobalNameClaim claim)
-                && ReferenceEquals(claim.Owner, entry))
+            if (!_globalNames.TryGetValue(declaration.Name, out GlobalNameClaim? claim))
+            {
+                continue;
+            }
+
+            _ = claim.Owners.Remove(entry);
+            if (claim.Owners.Count == 0)
             {
                 _ = _globalNames.Remove(declaration.Name);
             }
         }
     }
-
     private void WarnOnce(string path, string message)
     {
         if (!_warnedPaths.Add(path))
@@ -895,6 +936,25 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         }
 
         return exception?.Message ?? "the load faulted";
+    }
+
+    /// <summary>
+    /// Observes a load's eventual fault so a task retired or disposed before completion cannot
+    /// surface as an unobserved task exception.
+    /// </summary>
+    /// <remarks>
+    /// The continuation is best-effort and runs only for a faulted antecedent; it keeps the
+    /// observation independent of whether the catalog ever pumps again (shutdown, a mount that
+    /// retires the entry, or a sprite that never returns).
+    /// </remarks>
+    /// <param name="load">The load task to observe.</param>
+    private static void ObserveFault(Task load)
+    {
+        _ = load.ContinueWith(
+            static completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private static T LoadBlocking<T>(Task<T> task, string path, string description)
@@ -967,5 +1027,12 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         internal Task<byte[]>? SpirVLoad { get; set; }
     }
 
-    private readonly record struct GlobalNameClaim(ShaderUniformType Type, StoreEntry Owner);
+    private sealed class GlobalNameClaim
+    {
+        internal GlobalNameClaim(ShaderUniformType type) => Type = type;
+
+        internal ShaderUniformType Type { get; }
+
+        internal List<StoreEntry> Owners { get; } = [];
+    }
 }

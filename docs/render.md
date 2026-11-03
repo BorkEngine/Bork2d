@@ -277,8 +277,10 @@ Every custom declaration set is validated: `LayoutVersion` 2, the `main` entry p
 SPIR-V payload whose first little-endian word is `0x07230203`, at most four texture slots, identifier
 names that are unique within their block, instance-uniform offsets that are aligned, inside the
 16-float block, and non-overlapping, global-uniform offsets that are aligned, unique, and inside the
-eight-`vec4` slots, and no name declared in both blocks. Global names are engine-wide: if two loaded
-shaders declare the same name with different types, the later one is rejected. A failed load, invalid
+eight-`vec4` slots, and no name declared in both blocks. Global names are engine-wide and track
+every live shader that declares them: shaders of the same type may share a name, the name stays
+claimed while any owner is live, and a later shader that declares it with a different type is
+rejected. A failed load, invalid
 metadata, module creation failure, or pipeline creation failure draws with `shader/sprite` and logs
 one warning per shader path; a failure of the default shader itself is a fatal startup error.
 Modules are cached by shader content hash and pipelines by `(content hash, output format)`, so

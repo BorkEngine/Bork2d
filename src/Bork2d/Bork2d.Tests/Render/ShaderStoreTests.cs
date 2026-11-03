@@ -458,6 +458,150 @@ public sealed class ShaderStoreTests
     }
 
     [Fact]
+    public void SharedGlobalNameKeepsItsClaimWhenAnotherOwnerRetires()
+    {
+        using var fixture = new StoreFixture();
+        ShaderRenderData first = fixture.Freeze(
+            CreateCustomShader(
+                "materials/owner-first",
+                globals:
+                [
+                    new ShaderUniform("gShared", ShaderUniformType.Float, 0, Vector4.Zero),
+                ]));
+        ShaderRenderData second = fixture.Freeze(
+            CreateCustomShader(
+                "materials/owner-second",
+                globals:
+                [
+                    new ShaderUniform("gShared", ShaderUniformType.Float, 0, Vector4.Zero),
+                ]));
+        ShaderRenderData conflicting = fixture.Freeze(
+            CreateCustomShader(
+                "materials/owner-conflict",
+                globals:
+                [
+                    new ShaderUniform("gShared", ShaderUniformType.Vector2, 0, Vector4.Zero),
+                ]));
+
+        Assert.Equal(ShaderBindingState.Ready, MakeReady(fixture, first).State);
+        Assert.Equal(ShaderBindingState.Ready, MakeReady(fixture, second).State);
+
+        // Retire the last owner through a pipeline failure for another output format. The name is
+        // shared, so the earlier owner must keep guarding it.
+        fixture.Factory.PipelineFailure = new Bork2dException("pipeline failed");
+        Assert.Equal(
+            ShaderBindingState.Failed,
+            fixture.Store.Resolve(second, Format.B8G8R8A8Srgb).State);
+        fixture.Factory.PipelineFailure = null;
+
+        _ = fixture.Store.Resolve(conflicting, Format.R8G8B8A8Srgb);
+        fixture.Assets.CompleteSpirV("materials/owner-conflict");
+        fixture.Store.Pump();
+
+        Assert.Equal(
+            ShaderBindingState.Failed,
+            fixture.Store.Resolve(conflicting, Format.R8G8B8A8Srgb).State);
+        Assert.Contains(
+            fixture.Logs.Entries,
+            entry => entry.Message.Contains("already registered", StringComparison.Ordinal));
+        Assert.Equal(
+            ShaderBindingState.Ready,
+            fixture.Store.Resolve(first, Format.R8G8B8A8Srgb).State);
+    }
+
+    [Fact]
+    public void GlobalNameIsReleasedWhenTheLastOwnerRetires()
+    {
+        using var fixture = new StoreFixture();
+        ShaderRenderData first = fixture.Freeze(
+            CreateCustomShader(
+                "materials/last-first",
+                globals:
+                [
+                    new ShaderUniform("gShared", ShaderUniformType.Float, 0, Vector4.Zero),
+                ]));
+        ShaderRenderData second = fixture.Freeze(
+            CreateCustomShader(
+                "materials/last-second",
+                globals:
+                [
+                    new ShaderUniform("gShared", ShaderUniformType.Float, 0, Vector4.Zero),
+                ]));
+        ShaderRenderData differentType = fixture.Freeze(
+            CreateCustomShader(
+                "materials/last-different",
+                globals:
+                [
+                    new ShaderUniform("gShared", ShaderUniformType.Vector2, 0, Vector4.Zero),
+                ]));
+
+        Assert.Equal(ShaderBindingState.Ready, MakeReady(fixture, first).State);
+        Assert.Equal(ShaderBindingState.Ready, MakeReady(fixture, second).State);
+
+        fixture.Factory.PipelineFailure = new Bork2dException("pipeline failed");
+        _ = fixture.Store.Resolve(first, Format.B8G8R8A8Srgb);
+        _ = fixture.Store.Resolve(second, Format.B8G8R8A8Srgb);
+        fixture.Factory.PipelineFailure = null;
+
+        // Both owners retired, so the name is free again for a different type.
+        Assert.Equal(
+            ShaderBindingState.Ready,
+            MakeReady(fixture, differentType).State);
+    }
+
+    [Fact]
+    public void DefaultReloadKeepsACustomGlobalNameClaim()
+    {
+        const string replacementPath = "shader/sprite-spv-v2";
+        using var fixture = new StoreFixture(
+            CreateCustomShader(
+                ShaderStore.DefaultSpirVPath,
+                globals:
+                [
+                    new ShaderUniform("gShared", ShaderUniformType.Float, 0, Vector4.Zero),
+                ]));
+        ShaderRenderData custom = fixture.Freeze(
+            CreateCustomShader(
+                "materials/custom-claim",
+                globals:
+                [
+                    new ShaderUniform("gShared", ShaderUniformType.Float, 0, Vector4.Zero),
+                ]));
+        ShaderRenderData conflicting = fixture.Freeze(
+            CreateCustomShader(
+                "materials/custom-claim-conflict",
+                globals:
+                [
+                    new ShaderUniform("gShared", ShaderUniformType.Vector2, 0, Vector4.Zero),
+                ]));
+
+        // Mount a replacement default that no longer declares the shared name, but keep its SPIR-V
+        // pending so the custom shader loads and claims the name before the default swap.
+        fixture.Assets.DefaultAsset = CreateCustomShader(replacementPath);
+        fixture.Assets.CatalogVersion++;
+        fixture.Store.Pump();
+        Assert.Equal(ShaderBindingState.Ready, MakeReady(fixture, custom).State);
+
+        fixture.Assets.CompleteSpirV(replacementPath, CreateSpirV(seed: 12));
+        fixture.Store.Pump();
+        Assert.Empty(fixture.Store.DefaultEntry.Metadata.GlobalUniforms);
+        Assert.Equal(
+            ShaderBindingState.Ready,
+            fixture.Store.Resolve(custom, Format.R8G8B8A8Srgb).State);
+
+        _ = fixture.Store.Resolve(conflicting, Format.R8G8B8A8Srgb);
+        fixture.Assets.CompleteSpirV("materials/custom-claim-conflict");
+        fixture.Store.Pump();
+
+        Assert.Equal(
+            ShaderBindingState.Failed,
+            fixture.Store.Resolve(conflicting, Format.R8G8B8A8Srgb).State);
+        Assert.Contains(
+            fixture.Logs.Entries,
+            entry => entry.Message.Contains("already registered", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void IdenticalContentSharesOneModuleAndOnePipelinePerFormat()
     {
         using var fixture = new StoreFixture();
@@ -684,6 +828,14 @@ public sealed class ShaderStoreTests
                 entry => entry.Message.Contains(fragment, StringComparison.Ordinal)));
     }
 
+    private static ShaderBinding MakeReady(StoreFixture fixture, ShaderRenderData metadata)
+    {
+        _ = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        fixture.Assets.CompleteSpirV(metadata.SpirV.Path!);
+        fixture.Store.Pump();
+        return fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+    }
+
     private static ILoggerFactory CreateLoggerFactory(out CapturingLoggerProvider provider)
     {
         var created = new CapturingLoggerProvider();
@@ -725,14 +877,21 @@ public sealed class ShaderStoreTests
     {
         private readonly ILoggerFactory _loggerFactory;
 
-        internal StoreFixture()
+        internal StoreFixture(ShaderAsset? defaultAsset = null)
         {
+            if (defaultAsset is not null)
+            {
+                Assets.DefaultAsset = defaultAsset;
+            }
+
             _loggerFactory = LoggerFactory.Create(builder =>
             {
                 builder.SetMinimumLevel(LogLevel.Trace);
                 builder.AddProvider(Logs);
             });
-            Assets.CompleteSpirV(ShaderStore.DefaultSpirVPath, CreateSpirV(seed: 100));
+            Assets.CompleteSpirV(
+                Assets.DefaultAsset!.SpirV.Path!,
+                CreateSpirV(seed: 100));
             Store = ShaderStore.Create(
                 Assets,
                 Factory,
