@@ -7,7 +7,7 @@ namespace Bork2d.Render.Vulkan;
 
 /// <summary>
 /// Records the frame's full-target opaque-black clear and the approved per-camera dynamic-rendering
-/// passes with one instanced draw per non-empty camera (M8 §6.8/§6.11).
+/// passes with one instanced draw per contiguous shader run (M8 §6.8/§6.11, custom shaders).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,9 +22,11 @@ namespace Bork2d.Render.Vulkan;
 /// rounded pixel rect with a single sRGB color attachment, no depth/stencil, and
 /// <c>storeOp=STORE</c>. <c>Clear.Color</c> uses <c>loadOp=CLEAR</c> with the camera's linear RGBA
 /// color; <c>Clear.None</c>/<c>Clear.Depth</c> use <c>LOAD</c> and never touch depth. A camera with
-/// at least one instance binds the pipeline/descriptor set, pushes the 64-byte view-projection, sets
-/// its viewport/scissor, and issues exactly one <c>vkCmdDraw(4, count, 0, firstInstance)</c>; an
-/// empty camera records only the pass when it clears.
+/// at least one run sets its viewport/scissor once, pushes the 64-byte view-projection once, then
+/// binds each run's pipeline and descriptor sets with that run's global-block dynamic offset and
+/// issues <c>vkCmdDraw(4, run.InstanceCount, 0, run.FirstInstance)</c>. Consecutive runs that share
+/// both the pipeline and the dynamic offset skip the redundant binds. A camera with no runs records
+/// only its pass when it clears.
 /// </para>
 /// <para>
 /// A color-attachment barrier runs before every camera pass so its <c>LOAD</c> observes the frame
@@ -91,34 +93,42 @@ internal static unsafe class SpritePassRecorder
         vk.CmdEndRendering(commandBuffer);
     }
 
-    /// <summary>Records every valid camera's pass and draw from a frame plan.</summary>
+    /// <summary>Records every valid camera's pass and shader runs from a frame plan.</summary>
     /// <param name="vk">The Vulkan API object.</param>
     /// <param name="commandBuffer">The frame command buffer, already begun.</param>
     /// <param name="spritePipeline">The pipeline owner (pipeline layout for push constants/binding).</param>
-    /// <param name="graphicsPipeline">The pipeline for the target's color format.</param>
-    /// <param name="descriptorSet">The frame's bindless descriptor set.</param>
+    /// <param name="descriptorSet">The frame's bindless descriptor set (set 0).</param>
+    /// <param name="globalDescriptorSet">The frame's global uniform descriptor set (set 1).</param>
     /// <param name="attachmentView">The target image view in <c>COLOR_ATTACHMENT_OPTIMAL</c>.</param>
     /// <param name="attachmentImage">The target image (for the per-pass color-attachment barrier).</param>
     /// <param name="cameras">The plan's valid camera array.</param>
     /// <param name="cameraCount">The number of valid cameras in <paramref name="cameras"/>.</param>
+    /// <param name="runs">The plan's shader runs.</param>
+    /// <param name="runPipelines">
+    /// The graphics pipeline for each run, parallel to <paramref name="runs"/>.
+    /// </param>
     internal static void RecordPasses(
         Vk vk,
         CommandBuffer commandBuffer,
         SpritePipeline spritePipeline,
-        Pipeline graphicsPipeline,
         DescriptorSet descriptorSet,
+        DescriptorSet globalDescriptorSet,
         ImageView attachmentView,
         Image attachmentImage,
         CameraDrawPlan[] cameras,
-        int cameraCount)
+        int cameraCount,
+        ShaderRun[] runs,
+        Pipeline[] runPipelines)
     {
         ArgumentNullException.ThrowIfNull(spritePipeline);
         ArgumentNullException.ThrowIfNull(cameras);
+        ArgumentNullException.ThrowIfNull(runs);
+        ArgumentNullException.ThrowIfNull(runPipelines);
 
         for (var index = 0; index < cameraCount; index++)
         {
             CameraDrawPlan camera = cameras[index];
-            bool hasInstances = camera.InstanceCount > 0;
+            bool hasInstances = camera.RunCount > 0;
             if (!hasInstances && camera.Clear != ClearKind.Color)
             {
                 // An empty Clear.None/Depth camera records nothing at all.
@@ -177,13 +187,15 @@ internal static unsafe class SpritePassRecorder
 
             if (hasInstances)
             {
-                RecordDraw(
+                RecordRuns(
                     vk,
                     commandBuffer,
                     spritePipeline,
-                    graphicsPipeline,
                     descriptorSet,
+                    globalDescriptorSet,
                     camera,
+                    runs,
+                    runPipelines,
                     area);
             }
 
@@ -191,36 +203,17 @@ internal static unsafe class SpritePassRecorder
         }
     }
 
-    private static void RecordDraw(
+    private static void RecordRuns(
         Vk vk,
         CommandBuffer commandBuffer,
         SpritePipeline spritePipeline,
-        Pipeline graphicsPipeline,
         DescriptorSet descriptorSet,
+        DescriptorSet globalDescriptorSet,
         in CameraDrawPlan camera,
+        ShaderRun[] runs,
+        Pipeline[] runPipelines,
         in Rect2D area)
     {
-        vk.CmdBindPipeline(commandBuffer, PipelineBindPoint.Graphics, graphicsPipeline);
-        DescriptorSet set = descriptorSet;
-        vk.CmdBindDescriptorSets(
-            commandBuffer,
-            PipelineBindPoint.Graphics,
-            spritePipeline.PipelineLayout,
-            0,
-            1,
-            &set,
-            0,
-            null);
-
-        Matrix4x4 viewProjection = camera.Projection.ViewProjection;
-        vk.CmdPushConstants(
-            commandBuffer,
-            spritePipeline.PipelineLayout,
-            ShaderStageFlags.VertexBit,
-            0,
-            SpritePipeline.PushConstantBytes,
-            &viewProjection);
-
         var viewport = new Viewport
         {
             X = area.Offset.X,
@@ -234,12 +227,71 @@ internal static unsafe class SpritePassRecorder
         Rect2D scissor = area;
         vk.CmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        vk.CmdDraw(
+        Matrix4x4 viewProjection = camera.Projection.ViewProjection;
+        vk.CmdPushConstants(
             commandBuffer,
-            QuadVertexCount,
-            (uint)camera.InstanceCount,
+            spritePipeline.PipelineLayout,
+            ShaderStageFlags.VertexBit,
             0,
-            (uint)camera.FirstInstance);
+            SpritePipeline.PushConstantBytes,
+            &viewProjection);
+
+        var bound = false;
+        var boundPipeline = default(Pipeline);
+        var boundOffset = 0u;
+        int runEnd = camera.FirstRun + camera.RunCount;
+        for (var runIndex = camera.FirstRun; runIndex < runEnd; runIndex++)
+        {
+            ShaderRun run = runs[runIndex];
+            Pipeline pipeline = runPipelines[runIndex];
+            bool rebind = !bound || pipeline.Handle != boundPipeline.Handle || run.GlobalBlockOffset != boundOffset;
+            if (rebind)
+            {
+                bound = true;
+                boundPipeline = pipeline;
+                boundOffset = run.GlobalBlockOffset;
+                RecordBindings(
+                    vk,
+                    commandBuffer,
+                    spritePipeline,
+                    descriptorSet,
+                    globalDescriptorSet,
+                    pipeline,
+                    run.GlobalBlockOffset);
+            }
+
+            vk.CmdDraw(
+                commandBuffer,
+                QuadVertexCount,
+                (uint)run.InstanceCount,
+                0,
+                (uint)run.FirstInstance);
+        }
+    }
+
+    private static void RecordBindings(
+        Vk vk,
+        CommandBuffer commandBuffer,
+        SpritePipeline spritePipeline,
+        DescriptorSet descriptorSet,
+        DescriptorSet globalDescriptorSet,
+        Pipeline graphicsPipeline,
+        uint dynamicOffset)
+    {
+        vk.CmdBindPipeline(commandBuffer, PipelineBindPoint.Graphics, graphicsPipeline);
+        DescriptorSet* sets = stackalloc DescriptorSet[2];
+        sets[0] = descriptorSet;
+        sets[1] = globalDescriptorSet;
+        uint offset = dynamicOffset;
+        vk.CmdBindDescriptorSets(
+            commandBuffer,
+            PipelineBindPoint.Graphics,
+            spritePipeline.PipelineLayout,
+            0,
+            2,
+            sets,
+            1,
+            &offset);
     }
 
     private static void RecordColorAttachmentBarrier(

@@ -11,16 +11,16 @@ provider package.
 | `Bork2d.Engine` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
 | `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `IRenderable`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
 | `Bork2d.Engine.Rendering` | `Color` (immutable linear RGBA), `RenderStats`, `ClearKind`, `FrameCaptureResult` |
-| `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `TextureDescriptor`, `AssetRef<T>`, `DataRef`, enums |
+| `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `ShaderAsset`, `ShaderUniform`, `ShaderTextureSlot`, `ShaderUniformType`, `TextureDescriptor`, `AssetRef<T>`, `DataRef`, enums |
 | `Bork2d.Engine.Assets.Pack` | `PackBuilder`, `PackCompressionMode` (tooling only) |
 | `Bork2d.Engine.Input` | `IInput`, `KeyCode`, `MouseButton` |
 | `Bork2d.Engine.Mathematics` | `Bounds`, `Ray2D`, `Vector2Extensions`, `Vector2ApproximatelyExtensions` |
 | `Bork2d.Engine.Platform` | `IWindow`, `ITime` |
 
-`GameEngine`, `Transform`, `Camera`, `SpriteRender`, `AssetService`, `FrameSnapshot`, the typed
-render-data buffers/producers/definitions, `RenderableRegistry`, and the projection and
-sprite-bounds math are internal. `Bork2d.Engine.Assets.Pack` exposes only the pack writer and its
-compression enum; everything else there is implementation.
+`GameEngine`, `Transform`, `Camera`, `SpriteRender`, `AssetService`, `FrameSnapshot`,
+`ShaderRenderData`, the typed render-data buffers/producers/definitions, `RenderableRegistry`, and
+the projection and sprite-bounds math are internal. `Bork2d.Engine.Assets.Pack` exposes only the pack
+writer and its compression enum; everything else there is implementation.
 
 ## Game and engine
 
@@ -29,8 +29,9 @@ once per tick, and `Teardown` once before shutdown. All three run on the tick th
 concurrent. Exceptions propagate to `Bork2dApp.Run` after cleanup.
 
 `IEngine<TLayer>` provides `Time`, `Window`, `Input`, `Assets`, `LoggerFactory`, `Root`,
-`RenderStats`, `CreateTransform`, `CreateCamera`, `CreateSpriteRender`, `CaptureFrameAsync`, and
-`Exit`. Access rules differ by mode:
+`RenderStats`, `CreateTransform`, `CreateCamera`, `CreateSpriteRender`, `SetGlobalUniform` (float,
+`Vector2`, `Vector3`, `Vector4`, and `Color` overloads), `ResetGlobalUniforms`, `CaptureFrameAsync`,
+and `Exit`. Access rules differ by mode:
 
 | Member | Windowed | Offscreen | Headless |
 | --- | --- | --- | --- |
@@ -42,6 +43,23 @@ concurrent. Exceptions propagate to `Bork2dApp.Run` after cleanup.
 Retained window/input references throw `ObjectDisposedException` after a windowed run; the offscreen
 window facade stays functional. `Exit` may be called from any thread; the current tick finishes and
 the next tick does not start.
+
+### Global shader uniforms
+
+`SetGlobalUniform` stores engine-wide user uniforms shared by every custom shader, and
+`ResetGlobalUniforms` clears them. A name is matched ordinally and has exactly one
+`ShaderUniformType` while it is set: setting an existing name with the same type
+replaces its value, while setting it with a different type throws `ArgumentException` and leaves the
+stored value unchanged. A null, empty, or whitespace name throws `ArgumentException`. These calls
+may run on any thread and use a dedicated lock that is independent of the scene's structural lock.
+User globals are copied into each frame snapshot after the scene walk. The built-in time input is
+not a user global; the frame's time is captured separately from `ITime.Time`.
+
+The renderer applies a captured user global to each shader run's 144-byte global block by its ordinal
+name when the shader declares the same type, and uses the declaration's shader default when the name
+is absent. A type mismatch between the engine value and a shader declaration makes that custom shader
+fall back to `shader/sprite` for the frame with a one-time warning; the stored bytes are never
+reinterpreted. The frame time always occupies the block's `time.x`.
 
 ### Frame capture
 
@@ -89,6 +107,36 @@ a normalized pivot, a topology, and optional indices. The renderer derives the q
 vertex array. Quad world size is `(maxU - minU) * Scale.X` by `(maxV - minV) * Scale.Y`, so texture
 pixel dimensions never affect geometry.
 
+A sprite renderable also has an optional custom fragment `Shader` and up to four additional texture
+references (`AdditionalTextures`). The `AdditionalTextures` setter clones the array and `null`
+clears it; the getter returns a copy. Every entry is stored, but capture copies the first four plus
+the total count, so the renderer can warn about and ignore references beyond four. Assigning a
+shader freezes its declarations once, and capture carries only that frozen `ShaderRenderData`, never
+the live `ShaderAsset`.
+
+The renderer resolves a captured sprite's shader from that frozen metadata. No assigned `Shader`
+selects the built-in `shader/sprite` entry; a custom shader is keyed by its raw SPIR-V `DataRef` path
+and loaded asynchronously, so a sprite waits (and is counted as skipped) until its frame becomes
+ready. A custom shader that fails loading, validation, module creation, or pipeline creation draws
+with `shader/sprite` and logs one warning per shader path. Its declared additional textures are
+resolved positionally in the first four `AdditionalTextures` slots; a still-loading extra texture
+skips the sprite, a failed or absent one samples the bindless placeholder, references beyond the
+shader's declared slot count are not loaded, and references beyond four are ignored with a one-time
+warning. A catalog mount reloads a custom path from the new winning entry on its next sighting,
+retries a previously failed path, and reloads the default shader while keeping it active until the
+replacement is ready.
+
+Instance uniform values are strict. The `SetUniform` overloads validate immediately against the
+currently assigned shader's frozen metadata: with no shader assigned, an undeclared name, a
+declared type that does not match the overload, or a null/empty/whitespace name, the call throws
+`ArgumentException` and stores nothing. Accepted values are stored per renderable, and
+`ResetUniforms` clears them so the shader defaults apply again. Reassigning `Shader` does not clear
+stored values; a value whose name or type no longer matches the new shader is inert at capture.
+Capture applies the stored overrides over the frozen default block without allocating on the warm
+path. A sprite with no custom shader has a zero instance-uniform block in the snapshot; the renderer
+seeds it from the default entry's declared default block, so a game pack that shadows
+`shader/sprite` with instance-uniform declarations behaves correctly without per-sprite overrides.
+
 Cameras and sprites are `IRenderable`s and expose a read-only world-space `Bounds` AABB for
 conservative renderer culling. A camera's bounds contain its transformed visible rectangle; a
 sprite's bounds contain the drawn quad, derived from the frozen render data, pivot, flips, and
@@ -101,6 +149,22 @@ copy of its draw fields. Assigning an asset to a renderable freezes it once; mut
 afterwards (including its UV and index arrays) does not change the drawn sprite or any published
 snapshot, and re-assigning the same asset keeps the first frozen values. Load or create a new asset
 instance to change the rendered result.
+
+`ShaderAsset` is a MessagePack custom fragment shader description: a `DataRef` to a SPIR-V module, a
+layout version, an entry point (default `main`), instance and global `ShaderUniform` declarations,
+and `ShaderTextureSlot` declarations. The engine's current layout version is `2`. A uniform's
+`Offset` is a float-lane offset inside the 16-float instance block (four `Vector4` lanes) or the
+eight-`Vector4` global block, and `Default` components beyond the declared `ShaderUniformType` width
+are ignored. The declaration arrays are non-null and empty by default. The loader does not validate
+names, types, offsets, overlaps, or the layout version; freezing tolerates malformed declarations,
+and the renderer owns rejecting or falling back from them.
+
+Like `SpriteAsset`, `ShaderAsset` freezes once per asset instance when assigned to a sprite
+renderable: mutating it afterwards (including replacing or editing its declaration arrays) does not
+change a published snapshot, and re-assigning the same asset keeps the first frozen values. Freezing
+is tolerant of malformed metadata: null arrays become empty, null and duplicate names are skipped
+with the first declaration winning, and invalid offsets or unknown types contribute no lanes. The
+renderer owns rejecting or falling back from malformed declarations.
 
 Layer enums must be `int`-backed `[Flags]` enums with 1-32 named single-bit values; `None = 0` is
 allowed. Invalid layer types fail at build/host creation.
@@ -244,8 +308,14 @@ children still compose. The camera and sprite producers own the reserved slots `
 renderable producer owns a slot at or above `2`. Transforms are traversed, but only renderables
 produce records; the layer enum is flattened to a raw 32-bit mask. Each sprite record carries the
 immutable `SpriteRenderData` frozen when the asset was assigned, never the live `SpriteAsset`, and
-the world-space AABB computed from that data when the capture composed the world matrix. The
-renderer culls with those bounds without reading the scene.
+the world-space AABB computed from that data when the capture composed the world matrix. It also
+carries the immutable `ShaderRenderData` frozen when the shader was assigned (or null), the four
+`Vector4` lanes of the instance uniform block (`SpriteSnapshot.Uniform0` through `Uniform3`) built
+from the frozen declared defaults and matching stored overrides, the first four additional texture
+references (`ExtraTexture0` through `ExtraTexture3`), and the total additional-texture count
+(`AdditionalTextureCount`). Only stored instance uniforms still declared with the same name and type
+are applied; malformed declarations contribute nothing at capture and are left for the renderer to
+reject or fall back from. The renderer culls with those bounds without reading the scene.
 
 Frame buffers are compact typed pools (`RenderDataBuffer<T>`) owned by the snapshot through a
 `RenderDataBufferSet`. They start empty, grow to the observed high-water mark, and never shrink;
@@ -253,6 +323,12 @@ resetting a slot clears every buffer's used range (not only cameras and sprites)
 references without shrinking the buffers, so a warm capture allocates nothing. Adding a renderable
 kind registers one definition/producer, plus the renderer pass for its data; it adds no capture
 switch case and no engine creation method.
+
+Engine-wide user global uniforms live in a separate value-only buffer (`GlobalUniformSnapshot`:
+name, type, value) filled from the engine's global map after the scene walk. They are not renderable
+producer slots and do not consume a reserved slot. Resetting a slot clears that buffer too, releasing
+obsolete names, and a warm capture appends globals without allocating. The frame's time is captured
+separately and is not one of the user globals.
 
 Camera projection is pure and shared with the renderer: the camera world matrix is the inverse-view
 source, the rounded pixel viewport supplies the aspect, and the only Y conversion is the negation

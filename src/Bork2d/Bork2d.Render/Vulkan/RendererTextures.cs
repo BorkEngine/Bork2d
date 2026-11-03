@@ -1,5 +1,6 @@
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
+using Bork2d.Render.Shaders;
 using Bork2d.Render.Textures;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
@@ -7,12 +8,13 @@ using Silk.NET.Vulkan;
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// The sprite pipeline, texture-page store, and bindless page writer shared by the windowed and
-/// offscreen renderers.
+/// The sprite pipeline, default shader store, texture-page store, and bindless page writer shared by
+/// the windowed and offscreen renderers.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Both target drivers create the same sprite pipeline per output format, the same asynchronous
+/// Both target drivers create the same sprite pipeline per output format, the same default
+/// <see cref="ShaderStore"/> loaded from the built-in pack, the same asynchronous
 /// <see cref="TexturePageStore"/>, and the same production <see cref="VulkanTexturePages"/> GPU seam;
 /// they also retire every in-flight frame fence and rewrite every frame's bindless descriptor set
 /// when the page capacity grows. This composition owns that setup and teardown.
@@ -36,6 +38,7 @@ internal sealed class RendererTextures : IBindlessPageWriter
     private readonly int _textureUploadBudgetBytes;
     private readonly string _modeDescription;
     private SpritePipeline? _pipeline;
+    private ShaderStore? _shaders;
     private VulkanTexturePages? _gpu;
     private TexturePageStore? _pages;
     private int _stopLogPageCount;
@@ -89,6 +92,9 @@ internal sealed class RendererTextures : IBindlessPageWriter
     /// <summary>Gets the sprite pipeline owner, or <see langword="null"/> before startup.</summary>
     internal SpritePipeline? Pipeline => _pipeline;
 
+    /// <summary>Gets the default shader store, or <see langword="null"/> before startup.</summary>
+    internal ShaderStore? Shaders => _shaders;
+
     /// <summary>Gets the texture-page cache, or <see langword="null"/> before startup.</summary>
     internal TexturePageStore? Pages => _pages;
 
@@ -108,14 +114,26 @@ internal sealed class RendererTextures : IBindlessPageWriter
     internal int StopLogFailedPaths => _stopLogFailedPaths;
 
     /// <summary>
-    /// Creates the sprite pipeline owner on first use and the pipeline for the output format.
+    /// Creates the sprite pipeline owner, the shader catalog, and the pipeline for the output
+    /// format on first use; a later format creates only that format's default pipeline.
     /// </summary>
     /// <param name="format">The target's sRGB output color format.</param>
-    /// <exception cref="Bork2dException">The pipeline could not be created.</exception>
+    /// <exception cref="Bork2dException">
+    /// The vertex module, default shader asset/module, or graphics pipeline is missing or invalid.
+    /// </exception>
     internal void EnsurePipeline(Format format)
     {
-        SpritePipeline pipeline = _pipeline ??= SpritePipeline.Create(_device, _instance, _logger);
-        pipeline.GetOrCreatePipeline(format);
+        if (_pipeline is null)
+        {
+            byte[] vertexSpirV = ShaderStore.LoadSpirV(
+                _assets,
+                ShaderStore.VertexSpirVPath,
+                "the built-in sprite vertex module");
+            _pipeline = SpritePipeline.Create(_device, _instance, _logger, vertexSpirV);
+            _shaders = ShaderStore.Create(_assets, _pipeline, _assetCatalogVersion, _logger);
+        }
+
+        _shaders!.EnsureDefaultPipeline(format);
     }
 
     /// <summary>
@@ -149,10 +167,15 @@ internal sealed class RendererTextures : IBindlessPageWriter
     }
 
     /// <summary>
-    /// Advances the texture-page state machine once per frame, before recording, so completed loads
-    /// prepare uploads and completed uploads write their bindless descriptor.
+    /// Advances the shader catalog and the texture-page state machine once per frame, before
+    /// recording, so completed loads prepare the next frame's modules/uploads and completed uploads
+    /// write their bindless descriptor.
     /// </summary>
-    internal void Pump() => _pages!.Pump();
+    internal void Pump()
+    {
+        _shaders!.Pump();
+        _pages!.Pump();
+    }
 
     /// <summary>Records the page counters before the page store is destroyed for the stop log.</summary>
     internal void CaptureStopCounters()
@@ -169,10 +192,15 @@ internal sealed class RendererTextures : IBindlessPageWriter
         _stopLogFailedPaths = pages.FailedPathCount;
     }
 
-    /// <summary>Destroys the pages and the pipeline in dependency order; idempotent and never throws.</summary>
+    /// <summary>
+    /// Destroys the pages, the default shader module, and the pipeline in dependency order;
+    /// idempotent and never throws.
+    /// </summary>
     /// <remarks>
     /// Frame descriptor sets/pools are destroyed by the frame set before this runs, so the page
-    /// images/views they reference can be freed before the pipeline that owns their samplers.
+    /// images/views they reference can be freed before the pipeline that owns their samplers. The
+    /// shader store is disposed before the pipeline; destroying a module still referenced by a
+    /// pipeline object is safe, and the store may not be used after this point.
     /// </remarks>
     internal void Destroy()
     {
@@ -184,6 +212,9 @@ internal sealed class RendererTextures : IBindlessPageWriter
         _pages?.Destroy();
         _pages = null;
         _gpu = null;
+
+        _shaders?.Dispose();
+        _shaders = null;
 
         _pipeline?.Destroy();
         _pipeline = null;

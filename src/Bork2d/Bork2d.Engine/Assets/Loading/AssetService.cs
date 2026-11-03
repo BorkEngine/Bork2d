@@ -9,16 +9,17 @@ namespace Bork2d.Engine.Assets.Loading;
 
 /// <summary>
 /// The app-scoped asset service: one dedicated loader thread, one unbounded FIFO request queue, and
-/// an internal base/overlay filesystem.
+/// an internal built-in/base/overlay filesystem.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The constructor allocates the in-memory filesystem only: it does not resolve a path, open a
-/// file, or start a thread, so <c>Build()</c> can stay filesystem-free. <see cref="Start"/> opens
-/// and validates the base pack (unless the service was created for an empty filesystem) and then
-/// starts exactly one loader thread. <see cref="Stop"/> stops accepting requests, cancels queued
-/// and in-flight load tasks, joins the loader, and closes the mounted packs. Both are idempotent
-/// at the <see cref="Dispose"/> level.
+/// file, or start a thread, so <c>Build()</c> can stay filesystem-free. <see cref="Start"/> mounts the
+/// embedded built-in pack first (when one is supplied), then opens and validates the base pack
+/// (unless the service was created for an empty filesystem), and then starts exactly one loader
+/// thread. The built-in pack therefore sits below every game pack and overlay. <see cref="Stop"/>
+/// stops accepting requests, cancels queued and in-flight load tasks, joins the loader, and closes
+/// the mounted packs. Both are idempotent at the <see cref="Dispose"/> level.
 /// </para>
 /// <para>
 /// A load request resolves its winning pack entry at enqueue time, so a later overlay mount never
@@ -43,6 +44,9 @@ internal sealed class AssetService : IAssets, IAssetCatalogVersion, IDisposable
     private const string DataKind = "data";
     private const string MessagePackKind = "messagepack";
 
+    /// <summary>The identifier used for the embedded pack in diagnostics and logs.</summary>
+    internal const string BuiltInPackDisplayPath = "<built-in>";
+
     private readonly Lock _lock = new();
     private readonly AssetFileSystem _fileSystem = new();
     private readonly Queue<AssetRequest> _queue = new();
@@ -50,6 +54,7 @@ internal sealed class AssetService : IAssets, IAssetCatalogVersion, IDisposable
     private readonly CancellationTokenSource _stopping = new();
     private readonly ILogger _logger;
     private readonly string? _basePackPath;
+    private readonly byte[]? _builtInPack;
 
     private Thread? _loaderThread;
     private AssetRequest? _inFlight;
@@ -63,16 +68,25 @@ internal sealed class AssetService : IAssets, IAssetCatalogVersion, IDisposable
     /// filesystem or starting a thread.
     /// </summary>
     /// <param name="basePackPath">
-    /// The configured base pack path, or <see langword="null"/> for an empty filesystem
+    /// The configured base pack path, or <see langword="null"/> for no game base pack
     /// (<c>WithoutAssets</c>). Relative paths resolve against the process current directory when
     /// <see cref="Start"/> opens the pack.
     /// </param>
     /// <param name="loggerFactory">The app-owned logger factory.</param>
-    internal AssetService(string? basePackPath, ILoggerFactory loggerFactory)
+    /// <param name="builtInPack">
+    /// The embedded built-in pack bytes, or <see langword="null"/> when the caller (an engine test)
+    /// supplies no built-in pack. When present it is mounted first, below the base pack and every
+    /// overlay.
+    /// </param>
+    internal AssetService(
+        string? basePackPath,
+        ILoggerFactory loggerFactory,
+        byte[]? builtInPack = null)
     {
         ArgumentNullException.ThrowIfNull(loggerFactory);
 
         _basePackPath = basePackPath;
+        _builtInPack = builtInPack;
         _logger = loggerFactory.CreateLogger(Category);
     }
 
@@ -100,11 +114,12 @@ internal sealed class AssetService : IAssets, IAssetCatalogVersion, IDisposable
     internal Thread? LoaderThread => Volatile.Read(ref _loaderThread);
 
     /// <summary>
-    /// Opens and validates the base pack, starts the loader thread, and logs the start event.
+    /// Mounts the embedded built-in pack (when supplied), opens and validates the base pack, starts
+    /// the loader thread, and logs the start events.
     /// </summary>
     /// <exception cref="Bork2dException">
-    /// The configured base pack is missing or malformed. The partial service is cleaned up and no
-    /// loader thread is left running.
+    /// The embedded built-in pack is malformed, or the configured base pack is missing or malformed.
+    /// The partial service is cleaned up and no loader thread is left running.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The service has been disposed.</exception>
     /// <exception cref="InvalidOperationException">The service has already been started.</exception>
@@ -121,9 +136,30 @@ internal sealed class AssetService : IAssets, IAssetCatalogVersion, IDisposable
             _started = true;
         }
 
+        PackMountInfo? builtInMount = null;
         PackMountInfo? mount = null;
         try
         {
+            if (_builtInPack is not null)
+            {
+                try
+                {
+                    builtInMount = _fileSystem.LoadPack(
+                        new MemoryStream(_builtInPack, writable: false),
+                        BuiltInPackDisplayPath);
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    _logger.LogError(
+                        exception,
+                        "Failed to open the built-in asset pack: {Reason}.",
+                        exception.Message);
+                    throw new Bork2dException(
+                        $"Failed to open the embedded built-in asset pack: {exception.Message}",
+                        exception);
+                }
+            }
+
             if (_basePackPath is not null)
             {
                 try
@@ -156,6 +192,7 @@ internal sealed class AssetService : IAssets, IAssetCatalogVersion, IDisposable
             throw;
         }
 
+        LogBuiltInMounted(builtInMount);
         LogStarted(mount);
     }
 
@@ -548,6 +585,20 @@ internal sealed class AssetService : IAssets, IAssetCatalogVersion, IDisposable
     {
         LogLoadFailure(exception);
         return Task.FromException<T>(exception);
+    }
+
+    private void LogBuiltInMounted(PackMountInfo? mount)
+    {
+        if (mount is { } info)
+        {
+            _logger.LogInformation(
+                "Mounted built-in asset pack '{PackPath}' below the game packs: version "
+                    + "{Version}, entries {EntryCount}, stored bytes {StoredBytes}.",
+                info.SuppliedPath,
+                info.Version,
+                info.EntryCount,
+                info.StoredBytes);
+        }
     }
 
     private void LogStarted(PackMountInfo? mount)

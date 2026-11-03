@@ -11,22 +11,24 @@ Bork2d.Tests ───> Bork2d.Engine, Bork2d.Render, Bork2d.Runtime, Bork2d.Bak
 Bork2d.Runtime ─> Bork2d.Render ─> Bork2d.Engine
       └──────────────────────────────^
 Bork2d.Bake ────────────────────────> Bork2d.Engine   (build time only)
+build/Bork2d.BuiltInAssets ─────────> Bork2d.Bake, Bork2d.Engine   (build time only)
 ```
 
 | Project | Role |
 | --- | --- |
 | [Bork2d.Engine](../src/Bork2d/Bork2d.Engine) | Public contract and implementation: scene, time, input/platform seams, assets, pack reader/writer. No GPU, OS, or logging-provider dependency. |
 | [Bork2d.Render](../src/Bork2d/Bork2d.Render) | Internal Vulkan implementation: device selection, swapchain/offscreen target, sprite pipeline, texture pages, snapshot handoff, capture. |
-| [Bork2d.Runtime](../src/Bork2d/Bork2d.Runtime) | Public host: builder, modes, SDL window/input, Vulkan instance/surface, renderer composition, logging. |
+| [Bork2d.Runtime](../src/Bork2d/Bork2d.Runtime) | Public host: builder, modes, SDL window/input, Vulkan instance/surface, renderer composition, logging. Embeds the built-in shader pack. |
 | [Bork2d.Bake](../src/Bork2d/Bork2d.Bake) | Build-time JIT tooling: TOML binding, processors, texture decode, pack composition, incremental manifest, CLI. |
+| [Bork2d.BuiltInAssets](../build/Bork2d.BuiltInAssets/Bork2d.BuiltInAssets.csproj) | Build-only JIT generator for the embedded built-in shader pack. Outside the runtime solution and never referenced by a runtime project. |
 | [Bork2d.Tests](../src/Bork2d/Bork2d.Tests) | xUnit suite, including dependency-matrix and public-surface tests. |
 
 The rules are test-enforced by
 [DependencyMatrixTests.cs](../src/Bork2d/Bork2d.Tests/Architecture/DependencyMatrixTests.cs):
 `Bork2d.Render` references only `Bork2d.Engine`, `Bork2d.Runtime` references only engine and render,
-`Bork2d.Bake` references only engine, and no runtime project references bake tooling. The engine may
-reference only the BCL and its four implementation packages (PolyType, Nerdbank.MessagePack,
-Microsoft.Extensions.Logging.Abstractions, System.IO.Hashing).
+`Bork2d.Bake` references only engine, and no runtime project references bake tooling or the built-in
+pack generator. The engine may reference only the BCL and its four implementation packages (PolyType,
+Nerdbank.MessagePack, Microsoft.Extensions.Logging.Abstractions, System.IO.Hashing).
 
 ## Threads
 
@@ -40,6 +42,8 @@ Microsoft.Extensions.Logging.Abstractions, System.IO.Hashing).
 
 No member requires the process main thread. Scene structure is serialized by one engine-owned lock;
 per-object property access uses a per-object lock, with structural-then-object lock ordering.
+Engine-wide user shader uniforms use a separate dedicated lock and never the structural lock, so
+setting a global never blocks scene capture or per-object work.
 
 The two render target drivers stay separate: `VulkanRenderer` owns swapchain acquire/present,
 resize, recovery, and the minimized drain; `VulkanOffscreenRenderer` owns the fixed sRGB target, its
@@ -63,7 +67,8 @@ snapshot:
 3. It walks the rooted scene once with an iterative, parent-first traversal that composes one world
    matrix and takes one per-object lock per node, and runs the registered typed renderable producers,
    which capture every camera, sprite, and custom renderable into its typed buffer in the slot as
-   value-only records.
+   value-only records. After the walk it copies the engine-wide user shader uniforms into their own
+   value-only snapshot buffer.
 4. It publishes the slot as the newest snapshot. A newer publish supersedes the previous `Ready`
    slot, never a `Rendering` one.
 5. The render thread takes the latest `Ready` snapshot, plans the frame, records it, and releases
@@ -96,10 +101,15 @@ Assets are built ahead of time, not loaded from loose files at runtime:
    processors.
 2. The bake discovers sources under ordered pack roots, binds TOML, runs processors, validates
    references, stages every pack, and publishes the staged set with rollback on failure.
-3. The runtime mounts the base pack (and any later overlays), resolving a canonical path to the
-   winning entry.
-4. The asset loader thread decompresses and deserializes on demand.
-5. The render thread prefetches texture descriptors/payloads through `IAssets` and uploads them to
+3. The build of `Bork2d.Runtime` runs the build-only `Bork2d.BuiltInAssets` generator over
+   `src/Bork2d/BuiltInAssets/Assets`. The generator uses the same bake processors and pack writer,
+   emits `bork2d-builtin.pck` into a temporary output directory, and writes it as a generated C# byte
+   array that is compiled into the runtime assembly. The generator and its bake references stay out
+   of the runtime solution, output, and publish graph.
+4. The runtime mounts the embedded built-in pack first, then the base pack (and any later overlays),
+   resolving a canonical path to the winning entry.
+5. The asset loader thread decompresses and deserializes on demand.
+6. The render thread prefetches texture descriptors/payloads through `IAssets` and uploads them to
    bindless texture pages without blocking on a load.
 
 ## Invariants
@@ -115,14 +125,17 @@ Assets are built ahead of time, not loaded from loose files at runtime:
   sprite's drawn quad are converted to world AABBs, and a sprite is skipped only when its known
   bounds do not intersect the camera's. Empty bounds mean "unknown" and never cull; there is no
   spatial index and no culling toggle.
-- **Snapshots.** Capture contains no live scene entities. The only object reference that crosses
-  the tick/render boundary is immutable sprite render data, frozen from the loaded `SpriteAsset`
-  when it was assigned; the mutable asset itself is never captured. Reusing a slot clears every
-  typed render-data buffer's used range, so it retains no obsolete render data.
+- **Snapshots.** Capture contains no live scene entities. The only object references that cross the
+  tick/render boundary are immutable sprite render data and immutable shader render data, frozen from
+  the loaded `SpriteAsset`/`ShaderAsset` when it was assigned; the mutable assets themselves are
+  never captured. Reusing a slot clears every typed render-data buffer's used range and the user
+  global-uniform buffer, so it retains no obsolete render data or names.
 - **AOT.** Generated shapes are required; there is no reflection-shape fallback or runtime TOML.
   Runtime projects enable trim and AOT analyzers.
-- **Tooling isolation.** The bake tooling, TOML parser, image decoder, and shader compiler never
-  enter a runtime project's output or publish graph.
+- **Tooling isolation.** The bake tooling, TOML parser, image decoder, shader compiler, and the
+  built-in pack generator never enter a runtime project's output or publish graph. The built-in pack
+  itself is different: it is generated at build time and embedded in `Bork2d.Runtime` as C#, so the
+  runtime carries its default shader assets without a loose pack file or tooling dependency.
 
 ## Quality gates
 

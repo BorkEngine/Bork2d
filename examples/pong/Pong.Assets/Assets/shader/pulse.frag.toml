@@ -1,0 +1,2 @@
+[uniforms]
+lastHit = { type = "float", default = 0.0 }

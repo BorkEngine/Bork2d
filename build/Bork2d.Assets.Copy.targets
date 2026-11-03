@@ -37,9 +37,16 @@
         <Bork2dAssetsMode Condition="'$(Bork2dAssetsMode)' == '' and '$(Configuration)' == 'Release'">release</Bork2dAssetsMode>
         <Bork2dAssetsMode Condition="'$(Bork2dAssetsMode)' == ''">debug</Bork2dAssetsMode>
         <Bork2dAssetsVerbose Condition="'$(Bork2dAssetsVerbose)' == ''">false</Bork2dAssetsVerbose>
+        <Bork2dAssetsSourceRoot Condition="'$(Bork2dAssetsSourceRoot)' == ''">Assets</Bork2dAssetsSourceRoot>
         <_Bork2dAssetsVerboseSwitch Condition="'$(Bork2dAssetsVerbose)' == 'true'"> --verbose</_Bork2dAssetsVerboseSwitch>
         <_Bork2dAssetsVerboseSwitch Condition="'$(_Bork2dAssetsVerboseSwitch)' == ''"></_Bork2dAssetsVerboseSwitch>
     </PropertyGroup>
+
+    <ItemGroup Condition="'$(Bork2dAssetsProjectDirectory)' != ''">
+        <!-- The app owns no compile input for asset sources; declare them so an asset-only edit
+             invalidates the app build that builds and copies the pack. -->
+        <UpToDateCheckInput Include="$(Bork2dAssetsProjectDirectory)\$(Bork2dAssetsSourceRoot)\**\*" />
+    </ItemGroup>
 
     <Target Name="Bork2dValidateAssetsCopyConfiguration"
             BeforeTargets="Bork2dCopyAssetsToBuild;Bork2dCopyAssetsToPublish"

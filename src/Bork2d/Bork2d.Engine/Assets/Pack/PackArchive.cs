@@ -129,8 +129,28 @@ internal sealed class PackArchive : IDisposable
     /// <exception cref="ArgumentException">The stream is not readable and seekable.</exception>
     /// <exception cref="Bork2dException">The stream is not a valid v1 pack.</exception>
     internal static PackArchive Open(Stream stream)
+        => Open(stream, "<stream>");
+
+    /// <summary>
+    /// Opens and validates a pack from a caller-supplied seekable stream with an explicit identifier
+    /// for diagnostics.
+    /// </summary>
+    /// <remarks>
+    /// The runtime uses this overload for the embedded built-in pack, whose bytes have no filesystem
+    /// path, so every validation message still names the pack.
+    /// </remarks>
+    /// <param name="stream">The readable, seekable pack stream; the archive takes ownership.</param>
+    /// <param name="displayPath">The non-empty identifier used in diagnostics.</param>
+    /// <returns>The validated archive.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="stream"/> or <paramref name="displayPath"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="displayPath"/> is empty or whitespace, or the stream is not readable and seekable.
+    /// </exception>
+    /// <exception cref="Bork2dException">The stream is not a valid v1 pack.</exception>
+    internal static PackArchive Open(Stream stream, string displayPath)
     {
         ArgumentNullException.ThrowIfNull(stream);
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayPath);
         if (!stream.CanRead)
         {
             throw new ArgumentException("The pack stream must be readable.", nameof(stream));
@@ -143,7 +163,7 @@ internal sealed class PackArchive : IDisposable
 
         try
         {
-            return Create(stream, "<stream>");
+            return Create(stream, displayPath);
         }
         catch
         {

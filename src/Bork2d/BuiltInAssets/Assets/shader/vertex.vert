@@ -1,10 +1,10 @@
 #version 460
 
-// Bork2d sprite pipeline vertex shader.
+// Bork2d built-in sprite pipeline vertex shader.
 //
-// The instance record is the approved 96-byte std430 ABI (6 x vec4). The vertex stage has no
-// vertex buffer: gl_VertexIndex selects one of the four generated quad corners and
-// gl_InstanceIndex selects the instance record.
+// The instance record is the 176-byte std430 ABI (11 x vec4). The vertex stage has no vertex
+// buffer: gl_VertexIndex selects one of the four generated quad corners and gl_InstanceIndex
+// selects the instance record.
 //
 // FlipX/FlipY are applied by the planner as the sign of size.x/size.y. That is algebraically
 // identical to the approved formula
@@ -13,12 +13,17 @@
 
 struct Instance
 {
-    vec4 transform0; // M11, M12, M21, M22 (2x2 linear part)
-    vec4 transform1; // M31, M32, sizeX, sizeY (sizeX/sizeY carry the flip sign)
+    vec4 transform0; // M11, M12, M21, M22
+    vec4 transform1; // M31, M32, sizeX, sizeY (size signs carry flips)
     vec4 uv0;        // uTL, vTL, uTR, vTR
     vec4 uv1;        // uBR, vBR, uBL, vBL
     vec4 tint;       // linear RGBA
-    vec4 misc;       // pivotX, pivotY, textureIndex, flags (reserved, zero)
+    vec4 misc;       // pivotX, pivotY, mainTextureIndex, flags (zero)
+    vec4 extraTextureIndices; // 4 additional bindless indices as floats
+    vec4 instanceParams0;
+    vec4 instanceParams1;
+    vec4 instanceParams2;
+    vec4 instanceParams3;
 };
 
 layout(std430, set = 0, binding = 0) readonly buffer InstanceBuffer
@@ -34,6 +39,10 @@ layout(push_constant) uniform PushConstants
 layout(location = 0) out vec2 vUv;
 layout(location = 1) out vec4 vTint;
 layout(location = 2) flat out uint vTextureIndex;
+layout(location = 3) out vec2 vWorldPosition;
+layout(location = 4) out vec2 vLocalPosition;
+layout(location = 5) flat out uint vExtraTextureIndices[4];
+layout(location = 9) out vec4 vInstanceParams[4];
 
 void main()
 {
@@ -86,4 +95,16 @@ void main()
     vUv = uv;
     vTint = instance.tint;
     vTextureIndex = uint(instance.misc.z);
+    vWorldPosition = world.xy;
+    vLocalPosition = local;
+    vExtraTextureIndices = uint[4](
+        uint(instance.extraTextureIndices.x),
+        uint(instance.extraTextureIndices.y),
+        uint(instance.extraTextureIndices.z),
+        uint(instance.extraTextureIndices.w));
+    vInstanceParams = vec4[4](
+        instance.instanceParams0,
+        instance.instanceParams1,
+        instance.instanceParams2,
+        instance.instanceParams3);
 }

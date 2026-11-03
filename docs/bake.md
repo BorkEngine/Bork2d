@@ -2,8 +2,8 @@
 
 `Bork2d.Bake` is the build-time asset pipeline. It is a JIT library used by game-owned assets
 executables; it references `Bork2d.Engine` and the pack writer, but no runtime project references
-it. The bake tooling, TOML parser, image decoder, and processors never enter a game's compile or
-publish graph.
+it. The bake tooling, TOML parser, image decoder, shader compiler, and processors never enter a
+game's compile or publish graph.
 
 A game owns an assets executable (for example
 [Pong.Assets](../examples/pong/Pong.Assets)) whose `Program` configures `BakeApplicationBuilder`
@@ -40,7 +40,8 @@ return await new BakeApplicationBuilder()
 - `RegisterAsset<T>(validator)` registers the type when it is not registered yet and appends a
   semantic validator. It never reports the duplicate-type diagnostic; multiple validators for one type
   run in registration order, and a null validator throws.
-- `UseDefaultProcessors()` registers the built-in texture processor.
+- `UseDefaultProcessors()` registers the built-in texture processor and the built-in fragment shader
+  processor.
 - `WithTextureDefaults` supplies sampler state for textures without a sidecar.
 - `AddProcessor` adds a custom processor; later registrations override earlier ones for the same
   extension and report an informational diagnostic.
@@ -55,8 +56,8 @@ Each pack root is walked recursively in ordinal path order. Reparse points are s
 classified as follows:
 
 - **Processor source.** A non-TOML file whose longest registered compound extension matches a
-  processor (for example `.png` or `.circle`). Its asset base path is the pack-relative path with
-  the extension removed and lowercased.
+  processor (for example `.png`, `.frag`, or `.circle`). Its asset base path is the pack-relative
+  path with the extension removed and lowercased.
 - **Data TOML.** A `.toml` file with a root `[bork2d]` table whose `type` is a registered CLR type.
   The asset path is the file path without `.toml`, lowercased. Constructor parameters/properties
   bind by name; a data TOML filename must not contain a dot.
@@ -98,6 +99,82 @@ wrap = "clamp"      # clamp | repeat
 An absent key falls back to `WithTextureDefaults`. A missing sidecar is created with both defaults
 and reported as an informational diagnostic. Texture decoding produces straight-alpha RGBA8 without
 premultiplication, gamma changes, flipping, or resampling; 16-bit PNGs are rejected.
+
+### Fragment shaders
+
+`Assets/materials/lit.frag` is handled by the built-in shader processor. It emits a `ShaderAsset`
+at `materials/lit` and the raw SPIR-V payload at `materials/lit-spv`. A shader is an ordinary asset,
+not a reserved directory: it may live under any canonical asset path.
+
+The processor supplies `#version 460`, `#extension GL_EXT_nonuniform_qualifier : require`, the fixed
+fragment interface, and the `main` entry point. A source therefore contains only its own functions
+and `void main()`; a `#version` or `#extension` directive (after optional leading whitespace) is a
+bake error. The source is read as strict UTF-8.
+
+The prefix defines `main` as `bork2d_user_main`, and the processor appends a fixed epilogue after the
+source that undefines the macro and supplies the real `void main()`. The epilogue calls the user body
+and then references every fixed-interface input in a branch that cannot be reached for valid engine
+data: it ORs the four extra bindless indices and compares them against `0x003FFFFF`, above the
+engine's 1,048,576-entry bindless cap. This keeps a user source that does not consume every varying
+from making the engine-owned vertex stage's outputs appear unconsumed (a Vulkan
+`WARNING-Shader-OutputNotConsumed`), and the branch body never runs, so no valid frame's pixels
+change. The epilogue suffix is not part of the prologue line count used to map shaderc diagnostics
+back to the source; the `#define main` line is part of the prefix and is included in that offset.
+
+The fixed interface is versioned by the shader layout version `2`:
+
+| Input | Meaning |
+| --- | --- |
+| `vUv` | Interpolated sprite UV. |
+| `vTint` | Sprite linear RGBA tint. |
+| `vWorldPosition` | Fragment world position. |
+| `vLocalPosition` | Fragment position in the sprite's local quad space. |
+| `vTextureIndex` | Bindless index of the sprite's main texture. |
+| `vExtraTextureIndices[4]` | Bindless indices of up to four additional textures. |
+| `vInstanceParams[4]` | The packed per-renderable uniform block. |
+| `outColor` | The linear RGBA output. |
+
+The prologue places the bindless sampler array at set `0`, binding `1` and the global block
+(`vec4 time; vec4 globals[8]`) at set `1`, binding `2`. Layout version `2` is the first version with
+that fixed placement.
+
+The prologue also defines the direct-use macros `BORK2D_MAIN_TEXTURE`, `BORK2D_TEXTURE0` through
+`BORK2D_TEXTURE3`, and `BORK2D_TIME`, plus one macro per sidecar-declared uniform so a declared name
+such as `uPulse` is usable directly. Every macro expansion is parenthesized.
+
+The required sidecar `<source>.toml` declares the additional texture slots and uniforms:
+
+```toml
+textureSlots = ["mask", "noise"]
+
+[uniforms]
+uPulse = { type = "float", default = 1.0 }
+uTint = { type = "color", default = [1.0, 1.0, 1.0, 1.0] }
+
+[globals]
+uWind = { type = "vec2", default = [0.0, 0.0] }
+```
+
+- `textureSlots` holds at most four unique GLSL identifiers. Their positions correspond to the
+  sprite's additional texture positions; the names are metadata only.
+- `type` is exactly `float`, `vec2`, `vec3`, `vec4`, or `color` (case-sensitive).
+- `default` is absent for a zero value, a scalar for `float`, or an array of numbers whose length
+  matches the declared component count: `float` 1, `vec2` 2, `vec3` 3, and `vec4`/`color` 4. Every
+  component must be finite.
+- A declared name must be a GLSL identifier that does not start with `gl_`, `BORK2D_`, or
+  `bork2d`, and must be unique across `[uniforms]` and `[globals]`.
+
+The instance block has 16 float lanes. Declarations are sorted by ordinal name and assigned in that
+order: `float` takes one lane and aligns to one, `vec2` takes two and aligns to two, and `vec3`,
+`vec4`, and `color` take their width and align to four, so a declaration never crosses a `vec4`
+lane boundary. Overflow is an error; the bake never truncates. The global block has eight `vec4`
+slots: each declaration gets one slot at float lane `slot * 4`, in ordinal name order. The emitted
+`ShaderAsset` records the packed declarations in that order and the texture slots in sidecar order;
+unused `Default` components are zero.
+
+A missing sidecar is created empty and reported as an informational diagnostic, so the shader
+declares no uniforms and no extra slots. An existing empty sidecar has the same meaning. Shader
+compilation uses shaderc 2.23.0 in the bake tooling; no runtime project references it.
 
 ## Asset validators
 
@@ -157,6 +234,13 @@ not validate processor outputs, sidecars, or runtime-loaded assets.
 
 ## Processors
 
+`UseDefaultProcessors()` registers the built-in processors:
+
+| Source | Name | Outputs | Sidecar |
+| --- | --- | --- | --- |
+| `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tga` | `texture` | `TextureDescriptor` at the base path, raw RGBA8 at `<base>-raw`. | Required; created from `WithTextureDefaults` when missing. |
+| `.frag` | `shader` | `ShaderAsset` at the base path, raw SPIR-V at `<base>-spv`. | Required; created empty when missing. |
+
 Implement `IAssetProcessor` for a sidecar-free source, or derive from `AssetProcessor<TSidecar>` for
 a required-sidecar source. A processor declares a stable `Name`, its extension list, and its
 sidecar policy. Its `Process` method reads the source and emits outputs through the per-source
@@ -178,6 +262,32 @@ Processors run synchronously on the bake thread and may be reused, so they must 
 per-source state. They never touch MessagePack or the pack writer directly. A failed source emits
 no outputs. See [CircleProcessor.cs](../examples/pong/Pong.Assets/Processors/CircleProcessor.cs)
 for a worked custom processor.
+
+## Built-in asset pack
+
+The engine's own shader assets live under
+[src/Bork2d/BuiltInAssets/Assets](../src/Bork2d/BuiltInAssets/Assets) and are baked by the build-only
+[Bork2d.BuiltInAssets](../build/Bork2d.BuiltInAssets/Bork2d.BuiltInAssets.csproj) generator. The
+generator configures the ordinary builder with `WithPack("bork2d-builtin.pck", "Assets")`,
+`UseDefaultProcessors()`, and one tool-only processor for the engine-owned vertex stage, runs the
+normal `bake` command into a unique temporary output directory, and writes the pack as a generated C#
+byte array. `Bork2d.Runtime` compiles that file into its assembly and mounts the pack below the game
+packs; no loose pack file is published.
+
+The source tree uses the same processors as game content. `shader/sprite.frag` and its checked-in
+empty `shader/sprite.frag.toml` sidecar produce the `shader/sprite` `ShaderAsset` and the
+`shader/sprite-spv` payload, exactly like a game shader; the sidecar is committed so a clean build
+never creates or mutates a source file. The tool-only `builtin-vertex` processor owns `.vert`: it
+reads the source as strict UTF-8, compiles it through the shared `GlslCompiler`, and emits
+`shader/vertex-spv`. `.vert` is not registered by `UseDefaultProcessors()`, so it is not a
+user-facing source type.
+
+[build/Bork2d.BuiltInAssets.targets](../build/Bork2d.BuiltInAssets.targets) is imported by
+`Bork2d.Runtime.csproj`. Before `CoreCompile` it restores and builds the generator out of process,
+regenerates the pack when any built-in source or the tool assembly changes, and adds the generated
+file to the compilation. It works from a clean clone and never writes into the source tree: the pack
+goes to a temporary output directory and the generator removes the bake's incremental state
+afterwards. Generated files are never committed.
 
 ## CLI
 
@@ -228,25 +338,38 @@ Codes are stable once a range is released. A diagnostic renders as
 | `BK6xxx` | MSBuild/build integration. |
 | `BK7xxx` | Processor registration and processing. |
 | `BK8xxx` | Registered semantic asset validators, including the built-in sprite validator. |
+| `BK9xxx` | Fragment shader sources and metadata: unreadable or forbidden source (`BK9001`), shaderc compilation failure (`BK9002`), invalid sidecar name/type/default/slots (`BK9003`), and instance/global uniform block overflow (`BK9004`). |
 
 ## Incremental builds
 
 `bake` records a schema-3 manifest at `<project root>/obj/bork2d/bake/manifest.json`. It tracks the
 tool version, configuration hash, registered type/processor assembly closure, mode, every input
-path/hash, and every output path/hash. When all match, the bake prints an up-to-date summary and
-writes nothing. Any changed source, registration, processor, pack path, mode, or output triggers a
-full bake; `--force` bypasses the check, and `--check`/`validate` always run the pipeline and its
-validators. `clean` removes the manifest with the packs.
+path/hash, and every output path/hash. The configuration hash includes the shader tool marker
+`shaderc-2.23.0/layout-2/prologue-3/packer-1`, so upgrading shaderc or changing the fragment layout,
+prologue, or uniform packer invalidates a manifest written by the earlier tool. When all match, the
+bake prints an up-to-date summary and writes nothing. Any changed source, registration, processor,
+pack path, mode, or output triggers a full bake; `--force` bypasses the check, and
+`--check`/`validate` always run the pipeline and its validators. `clean` removes the manifest with
+the packs.
 
 ## MSBuild integration
 
 Import [`build/Bork2d.Assets.targets`](../build/Bork2d.Assets.targets) from the assets executable.
 After `Build` it runs `bake --project-root $(MSBuildProjectDirectory) --mode <debug|release>`; before
 `CoreClean` it runs `clean`. Useful properties: `Bork2dAssetsMode`, `Bork2dAssetsVerbose`,
-`Bork2dAssetsEnabled`, `Bork2dAssetsTargetFramework`, `Bork2dDotNetHost`.
+`Bork2dAssetsEnabled`, `Bork2dAssetsSourceRoot` (project-relative, default `Assets`),
+`Bork2dAssetsTargetFramework`, `Bork2dDotNetHost`.
 
 Import [`build/Bork2d.Assets.Copy.targets`](../build/Bork2d.Assets.Copy.targets) from a desktop or
 AOT app to copy the baked packs. Set `Bork2dAssetsProjectDirectory` and
 `Bork2dAssetsExecutable`; when `Bork2dAssetsProjectFile` is set, the targets restore and build the
 assets executable out of process before copying to `$(TargetDir)` and `$(PublishDir)`. This keeps
 the tooling out of the app's output and publish graph, including for a self-contained AOT app.
+
+The mode selects payload compression, not automatic asset watching: Debug packs are uncompressed
+and Release packs use Zstd only when it is strictly smaller. The assets and copy targets declare
+the source root as `UpToDateCheckInput` and as incremental target inputs, with a stamp output, so
+Visual Studio, Rider, and plain MSBuild rerun the bake after an asset-only edit instead of skipping
+an apparently up-to-date project. Without that declaration an IDE can skip MSBuild entirely after
+the first build and the manifest's own change detection never runs. A stale project can always be
+refreshed with Rebuild; the bake manifest then detects the changed source and rewrites the pack.

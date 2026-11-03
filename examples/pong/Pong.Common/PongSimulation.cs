@@ -103,6 +103,8 @@ public sealed class PongSimulation
     /// <summary>Gets the winning side, or <see cref="PongSide.None"/> while the match is running.</summary>
     public PongSide Winner { get; private set; }
 
+    public event Action OnBallBounce = delegate { };
+
     /// <summary>
     /// Advances the simulation by one step.
     /// </summary>
@@ -197,6 +199,18 @@ public sealed class PongSimulation
             Math.Clamp(_ballPosition.Y, -_halfHeight + BallRadius, _halfHeight - BallRadius));
     }
 
+    public SimulationState CaptureState()
+    {
+        return new SimulationState
+        {
+            LeftScore = LeftScore,
+            RightScore = RightScore,
+            IsPaused = IsPaused,
+            IsServing = IsServing,
+            Winner = Winner
+        };
+    }
+
     private void MovePaddles(float deltaTime, float leftInput, float rightInput)
     {
         // Math.Clamp(NaN, ...) returns NaN, so a non-finite input is treated as neutral.
@@ -214,11 +228,13 @@ public sealed class PongSimulation
         {
             _ballPosition.Y = _halfHeight - BallRadius;
             _ballVelocity.Y = -MathF.Abs(_ballVelocity.Y);
+            OnBallBounce.Invoke();
         }
         else if (_ballPosition.Y - BallRadius < -_halfHeight)
         {
             _ballPosition.Y = -_halfHeight + BallRadius;
             _ballVelocity.Y = MathF.Abs(_ballVelocity.Y);
+            OnBallBounce.Invoke();
         }
 
         TryBounceOffPaddle(left: true);
@@ -266,6 +282,7 @@ public sealed class PongSimulation
         _ballPosition.X = paddleFace + (direction * BallRadius);
         _ballVelocity = new Vector2(direction * MathF.Cos(angle), MathF.Sin(angle))
                         * speed * (1f + (_bounceCount * _settings.PaddleSpeedMultiplier));
+        OnBallBounce.Invoke();
     }
 
     private void ScorePoint(PongSide scorer)

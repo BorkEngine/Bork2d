@@ -5,13 +5,17 @@ using Bork2d.Engine.Rendering;
 namespace Bork2d.Render.Sprites;
 
 /// <summary>
-/// Builds the 96-byte <see cref="SpriteInstance"/> record from a resolved snapshot and quad
-/// (M8 §6.4/§6.6).
+/// Builds the 176-byte <see cref="SpriteInstance"/> record from a resolved snapshot and quad
+/// (M8 §6.4/§6.6, shader ABI v2).
 /// </summary>
 /// <remarks>
-/// The builder is pure and allocation-free. It assumes the caller already validated the sprite and
-/// resolved its quad; <c>flags</c> stays zero because flips are encoded as the sign of
-/// <c>sizeX</c>/<c>sizeY</c>.
+/// The builder is pure and allocation-free. It assumes the caller already validated the sprite,
+/// resolved its quad, and resolved its shader binding and additional textures. <c>flags</c> stays
+/// zero because flips are encoded as the sign of <c>sizeX</c>/<c>sizeY</c>. The four
+/// instance-parameter lanes are copied from the snapshot's frozen uniform block (the planner seeds
+/// the default shader's declared defaults for a sprite without a custom shader), and the four
+/// additional bindless texture indices are the resolved positional slots, with <c>0</c> for an
+/// absent or failed extra texture.
 /// </remarks>
 internal static class SpriteInstanceBuilder
 {
@@ -19,11 +23,15 @@ internal static class SpriteInstanceBuilder
     /// <param name="sprite">The captured sprite values.</param>
     /// <param name="quad">The resolved world-unit quad.</param>
     /// <param name="textureIndex">The bindless page index; <c>0</c> is the placeholder.</param>
+    /// <param name="extraTextureIndices">
+    /// The four resolved additional bindless texture indices; <c>0</c> is the placeholder.
+    /// </param>
     /// <returns>The instance record to write into the mapped buffer.</returns>
     internal static SpriteInstance Create(
         in SpriteSnapshot sprite,
         in SpriteQuad quad,
-        uint textureIndex)
+        uint textureIndex,
+        Vector4 extraTextureIndices = default)
     {
         SpriteRenderData data = sprite.SpriteData
             ?? throw new ArgumentException("A null sprite has no instance.", nameof(sprite));
@@ -43,6 +51,11 @@ internal static class SpriteInstanceBuilder
             Uv1 = new Vector4(uvs[2].X, uvs[2].Y, uvs[3].X, uvs[3].Y),
             Tint = sprite.Tint,
             Misc = new Vector4(quad.Pivot.X, quad.Pivot.Y, textureIndex, 0f),
+            ExtraTextureIndices = extraTextureIndices,
+            InstanceParams0 = sprite.Uniform0,
+            InstanceParams1 = sprite.Uniform1,
+            InstanceParams2 = sprite.Uniform2,
+            InstanceParams3 = sprite.Uniform3,
         };
     }
 }

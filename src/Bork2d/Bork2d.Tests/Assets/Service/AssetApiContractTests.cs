@@ -90,6 +90,9 @@ public sealed class AssetApiContractTests
         Assert.Contains(
             typeof(IShapeable<>),
             typeof(TextureDescriptor).GetInterfaces().Select(UnwrapGeneric));
+        Assert.Contains(
+            typeof(IShapeable<>),
+            typeof(ShaderAsset).GetInterfaces().Select(UnwrapGeneric));
     }
 
     [Fact]

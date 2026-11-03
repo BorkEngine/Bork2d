@@ -14,11 +14,17 @@ public sealed class PongGame : IGame<GameLayer>
 
     private const int PaddleZIndex = 10;
     private const int BallZIndex = 20;
+
+    // A fixed phase keeps the ball's time-driven pulse legible from the first frame instead of
+    // starting at the dimmest point of its cycle.
+    private const float BallPulsePhase = 0.75f;
+
     private const string SettingsPath = "game_settings";
     private const float MinimumCourtHalfWidth = PongSimulation.PaddleInset + PongSimulation.PaddleHalfWidth;
 
     private static readonly Color _clearColor = new(0.04f, 0.04f, 0.06f, 1f);
     private IEngine<GameLayer>? _engine;
+    private SimulationState _lastState = default;
     private string? _title;
 
 
@@ -45,6 +51,7 @@ public sealed class PongGame : IGame<GameLayer>
         GameSettings settings = engine.Assets.LoadAsset<GameSettings>(SettingsPath).GetAwaiter().GetResult();
         SpriteAsset paddleSprite = engine.Assets.LoadAsset(settings.Paddle).GetAwaiter().GetResult();
         SpriteAsset ballSprite = engine.Assets.LoadAsset(settings.Ball).GetAwaiter().GetResult();
+        ShaderAsset ballShader = engine.Assets.LoadAsset(settings.BallShader).GetAwaiter().GetResult();
 
         ICamera<GameLayer> camera = engine.CreateCamera(engine.Root);
         camera.Size = CourtHalfHeight;
@@ -61,8 +68,12 @@ public sealed class PongGame : IGame<GameLayer>
         Ball.Layer = GameLayer.Ball;
         Ball.ZIndex = BallZIndex;
         Ball.Tint = Color.White;
+        Ball.Shader = ballShader;
+        Ball.SetUniform("lastHit", (float)engine.Time.Time);
 
         Simulation = new PongSimulation(settings, ComputeHalfWidth(engine), CourtHalfHeight);
+        Simulation.OnBallBounce += () => Ball.SetUniform("lastHit", (float)engine.Time.Time);
+
         _title = null;
         ApplySimulation();
         UpdateTitle(engine, Simulation);
@@ -133,11 +144,13 @@ public sealed class PongGame : IGame<GameLayer>
 
     private void UpdateTitle(IEngine<GameLayer> engine, PongSimulation simulation)
     {
-        string title = PongTitle.Format(simulation);
-        if (string.Equals(title, _title, StringComparison.Ordinal))
+        SimulationState state = simulation.CaptureState();
+        if (_lastState == state)
         {
             return;
         }
+        _lastState = state;
+        string title = PongTitle.Format(state);
 
         engine.Window.Title = title;
         _title = title;

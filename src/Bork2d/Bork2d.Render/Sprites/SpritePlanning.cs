@@ -12,9 +12,11 @@ namespace Bork2d.Render.Sprites;
 /// <para>
 /// Sorting runs once per snapshot on an index array so the snapshot itself is never copied or
 /// reordered: sprites ascend by <c>Layer</c>, then <c>ZIndex</c>; cameras ascend by <c>ZIndex</c>.
-/// Equal keys are unspecified; the heap sort is deterministic for a given input but is not a stable
-/// sort, so callers must not rely on the order of equal keys. Both orderings share one generic
-/// index sorter with struct comparers, so the heap mechanics exist once and neither path allocates.
+/// Sprite ordering builds compact 12-byte <see cref="SpriteSortKey"/> values and sorts the key
+/// scratch buffer, then writes the resulting indices; a large frame therefore never compares full
+/// captured records or repeatedly reads their cache lines. Cameras keep the small generic heap
+/// sorter. Equal keys are unspecified and neither sort is stable, so callers must not rely on the
+/// order of equal keys; both paths reuse caller-owned scratch and allocate nothing warm.
 /// </para>
 /// <para>
 /// The per-camera filter is the shared <see cref="IsVisible"/> rule: <c>(CullingMask &amp; Layer)
@@ -67,16 +69,42 @@ internal static class SpritePlanning
     /// The output index buffer; at least <paramref name="sprites"/>'s length. The remaining entries
     /// are left untouched.
     /// </param>
-    /// <exception cref="ArgumentException">The index buffer is too small.</exception>
-    internal static void Sort(ReadOnlySpan<SpriteSnapshot> sprites, Span<int> indices)
-        => SortIndices<SpriteSnapshot, SpriteOrder>(sprites, indices);
+    /// <param name="keys">
+    /// The reusable key scratch buffer; at least <paramref name="sprites"/>'s length. The planner
+    /// grows it once and reuses it every frame.
+    /// </param>
+    /// <exception cref="ArgumentException">An output buffer is too small.</exception>
+    internal static void Sort(
+        ReadOnlySpan<SpriteSnapshot> sprites,
+        Span<int> indices,
+        Span<SpriteSortKey> keys)
+    {
+        if (indices.Length < sprites.Length || keys.Length < sprites.Length)
+        {
+            throw new ArgumentException(
+                $"The sort buffers must hold {sprites.Length} entries.");
+        }
+
+        for (var index = 0; index < sprites.Length; index++)
+        {
+            SpriteSnapshot sprite = sprites[index];
+            keys[index] = new SpriteSortKey(sprite.Layer, sprite.ZIndex, index);
+        }
+
+        Span<SpriteSortKey> ordered = keys[..sprites.Length];
+        ordered.Sort();
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            indices[index] = ordered[index].Index;
+        }
+    }
 
     /// <summary>
     /// Sorts camera indices by <c>ZIndex</c> ascending without allocating or touching the snapshot.
     /// </summary>
     /// <remarks>
-    /// Cameras apply in this order; equal <c>ZIndex</c> values are unspecified. The sort shares the
-    /// sprite order's preallocated-index heap mechanics, so a warm plan allocates nothing.
+    /// Cameras apply in this order; equal <c>ZIndex</c> values are unspecified. The camera set is
+    /// small, so this keeps the reusable index heap sorter and allocates nothing warm.
     /// </remarks>
     /// <param name="cameras">The captured cameras in capture order.</param>
     /// <param name="indices">
@@ -200,17 +228,6 @@ internal static class SpritePlanning
         /// <param name="right">The right record.</param>
         /// <returns>A negative, zero, or positive value in ascending key order.</returns>
         static abstract int Compare(in TSource left, in TSource right);
-    }
-
-    /// <summary>Orders sprites by ascending <c>Layer</c>, then ascending <c>ZIndex</c>.</summary>
-    private readonly struct SpriteOrder : IIndexOrder<SpriteSnapshot>
-    {
-        /// <inheritdoc/>
-        public static int Compare(in SpriteSnapshot left, in SpriteSnapshot right)
-        {
-            int layer = left.Layer.CompareTo(right.Layer);
-            return layer != 0 ? layer : left.ZIndex.CompareTo(right.ZIndex);
-        }
     }
 
     /// <summary>Orders cameras by ascending <c>ZIndex</c>.</summary>

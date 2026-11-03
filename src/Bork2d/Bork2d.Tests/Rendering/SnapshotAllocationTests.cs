@@ -1,4 +1,5 @@
 using System.Numerics;
+using Bork2d.Engine.Assets;
 using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
 using Bork2d.Render.Handoff;
@@ -87,6 +88,53 @@ public sealed class SnapshotAllocationTests
         Assert.Equal(spriteCapacity, snapshot.SpriteCapacity);
         Assert.Equal(1, snapshot.CameraCount);
         Assert.Equal(8, snapshot.SpriteCount);
+    }
+
+    [Fact]
+    public void WarmCaptureWithShaderUniformsAndGlobalsAllocatesNothing()
+    {
+        var engine = new GameEngine<GameLayer>(new FakeTime(), new FakeWindow(), new FakeAssets());
+        var shader = new ShaderAsset
+        {
+            InstanceUniforms =
+            [
+                new ShaderUniform("tint", ShaderUniformType.Color, 0, Vector4.One),
+                new ShaderUniform("intensity", ShaderUniformType.Float, 4, Vector4.Zero),
+            ],
+        };
+        for (var index = 0; index < 8; index++)
+        {
+            var sprite = engine.CreateSpriteRender(engine.Root);
+            sprite.Layer = GameLayer.World;
+            sprite.Shader = shader;
+            sprite.SetUniform("tint", new Color(0.25f, 0.5f, 0.75f, 1f));
+            sprite.SetUniform("intensity", index);
+            sprite.AdditionalTextures = ["textures/a", "textures/b"];
+        }
+
+        engine.SetGlobalUniform("scale", new Vector2(1f, 2f));
+        for (var index = 0; index < 8; index++)
+        {
+            engine.SetGlobalUniform($"global{index}", index);
+        }
+
+        var snapshot = new FrameSnapshot();
+        for (var iteration = 0; iteration < WarmupIterations; iteration++)
+        {
+            engine.CaptureSnapshot(snapshot, sequence: iteration + 1);
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var iteration = 0; iteration < MeasuredIterations; iteration++)
+        {
+            engine.CaptureSnapshot(snapshot, sequence: iteration + 1);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
+        Assert.Equal(8, snapshot.SpriteCount);
+        Assert.Equal(9, snapshot.GlobalUniformCount);
     }
 
     private static GameEngine<GameLayer> CreateFixedScene()

@@ -153,7 +153,7 @@ public sealed class WindowedRendererGpuTests
 
             _output.WriteLine($"window={window.Size}, drawable={drawable}, validation=on");
 
-            var assets = new GeneratedTextureAssets();
+            using var assets = new TestRendererAssets();
             assets.AddTexture("tex/windowed");
             var windowedSprite = new SpriteAsset
             {

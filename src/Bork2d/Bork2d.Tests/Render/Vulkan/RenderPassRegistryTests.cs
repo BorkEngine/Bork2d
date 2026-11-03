@@ -2,14 +2,15 @@ using Bork2d.Engine.Rendering;
 using Bork2d.Render.Sprites;
 using Bork2d.Render.Vulkan;
 using Bork2d.Tests.TestDoubles;
+using Silk.NET.Vulkan;
 using Xunit;
 
 namespace Bork2d.Tests.Render.Vulkan;
 
 /// <summary>
 /// Deterministic, GPU-free tests for the ordered render-pass registry: registration order governs
-/// planning and recording, every pass contributes to the aggregate stats, a planning round resets
-/// the aggregate and each pass, and adding a pass needs no registry or frame-loop change.
+/// planning and recording, every pass contributes to the aggregate, a planning round resets the
+/// aggregate and each pass, and adding a pass needs no registry or frame-loop change.
 /// </summary>
 public sealed class RenderPassRegistryTests
 {
@@ -21,12 +22,40 @@ public sealed class RenderPassRegistryTests
             new RecordingPass("Sprite", events),
             new RecordingPass("Custom", events));
 
-        registry.Plan(new FrameSnapshot(), 320, 240, new FakeInstanceBuffer());
+        registry.Plan(
+            new FrameSnapshot(),
+            320,
+            240,
+            new FakeInstanceBuffer(),
+            new FakeGlobalUniformBuffer(),
+            Format.B8G8R8A8Srgb);
 
         Assert.Equal(
             new[] { "Sprite", "Custom" },
             registry.Passes.Select(pass => pass.Name));
         Assert.Equal(new[] { "plan:Sprite", "plan:Custom" }, events);
+    }
+
+    [Fact]
+    public void PlanForwardsTheTargetFormatAndGlobalBufferToEveryPass()
+    {
+        var globals = new FakeGlobalUniformBuffer();
+        var first = new RecordingPass("Sprite", []);
+        var second = new RecordingPass("Custom", []);
+        var registry = new RenderPassRegistry(first, second);
+
+        registry.Plan(
+            new FrameSnapshot(),
+            320,
+            240,
+            new FakeInstanceBuffer(),
+            globals,
+            Format.R8G8B8A8Srgb);
+
+        Assert.Equal(Format.R8G8B8A8Srgb, first.TargetFormat);
+        Assert.Equal(Format.R8G8B8A8Srgb, second.TargetFormat);
+        Assert.Same(globals, first.Globals);
+        Assert.Same(globals, second.Globals);
     }
 
     [Fact]
@@ -54,7 +83,13 @@ public sealed class RenderPassRegistryTests
                 skippedSprites: 1,
                 culledSprites: 6));
 
-        registry.Plan(new FrameSnapshot(), 320, 240, new FakeInstanceBuffer());
+        registry.Plan(
+            new FrameSnapshot(),
+            320,
+            240,
+            new FakeInstanceBuffer(),
+            new FakeGlobalUniformBuffer(),
+            Format.B8G8R8A8Srgb);
 
         RenderPassStats stats = registry.Stats;
         Assert.Equal(3, stats.CameraCount);
@@ -98,9 +133,10 @@ public sealed class RenderPassRegistryTests
         var registry = new RenderPassRegistry(pass);
         var snapshot = new FrameSnapshot();
         var instances = new FakeInstanceBuffer();
+        var globals = new FakeGlobalUniformBuffer();
 
-        registry.Plan(snapshot, 320, 240, instances);
-        registry.Plan(snapshot, 320, 240, instances);
+        registry.Plan(snapshot, 320, 240, instances, globals, Format.B8G8R8A8Srgb);
+        registry.Plan(snapshot, 320, 240, instances, globals, Format.B8G8R8A8Srgb);
 
         Assert.Equal(2, pass.ResetCount);
         Assert.Equal(2, pass.PlanCount);
@@ -159,14 +195,22 @@ public sealed class RenderPassRegistryTests
 
         internal int RecordCount { get; private set; }
 
+        internal Format TargetFormat { get; private set; }
+
+        internal IGlobalUniformBuffer? Globals { get; private set; }
+
         public void Plan(
             FrameSnapshot snapshot,
             int framebufferWidth,
             int framebufferHeight,
             IInstanceBuffer instances,
+            IGlobalUniformBuffer globals,
+            Format targetFormat,
             RenderPassStats stats)
         {
             PlanCount++;
+            TargetFormat = targetFormat;
+            Globals = globals;
             _events.Add($"plan:{Name}");
             stats.CameraCount += _cameras;
             stats.CameraPlanCount += _cameraPlans;

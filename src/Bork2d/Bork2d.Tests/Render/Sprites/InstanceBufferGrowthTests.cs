@@ -6,8 +6,8 @@ namespace Bork2d.Tests.Render.Sprites;
 
 /// <summary>
 /// Deterministic tests for the per-frame instance-buffer growth policy (M8 §6.6): initial capacity,
-/// doubling/round-up, the power-of-two rule, the explicit device-limit failure, and the free-fence
-/// invariant.
+/// doubling/round-up, the power-of-two rule, the explicit device-limit failure with 176-byte
+/// records, and the free-fence invariant.
 /// </summary>
 public sealed class InstanceBufferGrowthTests
 {
@@ -66,6 +66,7 @@ public sealed class InstanceBufferGrowthTests
 
         Bork2dException exception = growth.CreateGrowthException(1025, failure);
         Assert.Contains("maxStorageBufferRange", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("176-byte", exception.Message, StringComparison.Ordinal);
         Assert.Contains("No instance is truncated", exception.Message, StringComparison.Ordinal);
     }
 

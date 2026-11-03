@@ -20,6 +20,8 @@ public sealed class DependencyMatrixTests
     private const string Hashing = "System.IO.Hashing";
     private const string Tomlyn = "Tomlyn";
     private const string StbImageSharp = "StbImageSharp";
+    private const string Shaderc = "Silk.NET.Shaderc";
+    private const string ShadercNative = "Silk.NET.Shaderc.Native";
     private const string MetadataLoadContext = "System.Reflection.MetadataLoadContext";
 
     private static readonly string[] _forbiddenEngineReferencePrefixes =
@@ -131,6 +133,8 @@ public sealed class DependencyMatrixTests
         AssertInternal(typeof(Bork2d.Engine.Scene.SpriteRender<>));
         AssertInternal(typeof(Bork2d.Engine.Scene.GameEngine<>));
         AssertInternal(typeof(Bork2d.Engine.Assets.Loading.AssetService));
+        AssertInternal(typeof(Bork2d.Engine.Assets.ShaderLayout));
+        AssertInternal(typeof(Bork2d.Engine.Assets.ShaderRenderData));
         AssertInternal(typeof(Bork2d.Engine.Assets.Vfs.AssetFileSystem));
         AssertInternal(typeof(Bork2d.Engine.Assets.Vfs.ResolvedAsset));
         AssertInternal(typeof(Bork2d.Engine.Assets.Pack.PackArchive));
@@ -138,6 +142,8 @@ public sealed class DependencyMatrixTests
         AssertInternal(typeof(Bork2d.Engine.Rendering.FrameSnapshot));
         AssertInternal(typeof(Bork2d.Engine.Rendering.CameraSnapshot));
         AssertInternal(typeof(Bork2d.Engine.Rendering.SpriteSnapshot));
+        AssertInternal(typeof(Bork2d.Engine.Rendering.GlobalUniformSnapshot));
+        AssertInternal(typeof(Bork2d.Engine.Rendering.GlobalUniformValue));
         AssertInternal(typeof(Bork2d.Engine.Rendering.SnapshotCapture));
         AssertInternal(typeof(Bork2d.Engine.Rendering.RenderDataBuffer<>));
         AssertInternal(typeof(Bork2d.Engine.Rendering.RenderDataBufferSet));
@@ -294,9 +300,64 @@ public sealed class DependencyMatrixTests
 
         Assert.Contains(Tomlyn, references);
         Assert.Contains(Hashing, references);
+        Assert.Contains(Shaderc, references);
         Assert.DoesNotContain(MetadataLoadContext, references);
         Assert.DoesNotContain("Bork2d.Runtime", references);
         Assert.DoesNotContain("Bork2d.Render", references);
+    }
+
+    [Fact]
+    public void BakeProjectPinsTheShadercToolingPackagesAndEnablesUnsafe()
+    {
+        string projectPath = Path.Combine(
+            RepositoryPaths.Root,
+            "src",
+            "Bork2d",
+            "Bork2d.Bake",
+            "Bork2d.Bake.csproj");
+        XDocument project = XDocument.Load(projectPath);
+
+        Dictionary<string, string> packages = project
+            .Descendants("PackageReference")
+            .ToDictionary(
+                reference => reference.Attribute("Include")!.Value,
+                reference => reference.Attribute("Version")!.Value,
+                StringComparer.Ordinal);
+
+        Assert.Equal("2.23.0", packages[Shaderc]);
+        Assert.Equal("2.23.0", packages[ShadercNative]);
+
+        Dictionary<string, string> properties = project
+            .Descendants("PropertyGroup")
+            .SelectMany(group => group.Elements())
+            .ToDictionary(
+                property => property.Name.LocalName,
+                property => property.Value.Trim(),
+                StringComparer.Ordinal);
+
+        Assert.Equal("true", properties["AllowUnsafeBlocks"]);
+    }
+
+    [Fact]
+    public void RuntimeAssembliesDoNotReferenceTheShaderCompiler()
+    {
+        Assembly[] runtimeAssemblies =
+        [
+            typeof(IAssets).Assembly,
+            typeof(Bork2d.Render.AssemblyReferenceAnchor).Assembly,
+            typeof(Bork2d.Runtime.Bork2dApp).Assembly,
+        ];
+
+        foreach (Assembly assembly in runtimeAssemblies)
+        {
+            string[] references = assembly
+                .GetReferencedAssemblies()
+                .Select(reference => reference.Name ?? string.Empty)
+                .ToArray();
+
+            Assert.DoesNotContain(Shaderc, references);
+            Assert.DoesNotContain(ShadercNative, references);
+        }
     }
 
     [Fact]

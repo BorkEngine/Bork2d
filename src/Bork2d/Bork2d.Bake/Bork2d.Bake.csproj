@@ -1,5 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+    <PropertyGroup>
+        <!-- Shaderc returns raw pointers. The bake is build-time JIT tooling, so the unsafe surface
+             never enters a runtime project or its AOT publish graph. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
     <ItemGroup>
         <!-- Tooling is a JIT library. It references the engine contract and the pack writer.
              Q-20 (no engine implementation dependency) is test-enforced by the metadata guard. -->
@@ -9,10 +15,14 @@
     <ItemGroup>
         <!-- Tomlyn parses source/sidecar TOML, StbImageSharp decodes texture sources (the WP1
              texture pipeline remains the only texture producer), System.IO.Hashing supplies the
-             deterministic hash primitive WP5 reuses, and PolyType supplies the compiled shape
-             metadata the explicit registrations bind through. There is no MetadataLoadContext: the
-             generated host and its metadata type resolution were removed in WP1 (D-038). -->
+             deterministic hash primitive WP5 reuses, PolyType supplies the compiled shape
+             metadata the explicit registrations bind through, and Silk.NET.Shaderc is the
+             build-tooling-only GLSL compiler. There is no MetadataLoadContext: the generated host
+             and its metadata type resolution were removed in WP1 (D-038). The shaderc packages
+             must never reach a runtime project or an AOT publish graph. -->
         <PackageReference Include="PolyType" Version="1.4.1" />
+        <PackageReference Include="Silk.NET.Shaderc" Version="2.23.0" />
+        <PackageReference Include="Silk.NET.Shaderc.Native" Version="2.23.0" />
         <PackageReference Include="StbImageSharp" Version="2.30.16" />
         <PackageReference Include="System.IO.Hashing" Version="11.0.0-rc.1.26425.128" />
         <PackageReference Include="Tomlyn" Version="2.10.1" />
@@ -21,6 +31,7 @@
     <ItemGroup>
         <!-- Bake tooling is internal by default; the public builder, the editor, and tests see it.
              There is no host or CLI grant: both were removed in WP1. -->
+        <InternalsVisibleTo Include="Bork2d.BuiltInAssets" />
         <InternalsVisibleTo Include="Bork2d.Editor" />
         <InternalsVisibleTo Include="Bork2d.Tests" />
     </ItemGroup>

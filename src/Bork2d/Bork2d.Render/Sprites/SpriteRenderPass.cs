@@ -1,21 +1,26 @@
 using Bork2d.Engine.Rendering;
+using Bork2d.Render.Shaders;
 using Bork2d.Render.Textures;
 using Bork2d.Render.Vulkan;
 using Microsoft.Extensions.Logging;
+using Silk.NET.Vulkan;
 
 namespace Bork2d.Render.Sprites;
 
 /// <summary>
-/// The registered sprite render pass: it plans the snapshot's sprites through the allocation-free
-/// <see cref="SpriteFramePlanner"/> and records one instanced draw per non-empty camera.
+/// The registered sprite render pass: it plans the snapshot's sprites and shader runs through the
+/// allocation-free <see cref="SpriteFramePlanner"/>, resolves each run's cached pipeline for the
+/// target format, and records one instanced draw per run.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The pass owns the planner and the <see cref="SpriteFramePlan"/> it refills, so planning stays
-/// allocation-free after warm-up. During planning the pass adds its plan counts to the shared
-/// <see cref="RenderPassStats"/>; during recording it records through
-/// <see cref="SpritePassRecorder.RecordPasses"/> with its own <see cref="SpritePipeline"/>, the frame
-/// descriptor set, the target view/image, and the target format from the record context.
+/// allocation-free after warm-up. During planning the pass resolves every run's pipeline for the
+/// target format from the shader catalog (the planner already validated/created it), adds its plan
+/// counts to the shared <see cref="RenderPassStats"/>, and keeps the plan for recording. During
+/// recording it records through <see cref="SpritePassRecorder.RecordPasses"/> with its own
+/// <see cref="SpritePipeline"/>, the frame descriptor sets, the target view/image, and the planned
+/// run pipelines.
 /// </para>
 /// <para>
 /// The full-target frame clear is not this pass: the target driver records it once before the
@@ -25,20 +30,29 @@ namespace Bork2d.Render.Sprites;
 internal sealed class SpriteRenderPass : IRenderPass
 {
     private readonly SpritePipeline _pipeline;
+    private readonly ShaderStore _shaders;
     private readonly SpriteFramePlanner _planner;
     private SpriteFramePlan _plan = new();
+    private Pipeline[] _runPipelines = [];
 
     /// <summary>Initializes a new instance of the <see cref="SpriteRenderPass"/> class.</summary>
     /// <param name="pipeline">The sprite pipeline owner created during target startup.</param>
+    /// <param name="shaders">The shader catalog created during target startup.</param>
     /// <param name="pages">The texture-page cache the planner resolves and prefetches through.</param>
     /// <param name="logger">The <c>Bork2d.Render</c> logger for throttled diagnostics.</param>
-    internal SpriteRenderPass(SpritePipeline pipeline, TexturePageStore pages, ILogger logger)
+    internal SpriteRenderPass(
+        SpritePipeline pipeline,
+        ShaderStore shaders,
+        TexturePageStore pages,
+        ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(pipeline);
+        ArgumentNullException.ThrowIfNull(shaders);
         ArgumentNullException.ThrowIfNull(pages);
         ArgumentNullException.ThrowIfNull(logger);
         _pipeline = pipeline;
-        _planner = new SpriteFramePlanner(pages, logger);
+        _shaders = shaders;
+        _planner = new SpriteFramePlanner(pages, shaders, logger);
     }
 
     /// <inheritdoc/>
@@ -50,12 +64,27 @@ internal sealed class SpriteRenderPass : IRenderPass
         int framebufferWidth,
         int framebufferHeight,
         IInstanceBuffer instances,
+        IGlobalUniformBuffer globals,
+        Format targetFormat,
         RenderPassStats stats)
     {
         ArgumentNullException.ThrowIfNull(stats);
 
-        SpriteFramePlan plan = _planner.Plan(snapshot, framebufferWidth, framebufferHeight, instances);
+        SpriteFramePlan plan = _planner.Plan(
+            snapshot,
+            framebufferWidth,
+            framebufferHeight,
+            instances,
+            globals,
+            targetFormat);
         _plan = plan;
+        EnsureRunPipelineCapacity(plan.RunCount);
+        for (var runIndex = 0; runIndex < plan.RunCount; runIndex++)
+        {
+            ShaderRun run = plan.Runs[runIndex];
+            _runPipelines[runIndex] = _shaders.GetPipeline(run.ShaderEntryId, targetFormat);
+        }
+
         stats.CameraCount += plan.CameraCount;
         stats.CameraPlanCount += plan.CameraPlanCount;
         stats.DrawCalls += plan.DrawCalls;
@@ -67,19 +96,33 @@ internal sealed class SpriteRenderPass : IRenderPass
 
     /// <inheritdoc/>
     public void Record(in RenderPassRecordContext context)
-    {
-        SpritePassRecorder.RecordPasses(
+        => SpritePassRecorder.RecordPasses(
             context.Vk,
             context.CommandBuffer,
             _pipeline,
-            _pipeline.GetOrCreatePipeline(context.TargetFormat),
             context.DescriptorSet,
+            context.GlobalDescriptorSet,
             context.AttachmentView,
             context.AttachmentImage,
             _plan.Cameras,
-            _plan.CameraPlanCount);
-    }
+            _plan.CameraPlanCount,
+            _plan.Runs,
+            _runPipelines);
 
     /// <inheritdoc/>
-    public void Reset() => _plan.Reset();
+    public void Reset()
+    {
+        _plan.Reset();
+    }
+
+    private void EnsureRunPipelineCapacity(int required)
+    {
+        if (_runPipelines.Length >= required)
+        {
+            return;
+        }
+
+        int capacity = Math.Max(required, Math.Max(16, _runPipelines.Length * 2));
+        Array.Resize(ref _runPipelines, capacity);
+    }
 }

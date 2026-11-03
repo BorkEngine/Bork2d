@@ -1,5 +1,6 @@
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
+using Bork2d.Render.Shaders;
 using Bork2d.Render.Textures;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
@@ -7,29 +8,39 @@ using Silk.NET.Vulkan;
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// The internal sprite pipeline: descriptor-set layout, pipeline layout, one graphics pipeline per
-/// sRGB output format, and the cached page samplers (M8 WP-2).
+/// The internal sprite pipeline: descriptor-set layout, pipeline layout, the vertex shader module,
+/// one graphics pipeline per (shader content hash, output format), and the cached page samplers
+/// (M8 WP-2, shader ABI v2).
 /// </summary>
 /// <remarks>
 /// <para>
-/// The descriptor set has binding 0 (the per-frame instance storage buffer, read by the vertex
-/// stage) and binding 1 (the bindless combined image sampler array, read by the fragment stage).
-/// Binding 1 is partially bound, updated after bind, and uses a variable descriptor count so page
-/// capacity can grow without recreating the pipeline layout. The pipeline layout carries a 64-byte
-/// view-projection push constant and descriptor set 0.
+/// Descriptor set 0 has binding 0 (the per-frame instance storage buffer, read by the vertex stage)
+/// and binding 1 (the bindless combined image sampler array, read by the fragment stage). Binding 1
+/// is partially bound, updated after bind, and uses a variable descriptor count so page capacity can
+/// grow without recreating the pipeline layout; it is the highest binding in its set, as Vulkan
+/// requires for a variable descriptor count. Descriptor set 1 has binding 2 (the per-frame dynamic
+/// uniform buffer holding the global block, read by the fragment stage); it is a separate set
+/// because a set containing an update-after-bind binding may not also contain a dynamic uniform
+/// buffer. The pipeline layout carries descriptor sets 0 and 1 and a 64-byte view-projection push
+/// constant.
 /// </para>
 /// <para>
-/// The graphics pipeline uses dynamic rendering with one sRGB color attachment, no depth/stencil,
-/// no vertex input, triangle-strip topology, four vertices per instance, dynamic viewport/scissor,
-/// disabled culling and depth test/write, and straight alpha blending. WP-2 only creates and owns
-/// the objects; recording draws is WP-3/WP-4.
+/// The vertex module is created from the built-in pack's <c>shader/vertex-spv</c>; the pipeline owns
+/// it. A fragment module comes from the shader catalog, which owns it, and the pipeline cache is
+/// keyed by the shader content hash and the output format, so identical content shares one pipeline
+/// and a swapchain format change lazily creates that format's pipeline. The graphics pipeline uses
+/// dynamic rendering with one
+/// sRGB color attachment, no depth/stencil, no vertex input, triangle-strip topology, four vertices
+/// per instance, dynamic viewport/scissor, disabled culling and depth test/write, and straight alpha
+/// blending.
 /// </para>
 /// <para>
 /// All objects are render-thread-owned and created once at renderer startup (or when a new output
-/// format first appears). Destruction is best-effort, idempotent, and never throws (D-M6-27).
+/// format or fragment module first appears). Destruction is best-effort, idempotent, and never
+/// throws (D-M6-27).
 /// </para>
 /// </remarks>
-internal sealed unsafe class SpritePipeline : IDisposable
+internal sealed unsafe class SpritePipeline : IDisposable, IShaderModuleFactory
 {
     /// <summary>The push-constant size: one 4x4 view-projection matrix in bytes.</summary>
     internal const int PushConstantBytes = 64;
@@ -40,6 +51,9 @@ internal sealed unsafe class SpritePipeline : IDisposable
     /// <summary>The descriptor-set binding of the bindless combined image sampler array.</summary>
     internal const uint TextureBinding = 1;
 
+    /// <summary>The descriptor-set binding of the dynamic global uniform buffer.</summary>
+    internal const uint GlobalBinding = 2;
+
     private static readonly byte[] _entryPoint = "main\0"u8.ToArray();
 
     private readonly Vk _vk;
@@ -47,11 +61,11 @@ internal sealed unsafe class SpritePipeline : IDisposable
     private readonly ILogger _logger;
     private readonly IVulkanInstance? _instance;
     private readonly ShaderModule _vertexModule;
-    private readonly ShaderModule _fragmentModule;
     private readonly DescriptorSetLayout _descriptorSetLayout;
+    private readonly DescriptorSetLayout _globalSetLayout;
     private readonly PipelineLayout _pipelineLayout;
     private readonly uint _maxTexturePages;
-    private readonly Dictionary<Format, Pipeline> _pipelines = [];
+    private readonly Dictionary<ulong, Dictionary<Format, Pipeline>> _pipelines = [];
     private readonly Dictionary<(TextureFilter Filter, TextureWrap Wrap), Sampler> _samplers = [];
     private int _destroyed;
 
@@ -61,8 +75,8 @@ internal sealed unsafe class SpritePipeline : IDisposable
         ILogger logger,
         IVulkanInstance? instance,
         ShaderModule vertexModule,
-        ShaderModule fragmentModule,
         DescriptorSetLayout descriptorSetLayout,
+        DescriptorSetLayout globalSetLayout,
         PipelineLayout pipelineLayout,
         uint maxTexturePages)
     {
@@ -71,8 +85,8 @@ internal sealed unsafe class SpritePipeline : IDisposable
         _logger = logger;
         _instance = instance;
         _vertexModule = vertexModule;
-        _fragmentModule = fragmentModule;
         _descriptorSetLayout = descriptorSetLayout;
+        _globalSetLayout = globalSetLayout;
         _pipelineLayout = pipelineLayout;
         _maxTexturePages = maxTexturePages;
     }
@@ -80,7 +94,10 @@ internal sealed unsafe class SpritePipeline : IDisposable
     /// <summary>Gets the descriptor-set layout shared by every frame's bindless set.</summary>
     internal DescriptorSetLayout DescriptorSetLayout => _descriptorSetLayout;
 
-    /// <summary>Gets the pipeline layout (64-byte push constant + descriptor set 0).</summary>
+    /// <summary>Gets the descriptor-set layout of the frame's global uniform set.</summary>
+    internal DescriptorSetLayout GlobalSetLayout => _globalSetLayout;
+
+    /// <summary>Gets the pipeline layout (64-byte push constant + descriptor sets 0 and 1).</summary>
     internal PipelineLayout PipelineLayout => _pipelineLayout;
 
     /// <summary>
@@ -91,20 +108,28 @@ internal sealed unsafe class SpritePipeline : IDisposable
     internal uint MaxTexturePages => _maxTexturePages;
 
     /// <summary>
-    /// Creates the shader modules, descriptor-set layout, and pipeline layout. A Vulkan failure
+    /// Creates the vertex module, descriptor-set layout, and pipeline layout. A Vulkan failure
     /// throws a <see cref="Bork2dException"/> so renderer startup fails cleanly (D-M6-14).
     /// </summary>
     /// <param name="device">The selected device; its API object owns the created handles.</param>
     /// <param name="instance">The instance seam used for debug labels; may be <see langword="null"/>.</param>
     /// <param name="logger">The <c>Bork2d.Render</c> logger used by best-effort cleanup.</param>
+    /// <param name="vertexSpirV">The built-in sprite vertex module's SPIR-V bytes.</param>
     /// <returns>The created pipeline object; the caller owns it.</returns>
+    /// <exception cref="ArgumentException"><paramref name="vertexSpirV"/> is empty.</exception>
     internal static SpritePipeline Create(
         VulkanDevice device,
         IVulkanInstance? instance,
-        ILogger logger)
+        ILogger logger,
+        byte[] vertexSpirV)
     {
         ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(vertexSpirV);
+        if (vertexSpirV.Length == 0)
+        {
+            throw new ArgumentException("The vertex SPIR-V module is empty.", nameof(vertexSpirV));
+        }
 
         uint maxTexturePages = (uint)TexturePageCapacity.EffectiveLimit(
             device.Limits.MaxPerStageDescriptorUpdateAfterBindSampledImages,
@@ -114,23 +139,23 @@ internal sealed unsafe class SpritePipeline : IDisposable
         Vk vk = device.Api;
         Device logicalDevice = device.Device;
         var vertexModule = default(ShaderModule);
-        var fragmentModule = default(ShaderModule);
         var descriptorSetLayout = default(DescriptorSetLayout);
+        var globalSetLayout = default(DescriptorSetLayout);
         var pipelineLayout = default(PipelineLayout);
         try
         {
             vertexModule = CreateShaderModule(
                 vk,
                 logicalDevice,
-                SpriteShaderSpirV.Vertex,
-                "sprite.vert");
-            fragmentModule = CreateShaderModule(
+                vertexSpirV,
+                "shader/vertex-spv");
+            descriptorSetLayout = CreateDescriptorSetLayout(vk, logicalDevice, maxTexturePages);
+            globalSetLayout = CreateGlobalSetLayout(vk, logicalDevice);
+            pipelineLayout = CreatePipelineLayout(
                 vk,
                 logicalDevice,
-                SpriteShaderSpirV.Fragment,
-                "sprite.frag");
-            descriptorSetLayout = CreateDescriptorSetLayout(vk, logicalDevice, maxTexturePages);
-            pipelineLayout = CreatePipelineLayout(vk, logicalDevice, descriptorSetLayout);
+                descriptorSetLayout,
+                globalSetLayout);
 
             var pipeline = new SpritePipeline(
                 vk,
@@ -138,8 +163,8 @@ internal sealed unsafe class SpritePipeline : IDisposable
                 logger,
                 instance,
                 vertexModule,
-                fragmentModule,
                 descriptorSetLayout,
+                globalSetLayout,
                 pipelineLayout,
                 maxTexturePages);
             pipeline.SetObjectNames();
@@ -153,33 +178,107 @@ internal sealed unsafe class SpritePipeline : IDisposable
                 logger,
                 pipelineLayout,
                 descriptorSetLayout,
-                vertexModule,
-                fragmentModule);
+                globalSetLayout,
+                vertexModule);
             throw;
         }
     }
+    /// <summary>
+    /// Creates a fragment shader module the caller owns.
+    /// </summary>
+    /// <param name="spirv">The fragment SPIR-V bytes.</param>
+    /// <param name="name">The asset path or diagnostic name used in errors and labels.</param>
+    /// <returns>The created module; the shader store owns and destroys it.</returns>
+    /// <exception cref="ArgumentException"><paramref name="spirv"/> is empty.</exception>
+    /// <exception cref="Bork2dException">The module could not be created.</exception>
+    internal ShaderModule CreateFragmentModule(byte[] spirv, string name)
+    {
+        ArgumentNullException.ThrowIfNull(spirv);
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        if (spirv.Length == 0)
+        {
+            throw new ArgumentException("The fragment SPIR-V module is empty.", nameof(spirv));
+        }
+
+        ShaderModule module = CreateShaderModule(_vk, _device, spirv, name);
+        _instance?.SetObjectName(
+            _device.Handle,
+            ObjectType.ShaderModule,
+            (nint)module.Handle,
+            $"Bork2d sprite fragment shader ({name})");
+        return module;
+    }
+
+    /// <summary>Destroys a fragment shader module created by <see cref="CreateFragmentModule"/>.</summary>
+    /// <param name="module">The module to destroy; a zero handle is ignored.</param>
+    internal void DestroyFragmentModule(ShaderModule module)
+        => DestroyShaderModule(module, "fragment");
 
     /// <summary>
-    /// Gets the graphics pipeline for <paramref name="colorFormat"/>, creating it on first use.
+    /// Gets the graphics pipeline for a shader content hash and output color format, creating it on
+    /// first use.
     /// </summary>
     /// <param name="colorFormat">The sRGB output color format.</param>
-    /// <returns>The pipeline for that format.</returns>
+    /// <param name="contentHash">The shader content hash that owns the pipeline.</param>
+    /// <param name="fragmentModule">The fragment shader module the pipeline uses.</param>
+    /// <returns>The cached pipeline for that content and format.</returns>
     /// <exception cref="Bork2dException">The pipeline could not be created.</exception>
-    internal Pipeline GetOrCreatePipeline(Format colorFormat)
+    internal Pipeline GetOrCreatePipeline(
+        Format colorFormat,
+        ulong contentHash,
+        ShaderModule fragmentModule)
     {
-        if (_pipelines.TryGetValue(colorFormat, out Pipeline existing))
+        if (_pipelines.TryGetValue(contentHash, out Dictionary<Format, Pipeline>? byFormat)
+            && byFormat.TryGetValue(colorFormat, out Pipeline existing))
         {
             return existing;
         }
 
-        Pipeline pipeline = CreateGraphicsPipeline(colorFormat);
-        _pipelines.Add(colorFormat, pipeline);
+        Pipeline pipeline = CreateGraphicsPipeline(colorFormat, fragmentModule);
+        if (byFormat is null)
+        {
+            byFormat = [];
+            _pipelines.Add(contentHash, byFormat);
+        }
+
+        byFormat.Add(colorFormat, pipeline);
         _instance?.SetObjectName(
             _device.Handle,
             ObjectType.Pipeline,
             (nint)pipeline.Handle,
-            $"Bork2d sprite pipeline ({colorFormat})");
+            $"Bork2d sprite pipeline ({colorFormat}, content 0x{contentHash:X16})");
         return pipeline;
+    }
+
+    /// <summary>Looks up a cached pipeline without creating one.</summary>
+    /// <param name="contentHash">The shader content hash that owns the pipeline.</param>
+    /// <param name="colorFormat">The sRGB output color format.</param>
+    /// <param name="pipeline">The cached pipeline when one exists.</param>
+    /// <returns><see langword="true"/> when the pipeline exists.</returns>
+    internal bool TryGetPipeline(ulong contentHash, Format colorFormat, out Pipeline pipeline)
+    {
+        if (_pipelines.TryGetValue(contentHash, out Dictionary<Format, Pipeline>? byFormat))
+        {
+            return byFormat.TryGetValue(colorFormat, out pipeline);
+        }
+
+        pipeline = default;
+        return false;
+    }
+
+    /// <summary>Destroys every cached pipeline for one shader content hash.</summary>
+    /// <param name="contentHash">The shader content hash whose pipelines are destroyed.</param>
+    internal void DestroyPipelines(ulong contentHash)
+    {
+        if (!_pipelines.Remove(contentHash, out Dictionary<Format, Pipeline>? byFormat))
+        {
+            return;
+        }
+
+        foreach (Pipeline pipeline in byFormat.Values)
+        {
+            DestroyPipeline(pipeline);
+        }
     }
 
     /// <summary>
@@ -237,7 +336,26 @@ internal sealed unsafe class SpritePipeline : IDisposable
     /// <inheritdoc/>
     public void Dispose() => Destroy();
 
-    /// <summary>Destroys the pipelines, samplers, modules, and layouts; never throws.</summary>
+    ShaderModule IShaderModuleFactory.CreateModule(byte[] spirV, string name)
+        => CreateFragmentModule(spirV, name);
+
+    void IShaderModuleFactory.DestroyModule(ShaderModule module) => DestroyFragmentModule(module);
+
+    Pipeline IShaderModuleFactory.GetOrCreatePipeline(
+        Format colorFormat,
+        ulong contentHash,
+        ShaderModule module)
+        => GetOrCreatePipeline(colorFormat, contentHash, module);
+
+    bool IShaderModuleFactory.TryGetPipeline(
+        ulong contentHash,
+        Format colorFormat,
+        out Pipeline pipeline)
+        => TryGetPipeline(contentHash, colorFormat, out pipeline);
+
+    void IShaderModuleFactory.DestroyPipelines(ulong contentHash) => DestroyPipelines(contentHash);
+
+    /// <summary>Destroys the pipelines, samplers, vertex module, and layouts; never throws.</summary>
     internal void Destroy()
     {
         if (Interlocked.Exchange(ref _destroyed, 1) != 0)
@@ -245,9 +363,12 @@ internal sealed unsafe class SpritePipeline : IDisposable
             return;
         }
 
-        foreach (Pipeline pipeline in _pipelines.Values)
+        foreach (Dictionary<Format, Pipeline> byFormat in _pipelines.Values)
         {
-            DestroyPipeline(pipeline);
+            foreach (Pipeline pipeline in byFormat.Values)
+            {
+                DestroyPipeline(pipeline);
+            }
         }
 
         _pipelines.Clear();
@@ -260,12 +381,12 @@ internal sealed unsafe class SpritePipeline : IDisposable
         _samplers.Clear();
 
         DestroyShaderModule(_vertexModule, "vertex");
-        DestroyShaderModule(_fragmentModule, "fragment");
         DestroyPipelineLayout(_pipelineLayout);
         DestroyDescriptorSetLayout(_descriptorSetLayout);
+        DestroyDescriptorSetLayout(_globalSetLayout);
     }
 
-    private Pipeline CreateGraphicsPipeline(Format colorFormat)
+    private Pipeline CreateGraphicsPipeline(Format colorFormat, ShaderModule fragmentModule)
     {
         PipelineShaderStageCreateInfo* stages = stackalloc PipelineShaderStageCreateInfo[2];
         fixed (byte* entryPoint = _entryPoint)
@@ -281,7 +402,7 @@ internal sealed unsafe class SpritePipeline : IDisposable
             {
                 SType = StructureType.PipelineShaderStageCreateInfo,
                 Stage = ShaderStageFlags.FragmentBit,
-                Module = _fragmentModule,
+                Module = fragmentModule,
                 PName = entryPoint,
             };
 
@@ -422,14 +543,14 @@ internal sealed unsafe class SpritePipeline : IDisposable
             "Bork2d sprite vertex shader");
         _instance.SetObjectName(
             device,
-            ObjectType.ShaderModule,
-            (nint)_fragmentModule.Handle,
-            "Bork2d sprite fragment shader");
-        _instance.SetObjectName(
-            device,
             ObjectType.DescriptorSetLayout,
             (nint)_descriptorSetLayout.Handle,
             "Bork2d sprite descriptor set layout");
+        _instance.SetObjectName(
+            device,
+            ObjectType.DescriptorSetLayout,
+            (nint)_globalSetLayout.Handle,
+            "Bork2d sprite global descriptor set layout");
         _instance.SetObjectName(
             device,
             ObjectType.PipelineLayout,
@@ -485,6 +606,8 @@ internal sealed unsafe class SpritePipeline : IDisposable
             PImmutableSamplers = null,
         };
 
+        // The variable/UAB binding must be the highest binding in the set; the global uniform set
+        // is separate because a UAB set may not contain a dynamic uniform buffer.
         DescriptorBindingFlags* bindingFlags = stackalloc DescriptorBindingFlags[2];
         bindingFlags[0] = DescriptorBindingFlags.None;
         bindingFlags[1] = DescriptorBindingFlags.PartiallyBoundBit
@@ -515,10 +638,42 @@ internal sealed unsafe class SpritePipeline : IDisposable
         return layout;
     }
 
+    private static DescriptorSetLayout CreateGlobalSetLayout(Vk vk, Device device)
+    {
+        var binding = new DescriptorSetLayoutBinding
+        {
+            Binding = GlobalBinding,
+            DescriptorType = DescriptorType.UniformBufferDynamic,
+            DescriptorCount = 1,
+            StageFlags = ShaderStageFlags.FragmentBit,
+            PImmutableSamplers = null,
+        };
+        var layoutInfo = new DescriptorSetLayoutCreateInfo
+        {
+            SType = StructureType.DescriptorSetLayoutCreateInfo,
+            BindingCount = 1,
+            PBindings = &binding,
+        };
+        Result result = vk.CreateDescriptorSetLayout(
+            device,
+            in layoutInfo,
+            null,
+            out DescriptorSetLayout layout);
+        if (result != Result.Success)
+        {
+            throw new Bork2dException(
+                $"vkCreateDescriptorSetLayout failed for the sprite global descriptor set with "
+                    + $"VkResult {result}.");
+        }
+
+        return layout;
+    }
+
     private static PipelineLayout CreatePipelineLayout(
         Vk vk,
         Device device,
-        DescriptorSetLayout descriptorSetLayout)
+        DescriptorSetLayout descriptorSetLayout,
+        DescriptorSetLayout globalSetLayout)
     {
         var pushConstant = new PushConstantRange
         {
@@ -526,11 +681,14 @@ internal sealed unsafe class SpritePipeline : IDisposable
             Offset = 0,
             Size = PushConstantBytes,
         };
+        DescriptorSetLayout* setLayouts = stackalloc DescriptorSetLayout[2];
+        setLayouts[0] = descriptorSetLayout;
+        setLayouts[1] = globalSetLayout;
         var layoutInfo = new PipelineLayoutCreateInfo
         {
             SType = StructureType.PipelineLayoutCreateInfo,
-            SetLayoutCount = 1,
-            PSetLayouts = &descriptorSetLayout,
+            SetLayoutCount = 2,
+            PSetLayouts = setLayouts,
             PushConstantRangeCount = 1,
             PPushConstantRanges = &pushConstant,
         };
@@ -638,8 +796,8 @@ internal sealed unsafe class SpritePipeline : IDisposable
         ILogger logger,
         PipelineLayout pipelineLayout,
         DescriptorSetLayout descriptorSetLayout,
-        ShaderModule vertexModule,
-        ShaderModule fragmentModule)
+        DescriptorSetLayout globalSetLayout,
+        ShaderModule vertexModule)
     {
         if (pipelineLayout.Handle != 0)
         {
@@ -665,6 +823,20 @@ internal sealed unsafe class SpritePipeline : IDisposable
             }
         }
 
+        if (globalSetLayout.Handle != 0)
+        {
+            try
+            {
+                vk.DestroyDescriptorSetLayout(device, globalSetLayout, null);
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(
+                    exception,
+                    "Vulkan sprite global descriptor-set-layout destruction failed.");
+            }
+        }
+
         if (vertexModule.Handle != 0)
         {
             try
@@ -674,18 +846,6 @@ internal sealed unsafe class SpritePipeline : IDisposable
             catch (Exception exception)
             {
                 logger.LogError(exception, "Vulkan sprite vertex shader module destruction failed.");
-            }
-        }
-
-        if (fragmentModule.Handle != 0)
-        {
-            try
-            {
-                vk.DestroyShaderModule(device, fragmentModule, null);
-            }
-            catch (Exception exception)
-            {
-                logger.LogError(exception, "Vulkan sprite fragment shader module destruction failed.");
             }
         }
     }

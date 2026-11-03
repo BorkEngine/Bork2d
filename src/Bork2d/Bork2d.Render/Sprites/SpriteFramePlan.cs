@@ -2,19 +2,24 @@ namespace Bork2d.Render.Sprites;
 
 /// <summary>
 /// The renderer-owned result of planning one snapshot: valid cameras in ascending <c>ZIndex</c>
-/// order with their contiguous instance ranges, plus the frame's draw/instance/skip/cull totals
-/// (M8 §6.6/§6.8).
+/// order with their contiguous instance and shader-run ranges, plus the frame's draw/instance/skip/
+/// cull totals (M8 §6.6/§6.8).
 /// </summary>
 /// <remarks>
 /// <para>
 /// The instance is created once by <see cref="SpriteFramePlanner"/> and refilled by each
 /// <c>Plan</c> call, so a warm frame allocates nothing. The renderer records the per-camera passes
-/// from <see cref="Cameras"/> immediately after planning and before the next plan overwrites it.
+/// from <see cref="Cameras"/> and <see cref="Runs"/> immediately after planning and before the next
+/// plan overwrites them.
 /// </para>
 /// <para>
 /// <see cref="CameraCount"/> is the snapshot's captured camera count, including cameras that were
-/// invalid and skipped; <see cref="CameraPlanCount"/> is the valid subset. <see cref="DrawCalls"/>
-/// always equals <see cref="NonEmptyCameras"/> and is at most <see cref="CameraCount"/>.
+/// invalid and skipped; <see cref="CameraPlanCount"/> is the valid subset.
+/// <see cref="DrawCalls"/> is the total number of shader runs: every run records exactly one
+/// <c>vkCmdDraw</c>, so a camera with at least one run records one draw per contiguous shader change.
+/// A default-only camera therefore records exactly one draw, while a camera with alternating custom
+/// and default sprites records one per contiguous group. <see cref="NonEmptyCameras"/> is the number
+/// of cameras with at least one run, so <c>NonEmptyCameras &lt;= DrawCalls</c>.
 /// </para>
 /// </remarks>
 internal sealed class SpriteFramePlan
@@ -25,7 +30,7 @@ internal sealed class SpriteFramePlan
     /// <summary>Gets the number of cameras with a valid projection (the pass candidates).</summary>
     internal int CameraPlanCount { get; set; }
 
-    /// <summary>Gets the number of <c>vkCmdDraw</c> calls the frame records.</summary>
+    /// <summary>Gets the number of shader runs, and therefore the number of <c>vkCmdDraw</c> calls.</summary>
     internal int DrawCalls { get; set; }
 
     /// <summary>Gets the number of cameras that draw at least one instance.</summary>
@@ -33,6 +38,9 @@ internal sealed class SpriteFramePlan
 
     /// <summary>Gets the total number of instance records written into the frame buffer.</summary>
     internal int InstanceCount { get; set; }
+
+    /// <summary>Gets the number of shader runs written into <see cref="Runs"/>.</summary>
+    internal int RunCount { get; set; }
 
     /// <summary>Gets the number of sprites skipped by the frame (null/layer/non-Quad/pending).</summary>
     internal long SkippedSprites { get; set; }
@@ -52,11 +60,18 @@ internal sealed class SpriteFramePlan
     internal CameraDrawPlan[] Cameras { get; set; } = [];
 
     /// <summary>
-    /// Clears the frame's counts and cameras so a pass that is not planned again records nothing.
+    /// Gets the per-camera shader runs, in camera order and then in sprite order; only the first
+    /// <see cref="RunCount"/> entries are valid.
+    /// </summary>
+    internal ShaderRun[] Runs { get; set; } = [];
+
+    /// <summary>
+    /// Clears the frame's counts, cameras, and runs so a pass that is not planned again records
+    /// nothing.
     /// </summary>
     /// <remarks>
     /// The instance is reused: <see cref="SpriteFramePlanner"/> refills it in place on the next plan,
-    /// and the cleared array reference is the shared empty array, so a reset never allocates.
+    /// and the cleared array references are the shared empty array, so a reset never allocates.
     /// </remarks>
     internal void Reset()
     {
@@ -65,8 +80,10 @@ internal sealed class SpriteFramePlan
         DrawCalls = 0;
         NonEmptyCameras = 0;
         InstanceCount = 0;
+        RunCount = 0;
         SkippedSprites = 0;
         CulledSprites = 0;
         Cameras = [];
+        Runs = [];
     }
 }

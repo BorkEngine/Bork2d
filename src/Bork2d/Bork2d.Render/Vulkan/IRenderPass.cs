@@ -1,5 +1,6 @@
 using Bork2d.Engine.Rendering;
 using Bork2d.Render.Sprites;
+using Silk.NET.Vulkan;
 
 namespace Bork2d.Render.Vulkan;
 
@@ -9,9 +10,10 @@ namespace Bork2d.Render.Vulkan;
 /// <remarks>
 /// <para>
 /// Passes are registered in one ordered <see cref="RenderPassRegistry"/>. <see cref="Plan"/> runs in
-/// registration order and may only read the snapshot, write its own plan, and add its counts to the
-/// shared <see cref="RenderPassStats"/>; <see cref="Record"/> runs in the same order, so the recorded
-/// draw order is deterministic. A new renderable kind adds an engine producer and one pass here; no
+/// registration order and may only read the snapshot and the frame's target format, write its own
+/// plan and the per-run global uniform blocks, and add its counts to the shared
+/// <see cref="RenderPassStats"/>; <see cref="Record"/> runs in the same order, so the recorded draw
+/// order is deterministic. A new renderable kind adds an engine producer and one pass here; no
 /// central frame-loop plan/record switch changes.
 /// </para>
 /// <para>
@@ -32,12 +34,18 @@ internal interface IRenderPass
     /// <param name="framebufferWidth">The target/framebuffer width in pixels.</param>
     /// <param name="framebufferHeight">The target/framebuffer height in pixels.</param>
     /// <param name="instances">The frame's instance sink, after its fence has been observed.</param>
+    /// <param name="globals">
+    /// The frame's global uniform sink; the sprite pass writes the frame's single time block.
+    /// </param>
+    /// <param name="targetFormat">The target's sRGB output color format for this frame.</param>
     /// <param name="stats">The registry-owned aggregate this pass contributes to.</param>
     void Plan(
         FrameSnapshot snapshot,
         int framebufferWidth,
         int framebufferHeight,
         IInstanceBuffer instances,
+        IGlobalUniformBuffer globals,
+        Format targetFormat,
         RenderPassStats stats);
 
     /// <summary>Records this pass's commands into the frame command buffer.</summary>

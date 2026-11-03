@@ -31,6 +31,25 @@ internal sealed class GeneratedTextureAssets : IAssets
     /// <param name="height">The texture height in pixels.</param>
     /// <returns>The same path, for convenient call sites.</returns>
     internal string AddTexture(string path, uint width = 4, uint height = 4)
+        => AddSolidTexture(path, 255, 0, 255, 255, width, height);
+
+    /// <summary>Registers a ready solid-color RGBA8 texture for a path.</summary>
+    /// <param name="path">The canonical descriptor path.</param>
+    /// <param name="r">The sRGB red byte.</param>
+    /// <param name="g">The sRGB green byte.</param>
+    /// <param name="b">The sRGB blue byte.</param>
+    /// <param name="a">The alpha byte.</param>
+    /// <param name="width">The texture width in pixels.</param>
+    /// <param name="height">The texture height in pixels.</param>
+    /// <returns>The same path, for convenient call sites.</returns>
+    internal string AddSolidTexture(
+        string path,
+        byte r,
+        byte g,
+        byte b,
+        byte a = 255,
+        uint width = 4,
+        uint height = 4)
     {
         _descriptors[path] = new TextureDescriptor
         {
@@ -41,7 +60,7 @@ internal sealed class GeneratedTextureAssets : IAssets
             Wrap = TextureWrap.Clamp,
             Payload = $"data/{path}",
         };
-        _payloads[$"data/{path}"] = CreatePixels(width, height);
+        _payloads[$"data/{path}"] = CreatePixels(width, height, r, g, b, a);
         return path;
     }
 
@@ -132,15 +151,15 @@ internal sealed class GeneratedTextureAssets : IAssets
     public bool Exists(string assetPath)
         => throw new NotSupportedException("Generated texture tests do not query assets.");
 
-    private static byte[] CreatePixels(uint width, uint height)
+    private static byte[] CreatePixels(uint width, uint height, byte r, byte g, byte b, byte a)
     {
         var pixels = new byte[width * height * 4];
         for (var offset = 0; offset < pixels.Length; offset += 4)
         {
-            pixels[offset] = 255;
-            pixels[offset + 1] = 0;
-            pixels[offset + 2] = 255;
-            pixels[offset + 3] = 255;
+            pixels[offset] = r;
+            pixels[offset + 1] = g;
+            pixels[offset + 2] = b;
+            pixels[offset + 3] = a;
         }
 
         return pixels;

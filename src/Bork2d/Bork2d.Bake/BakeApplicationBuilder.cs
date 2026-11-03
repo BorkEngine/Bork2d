@@ -1,6 +1,7 @@
 using Bork2d.Bake.Baking;
 using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Processors;
+using Bork2d.Bake.Shaders;
 using Bork2d.Bake.Textures;
 using Bork2d.Engine.Assets;
 using PolyType;
@@ -110,17 +111,28 @@ public sealed class BakeApplicationBuilder
         return this;
     }
 
-    /// <summary>Registers the built-in texture processor for png/jpg/jpeg/bmp/tga; idempotent.</summary>
+    /// <summary>
+    /// Registers the built-in texture processor for png/jpg/jpeg/bmp/tga and the fragment shader
+    /// processor for frag; idempotent.
+    /// </summary>
     /// <remarks>
     /// <para>
-    /// The processor is added at this call position, so a later <see cref="AddProcessor(IAssetProcessor)"/>
-    /// registration overrides it for a shared extension (with an informational diagnostic), and the
-    /// defaults stay first when this call precedes the custom registrations.
+    /// The processors are added at this call position, so a later
+    /// <see cref="AddProcessor(IAssetProcessor)"/> registration overrides one of them for a shared
+    /// extension (with an informational diagnostic), and the defaults stay first when this call
+    /// precedes the custom registrations.
     /// </para>
     /// <para>
+    /// The texture processor emits a <c>TextureDescriptor</c> and its raw payload;
     /// <see cref="WithTextureDefaults(TextureFilter, TextureWrap)"/> supplies the sampler values of the
     /// canonical sidecar created for a texture that has none, even when it is called after this
     /// method: the processor reads the builder's shared defaults at bake time.
+    /// </para>
+    /// <para>
+    /// The fragment shader processor compiles a GLSL <c>.frag</c> source with the fixed engine
+    /// prologue and emits a <c>ShaderAsset</c> plus its raw SPIR-V payload. It is an ordinary asset
+    /// processor, so a source under any canonical asset path is baked; a missing required sidecar is
+    /// created empty and reports the framework's informational diagnostic.
     /// </para>
     /// </remarks>
     /// <returns>This builder.</returns>
@@ -130,6 +142,7 @@ public sealed class BakeApplicationBuilder
         {
             _definition.RequestDefaultProcessors();
             _definition.AddProcessor(new TextureProcessor(_definition.TextureDefaults));
+            _definition.AddProcessor(new ShaderProcessor());
         }
 
         return this;
