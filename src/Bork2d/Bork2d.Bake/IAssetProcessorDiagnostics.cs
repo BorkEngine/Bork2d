@@ -6,8 +6,9 @@ namespace Bork2d.Bake;
 /// </summary>
 /// <remarks>
 /// A processor that reports an error has all of its outputs for that source discarded; a validator error
-/// fails the pack. Processors use <c>BK7xxx</c> codes and validators use <c>BK8xxx</c> codes; the message
-/// should name the owning processor or validator and the offending asset field.
+/// fails the pack. Processors use <c>BK7xxx</c> codes (and the built-in shader processor uses the
+/// shader-specific <c>BK9xxx</c> range) and validators use <c>BK8xxx</c> codes; the message should name
+/// the owning processor or validator and the offending asset field.
 /// </remarks>
 public interface IAssetProcessorDiagnostics
 {

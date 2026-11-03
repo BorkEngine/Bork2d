@@ -47,9 +47,10 @@ public sealed class BakeApplicationBuilderTests
         Assert.Equal(BakeTextureFilter.Linear, project.TextureFilter);
         Assert.Equal(BakeTextureWrap.Repeat, project.TextureWrap);
         Assert.True(project.UseDefaultProcessors);
-        Assert.Equal(2, project.Processors.Count);
+        Assert.Equal(3, project.Processors.Count);
         Assert.Equal("texture", project.Processors[0].Name);
-        Assert.Equal("fake", project.Processors[1].Name);
+        Assert.Equal("shader", project.Processors[1].Name);
+        Assert.Equal("fake", project.Processors[2].Name);
         Assert.Contains("Bork2d.Engine.Assets.SpriteAsset", project.AssetTypes.Keys);
         Assert.Contains("Bork2d.Tests.Bake.Baking.GameConfig", project.AssetTypes.Keys);
         Assert.Contains("Bork2d.Tests.Bake.Baking.StatsRoot", project.AssetTypes.Keys);
@@ -188,7 +189,7 @@ public sealed class BakeApplicationBuilderTests
     }
 
     [Fact]
-    public void UseDefaultProcessorsIsIdempotentAndRegistersTheTextureProcessor()
+    public void UseDefaultProcessorsIsIdempotentAndRegistersTheBuiltInProcessors()
     {
         using var directory = TempDirectory.Create("builder-default-processors");
         directory.CreateDirectory("Assets");
@@ -204,14 +205,19 @@ public sealed class BakeApplicationBuilderTests
         Assert.NotNull(project);
         Assert.Empty(diagnostics.GetSorted());
         Assert.True(project.UseDefaultProcessors);
-        Bork2d.Bake.Processors.BakeProcessorRegistration processor =
-            Assert.Single(project.Processors);
-        Assert.Equal("texture", processor.Name);
+        Assert.Equal(["texture", "shader"], project.Processors.Select(processor => processor.Name));
+
+        Bork2d.Bake.Processors.BakeProcessorRegistration texture = project.Processors[0];
         Assert.Equal(
             new[] { "bmp", "jpeg", "jpg", "png", "tga" },
-            processor.Extensions.Order(StringComparer.Ordinal));
-        Assert.Equal(SidecarPolicy.Required, processor.Policy);
-        Assert.NotNull(processor.SidecarShape);
+            texture.Extensions.Order(StringComparer.Ordinal));
+        Assert.Equal(SidecarPolicy.Required, texture.Policy);
+        Assert.NotNull(texture.SidecarShape);
+
+        Bork2d.Bake.Processors.BakeProcessorRegistration shader = project.Processors[1];
+        Assert.Equal(["frag"], shader.Extensions);
+        Assert.Equal(SidecarPolicy.Required, shader.Policy);
+        Assert.NotNull(shader.SidecarShape);
     }
 
     [Fact]
