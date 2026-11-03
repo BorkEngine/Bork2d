@@ -357,7 +357,8 @@ the packs.
 Import [`build/Bork2d.Assets.targets`](../build/Bork2d.Assets.targets) from the assets executable.
 After `Build` it runs `bake --project-root $(MSBuildProjectDirectory) --mode <debug|release>`; before
 `CoreClean` it runs `clean`. Useful properties: `Bork2dAssetsMode`, `Bork2dAssetsVerbose`,
-`Bork2dAssetsEnabled`, `Bork2dAssetsTargetFramework`, `Bork2dDotNetHost`.
+`Bork2dAssetsEnabled`, `Bork2dAssetsSourceRoot` (project-relative, default `Assets`),
+`Bork2dAssetsTargetFramework`, `Bork2dDotNetHost`.
 
 Import [`build/Bork2d.Assets.Copy.targets`](../build/Bork2d.Assets.Copy.targets) from a desktop or
 AOT app to copy the baked packs. Set `Bork2dAssetsProjectDirectory` and
@@ -366,8 +367,9 @@ assets executable out of process before copying to `$(TargetDir)` and `$(Publish
 the tooling out of the app's output and publish graph, including for a self-contained AOT app.
 
 The mode selects payload compression, not automatic asset watching: Debug packs are uncompressed
-and Release packs use Zstd only when it is strictly smaller. The desktop project has no compile-time
-reference to the asset sources, so an asset-only edit requires a build that reaches the assets
-executable and its copy target. If an IDE skips the project as up to date after such an edit, run a
-rebuild (or the assets project) once; the bake manifest then detects the changed source and rewrites
-the pack.
+and Release packs use Zstd only when it is strictly smaller. The assets and copy targets declare
+the source root as `UpToDateCheckInput` and as incremental target inputs, with a stamp output, so
+Visual Studio, Rider, and plain MSBuild rerun the bake after an asset-only edit instead of skipping
+an apparently up-to-date project. Without that declaration an IDE can skip MSBuild entirely after
+the first build and the manifest's own change detection never runs. A stale project can always be
+refreshed with Rebuild; the bake manifest then detects the changed source and rewrites the pack.

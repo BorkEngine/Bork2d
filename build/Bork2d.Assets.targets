@@ -28,8 +28,14 @@
           Bork2dAssetsMode          debug|release; default derived from $(Configuration)
           Bork2dAssetsVerbose       true adds the CLI verbose switch
           Bork2dAssetsEnabled       false disables the integration
+          Bork2dAssetsSourceRoot    project-relative asset source root; default Assets
           Bork2dAssetsTargetFramework  informational target framework for consumers; default net11.0
           Bork2dDotNetHost          dotnet host executable; default dotnet
+
+        The bake target declares its asset sources and a stamp output so IDE incremental
+        builders (including ReSharper Build) can see that an asset-only edit makes the project
+        dirty. Without those inputs the IDE may skip MSBuild after the first build, and the
+        manifest's own change detection never runs.
     -->
 
     <PropertyGroup>
@@ -38,12 +44,20 @@
         <Bork2dAssetsMode Condition="'$(Bork2dAssetsMode)' == '' and '$(Configuration)' == 'Release'">release</Bork2dAssetsMode>
         <Bork2dAssetsMode Condition="'$(Bork2dAssetsMode)' == ''">debug</Bork2dAssetsMode>
         <Bork2dAssetsVerbose Condition="'$(Bork2dAssetsVerbose)' == ''">false</Bork2dAssetsVerbose>
+        <Bork2dAssetsSourceRoot Condition="'$(Bork2dAssetsSourceRoot)' == ''">Assets</Bork2dAssetsSourceRoot>
         <_Bork2dAssetsVerboseSwitch Condition="'$(Bork2dAssetsVerbose)' == 'true'"> --verbose</_Bork2dAssetsVerboseSwitch>
         <_Bork2dAssetsVerboseSwitch Condition="'$(_Bork2dAssetsVerboseSwitch)' == ''"></_Bork2dAssetsVerboseSwitch>
     </PropertyGroup>
 
+    <ItemGroup>
+        <!-- Visual Studio's fast up-to-date check; ReSharper Build reads the target Inputs/Outputs. -->
+        <UpToDateCheckInput Include="$(MSBuildProjectDirectory)\$(Bork2dAssetsSourceRoot)\**\*" />
+    </ItemGroup>
+
     <Target Name="Bork2dAssetsBake"
             AfterTargets="Build"
+            Inputs="$(MSBuildProjectDirectory)\$(Bork2dAssetsSourceRoot)\**\*;$(TargetPath);$(MSBuildProjectFullPath)"
+            Outputs="$(IntermediateOutputPath)bork2d-assets.stamp"
             Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dAssetsEnabled)' != 'false' and '$(_Bork2dAssetsBakeCompleted)' != 'true'">
         <PropertyGroup>
             <_Bork2dAssetsBakeCompleted>true</_Bork2dAssetsBakeCompleted>
@@ -54,6 +68,8 @@
               WorkingDirectory="$(MSBuildProjectDirectory)"
               StandardOutputImportance="high"
               StandardErrorImportance="high" />
+        <MakeDir Directories="$(IntermediateOutputPath)" />
+        <Touch Files="$(IntermediateOutputPath)bork2d-assets.stamp" AlwaysCreate="true" />
     </Target>
 
     <!--
@@ -72,6 +88,12 @@
               WorkingDirectory="$(MSBuildProjectDirectory)"
               StandardOutputImportance="high"
               StandardErrorImportance="high" />
+    </Target>
+
+    <Target Name="Bork2dAssetsCleanStamp"
+            BeforeTargets="CoreClean"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(Bork2dAssetsEnabled)' != 'false'">
+        <Delete Files="$(IntermediateOutputPath)bork2d-assets.stamp" />
     </Target>
 
 </Project>
