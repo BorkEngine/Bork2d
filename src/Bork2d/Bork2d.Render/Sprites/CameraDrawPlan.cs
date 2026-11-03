@@ -5,7 +5,8 @@ namespace Bork2d.Render.Sprites;
 
 /// <summary>
 /// One valid camera's position in a frame plan: its rounded pixel projection, world culling bounds,
-/// load op, clear color, culling mask, and its contiguous instance range (M8 §6.6/§6.8).
+/// load op, clear color, culling mask, its contiguous instance range, and its contiguous shader-run
+/// range (M8 §6.6/§6.8).
 /// </summary>
 /// <param name="Projection">The validated rounded pixel viewport and view-projection matrix.</param>
 /// <param name="WorldBounds">
@@ -16,6 +17,8 @@ namespace Bork2d.Render.Sprites;
 /// <param name="CullingMask">The camera's layer mask used to filter the sorted sprites.</param>
 /// <param name="FirstInstance">The first instance record for this camera in the frame buffer.</param>
 /// <param name="InstanceCount">The number of records this camera draws; zero means no draw.</param>
+/// <param name="FirstRun">The first <see cref="ShaderRun"/> for this camera in the frame plan.</param>
+/// <param name="RunCount">The number of runs this camera records; zero means no draw.</param>
 internal readonly record struct CameraDrawPlan(
     CameraProjectionResult Projection,
     Bounds WorldBounds,
@@ -23,4 +26,6 @@ internal readonly record struct CameraDrawPlan(
     Color ClearColor,
     uint CullingMask,
     int FirstInstance,
-    int InstanceCount);
+    int InstanceCount,
+    int FirstRun,
+    int RunCount);

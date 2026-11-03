@@ -8,7 +8,7 @@ namespace Bork2d.Tests.Render.Diagnostics;
 /// <summary>
 /// Deterministic tests for the one-frame <see cref="RenderStats"/> mapping (M8 §6.9/§6.10): every
 /// documented field maps from the aggregate render-pass statistics/page store, and the public
-/// invariants (<c>DrawCalls == NonEmptyCameras &lt;= Cameras</c>) hold.
+/// invariants (<c>NonEmptyCameras &lt;= DrawCalls</c>, <c>NonEmptyCameras &lt;= Cameras</c>) hold.
 /// </summary>
 public sealed class FrameRenderStatsTests
 {
@@ -80,8 +80,11 @@ public sealed class FrameRenderStatsTests
             validationErrors: 0,
             validationWarnings: 0);
 
-        Assert.Equal(stats.NonEmptyCameras, stats.DrawCalls);
-        Assert.True(stats.DrawCalls <= stats.Cameras);
+        // Every shader run records one draw and a drawing camera has at least one run, so the draw
+        // count is at least the non-empty camera count (and may exceed the camera count when a
+        // camera contains several contiguous shader groups).
+        Assert.True(stats.NonEmptyCameras <= stats.DrawCalls);
+        Assert.True(stats.NonEmptyCameras <= stats.Cameras);
         Assert.Equal(9, stats.SkippedSprites);
     }
 }

@@ -24,16 +24,19 @@ internal sealed class RenderPassStats
     /// <summary>Gets or sets the number of cameras with a valid projection (the pass candidates).</summary>
     internal int CameraPlanCount { get; set; }
 
-    /// <summary>Gets or sets the number of <c>vkCmdDraw</c> calls the frame records.</summary>
+    /// <summary>Gets or sets the number of <c>vkCmdDraw</c> calls the frame records (one per run).</summary>
     internal int DrawCalls { get; set; }
 
-    /// <summary>Gets or sets the number of cameras that draw at least one instance.</summary>
+    /// <summary>Gets or sets the number of cameras that record at least one shader run.</summary>
     internal int NonEmptyCameras { get; set; }
 
     /// <summary>Gets or sets the total number of instance records written into the frame buffer.</summary>
     internal int InstanceCount { get; set; }
 
-    /// <summary>Gets or sets the number of sprites skipped by the frame (null/layer/non-Quad/pending).</summary>
+    /// <summary>
+    /// Gets or sets the number of sprites skipped by the frame (null/layer/non-Quad/pending shader
+    /// or page).
+    /// </summary>
     internal long SkippedSprites { get; set; }
 
     /// <summary>Gets or sets the number of sprites whose world bounds cull them from every camera.</summary>

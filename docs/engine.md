@@ -55,6 +55,12 @@ may run on any thread and use a dedicated lock that is independent of the scene'
 User globals are copied into each frame snapshot after the scene walk. The built-in time input is
 not a user global; the frame's time is captured separately from `ITime.Time`.
 
+The renderer applies a captured user global to each shader run's 144-byte global block by its ordinal
+name when the shader declares the same type, and uses the declaration's shader default when the name
+is absent. A type mismatch between the engine value and a shader declaration makes that custom shader
+fall back to `shader/sprite` for the frame with a one-time warning; the stored bytes are never
+reinterpreted. The frame time always occupies the block's `time.x`.
+
 ### Frame capture
 
 `CaptureFrameAsync` returns a `FrameCaptureResult`: row-major RGBA8 pixels with a top-left origin,
@@ -108,6 +114,18 @@ the total count, so the renderer can warn about and ignore references beyond fou
 shader freezes its declarations once, and capture carries only that frozen `ShaderRenderData`, never
 the live `ShaderAsset`.
 
+The renderer resolves a captured sprite's shader from that frozen metadata. No assigned `Shader`
+selects the built-in `shader/sprite` entry; a custom shader is keyed by its raw SPIR-V `DataRef` path
+and loaded asynchronously, so a sprite waits (and is counted as skipped) until its frame becomes
+ready. A custom shader that fails loading, validation, module creation, or pipeline creation draws
+with `shader/sprite` and logs one warning per shader path. Its declared additional textures are
+resolved positionally in the first four `AdditionalTextures` slots; a still-loading extra texture
+skips the sprite, a failed or absent one samples the bindless placeholder, references beyond the
+shader's declared slot count are not loaded, and references beyond four are ignored with a one-time
+warning. A catalog mount reloads a custom path from the new winning entry on its next sighting,
+retries a previously failed path, and reloads the default shader while keeping it active until the
+replacement is ready.
+
 Instance uniform values are strict. The `SetUniform` overloads validate immediately against the
 currently assigned shader's frozen metadata: with no shader assigned, an undeclared name, a
 declared type that does not match the overload, or a null/empty/whitespace name, the call throws
@@ -115,7 +133,9 @@ declared type that does not match the overload, or a null/empty/whitespace name,
 `ResetUniforms` clears them so the shader defaults apply again. Reassigning `Shader` does not clear
 stored values; a value whose name or type no longer matches the new shader is inert at capture.
 Capture applies the stored overrides over the frozen default block without allocating on the warm
-path.
+path. A sprite with no custom shader has a zero instance-uniform block in the snapshot; the renderer
+seeds it from the default entry's declared default block, so a game pack that shadows
+`shader/sprite` with instance-uniform declarations behaves correctly without per-sprite overrides.
 
 Cameras and sprites are `IRenderable`s and expose a read-only world-space `Bounds` AABB for
 conservative renderer culling. A camera's bounds contain its transformed visible rectangle; a

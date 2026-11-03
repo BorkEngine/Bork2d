@@ -14,7 +14,7 @@ namespace Bork2d.Render.Sprites;
 /// (uBR, vBR, uBL, vBL), <c>tint</c> (linear RGBA), <c>misc</c> (pivotX, pivotY, mainTextureIndex,
 /// flags), <c>extraTextureIndices</c> (four additional bindless texture indices as floats), and
 /// <c>instanceParams0</c> through <c>instanceParams3</c> (the 16-float custom-shader instance
-/// uniform block). <c>flags</c> is reserved and is zero in this milestone.
+/// uniform block). <c>flags</c> is reserved and stays zero; flips live in the signed sizes.
 /// </para>
 /// <para>
 /// <c>sizeX</c>/<c>sizeY</c> carry the <c>FlipX</c>/<c>FlipY</c> sign, which is the algebraically

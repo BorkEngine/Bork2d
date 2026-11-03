@@ -17,6 +17,9 @@ internal enum SpriteSkipReason
     /// <summary>The topology is a known non-<c>Quad</c> value; skipped, never approximated.</summary>
     NonQuad,
 
-    /// <summary>The texture page is still loading; skipped until it is ready.</summary>
+    /// <summary>
+    /// A texture page or the custom shader is still loading, or an additional texture page is; the
+    /// sprite is skipped until the frame that first observes it ready.
+    /// </summary>
     Pending,
 }

@@ -4,10 +4,12 @@ using Bork2d.Engine.Assets;
 using Bork2d.Engine.Mathematics;
 using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
+using Bork2d.Render.Shaders;
 using Bork2d.Render.Sprites;
 using Bork2d.Render.Textures;
 using Bork2d.Tests.TestDoubles;
 using Microsoft.Extensions.Logging;
+using Silk.NET.Vulkan;
 using Xunit;
 
 namespace Bork2d.Tests.Render.Sprites;
@@ -38,7 +40,7 @@ public sealed class SpriteFramePlannerTests
         AddSprite(snapshot, Sprite("tex/a"), layer: 1, zIndex: 5, x: 10f);
         AddSprite(snapshot, Sprite("tex/a"), layer: 1, zIndex: 2, x: 20f);
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(1, plan.CameraCount);
         Assert.Equal(1, plan.CameraPlanCount);
@@ -62,7 +64,7 @@ public sealed class SpriteFramePlannerTests
         AddSprite(snapshot, Sprite("tex/a"), layer: 1u);
         AddSprite(snapshot, Sprite("tex/a"), layer: 2u);
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(2, plan.CameraCount);
         Assert.Equal(2, plan.CameraPlanCount);
@@ -82,7 +84,7 @@ public sealed class SpriteFramePlannerTests
         AddCamera(snapshot, zIndex: 0, clear: ClearKind.Color);
         AddCamera(snapshot, zIndex: 1, clear: ClearKind.Depth);
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(2, plan.CameraPlanCount);
         Assert.Equal(0, plan.DrawCalls);
@@ -105,8 +107,8 @@ public sealed class SpriteFramePlannerTests
         AddCamera(snapshot, zIndex: 3, world: Matrix3x2.CreateScale(2f));
         AddCamera(snapshot, zIndex: 4);
 
-        SpriteFramePlan first = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
-        SpriteFramePlan second = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan first = fixture.Plan(snapshot, 320, 240);
+        SpriteFramePlan second = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(5, first.CameraCount);
         Assert.Equal(1, first.CameraPlanCount);
@@ -126,7 +128,7 @@ public sealed class SpriteFramePlannerTests
         snapshot.AddSprite(new SpriteSnapshot(null, Matrix3x2.Identity, Color.White, 1u, 0, false, false));
         AddSprite(snapshot, Sprite("tex/a"), layer: 0u);
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(0, plan.CameraCount);
         Assert.Equal(0, plan.CameraPlanCount);
@@ -144,12 +146,12 @@ public sealed class SpriteFramePlannerTests
         AddCamera(snapshot, zIndex: 0);
         AddSprite(snapshot, Sprite("tex/pending"), layer: 1u);
 
-        SpriteFramePlan pending = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan pending = fixture.Plan(snapshot, 320, 240);
         Assert.Equal(1, pending.SkippedSprites);
         Assert.Equal(0, pending.InstanceCount);
 
         fixture.MakeReadyPage("tex/pending", 8, 8);
-        SpriteFramePlan ready = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan ready = fixture.Plan(snapshot, 320, 240);
         Assert.Equal(0, ready.SkippedSprites);
         Assert.Equal(1, ready.InstanceCount);
         Assert.Equal(1, fixture.Instances.WriteCount);
@@ -176,7 +178,7 @@ public sealed class SpriteFramePlannerTests
         AddCamera(snapshot, zIndex: 0);
         AddSprite(snapshot, Sprite("tex/pending-bad"), layer: 1u);
 
-        SpriteFramePlan validPending = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan validPending = fixture.Plan(snapshot, 320, 240);
         Assert.Equal(1, validPending.SkippedSprites);
         Assert.Equal(0, validPending.InstanceCount);
     }
@@ -191,7 +193,7 @@ public sealed class SpriteFramePlannerTests
         AddSprite(snapshot, Sprite("tex/failed", scale: new Vector2(10f, 4f)), layer: 1u, zIndex: 0);
         AddSprite(snapshot, Sprite(texture: null, scale: new Vector2(10f, 4f)), layer: 1u, zIndex: 1);
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(2, plan.InstanceCount);
         Assert.Equal(0, plan.SkippedSprites);
@@ -224,7 +226,7 @@ public sealed class SpriteFramePlannerTests
             flipX: true,
             flipY: true);
 
-        _ = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        _ = fixture.Plan(snapshot, 320, 240);
 
         SpriteInstance instance = fixture.Instances.Get(0);
         Assert.Equal(-4f, instance.Transform1.Z, 5);
@@ -250,7 +252,7 @@ public sealed class SpriteFramePlannerTests
         AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 1, x: 2f);
         AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 2, x: 3f);
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(2, plan.NonEmptyCameras);
         Assert.Equal(2, plan.DrawCalls);
@@ -282,7 +284,7 @@ public sealed class SpriteFramePlannerTests
         AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 1, x: 5f);
         AddSprite(snapshot, Sprite("tex/a"), layer: 8u, zIndex: 0, x: 50f, bounds: Box(0f, 0f, 5f));
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(2, plan.CameraPlanCount);
         Assert.Equal(2, plan.NonEmptyCameras);
@@ -331,7 +333,7 @@ public sealed class SpriteFramePlannerTests
             flipX: true,
             x: 4f);
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(2, plan.InstanceCount);
         Assert.Equal(1, plan.Cameras[0].InstanceCount);
@@ -366,7 +368,7 @@ public sealed class SpriteFramePlannerTests
         AddSprite(snapshot, Sprite("tex/a"), layer: 4u, zIndex: 5, x: 45f);
         AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 4, x: 14f);
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(4, plan.InstanceCount);
         Assert.Equal(0, plan.CulledSprites);
@@ -403,7 +405,7 @@ public sealed class SpriteFramePlannerTests
         AddSprite(snapshot, Sprite("tex/a"), layer: 8u, zIndex: 4, x: 50f, bounds: Box(0f, 0f, 5f));
         AddSprite(snapshot, Sprite("tex/a"), layer: 4u, zIndex: 5, x: 7f, bounds: Box(7f, 0f, 5f));
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         for (var cameraIndex = 0; cameraIndex < plan.CameraPlanCount; cameraIndex++)
         {
@@ -469,8 +471,8 @@ public sealed class SpriteFramePlannerTests
         AddSprite(snapshot, Sprite("tex/a", topology: SpriteTopology.TriangleStrip), layer: 1u);
         AddSprite(snapshot, Sprite("tex/a", topology: SpriteTopology.Triangles), layer: 1u);
 
-        SpriteFramePlan first = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
-        SpriteFramePlan second = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan first = fixture.Plan(snapshot, 320, 240);
+        SpriteFramePlan second = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(2, first.SkippedSprites);
         Assert.Equal(2, second.SkippedSprites);
@@ -521,7 +523,7 @@ public sealed class SpriteFramePlannerTests
         engine.CaptureSnapshot(snapshot, 1);
         SpriteRenderData frozen = Assert.IsType<SpriteRenderData>(snapshot.Sprites[0].SpriteData);
 
-        SpriteFramePlan before = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan before = fixture.Plan(snapshot, 320, 240);
         SpriteInstance first = fixture.Instances.Get(0);
 
         asset.Uvs![0] = new Vector2(-1f, -1f);
@@ -533,7 +535,7 @@ public sealed class SpriteFramePlannerTests
 
         var again = new FrameSnapshot { Sequence = 2 };
         engine.CaptureSnapshot(again, 2);
-        SpriteFramePlan after = fixture.Planner.Plan(again, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan after = fixture.Plan(again, 320, 240);
         SpriteInstance second = fixture.Instances.Get(0);
 
         Assert.Equal(1, before.InstanceCount);
@@ -565,13 +567,13 @@ public sealed class SpriteFramePlannerTests
                 bounds: Box(0f, 0f, 5f));
         }
 
-        _ = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        _ = fixture.Plan(snapshot, 320, 240);
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         var total = 0;
         for (var iteration = 0; iteration < 200; iteration++)
         {
-            total += fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals).InstanceCount;
+            total += fixture.Plan(snapshot, 320, 240).InstanceCount;
         }
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -593,21 +595,21 @@ public sealed class SpriteFramePlannerTests
             AddSprite(snapshot, asset, layer: 1u, zIndex: index, x: index * 0.01f);
         }
 
-        SpriteFramePlan warm = fixture.Planner.Plan(snapshot, 1920, 1080, fixture.Instances, fixture.Globals);
+        SpriteFramePlan warm = fixture.Plan(snapshot, 1920, 1080);
         Assert.Equal(spriteCount, warm.InstanceCount);
 
         // Let tiered JIT finish and every pooled buffer reach its high-water mark before the
         // measurement; the first large plan can otherwise allocate on a cold test-host thread.
         for (var warmup = 0; warmup < 5; warmup++)
         {
-            _ = fixture.Planner.Plan(snapshot, 1920, 1080, fixture.Instances, fixture.Globals);
+            _ = fixture.Plan(snapshot, 1920, 1080);
         }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         var total = 0;
         for (var iteration = 0; iteration < 10; iteration++)
         {
-            total += fixture.Planner.Plan(snapshot, 1920, 1080, fixture.Instances, fixture.Globals).InstanceCount;
+            total += fixture.Plan(snapshot, 1920, 1080).InstanceCount;
         }
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -640,18 +642,18 @@ public sealed class SpriteFramePlannerTests
                 bounds: bounds);
         }
 
-        int expected = fixture.Planner.Plan(snapshot, 1920, 1080, fixture.Instances, fixture.Globals).InstanceCount;
+        int expected = fixture.Plan(snapshot, 1920, 1080).InstanceCount;
         Assert.True(expected > 0);
         for (var warmup = 0; warmup < 5; warmup++)
         {
-            _ = fixture.Planner.Plan(snapshot, 1920, 1080, fixture.Instances, fixture.Globals);
+            _ = fixture.Plan(snapshot, 1920, 1080);
         }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         var total = 0;
         for (var iteration = 0; iteration < 200; iteration++)
         {
-            total += fixture.Planner.Plan(snapshot, 1920, 1080, fixture.Instances, fixture.Globals).InstanceCount;
+            total += fixture.Plan(snapshot, 1920, 1080).InstanceCount;
         }
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -673,7 +675,7 @@ public sealed class SpriteFramePlannerTests
         // No bounds means "unknown": a far sprite with empty bounds stays conservative and draws.
         AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 3, x: 1000f);
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(1, plan.CameraCount);
         Assert.Equal(0, plan.SkippedSprites);
@@ -693,7 +695,7 @@ public sealed class SpriteFramePlannerTests
         AddSprite(snapshot, Sprite("tex/a"), layer: 2u, x: 100f, bounds: Box(100f, 0f, 5f));
         AddSprite(snapshot, Sprite("tex/a"), layer: 1u, x: 100f, bounds: Box(100f, 0f, 5f));
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         // The layer-mismatched sprite was never a bounds candidate, so only the layer-matched
         // offscreen sprite counts as culled.
@@ -717,7 +719,7 @@ public sealed class SpriteFramePlannerTests
             world: Matrix3x2.CreateTranslation(100f, 0f));
         AddSprite(snapshot, Sprite("tex/a"), layer: 1u, x: 100f, bounds: Box(100f, 0f, 5f));
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(1, plan.InstanceCount);
         Assert.Equal(0, plan.CulledSprites);
@@ -736,7 +738,7 @@ public sealed class SpriteFramePlannerTests
         AddSprite(snapshot, Sprite("tex/a"), layer: 1u, x: 0f, bounds: Box(0f, 0f, 5f));
         AddSprite(snapshot, Sprite("tex/a"), layer: 1u, x: 100f, bounds: Box(100f, 0f, 5f));
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(2, plan.InstanceCount);
         Assert.Equal(1, plan.CulledSprites);
@@ -757,7 +759,7 @@ public sealed class SpriteFramePlannerTests
             bounds: Box(100f, 0f, 5f));
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals));
+            () => fixture.Plan(snapshot, 320, 240));
         Assert.Contains("Scale", exception.Message, StringComparison.Ordinal);
     }
 
@@ -770,7 +772,7 @@ public sealed class SpriteFramePlannerTests
         AddCamera(snapshot, zIndex: 0, size: float.MaxValue);
         AddSprite(snapshot, Sprite("tex/a"), layer: 1u, x: 1000f, bounds: Box(1000f, 0f, 5f));
 
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(1, plan.CameraPlanCount);
         Assert.Equal(1, plan.InstanceCount);
@@ -801,7 +803,7 @@ public sealed class SpriteFramePlannerTests
             (viewCorner.X * sine) + (viewCorner.Y * cosine));
 
         FrameSnapshot snapshot = CaptureEngine(engine);
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(1, plan.InstanceCount);
         Assert.Equal(0, plan.CulledSprites);
@@ -824,7 +826,7 @@ public sealed class SpriteFramePlannerTests
         sprite.LocalPosition = new Vector2(14f, -14f);
 
         FrameSnapshot snapshot = CaptureEngine(engine);
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         // The mirrored pivot places the quad at x [8.6, 14.6], y [-14.6, -8.6]; dropping the flip
         // sign would put it at x [13.4, 19.4], y [-19.4, -13.4] and wrongly cull it.
@@ -851,7 +853,7 @@ public sealed class SpriteFramePlannerTests
         sprite.LocalRotation = 30f;
 
         FrameSnapshot snapshot = CaptureEngine(engine);
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         // The sheared quad reaches x = 11.34; the un-sheared quad would start at x = 17 and be
         // wrongly culled against the camera's x extent of 13.33.
@@ -874,14 +876,14 @@ public sealed class SpriteFramePlannerTests
         sprite.LocalPosition = new Vector2(13f, 0f);
 
         FrameSnapshot snapshot = CaptureEngine(engine);
-        SpriteFramePlan plan = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
         Assert.Equal(1, plan.InstanceCount);
         Assert.Equal(0, plan.CulledSprites);
     }
 
     [Fact]
-    public void PlanWritesExactlyOneGlobalBlockWithTheFrameTimeAndZeroUserSlots()
+    public void PlanWithNoRunsWritesNoGlobalBlock()
     {
         using var fixture = new PlanningFixture();
         var snapshot = new FrameSnapshot
@@ -892,34 +894,533 @@ public sealed class SpriteFramePlannerTests
         };
         AddCamera(snapshot, zIndex: 0);
 
-        _ = fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals);
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
 
+        Assert.Equal(0, plan.DrawCalls);
+        Assert.Equal(0, plan.RunCount);
+        Assert.Equal(1, fixture.Globals.EnsureCapacityCallCount);
+        Assert.Equal(0, fixture.Globals.LastRequiredBlocks);
+        Assert.Equal(0, fixture.Globals.WriteCount);
+    }
+
+    [Fact]
+    public void PlanWritesOneGlobalBlockPerRunWithTheFrameTimeAndShaderDefaults()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        ShaderRenderData metadata = fixture.Shaders.Register(
+            CustomShader(
+                "materials/globals",
+                globals:
+                [
+                    new ShaderUniform(
+                        "gColor",
+                        ShaderUniformType.Color,
+                        0,
+                        new Vector4(0.1f, 0.2f, 0.3f, 0.4f)),
+                    new ShaderUniform(
+                        "gScale",
+                        ShaderUniformType.Float,
+                        4,
+                        new Vector4(2f, 0f, 0f, 0f)),
+                ]),
+            ShaderBindingState.Ready);
+        var snapshot = new FrameSnapshot
+        {
+            Sequence = 4,
+            Time = 12.5,
+            DeltaTime = 0.016,
+        };
+        snapshot.AddGlobalUniform(
+            new GlobalUniformSnapshot(
+                "gColor",
+                ShaderUniformType.Color,
+                new Vector4(0.9f, 0.8f, 0.7f, 0.6f)));
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, shader: metadata);
+
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(1, plan.RunCount);
+        Assert.Equal(1, plan.DrawCalls);
         Assert.Equal(1, fixture.Globals.EnsureCapacityCallCount);
         Assert.Equal(1, fixture.Globals.LastRequiredBlocks);
         Assert.Equal(1, fixture.Globals.WriteCount);
         Assert.Equal(0, fixture.Globals.LastWrittenIndex);
 
         GlobalUniformBlock block = fixture.Globals.Get(0);
-        Assert.Equal(12.5f, block.Time.X);
-        Assert.Equal(0f, block.Time.Y);
-        Assert.Equal(0f, block.Time.Z);
-        Assert.Equal(0f, block.Time.W);
-        Assert.Equal(Vector4.Zero, block.Global0);
-        Assert.Equal(Vector4.Zero, block.Global1);
+        Assert.Equal(new Vector4(12.5f, 0f, 0f, 0f), block.Time);
+        Assert.Equal(new Vector4(0.9f, 0.8f, 0.7f, 0.6f), block.Global0);
+        Assert.Equal(new Vector4(2f, 0f, 0f, 0f), block.Global1);
         Assert.Equal(Vector4.Zero, block.Global2);
-        Assert.Equal(Vector4.Zero, block.Global3);
-        Assert.Equal(Vector4.Zero, block.Global4);
-        Assert.Equal(Vector4.Zero, block.Global5);
-        Assert.Equal(Vector4.Zero, block.Global6);
-        Assert.Equal(Vector4.Zero, block.Global7);
-        Assert.Equal(144, GlobalUniformBlock.SizeInBytes);
+        Assert.Equal(0u, plan.Runs[0].GlobalBlockOffset);
         Assert.Equal(144, fixture.Globals.BlockStride);
+        Assert.Equal(144, GlobalUniformBlock.SizeInBytes);
+    }
+
+    [Fact]
+    public void EachRunOwnsItsGlobalBlockAndDynamicOffset()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        ShaderRenderData first = fixture.Shaders.Register(
+            CustomShader(
+                "materials/first",
+                globals:
+                [
+                    new ShaderUniform(
+                        "gA",
+                        ShaderUniformType.Vector2,
+                        0,
+                        new Vector4(3f, 4f, 0f, 0f)),
+                ]),
+            ShaderBindingState.Ready);
+        ShaderRenderData second = fixture.Shaders.Register(
+            CustomShader(
+                "materials/second",
+                globals:
+                [
+                    new ShaderUniform(
+                        "gB",
+                        ShaderUniformType.Float,
+                        0,
+                        new Vector4(7f, 0f, 0f, 0f)),
+                ]),
+            ShaderBindingState.Ready);
+        var snapshot = new FrameSnapshot { Sequence = 1, Time = 2f };
+        snapshot.AddGlobalUniform(
+            new GlobalUniformSnapshot("gA", ShaderUniformType.Vector2, new Vector4(5f, 6f, 0f, 0f)));
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 0, shader: first);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 1, shader: second);
+
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(2, plan.RunCount);
+        Assert.Equal(2, plan.DrawCalls);
+        Assert.Equal(2, fixture.Globals.WriteCount);
+        Assert.Equal(0u, plan.Runs[0].GlobalBlockOffset);
+        Assert.Equal((uint)fixture.Globals.BlockStride, plan.Runs[1].GlobalBlockOffset);
+        Assert.Equal(new Vector4(5f, 6f, 0f, 0f), fixture.Globals.Get(0).Global0);
+        Assert.Equal(new Vector4(7f, 0f, 0f, 0f), fixture.Globals.Get(1).Global0);
+        Assert.Equal(new Vector4(2f, 0f, 0f, 0f), fixture.Globals.Get(0).Time);
+        Assert.Equal(new Vector4(2f, 0f, 0f, 0f), fixture.Globals.Get(1).Time);
+    }
+
+    [Fact]
+    public void PendingCustomShaderSkipsThenDrawsTheFrameAfterItBecomesReady()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        ShaderAsset asset = CustomShader("materials/pending");
+        ShaderRenderData metadata = fixture.Shaders.Register(asset, ShaderBindingState.Pending);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, shader: metadata);
+
+        SpriteFramePlan pending = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(1, pending.SkippedSprites);
+        Assert.Equal(0, pending.InstanceCount);
+        Assert.Equal(0, pending.DrawCalls);
+        Assert.Equal(0, fixture.Instances.WriteCount);
+
+        _ = fixture.Shaders.Register(asset, ShaderBindingState.Ready);
+        SpriteFramePlan ready = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(0, ready.SkippedSprites);
+        Assert.Equal(1, ready.InstanceCount);
+        Assert.Equal(1, ready.DrawCalls);
+        Assert.NotEqual(fixture.Shaders.DefaultEntryId, ready.Runs[0].ShaderEntryId);
+    }
+
+    [Fact]
+    public void FailedCustomShaderDrawsWithTheDefaultEntryAndIsNotSkipped()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        ShaderRenderData metadata = fixture.Shaders.Register(
+            CustomShader("materials/failed"),
+            ShaderBindingState.Failed);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, shader: metadata);
+
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(0, plan.SkippedSprites);
+        Assert.Equal(1, plan.InstanceCount);
+        Assert.Equal(1, plan.DrawCalls);
+        Assert.Equal(fixture.Shaders.DefaultEntryId, plan.Runs[0].ShaderEntryId);
+        Assert.Equal(Vector4.Zero, fixture.Instances.Get(0).InstanceParams0);
+    }
+
+    [Fact]
+    public void AlternatingShadersFormContiguousRunsAndNeverReorderSprites()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        ShaderRenderData first = fixture.Shaders.Register(
+            CustomShader("materials/first"),
+            ShaderBindingState.Ready);
+        ShaderRenderData second = fixture.Shaders.Register(
+            CustomShader("materials/second"),
+            ShaderBindingState.Ready);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 0, x: 10f, shader: first);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 1, x: 20f, shader: first);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 2, x: 30f, shader: second);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 3, x: 40f, shader: first);
+
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(4, plan.InstanceCount);
+        Assert.Equal(3, plan.RunCount);
+        Assert.Equal(3, plan.DrawCalls);
+        Assert.Equal(1, plan.NonEmptyCameras);
+        Assert.Equal(0, plan.Cameras[0].FirstRun);
+        Assert.Equal(3, plan.Cameras[0].RunCount);
+        Assert.Equal(new[] { 10f, 20f, 30f, 40f }, InstanceTranslations(fixture.Instances, 4));
+
+        Assert.Equal(0, plan.Runs[0].FirstInstance);
+        Assert.Equal(2, plan.Runs[0].InstanceCount);
+        Assert.Equal(fixture.Shaders.EntryIdFor(first), plan.Runs[0].ShaderEntryId);
+        Assert.Equal(2, plan.Runs[1].FirstInstance);
+        Assert.Equal(1, plan.Runs[1].InstanceCount);
+        Assert.Equal(fixture.Shaders.EntryIdFor(second), plan.Runs[1].ShaderEntryId);
+        Assert.Equal(3, plan.Runs[2].FirstInstance);
+        Assert.Equal(1, plan.Runs[2].InstanceCount);
+        Assert.Equal(fixture.Shaders.EntryIdFor(first), plan.Runs[2].ShaderEntryId);
+    }
+
+    [Fact]
+    public void PerCameraRunsAreCountedIndependentlyAcrossOverlappingCameras()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        ShaderRenderData first = fixture.Shaders.Register(
+            CustomShader("materials/first"),
+            ShaderBindingState.Ready);
+        ShaderRenderData second = fixture.Shaders.Register(
+            CustomShader("materials/second"),
+            ShaderBindingState.Ready);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0, clear: ClearKind.None);
+        AddCamera(snapshot, zIndex: 1, clear: ClearKind.None);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 0, shader: first);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 1, shader: second);
+
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(2, plan.NonEmptyCameras);
+        Assert.Equal(4, plan.DrawCalls);
+        Assert.Equal(4, plan.InstanceCount);
+        Assert.Equal(0, plan.Cameras[0].FirstRun);
+        Assert.Equal(2, plan.Cameras[0].RunCount);
+        Assert.Equal(2, plan.Cameras[1].FirstRun);
+        Assert.Equal(2, plan.Cameras[1].RunCount);
+        Assert.Equal(plan.Runs[0].ShaderEntryId, plan.Runs[2].ShaderEntryId);
+        Assert.Equal(plan.Runs[1].ShaderEntryId, plan.Runs[3].ShaderEntryId);
+    }
+
+    [Fact]
+    public void DefaultOnlySceneIsExactlyOneRunPerCamera()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0, clear: ClearKind.None);
+        AddCamera(snapshot, zIndex: 1, clear: ClearKind.None);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 0);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 1);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 2);
+
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(2, plan.RunCount);
+        Assert.Equal(2, plan.DrawCalls);
+        Assert.Equal(2, plan.NonEmptyCameras);
+        Assert.Equal(1, plan.Cameras[0].RunCount);
+        Assert.Equal(1, plan.Cameras[1].RunCount);
+        Assert.Equal(3, plan.Runs[0].InstanceCount);
+        Assert.Equal(3, plan.Runs[1].InstanceCount);
+        Assert.Equal(fixture.Shaders.DefaultEntryId, plan.Runs[0].ShaderEntryId);
+        Assert.Equal(fixture.Shaders.DefaultEntryId, plan.Runs[1].ShaderEntryId);
+    }
+
+    [Fact]
+    public void ExtraTexturesResolveDeclaredSlotsAndUseThePlaceholderForFailedOrAbsentRefs()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        fixture.MakeReadyPage("tex/extra", 8, 8);
+        fixture.MakeFailedPage("tex/bad", 8, 8);
+        int extraIndex = fixture.Store.EnsurePage("tex/extra").Index;
+        ShaderRenderData metadata = fixture.Shaders.Register(
+            CustomShader(
+                "materials/textures",
+                slots:
+                [
+                    new ShaderTextureSlot("t0"),
+                    new ShaderTextureSlot("t1"),
+                    new ShaderTextureSlot("t2"),
+                    new ShaderTextureSlot("t3"),
+                ]),
+            ShaderBindingState.Ready);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(
+            snapshot,
+            Sprite("tex/a"),
+            layer: 1u,
+            shader: metadata,
+            extraTexture0: "tex/extra",
+            extraTexture1: "tex/bad",
+            extraTexture3: "tex/extra",
+            additionalTextureCount: 4);
+
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(1, plan.InstanceCount);
+        SpriteInstance instance = fixture.Instances.Get(0);
+        Assert.Equal(extraIndex, instance.ExtraTextureIndices.X);
+        Assert.Equal(0f, instance.ExtraTextureIndices.Y);
+        Assert.Equal(0f, instance.ExtraTextureIndices.Z);
+        Assert.Equal(extraIndex, instance.ExtraTextureIndices.W);
+    }
+
+    [Fact]
+    public void PendingExtraTextureSkipsTheWholeSpriteUntilThePageIsReady()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        ShaderRenderData metadata = fixture.Shaders.Register(
+            CustomShader("materials/textures", slots: [new ShaderTextureSlot("t0")]),
+            ShaderBindingState.Ready);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(
+            snapshot,
+            Sprite("tex/a"),
+            layer: 1u,
+            shader: metadata,
+            extraTexture0: "tex/pending-extra",
+            additionalTextureCount: 1);
+
+        SpriteFramePlan pending = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(1, pending.SkippedSprites);
+        Assert.Equal(0, pending.InstanceCount);
+
+        fixture.MakeReadyPage("tex/pending-extra", 8, 8);
+        SpriteFramePlan ready = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(0, ready.SkippedSprites);
+        Assert.Equal(1, ready.InstanceCount);
+        Assert.NotEqual(0f, fixture.Instances.Get(0).ExtraTextureIndices.X);
+    }
+
+    [Fact]
+    public void AdditionalTexturesBeyondFourAreIgnoredWithOneWarning()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        fixture.MakeReadyPage("tex/extra", 8, 8);
+        ShaderRenderData metadata = fixture.Shaders.Register(
+            CustomShader(
+                "materials/textures",
+                slots:
+                [
+                    new ShaderTextureSlot("t0"),
+                    new ShaderTextureSlot("t1"),
+                    new ShaderTextureSlot("t2"),
+                    new ShaderTextureSlot("t3"),
+                ]),
+            ShaderBindingState.Ready);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(
+            snapshot,
+            Sprite("tex/a"),
+            layer: 1u,
+            shader: metadata,
+            extraTexture0: "tex/extra",
+            extraTexture1: "tex/extra",
+            extraTexture2: "tex/extra",
+            extraTexture3: "tex/extra",
+            additionalTextureCount: 5);
+
+        SpriteFramePlan first = fixture.Plan(snapshot, 320, 240);
+        SpriteFramePlan second = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(1, first.InstanceCount);
+        Assert.Equal(1, second.InstanceCount);
+        Assert.Equal(0, first.SkippedSprites);
+        Assert.Equal(
+            1,
+            fixture.Logs.Entries.Count(
+                entry => entry.Message.Contains("at most", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void ExtraTexturesBeyondTheDeclaredSlotCountAreNotLoaded()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        fixture.MakeReadyPage("tex/used", 8, 8);
+        ShaderRenderData metadata = fixture.Shaders.Register(
+            CustomShader("materials/textures", slots: [new ShaderTextureSlot("t0")]),
+            ShaderBindingState.Ready);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(
+            snapshot,
+            Sprite("tex/a"),
+            layer: 1u,
+            shader: metadata,
+            extraTexture0: "tex/used",
+            extraTexture1: "tex/unused",
+            additionalTextureCount: 2);
+
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(0, plan.SkippedSprites);
+        Assert.Equal(1, plan.InstanceCount);
+        Assert.DoesNotContain("tex/unused", fixture.Assets.LoadAssetPaths);
+        Assert.Equal(0f, fixture.Instances.Get(0).ExtraTextureIndices.Y);
+    }
+
+    [Fact]
+    public void DefaultEntryDeclarationsSeedInstanceUniformsAndTextureSlots()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        fixture.MakeReadyPage("tex/extra", 8, 8);
+        int extraIndex = fixture.Store.EnsurePage("tex/extra").Index;
+        fixture.Shaders.SetDefaultMetadata(
+            CustomShader(
+                "shader/sprite-spv",
+                instance:
+                [
+                    new ShaderUniform(
+                        "uDefault",
+                        ShaderUniformType.Vector4,
+                        0,
+                        new Vector4(2f, 3f, 4f, 5f)),
+                ],
+                slots: [new ShaderTextureSlot("t0")]));
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(
+            snapshot,
+            Sprite("tex/a"),
+            layer: 1u,
+            uniform0: new Vector4(9f),
+            extraTexture0: "tex/extra",
+            additionalTextureCount: 1);
+
+        SpriteFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(1, plan.InstanceCount);
+        Assert.Null(snapshot.Sprites[0].ShaderData);
+        SpriteInstance instance = fixture.Instances.Get(0);
+        Assert.Equal(new Vector4(2f, 3f, 4f, 5f), instance.InstanceParams0);
+        Assert.Equal(extraIndex, instance.ExtraTextureIndices.X);
+    }
+
+    [Fact]
+    public void CustomInstanceUniformLanesAreCopiedFromTheSnapshot()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        ShaderRenderData metadata = fixture.Shaders.Register(
+            CustomShader(
+                "materials/uniforms",
+                instance:
+                [
+                    new ShaderUniform("u0", ShaderUniformType.Vector4, 0, Vector4.Zero),
+                    new ShaderUniform("u1", ShaderUniformType.Float, 4, Vector4.Zero),
+                ]),
+            ShaderBindingState.Ready);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(
+            snapshot,
+            Sprite("tex/a"),
+            layer: 1u,
+            shader: metadata,
+            uniform0: new Vector4(1f, 2f, 3f, 4f),
+            uniform1: new Vector4(5f, 0f, 0f, 0f),
+            uniform2: new Vector4(6f, 0f, 0f, 0f),
+            uniform3: new Vector4(7f, 0f, 0f, 0f));
+
+        _ = fixture.Plan(snapshot, 320, 240);
+
+        SpriteInstance instance = fixture.Instances.Get(0);
+        Assert.Equal(new Vector4(1f, 2f, 3f, 4f), instance.InstanceParams0);
+        Assert.Equal(new Vector4(5f, 0f, 0f, 0f), instance.InstanceParams1);
+        Assert.Equal(new Vector4(6f, 0f, 0f, 0f), instance.InstanceParams2);
+        Assert.Equal(new Vector4(7f, 0f, 0f, 0f), instance.InstanceParams3);
+    }
+
+    [Fact]
+    public void GlobalTypeMismatchFallsBackToTheDefaultEntryWithOneWarning()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        ShaderRenderData metadata = fixture.Shaders.Register(
+            CustomShader(
+                "materials/global-mismatch",
+                globals:
+                [
+                    new ShaderUniform(
+                        "gValue",
+                        ShaderUniformType.Float,
+                        0,
+                        new Vector4(3f, 0f, 0f, 0f)),
+                ]),
+            ShaderBindingState.Ready);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        snapshot.AddGlobalUniform(
+            new GlobalUniformSnapshot("gValue", ShaderUniformType.Vector2, new Vector4(1f, 2f, 0f, 0f)));
+        AddCamera(snapshot, zIndex: 0);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, shader: metadata);
+
+        SpriteFramePlan first = fixture.Plan(snapshot, 320, 240);
+        SpriteFramePlan second = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(1, first.InstanceCount);
+        Assert.Equal(fixture.Shaders.DefaultEntryId, first.Runs[0].ShaderEntryId);
+        Assert.Equal(0f, fixture.Globals.Get(0).Global0.X);
+        Assert.Equal(
+            1,
+            fixture.Logs.Entries.Count(
+                entry => entry.Message.Contains("differs", StringComparison.Ordinal)));
+        Assert.Equal(1, second.InstanceCount);
     }
 
     private static Bounds Box(float x, float y, float halfExtent)
         => Bounds.FromMinMax(
             new Vector2(x - halfExtent, y - halfExtent),
             new Vector2(x + halfExtent, y + halfExtent));
+
+    private static ShaderAsset CustomShader(
+        string spirVPath,
+        ShaderUniform[]? instance = null,
+        ShaderUniform[]? globals = null,
+        ShaderTextureSlot[]? slots = null,
+        uint layoutVersion = ShaderLayout.CurrentVersion,
+        string entryPoint = "main")
+        => new()
+        {
+            SpirV = spirVPath,
+            LayoutVersion = layoutVersion,
+            EntryPoint = entryPoint,
+            InstanceUniforms = instance ?? [],
+            GlobalUniforms = globals ?? [],
+            TextureSlots = slots ?? [],
+        };
 
     private static float[] InstanceTranslations(FakeInstanceBuffer instances, int count)
     {
@@ -952,7 +1453,7 @@ public sealed class SpriteFramePlannerTests
         AddSprite(snapshot, asset, layer: 1u);
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => fixture.Planner.Plan(snapshot, 320, 240, fixture.Instances, fixture.Globals));
+            () => fixture.Plan(snapshot, 320, 240));
         Assert.Contains(field, exception.Message, StringComparison.Ordinal);
     }
 
@@ -985,7 +1486,17 @@ public sealed class SpriteFramePlannerTests
         bool flipX = false,
         bool flipY = false,
         float x = 0f,
-        Bounds? bounds = null)
+        Bounds? bounds = null,
+        ShaderRenderData? shader = null,
+        Vector4? uniform0 = null,
+        Vector4? uniform1 = null,
+        Vector4? uniform2 = null,
+        Vector4? uniform3 = null,
+        AssetRef<TextureDescriptor> extraTexture0 = default,
+        AssetRef<TextureDescriptor> extraTexture1 = default,
+        AssetRef<TextureDescriptor> extraTexture2 = default,
+        AssetRef<TextureDescriptor> extraTexture3 = default,
+        int additionalTextureCount = 0)
         => snapshot.AddSprite(
             new SpriteSnapshot(
                 SpriteRenderData.Freeze(asset),
@@ -997,6 +1508,16 @@ public sealed class SpriteFramePlannerTests
                 flipY)
             {
                 Bounds = bounds ?? Bounds.Empty,
+                ShaderData = shader,
+                Uniform0 = uniform0 ?? Vector4.Zero,
+                Uniform1 = uniform1 ?? Vector4.Zero,
+                Uniform2 = uniform2 ?? Vector4.Zero,
+                Uniform3 = uniform3 ?? Vector4.Zero,
+                ExtraTexture0 = extraTexture0,
+                ExtraTexture1 = extraTexture1,
+                ExtraTexture2 = extraTexture2,
+                ExtraTexture3 = extraTexture3,
+                AdditionalTextureCount = additionalTextureCount,
             });
 
     private static SpriteAsset Sprite(
@@ -1030,7 +1551,7 @@ public sealed class SpriteFramePlannerTests
             ILogger logger = _loggerFactory.CreateLogger("Bork2d.Render");
             Store = new TexturePageStore(Assets, Gpu, TexturePageCapacity.Initial, 16384, logger);
             Store.Start();
-            Planner = new SpriteFramePlanner(Store, logger);
+            Planner = new SpriteFramePlanner(Store, Shaders, logger);
         }
 
         internal FakeTextureAssets Assets { get; } = new();
@@ -1041,11 +1562,22 @@ public sealed class SpriteFramePlannerTests
 
         internal TexturePageStore Store { get; }
 
+        internal FakeShaderFrameSource Shaders { get; } = new();
+
         internal SpriteFramePlanner Planner { get; }
 
         internal FakeInstanceBuffer Instances { get; } = new();
 
         internal FakeGlobalUniformBuffer Globals { get; } = new();
+
+        internal SpriteFramePlan Plan(FrameSnapshot snapshot, int width, int height)
+            => Planner.Plan(
+                snapshot,
+                width,
+                height,
+                Instances,
+                Globals,
+                Format.R8G8B8A8Srgb);
 
         internal void MakeReadyPage(string path, uint width, uint height)
         {

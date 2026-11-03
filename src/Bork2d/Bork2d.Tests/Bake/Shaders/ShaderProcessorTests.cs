@@ -56,7 +56,7 @@ public sealed class ShaderProcessorTests
     public void IncrementalMarkerVersionsTheCompilerLayoutPrologueAndPacker()
     {
         Assert.Equal(
-            "shaderc-2.23.0/layout-2/prologue-2/packer-1",
+            "shaderc-2.23.0/layout-2/prologue-3/packer-1",
             ShaderToolInfo.ConfigurationMarker);
         Assert.Contains(
             $"layout-{ShaderLayout.CurrentVersion}",
@@ -190,7 +190,7 @@ public sealed class ShaderProcessorTests
         Assert.Contains("#define uDirection (vInstanceParams[1].xyz)", prologue, StringComparison.Ordinal);
         Assert.Contains("#define uTint (vInstanceParams[2].xyzw)", prologue, StringComparison.Ordinal);
         Assert.Contains("#define uWind (bork2dGlobals.globals[1].xy)", prologue, StringComparison.Ordinal);
-        Assert.Equal(26 + instanceUniforms.Length + globalUniforms.Length, ShaderPrologue.CountLines(prologue));
+        Assert.Equal(28 + instanceUniforms.Length + globalUniforms.Length, ShaderPrologue.CountLines(prologue));
     }
 
     [Fact]

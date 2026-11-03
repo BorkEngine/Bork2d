@@ -24,7 +24,7 @@ internal static class ShaderToolInfo
     internal const string ShadercVersion = "shaderc-2.23.0";
 
     /// <summary>The fixed-prologue version, bumped when the generated prologue changes.</summary>
-    internal const string PrologueVersion = "prologue-2";
+    internal const string PrologueVersion = "prologue-3";
 
     /// <summary>The uniform packing version, bumped when offset assignment changes.</summary>
     internal const string PackerVersion = "packer-1";

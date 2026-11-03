@@ -1,5 +1,6 @@
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
+using Bork2d.Render.Shaders;
 using Bork2d.Render.Textures;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
@@ -8,7 +9,7 @@ namespace Bork2d.Render.Vulkan;
 
 /// <summary>
 /// The internal sprite pipeline: descriptor-set layout, pipeline layout, the vertex shader module,
-/// one graphics pipeline per (fragment module, output format), and the cached page samplers
+/// one graphics pipeline per (shader content hash, output format), and the cached page samplers
 /// (M8 WP-2, shader ABI v2).
 /// </summary>
 /// <remarks>
@@ -25,9 +26,10 @@ namespace Bork2d.Render.Vulkan;
 /// </para>
 /// <para>
 /// The vertex module is created from the built-in pack's <c>shader/vertex-spv</c>; the pipeline owns
-/// it. A fragment module comes from the shader store, which owns it, and the pipeline cache is keyed
-/// by that module handle and the output format, so a swapchain format change lazily creates that
-/// format's pipeline for the default shader. The graphics pipeline uses dynamic rendering with one
+/// it. A fragment module comes from the shader catalog, which owns it, and the pipeline cache is
+/// keyed by the shader content hash and the output format, so identical content shares one pipeline
+/// and a swapchain format change lazily creates that format's pipeline. The graphics pipeline uses
+/// dynamic rendering with one
 /// sRGB color attachment, no depth/stencil, no vertex input, triangle-strip topology, four vertices
 /// per instance, dynamic viewport/scissor, disabled culling and depth test/write, and straight alpha
 /// blending.
@@ -38,7 +40,7 @@ namespace Bork2d.Render.Vulkan;
 /// throws (D-M6-27).
 /// </para>
 /// </remarks>
-internal sealed unsafe class SpritePipeline : IDisposable
+internal sealed unsafe class SpritePipeline : IDisposable, IShaderModuleFactory
 {
     /// <summary>The push-constant size: one 4x4 view-projection matrix in bytes.</summary>
     internal const int PushConstantBytes = 64;
@@ -63,7 +65,7 @@ internal sealed unsafe class SpritePipeline : IDisposable
     private readonly DescriptorSetLayout _globalSetLayout;
     private readonly PipelineLayout _pipelineLayout;
     private readonly uint _maxTexturePages;
-    private readonly Dictionary<(ulong FragmentModule, Format Format), Pipeline> _pipelines = [];
+    private readonly Dictionary<ulong, Dictionary<Format, Pipeline>> _pipelines = [];
     private readonly Dictionary<(TextureFilter Filter, TextureWrap Wrap), Sampler> _samplers = [];
     private int _destroyed;
 
@@ -213,29 +215,70 @@ internal sealed unsafe class SpritePipeline : IDisposable
         => DestroyShaderModule(module, "fragment");
 
     /// <summary>
-    /// Gets the graphics pipeline for a fragment module and output color format, creating it on
+    /// Gets the graphics pipeline for a shader content hash and output color format, creating it on
     /// first use.
     /// </summary>
     /// <param name="colorFormat">The sRGB output color format.</param>
+    /// <param name="contentHash">The shader content hash that owns the pipeline.</param>
     /// <param name="fragmentModule">The fragment shader module the pipeline uses.</param>
-    /// <returns>The cached pipeline for that module and format.</returns>
+    /// <returns>The cached pipeline for that content and format.</returns>
     /// <exception cref="Bork2dException">The pipeline could not be created.</exception>
-    internal Pipeline GetOrCreatePipeline(Format colorFormat, ShaderModule fragmentModule)
+    internal Pipeline GetOrCreatePipeline(
+        Format colorFormat,
+        ulong contentHash,
+        ShaderModule fragmentModule)
     {
-        var key = (fragmentModule.Handle, colorFormat);
-        if (_pipelines.TryGetValue(key, out Pipeline existing))
+        if (_pipelines.TryGetValue(contentHash, out Dictionary<Format, Pipeline>? byFormat)
+            && byFormat.TryGetValue(colorFormat, out Pipeline existing))
         {
             return existing;
         }
 
         Pipeline pipeline = CreateGraphicsPipeline(colorFormat, fragmentModule);
-        _pipelines.Add(key, pipeline);
+        if (byFormat is null)
+        {
+            byFormat = [];
+            _pipelines.Add(contentHash, byFormat);
+        }
+
+        byFormat.Add(colorFormat, pipeline);
         _instance?.SetObjectName(
             _device.Handle,
             ObjectType.Pipeline,
             (nint)pipeline.Handle,
-            $"Bork2d sprite pipeline ({colorFormat}, module 0x{fragmentModule.Handle:X})");
+            $"Bork2d sprite pipeline ({colorFormat}, content 0x{contentHash:X16})");
         return pipeline;
+    }
+
+    /// <summary>Looks up a cached pipeline without creating one.</summary>
+    /// <param name="contentHash">The shader content hash that owns the pipeline.</param>
+    /// <param name="colorFormat">The sRGB output color format.</param>
+    /// <param name="pipeline">The cached pipeline when one exists.</param>
+    /// <returns><see langword="true"/> when the pipeline exists.</returns>
+    internal bool TryGetPipeline(ulong contentHash, Format colorFormat, out Pipeline pipeline)
+    {
+        if (_pipelines.TryGetValue(contentHash, out Dictionary<Format, Pipeline>? byFormat))
+        {
+            return byFormat.TryGetValue(colorFormat, out pipeline);
+        }
+
+        pipeline = default;
+        return false;
+    }
+
+    /// <summary>Destroys every cached pipeline for one shader content hash.</summary>
+    /// <param name="contentHash">The shader content hash whose pipelines are destroyed.</param>
+    internal void DestroyPipelines(ulong contentHash)
+    {
+        if (!_pipelines.Remove(contentHash, out Dictionary<Format, Pipeline>? byFormat))
+        {
+            return;
+        }
+
+        foreach (Pipeline pipeline in byFormat.Values)
+        {
+            DestroyPipeline(pipeline);
+        }
     }
 
     /// <summary>
@@ -293,6 +336,25 @@ internal sealed unsafe class SpritePipeline : IDisposable
     /// <inheritdoc/>
     public void Dispose() => Destroy();
 
+    ShaderModule IShaderModuleFactory.CreateModule(byte[] spirV, string name)
+        => CreateFragmentModule(spirV, name);
+
+    void IShaderModuleFactory.DestroyModule(ShaderModule module) => DestroyFragmentModule(module);
+
+    Pipeline IShaderModuleFactory.GetOrCreatePipeline(
+        Format colorFormat,
+        ulong contentHash,
+        ShaderModule module)
+        => GetOrCreatePipeline(colorFormat, contentHash, module);
+
+    bool IShaderModuleFactory.TryGetPipeline(
+        ulong contentHash,
+        Format colorFormat,
+        out Pipeline pipeline)
+        => TryGetPipeline(contentHash, colorFormat, out pipeline);
+
+    void IShaderModuleFactory.DestroyPipelines(ulong contentHash) => DestroyPipelines(contentHash);
+
     /// <summary>Destroys the pipelines, samplers, vertex module, and layouts; never throws.</summary>
     internal void Destroy()
     {
@@ -301,9 +363,12 @@ internal sealed unsafe class SpritePipeline : IDisposable
             return;
         }
 
-        foreach (Pipeline pipeline in _pipelines.Values)
+        foreach (Dictionary<Format, Pipeline> byFormat in _pipelines.Values)
         {
-            DestroyPipeline(pipeline);
+            foreach (Pipeline pipeline in byFormat.Values)
+            {
+                DestroyPipeline(pipeline);
+            }
         }
 
         _pipelines.Clear();

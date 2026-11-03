@@ -36,8 +36,8 @@ namespace Bork2d.Render.Vulkan;
 /// <see cref="GlobalUniformBlock"/> blocks at the device's
 /// <c>minUniformBufferOffsetAlignment</c>-aligned stride. It starts at
 /// <see cref="InitialGlobalBlockCapacity"/> blocks and grows by the same power-of-two, fence-gated
-/// rule as the instance buffer. The sprite planner writes exactly one 144-byte block per frame, and
-/// the sprite pass binds it with dynamic offset zero; task 5 supplies per-run offsets.
+/// rule as the instance buffer. The sprite planner writes exactly one 144-byte block per shader run
+/// and the sprite pass binds each run with that run's dynamic byte offset.
 /// <see cref="Destroy"/> is best-effort, idempotent, and never throws (D-M6-27).
 /// </para>
 /// </remarks>
