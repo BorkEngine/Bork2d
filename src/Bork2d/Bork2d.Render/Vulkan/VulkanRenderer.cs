@@ -265,7 +265,11 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         CreateFrames(startupPageCapacity);
         _textures.CreatePageStore(startupPageCapacity);
         _passes = new RenderPassRegistry(
-            new SpriteRenderPass(_textures.Pipeline!, _textures.Pages!, _logger));
+            new SpriteRenderPass(
+                _textures.Pipeline!,
+                _textures.Shaders!,
+                _textures.Pages!,
+                _logger));
         _passLabel = instance.CreateDebugLabel("Bork2d windowed passes");
         _lifecycle.UpdateValidationCounters(instance);
         if (_lifecycle.Control.IsStopRequested)
@@ -518,7 +522,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             slot.Snapshot,
             (int)swapchain.Extent.Width,
             (int)swapchain.Extent.Height,
-            frame.InstanceResources);
+            frame.InstanceResources,
+            frame.InstanceResources,
+            swapchain.Format);
         RecordFrame(frame, imageIndex, swapchain, device);
         Submit(frame, imageIndex, swapchain, device);
         frame.InstanceResources.MarkSubmitted();
@@ -642,6 +648,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
                 swapchain.GetView(imageIndex),
                 swapchain.GetImage(imageIndex),
                 frame.InstanceResources.DescriptorSet,
+                frame.InstanceResources.GlobalDescriptorSet,
                 swapchain.Format));
 
         if (capture)
@@ -864,6 +871,8 @@ internal sealed unsafe class VulkanRenderer : IRenderer
                 pipeline,
                 pageCapacity,
                 device.Limits.MaxStorageBufferRange,
+                device.Limits.MaxUniformBufferRange,
+                device.Limits.MinUniformBufferOffsetAlignment,
                 _instance,
                 _logger);
             frames[index] = frame;

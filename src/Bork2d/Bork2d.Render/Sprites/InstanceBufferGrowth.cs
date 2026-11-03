@@ -8,7 +8,7 @@ namespace Bork2d.Render.Sprites;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Each frame starts at <see cref="InitialCapacity"/> 96-byte records. When a frame's planned
+/// Each frame starts at <see cref="InitialCapacity"/> 176-byte records. When a frame's planned
 /// instance count exceeds the current capacity, the new capacity is
 /// <c>roundUpToPowerOfTwo(max(required, capacity * 2))</c>. The frame's fence must already have
 /// signaled: the renderer waits it before reusing the frame, so <see cref="MarkInFlight"/> /
@@ -22,7 +22,7 @@ namespace Bork2d.Render.Sprites;
 /// </remarks>
 internal struct InstanceBufferGrowth
 {
-    /// <summary>The approved initial per-frame capacity in 96-byte records.</summary>
+    /// <summary>The approved initial per-frame capacity in 176-byte records.</summary>
     internal const int InitialCapacity = 1024;
 
     private readonly int _capacity;
@@ -45,7 +45,7 @@ internal struct InstanceBufferGrowth
         _inFlight = false;
     }
 
-    /// <summary>Gets the current capacity in 96-byte records.</summary>
+    /// <summary>Gets the current capacity in 176-byte records.</summary>
     internal readonly int Capacity => _capacity;
 
     /// <summary>Gets a value indicating whether a submitted frame still references the buffer.</summary>
@@ -143,7 +143,7 @@ internal struct InstanceBufferGrowth
         string failure)
         => new(
             $"The per-frame instance buffer cannot grow from {_capacity} to hold "
-                + $"{requiredInstances} 96-byte records: {failure}. No instance is truncated.");
+                + $"{requiredInstances} 176-byte records: {failure}. No instance is truncated.");
 
     /// <summary>Creates the fatal exception for a buffer used while its frame is in flight.</summary>
     /// <param name="requiredInstances">The frame's planned instance count.</param>

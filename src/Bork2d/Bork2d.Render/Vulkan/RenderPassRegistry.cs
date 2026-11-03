@@ -1,5 +1,6 @@
 using Bork2d.Engine.Rendering;
 using Bork2d.Render.Sprites;
+using Silk.NET.Vulkan;
 
 namespace Bork2d.Render.Vulkan;
 
@@ -53,22 +54,34 @@ internal sealed class RenderPassRegistry
     /// <param name="framebufferWidth">The target/framebuffer width in pixels.</param>
     /// <param name="framebufferHeight">The target/framebuffer height in pixels.</param>
     /// <param name="instances">The frame's instance sink, after its fence has been observed.</param>
+    /// <param name="globals">The frame's global uniform sink.</param>
+    /// <param name="targetFormat">The target's sRGB output color format for this frame.</param>
     /// <exception cref="Bork2d.Engine.Bork2dException">A pass's plan is malformed or cannot fit.</exception>
     internal void Plan(
         FrameSnapshot snapshot,
         int framebufferWidth,
         int framebufferHeight,
-        IInstanceBuffer instances)
+        IInstanceBuffer instances,
+        IGlobalUniformBuffer globals,
+        Format targetFormat)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(instances);
+        ArgumentNullException.ThrowIfNull(globals);
 
         _stats.Reset();
         for (var index = 0; index < _passes.Length; index++)
         {
             IRenderPass pass = _passes[index];
             pass.Reset();
-            pass.Plan(snapshot, framebufferWidth, framebufferHeight, instances, _stats);
+            pass.Plan(
+                snapshot,
+                framebufferWidth,
+                framebufferHeight,
+                instances,
+                globals,
+                targetFormat,
+                _stats);
         }
     }
 

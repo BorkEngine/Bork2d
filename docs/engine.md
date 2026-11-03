@@ -132,7 +132,7 @@ instance to change the rendered result.
 
 `ShaderAsset` is a MessagePack custom fragment shader description: a `DataRef` to a SPIR-V module, a
 layout version, an entry point (default `main`), instance and global `ShaderUniform` declarations,
-and `ShaderTextureSlot` declarations. The engine's current layout version is `1`. A uniform's
+and `ShaderTextureSlot` declarations. The engine's current layout version is `2`. A uniform's
 `Offset` is a float-lane offset inside the 16-float instance block (four `Vector4` lanes) or the
 eight-`Vector4` global block, and `Default` components beyond the declared `ShaderUniformType` width
 are ignored. The declaration arrays are non-null and empty by default. The loader does not validate

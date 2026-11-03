@@ -297,7 +297,11 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
         CreateFrames(startupPageCapacity);
         _textures.CreatePageStore(startupPageCapacity);
         _passes = new RenderPassRegistry(
-            new SpriteRenderPass(_textures.Pipeline!, _textures.Pages!, _logger));
+            new SpriteRenderPass(
+                _textures.Pipeline!,
+                _textures.Shaders!,
+                _textures.Pages!,
+                _logger));
         TransitionTargets();
         _passLabel = instance.CreateDebugLabel(PassLabelText);
         _lifecycle.UpdateValidationCounters(instance);
@@ -390,7 +394,9 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 slot.Snapshot,
                 (int)target.Extent.Width,
                 (int)target.Extent.Height,
-                frame.InstanceResources);
+                frame.InstanceResources,
+                frame.InstanceResources,
+                target.Format);
             RecordFrame(frame, _frameIndex);
             Submit(frame);
             frame.InstanceResources.MarkSubmitted();
@@ -453,6 +459,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 target.GetView(imageIndex),
                 target.GetImage(imageIndex),
                 frame.InstanceResources.DescriptorSet,
+                frame.InstanceResources.GlobalDescriptorSet,
                 target.Format));
 
         if (capture)
@@ -525,6 +532,8 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 pipeline,
                 pageCapacity,
                 device.Limits.MaxStorageBufferRange,
+                device.Limits.MaxUniformBufferRange,
+                device.Limits.MinUniformBufferOffsetAlignment,
                 _instance,
                 _logger);
             frames[index] = frame;

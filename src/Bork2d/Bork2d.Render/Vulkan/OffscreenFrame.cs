@@ -74,6 +74,10 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
     /// <param name="pipeline">The sprite pipeline that owns the descriptor-set layout.</param>
     /// <param name="pageCapacity">The initial bindless page capacity, including the placeholder.</param>
     /// <param name="maxStorageBufferRange">The device's <c>maxStorageBufferRange</c> limit.</param>
+    /// <param name="maxUniformBufferRange">The device's <c>maxUniformBufferRange</c> limit.</param>
+    /// <param name="minUniformBufferOffsetAlignment">
+    /// The device's <c>minUniformBufferOffsetAlignment</c> limit.
+    /// </param>
     /// <param name="instance">The instance seam used for debug labels; may be <see langword="null"/>.</param>
     /// <param name="logger">The <c>Bork2d.Render</c> logger.</param>
     /// <returns>The created frame.</returns>
@@ -87,6 +91,8 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
         SpritePipeline pipeline,
         int pageCapacity,
         uint maxStorageBufferRange,
+        uint maxUniformBufferRange,
+        ulong minUniformBufferOffsetAlignment,
         IVulkanInstance? instance,
         ILogger logger)
     {
@@ -143,6 +149,8 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
                 pipeline,
                 pageCapacity,
                 maxStorageBufferRange,
+                maxUniformBufferRange,
+                minUniformBufferOffsetAlignment,
                 instance,
                 logger);
 

@@ -11,8 +11,10 @@ namespace Bork2d.Bake.Shaders;
 /// <para>
 /// The header is versioned by <see cref="ShaderLayout.CurrentVersion"/> and must stay in lockstep
 /// with the engine's fragment interface: the varying names, locations, and meanings are the contract
-/// the renderer's vertex stage writes. Changing a location or a meaning requires a new layout
-/// version, not an edit here alone.
+/// the renderer's vertex stage writes. The bindless sampler array is set <c>0</c> binding <c>1</c>;
+/// the global block is set <c>1</c> binding <c>2</c> because Vulkan forbids a dynamic uniform buffer
+/// in the same set as an update-after-bind binding. Changing a location, a set, or a meaning requires
+/// a new layout version, not an edit here alone.
 /// </para>
 /// <para>
 /// Every macro expansion is parenthesized so a uniform can be used anywhere an expression is
@@ -36,7 +38,7 @@ internal static class ShaderPrologue
         layout(location = 9) in vec4 vInstanceParams[4];
 
         layout(set = 0, binding = 1) uniform sampler2D bork2dTextures[];
-        layout(set = 0, binding = 2) uniform Bork2dGlobalBlock
+        layout(set = 1, binding = 2) uniform Bork2dGlobalBlock
         {
             vec4 time;
             vec4 globals[8];

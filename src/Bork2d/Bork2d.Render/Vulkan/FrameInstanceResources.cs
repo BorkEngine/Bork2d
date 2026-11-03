@@ -1,3 +1,4 @@
+using System.Numerics;
 using Bork2d.Engine;
 using Bork2d.Render.Sprites;
 using Microsoft.Extensions.Logging;
@@ -7,13 +8,13 @@ using Buffer = Silk.NET.Vulkan.Buffer;
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// One GPU frame's growable instance buffer (binding 0) and bindless page descriptor set (binding
-/// 1) (M8 §6.5/§6.6).
+/// One GPU frame's growable instance buffer (set 0 binding 0), bindless page array (set 0 binding 1),
+/// and growable global uniform buffer (set 1 binding 2) (M8 §6.5/§6.6, shader ABI v2).
 /// </summary>
 /// <remarks>
 /// <para>
 /// The resources are created once per GPU frame slot at startup and never per frame. Binding 0 is a
-/// host-visible coherent storage buffer mapped once, holding <see cref="InstanceCapacity"/> 96-byte
+/// host-visible coherent storage buffer mapped once, holding <see cref="InstanceCapacity"/> 176-byte
 /// records; the sprite frame planner writes every record directly into that mapping, with no CPU
 /// frame array and no staging copy. When a frame needs more records than its buffer holds, the
 /// renderer (having observed the frame's fence) calls <see cref="EnsureCapacity"/>, which recreates
@@ -22,26 +23,40 @@ namespace Bork2d.Render.Vulkan;
 /// <see cref="Bork2dException"/> and never truncates instances.
 /// </para>
 /// <para>
-/// Binding 1 is the bindless combined-image-sampler array from the shared
-/// <see cref="SpritePipeline"/> layout, allocated with a variable descriptor count equal to the
-/// current page capacity and the <c>PARTIALLY_BOUND | UPDATE_AFTER_BIND |
+/// Binding 1 of the sprite descriptor set is the bindless combined-image-sampler array from the
+/// shared <see cref="SpritePipeline"/> layout, allocated with a variable descriptor count equal to
+/// the current page capacity and the <c>PARTIALLY_BOUND | UPDATE_AFTER_BIND |
 /// VARIABLE_DESCRIPTOR_COUNT</c> flags. Page descriptors are written by <see cref="WritePage"/> as
 /// pages become ready and rewritten after a capacity growth (the frame set waits every frame fence,
 /// calls <see cref="RecreateBindless(int)"/>, and then rewrites every resident page).
+/// </para>
+/// <para>
+/// The global uniform block lives in a separate descriptor set (set 1, binding 2) because Vulkan
+/// forbids a dynamic uniform buffer in a set that contains an update-after-bind binding. It holds
+/// <see cref="GlobalUniformBlock"/> blocks at the device's
+/// <c>minUniformBufferOffsetAlignment</c>-aligned stride. It starts at
+/// <see cref="InitialGlobalBlockCapacity"/> blocks and grows by the same power-of-two, fence-gated
+/// rule as the instance buffer. The sprite planner writes exactly one 144-byte block per frame, and
+/// the sprite pass binds it with dynamic offset zero; task 5 supplies per-run offsets.
 /// <see cref="Destroy"/> is best-effort, idempotent, and never throws (D-M6-27).
 /// </para>
 /// </remarks>
-internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuffer
+internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuffer, IGlobalUniformBuffer
 {
-    /// <summary>The approved initial per-frame capacity in 96-byte records.</summary>
+    /// <summary>The approved initial per-frame capacity in 176-byte records.</summary>
     internal const int InitialCapacity = InstanceBufferGrowth.InitialCapacity;
+
+    /// <summary>The initial number of global uniform blocks per frame.</summary>
+    internal const int InitialGlobalBlockCapacity = 16;
 
     private readonly Vk _vk;
     private readonly Device _device;
     private readonly PhysicalDevice _physicalDevice;
     private readonly ILogger _logger;
     private readonly DescriptorSetLayout _layout;
+    private readonly DescriptorSetLayout _globalLayout;
     private readonly ulong _maxStorageBufferRange;
+    private readonly uint _maxUniformBufferRange;
     private readonly int _frameIndex;
     private Buffer _buffer;
     private DeviceMemory _memory;
@@ -49,8 +64,16 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     private ulong _allocationBytes;
     private ulong _bufferBytes;
     private InstanceBufferGrowth _growth;
+    private Buffer _globalBuffer;
+    private DeviceMemory _globalMemory;
+    private void* _globalMapped;
+    private ulong _globalBufferBytes;
+    private int _globalCapacity;
+    private readonly int _globalBlockStride;
+    private int _globalGrowthCount;
     private DescriptorPool _pool;
     private DescriptorSet _descriptorSet;
+    private DescriptorSet _globalSet;
     private int _pageCapacity;
     private int _growthCount;
     private int _destroyed;
@@ -66,10 +89,19 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         ulong allocationBytes,
         ulong bufferBytes,
         InstanceBufferGrowth growth,
+        Buffer globalBuffer,
+        DeviceMemory globalMemory,
+        void* globalMapped,
+        ulong globalBufferBytes,
+        int globalCapacity,
+        int globalBlockStride,
         DescriptorSetLayout layout,
+        DescriptorSetLayout globalLayout,
         DescriptorPool pool,
         DescriptorSet descriptorSet,
+        DescriptorSet globalSet,
         ulong maxStorageBufferRange,
+        uint maxUniformBufferRange,
         int pageCapacity,
         int frameIndex)
     {
@@ -83,10 +115,19 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         _allocationBytes = allocationBytes;
         _bufferBytes = bufferBytes;
         _growth = growth;
+        _globalBuffer = globalBuffer;
+        _globalMemory = globalMemory;
+        _globalMapped = globalMapped;
+        _globalBufferBytes = globalBufferBytes;
+        _globalCapacity = globalCapacity;
+        _globalBlockStride = globalBlockStride;
         _layout = layout;
+        _globalLayout = globalLayout;
         _pool = pool;
         _descriptorSet = descriptorSet;
+        _globalSet = globalSet;
         _maxStorageBufferRange = maxStorageBufferRange;
+        _maxUniformBufferRange = maxUniformBufferRange;
         _pageCapacity = pageCapacity;
         _frameIndex = frameIndex;
     }
@@ -96,12 +137,22 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
 
     int IInstanceBuffer.InstanceCapacity => _growth.Capacity;
 
+    int IGlobalUniformBuffer.Capacity => _globalCapacity;
+
+    int IGlobalUniformBuffer.BlockStride => _globalBlockStride;
+
     void IInstanceBuffer.EnsureCapacity(int requiredInstances) => EnsureCapacity(requiredInstances);
 
     void IInstanceBuffer.WriteInstance(int index, in SpriteInstance instance)
         => WriteInstance(index, instance);
 
-    /// <summary>Gets the number of capacity growths this frame's buffer performed.</summary>
+    void IGlobalUniformBuffer.EnsureCapacity(int requiredBlocks)
+        => EnsureGlobalCapacity(requiredBlocks);
+
+    void IGlobalUniformBuffer.WriteBlock(int index, in GlobalUniformBlock block)
+        => WriteGlobalBlock(index, block);
+
+    /// <summary>Gets the number of capacity growths this frame's instance buffer performed.</summary>
     internal int GrowthCount => _growthCount;
 
     /// <summary>Gets the instance buffer handle (a diagnostic/label accessor).</summary>
@@ -116,14 +167,30 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     /// <summary>Gets the descriptor-set binding-0 range in bytes (the requested buffer size).</summary>
     internal ulong InstanceBufferBytesInRange => _bufferBytes;
 
-    /// <summary>Gets the frame descriptor set.</summary>
+    /// <summary>Gets the current global uniform block capacity (initially 16).</summary>
+    internal int GlobalBlockCapacity => _globalCapacity;
+
+    /// <summary>Gets the device-aligned byte stride between consecutive global blocks.</summary>
+    internal int GlobalBlockStride => _globalBlockStride;
+
+    /// <summary>Gets the allocated global uniform buffer size in bytes.</summary>
+    internal ulong GlobalBufferBytes => _globalBufferBytes;
+
+    /// <summary>Gets the number of global block capacity growths this frame performed.</summary>
+    internal int GlobalGrowthCount => _globalGrowthCount;
+
+    /// <summary>Gets the frame descriptor set (instance buffer and bindless page array).</summary>
     internal DescriptorSet DescriptorSet => _descriptorSet;
+
+    /// <summary>Gets the frame's global uniform descriptor set.</summary>
+    internal DescriptorSet GlobalDescriptorSet => _globalSet;
 
     /// <summary>Gets the current bindless page capacity (the set's variable descriptor count).</summary>
     internal int PageCapacity => _pageCapacity;
 
     /// <summary>
-    /// Creates the instance buffer and the frame's bindless descriptor pool/set.
+    /// Creates the instance buffer, the global uniform buffer, and the frame's bindless descriptor
+    /// pool/set.
     /// </summary>
     /// <param name="vk">The Vulkan API object that owns the device.</param>
     /// <param name="device">The selected logical device.</param>
@@ -134,6 +201,10 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     /// </param>
     /// <param name="pageCapacity">The initial bindless page capacity, including the placeholder.</param>
     /// <param name="maxStorageBufferRange">The device's <c>maxStorageBufferRange</c> limit.</param>
+    /// <param name="maxUniformBufferRange">The device's <c>maxUniformBufferRange</c> limit.</param>
+    /// <param name="minUniformBufferOffsetAlignment">
+    /// The device's <c>minUniformBufferOffsetAlignment</c> limit.
+    /// </param>
     /// <param name="instance">The instance seam used for debug labels; may be <see langword="null"/>.</param>
     /// <param name="logger">The <c>Bork2d.Render</c> logger used by best-effort cleanup.</param>
     /// <returns>The created resources; the caller owns them.</returns>
@@ -146,6 +217,8 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         SpritePipeline pipeline,
         int pageCapacity,
         uint maxStorageBufferRange,
+        uint maxUniformBufferRange,
+        ulong minUniformBufferOffsetAlignment,
         IVulkanInstance? instance,
         ILogger logger)
     {
@@ -159,6 +232,17 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
                 "The bindless page capacity must be positive.");
         }
 
+        if (maxUniformBufferRange < GlobalUniformBlock.SizeInBytes)
+        {
+            throw new Bork2dException(
+                $"The per-frame global uniform buffer needs a {GlobalUniformBlock.SizeInBytes}-byte "
+                    + $"range, which exceeds the selected device's maxUniformBufferRange of "
+                    + $"{maxUniformBufferRange}.");
+        }
+
+        int globalBlockStride = AlignBlockStride(
+            minUniformBufferOffsetAlignment,
+            frameIndex);
         var growth = new InstanceBufferGrowth(InstanceBufferGrowth.InitialCapacity);
         ulong initialBytes = (ulong)InstanceBufferGrowth.InitialCapacity
             * SpriteInstance.SizeInBytes;
@@ -166,16 +250,22 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         {
             throw new Bork2dException(
                 $"The per-frame instance buffer needs {initialBytes} bytes for "
-                    + $"{InstanceBufferGrowth.InitialCapacity} 96-byte records, which exceeds the "
+                    + $"{InstanceBufferGrowth.InitialCapacity} 176-byte records, which exceeds the "
                     + $"selected device's maxStorageBufferRange of {maxStorageBufferRange}.");
         }
+
+        ulong initialGlobalBytes = (ulong)InitialGlobalBlockCapacity * (ulong)globalBlockStride;
 
         Device logicalDevice = device;
         var pool = default(DescriptorPool);
         var descriptorSet = default(DescriptorSet);
+        var globalDescriptorSet = default(DescriptorSet);
         var buffer = default(Buffer);
         var memory = default(DeviceMemory);
+        var globalBuffer = default(Buffer);
+        var globalMemory = default(DeviceMemory);
         void* mapped = null;
+        void* globalMapped = null;
         var allocationBytes = 0UL;
         try
         {
@@ -185,20 +275,38 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
                 physicalDevice,
                 logger,
                 frameIndex,
-                InstanceBufferGrowth.InitialCapacity,
+                initialBytes,
+                BufferUsageFlags.StorageBufferBit,
+                "instance buffer",
                 out buffer,
                 out memory,
                 out mapped,
                 out allocationBytes);
 
+            CreateMappedBuffer(
+                vk,
+                logicalDevice,
+                physicalDevice,
+                logger,
+                frameIndex,
+                initialGlobalBytes,
+                BufferUsageFlags.UniformBufferBit,
+                "global uniform buffer",
+                out globalBuffer,
+                out globalMemory,
+                out globalMapped,
+                out _);
+
             CreateDescriptorPoolAndSet(
                 vk,
                 logicalDevice,
                 pipeline.DescriptorSetLayout,
+                pipeline.GlobalSetLayout,
                 pageCapacity,
                 frameIndex,
                 out pool,
-                out descriptorSet);
+                out descriptorSet,
+                out globalDescriptorSet);
 
             var resources = new FrameInstanceResources(
                 vk,
@@ -211,13 +319,23 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
                 allocationBytes,
                 initialBytes,
                 growth,
+                globalBuffer,
+                globalMemory,
+                globalMapped,
+                initialGlobalBytes,
+                InitialGlobalBlockCapacity,
+                globalBlockStride,
                 pipeline.DescriptorSetLayout,
+                pipeline.GlobalSetLayout,
                 pool,
                 descriptorSet,
+                globalDescriptorSet,
                 maxStorageBufferRange,
+                maxUniformBufferRange,
                 pageCapacity,
                 frameIndex);
             resources.WriteInstanceBuffer();
+            resources.WriteGlobalBuffer();
 
             if (instance is not null)
             {
@@ -228,16 +346,36 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
                     $"Bork2d frame {frameIndex} instance buffer");
                 instance.SetObjectName(
                     logicalDevice.Handle,
+                    ObjectType.Buffer,
+                    (nint)globalBuffer.Handle,
+                    $"Bork2d frame {frameIndex} global uniform buffer");
+                instance.SetObjectName(
+                    logicalDevice.Handle,
                     ObjectType.DescriptorSet,
                     (nint)descriptorSet.Handle,
                     $"Bork2d frame {frameIndex} descriptor set");
+                instance.SetObjectName(
+                    logicalDevice.Handle,
+                    ObjectType.DescriptorSet,
+                    (nint)globalDescriptorSet.Handle,
+                    $"Bork2d frame {frameIndex} global descriptor set");
             }
 
             return resources;
         }
         catch
         {
-            DestroyBestEffort(vk, logicalDevice, logger, pool, buffer, memory, mapped);
+            DestroyBestEffort(
+                vk,
+                logicalDevice,
+                logger,
+                pool,
+                buffer,
+                memory,
+                mapped,
+                globalBuffer,
+                globalMemory,
+                globalMapped);
             throw;
         }
     }
@@ -245,10 +383,10 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     /// <inheritdoc/>
     public void Dispose() => Destroy();
 
-    /// <summary>Records that the frame was submitted and the instance buffer is in flight.</summary>
+    /// <summary>Records that the frame was submitted and the buffers are in flight.</summary>
     internal void MarkSubmitted() => _growth.MarkInFlight();
 
-    /// <summary>Records that the frame fence signaled and the buffer may be replaced.</summary>
+    /// <summary>Records that the frame fence signaled and the buffers may be replaced.</summary>
     internal void MarkFenceSignaled() => _growth.MarkFenceSignaled();
 
     /// <inheritdoc cref="IInstanceBuffer.EnsureCapacity"/>
@@ -273,13 +411,16 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             throw _growth.CreateGrowthException(requiredInstances, failure);
         }
 
+        ulong bytes = (ulong)newCapacity * SpriteInstance.SizeInBytes;
         CreateMappedBuffer(
             _vk,
             _device,
             _physicalDevice,
             _logger,
             _frameIndex,
-            newCapacity,
+            bytes,
+            BufferUsageFlags.StorageBufferBit,
+            "instance buffer",
             out Buffer buffer,
             out DeviceMemory memory,
             out void* mapped,
@@ -297,7 +438,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         _memory = memory;
         _mapped = mapped;
         _allocationBytes = allocationBytes;
-        _bufferBytes = (ulong)newCapacity * SpriteInstance.SizeInBytes;
+        _bufferBytes = bytes;
         _growth = new InstanceBufferGrowth(newCapacity);
         _growthCount++;
         WriteInstanceBuffer();
@@ -333,15 +474,124 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     }
 
     /// <summary>
-    /// Recreates the descriptor pool/set with a new variable descriptor count.
+    /// Ensures the frame holds at least <paramref name="requiredBlocks"/> global uniform blocks.
+    /// </summary>
+    /// <remarks>
+    /// The growth rule mirrors <see cref="EnsureCapacity"/>: the frame fence must already have
+    /// signaled, the new capacity is <c>roundUpToPowerOfTwo(max(required, capacity * 2))</c>, and
+    /// the buffer is recreated and remapped before the old one is released.
+    /// </remarks>
+    /// <param name="requiredBlocks">The frame's required block count.</param>
+    /// <exception cref="ArgumentOutOfRangeException">The required count is negative.</exception>
+    /// <exception cref="InvalidOperationException">The frame is still in flight.</exception>
+    /// <exception cref="Bork2dException">The new capacity cannot be represented or allocated.</exception>
+    internal void EnsureGlobalCapacity(int requiredBlocks)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(requiredBlocks);
+        if (requiredBlocks <= _globalCapacity)
+        {
+            return;
+        }
+
+        if (_growth.InFlight)
+        {
+            throw new InvalidOperationException(
+                $"The per-frame global uniform buffer cannot grow from {_globalCapacity} to hold "
+                    + $"{requiredBlocks} blocks while the frame is in flight; the renderer must "
+                    + "observe the frame fence before growing.");
+        }
+
+        long doubled = (long)_globalCapacity * 2L;
+        long target = Math.Max(requiredBlocks, doubled);
+        if (target > int.MaxValue)
+        {
+            throw new Bork2dException(
+                $"The per-frame global uniform buffer cannot grow from {_globalCapacity} to hold "
+                    + $"{requiredBlocks} blocks: the requested capacity {target} exceeds the maximum "
+                    + "representable block count.");
+        }
+
+        uint rounded = BitOperations.RoundUpToPowerOf2((uint)target);
+        if (rounded == 0 || rounded > int.MaxValue)
+        {
+            throw new Bork2dException(
+                $"The per-frame global uniform buffer cannot grow from {_globalCapacity} to hold "
+                    + $"{requiredBlocks} blocks: the requested capacity {target} cannot be rounded "
+                    + "up to a power of two.");
+        }
+
+        int newCapacity = (int)rounded;
+        ulong bytes = (ulong)newCapacity * (ulong)_globalBlockStride;
+        CreateMappedBuffer(
+            _vk,
+            _device,
+            _physicalDevice,
+            _logger,
+            _frameIndex,
+            bytes,
+            BufferUsageFlags.UniformBufferBit,
+            "global uniform buffer",
+            out Buffer buffer,
+            out DeviceMemory memory,
+            out void* mapped,
+            out _);
+
+        Buffer previousBuffer = _globalBuffer;
+        DeviceMemory previousMemory = _globalMemory;
+        void* previousMapped = _globalMapped;
+        ulong previousBytes = _globalBufferBytes;
+        int previousCapacity = _globalCapacity;
+
+        _globalBuffer = buffer;
+        _globalMemory = memory;
+        _globalMapped = mapped;
+        _globalBufferBytes = bytes;
+        _globalCapacity = newCapacity;
+        _globalGrowthCount++;
+        WriteGlobalBuffer();
+
+        DestroyMappedBuffer(previousBuffer, previousMemory, previousMapped);
+
+        _logger.LogInformation(
+            "Global uniform buffer capacity grew: frame={Frame}, from={PreviousCapacity}, "
+                + "to={Capacity}, previousBytes={PreviousBytes}, bytes={Bytes}, stride={Stride}, "
+                + "maxRange={MaxRange}.",
+            _frameIndex,
+            previousCapacity,
+            newCapacity,
+            previousBytes,
+            _globalBufferBytes,
+            _globalBlockStride,
+            _maxUniformBufferRange);
+    }
+
+    /// <inheritdoc cref="IGlobalUniformBuffer.WriteBlock"/>
+    internal void WriteGlobalBlock(int index, in GlobalUniformBlock block)
+    {
+        if ((uint)index >= (uint)_globalCapacity)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(index),
+                index,
+                $"The global block index must be inside the current capacity of "
+                    + $"{_globalCapacity} blocks.");
+        }
+
+        var destination = (byte*)_globalMapped + ((long)index * _globalBlockStride);
+        *(GlobalUniformBlock*)destination = block;
+    }
+
+    /// <summary>
+    /// Recreates the descriptor pool and both frame descriptor sets with a new variable descriptor
+    /// count.
     /// </summary>
     /// <remarks>
     /// The caller must have waited every in-flight frame fence first (capacity growth happens
     /// between frames), and must rewrite every resident page descriptor afterwards because the new
-    /// set is empty.
+    /// set is empty. Bindings 0 and the global set are rewritten here from the live buffers.
     /// </remarks>
     /// <param name="pageCapacity">The new bindless page capacity, including the placeholder.</param>
-    /// <exception cref="Bork2dException">The pool or set could not be created.</exception>
+    /// <exception cref="Bork2dException">The pool or sets could not be created.</exception>
     internal void RecreateBindless(int pageCapacity)
     {
         if (pageCapacity <= _pageCapacity)
@@ -351,22 +601,27 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
 
         var pool = default(DescriptorPool);
         var descriptorSet = default(DescriptorSet);
+        var globalDescriptorSet = default(DescriptorSet);
         CreateDescriptorPoolAndSet(
             _vk,
             _device,
             _layout,
+            _globalLayout,
             pageCapacity,
             _frameIndex,
             out pool,
-            out descriptorSet);
+            out descriptorSet,
+            out globalDescriptorSet);
 
-        // The new pool/set exist before the old set is destroyed, so a failure leaves the frame
+        // The new pool/sets exist before the old set is destroyed, so a failure leaves the frame
         // usable with its previous capacity.
         DestroyPool(_pool);
         _pool = pool;
         _descriptorSet = descriptorSet;
+        _globalSet = globalDescriptorSet;
         _pageCapacity = pageCapacity;
         WriteInstanceBuffer();
+        WriteGlobalBuffer();
     }
 
     /// <summary>
@@ -403,7 +658,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         _vk.UpdateDescriptorSets(_device, 1, &write, 0, null);
     }
 
-    /// <summary>Destroys the descriptor set/pool, buffer, and memory; never throws.</summary>
+    /// <summary>Destroys the descriptor set/pool and both buffers; never throws.</summary>
     internal void Destroy()
     {
         if (Interlocked.Exchange(ref _destroyed, 1) != 0)
@@ -411,11 +666,45 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             return;
         }
 
-        DestroyBestEffort(_vk, _device, _logger, _pool, _buffer, _memory, _mapped);
+        DestroyBestEffort(
+            _vk,
+            _device,
+            _logger,
+            _pool,
+            _buffer,
+            _memory,
+            _mapped,
+            _globalBuffer,
+            _globalMemory,
+            _globalMapped);
         _pool = default;
         _buffer = default;
         _memory = default;
         _mapped = null;
+        _globalBuffer = default;
+        _globalMemory = default;
+        _globalMapped = null;
+        _descriptorSet = default;
+        _globalSet = default;
+    }
+
+    private static int AlignBlockStride(ulong alignment, int frameIndex)
+    {
+        ulong effective = alignment == 0 ? 1UL : alignment;
+        ulong stride = GlobalUniformBlock.SizeInBytes;
+        if (effective > 1)
+        {
+            stride = ((stride + effective - 1) / effective) * effective;
+        }
+
+        if (stride > int.MaxValue)
+        {
+            throw new Bork2dException(
+                $"Frame {frameIndex} has an unusable minUniformBufferOffsetAlignment of {alignment}; "
+                    + $"the {GlobalUniformBlock.SizeInBytes}-byte global block cannot be aligned.");
+        }
+
+        return (int)stride;
     }
 
     private static void CreateMappedBuffer(
@@ -424,7 +713,9 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         PhysicalDevice physicalDevice,
         ILogger logger,
         int frameIndex,
-        int capacity,
+        ulong bytes,
+        BufferUsageFlags usage,
+        string description,
         out Buffer buffer,
         out DeviceMemory memory,
         out void* mapped,
@@ -434,22 +725,21 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         memory = default;
         mapped = null;
         allocationBytes = 0;
-        ulong bytes = (ulong)capacity * SpriteInstance.SizeInBytes;
         try
         {
             var bufferInfo = new BufferCreateInfo
             {
                 SType = StructureType.BufferCreateInfo,
                 Size = bytes,
-                Usage = BufferUsageFlags.StorageBufferBit,
+                Usage = usage,
                 SharingMode = SharingMode.Exclusive,
             };
             Result result = vk.CreateBuffer(device, in bufferInfo, null, out buffer);
             if (result != Result.Success)
             {
                 throw new Bork2dException(
-                    $"vkCreateBuffer failed for frame {frameIndex} instance buffer with VkResult "
-                        + $"{result} ({bytes} bytes / {capacity} records).");
+                    $"vkCreateBuffer failed for frame {frameIndex} {description} with VkResult "
+                        + $"{result} ({bytes} bytes).");
             }
 
             MemoryRequirements requirements = vk.GetBufferMemoryRequirements(device, buffer);
@@ -458,7 +748,8 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             uint memoryTypeIndex = SelectMemoryType(
                 memoryProperties,
                 requirements.MemoryTypeBits,
-                frameIndex);
+                frameIndex,
+                description);
             var allocateInfo = new MemoryAllocateInfo
             {
                 SType = StructureType.MemoryAllocateInfo,
@@ -469,7 +760,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             if (result != Result.Success)
             {
                 throw new Bork2dException(
-                    $"vkAllocateMemory failed for frame {frameIndex} instance buffer with "
+                    $"vkAllocateMemory failed for frame {frameIndex} {description} with "
                         + $"VkResult {result} ({requirements.Size} bytes, memory type "
                         + $"{memoryTypeIndex}).");
             }
@@ -478,7 +769,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             if (result != Result.Success)
             {
                 throw new Bork2dException(
-                    $"vkBindBufferMemory failed for frame {frameIndex} instance buffer with "
+                    $"vkBindBufferMemory failed for frame {frameIndex} {description} with "
                         + $"VkResult {result}.");
             }
 
@@ -487,7 +778,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             if (result != Result.Success)
             {
                 throw new Bork2dException(
-                    $"vkMapMemory failed for frame {frameIndex} instance buffer with VkResult "
+                    $"vkMapMemory failed for frame {frameIndex} {description} with VkResult "
                         + $"{result} ({requirements.Size} bytes).");
             }
 
@@ -522,7 +813,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             }
             catch (Exception exception)
             {
-                logger.LogError(exception, "Vulkan frame instance-buffer unmap failed.");
+                logger.LogError(exception, "Vulkan frame buffer unmap failed.");
             }
         }
 
@@ -544,7 +835,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             }
             catch (Exception exception)
             {
-                logger.LogError(exception, "Vulkan frame instance-buffer destruction failed.");
+                logger.LogError(exception, "Vulkan frame buffer destruction failed.");
             }
         }
 
@@ -556,7 +847,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             }
             catch (Exception exception)
             {
-                logger.LogError(exception, "Vulkan frame instance-buffer memory free failed.");
+                logger.LogError(exception, "Vulkan frame buffer memory free failed.");
             }
         }
     }
@@ -565,12 +856,14 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         Vk vk,
         Device device,
         DescriptorSetLayout layout,
+        DescriptorSetLayout globalLayout,
         int pageCapacity,
         int frameIndex,
         out DescriptorPool pool,
-        out DescriptorSet descriptorSet)
+        out DescriptorSet descriptorSet,
+        out DescriptorSet globalDescriptorSet)
     {
-        DescriptorPoolSize* poolSizes = stackalloc DescriptorPoolSize[2];
+        DescriptorPoolSize* poolSizes = stackalloc DescriptorPoolSize[3];
         poolSizes[0] = new DescriptorPoolSize
         {
             Type = DescriptorType.StorageBuffer,
@@ -581,12 +874,17 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             Type = DescriptorType.CombinedImageSampler,
             DescriptorCount = (uint)pageCapacity,
         };
+        poolSizes[2] = new DescriptorPoolSize
+        {
+            Type = DescriptorType.UniformBufferDynamic,
+            DescriptorCount = 1,
+        };
         var poolInfo = new DescriptorPoolCreateInfo
         {
             SType = StructureType.DescriptorPoolCreateInfo,
             Flags = DescriptorPoolCreateFlags.UpdateAfterBindBit,
-            MaxSets = 1,
-            PoolSizeCount = 2,
+            MaxSets = 2,
+            PoolSizeCount = 3,
             PPoolSizes = poolSizes,
         };
         Result result = vk.CreateDescriptorPool(device, in poolInfo, null, out pool);
@@ -625,6 +923,27 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         }
 
         descriptorSet = allocated;
+
+        DescriptorSetLayout* globalSetLayouts = &globalLayout;
+        var globalSetInfo = new DescriptorSetAllocateInfo
+        {
+            SType = StructureType.DescriptorSetAllocateInfo,
+            DescriptorPool = pool,
+            DescriptorSetCount = 1,
+            PSetLayouts = globalSetLayouts,
+        };
+        var allocatedGlobal = default(DescriptorSet);
+        result = vk.AllocateDescriptorSets(device, in globalSetInfo, &allocatedGlobal);
+        if (result != Result.Success)
+        {
+            vk.DestroyDescriptorPool(device, pool, null);
+            pool = default;
+            throw new Bork2dException(
+                $"vkAllocateDescriptorSets failed for frame {frameIndex}'s global set with "
+                    + $"VkResult {result}.");
+        }
+
+        globalDescriptorSet = allocatedGlobal;
     }
 
     private void WriteInstanceBuffer()
@@ -643,6 +962,27 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             DstArrayElement = 0,
             DescriptorCount = 1,
             DescriptorType = DescriptorType.StorageBuffer,
+            PBufferInfo = &bufferInfo,
+        };
+        _vk.UpdateDescriptorSets(_device, 1, &write, 0, null);
+    }
+
+    private void WriteGlobalBuffer()
+    {
+        var bufferInfo = new DescriptorBufferInfo
+        {
+            Buffer = _globalBuffer,
+            Offset = 0,
+            Range = GlobalUniformBlock.SizeInBytes,
+        };
+        var write = new WriteDescriptorSet
+        {
+            SType = StructureType.WriteDescriptorSet,
+            DstSet = _globalSet,
+            DstBinding = SpritePipeline.GlobalBinding,
+            DstArrayElement = 0,
+            DescriptorCount = 1,
+            DescriptorType = DescriptorType.UniformBufferDynamic,
             PBufferInfo = &bufferInfo,
         };
         _vk.UpdateDescriptorSets(_device, 1, &write, 0, null);
@@ -669,7 +1009,8 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     private static uint SelectMemoryType(
         in PhysicalDeviceMemoryProperties properties,
         uint memoryTypeBits,
-        int frameIndex)
+        int frameIndex,
+        string description)
     {
         const MemoryPropertyFlags required =
             MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit;
@@ -687,8 +1028,8 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         }
 
         throw new Bork2dException(
-            $"No host-visible coherent Vulkan memory type supports frame {frameIndex}'s instance "
-                + $"buffer (memoryTypeBits=0x{memoryTypeBits:X}).");
+            $"No host-visible coherent Vulkan memory type supports frame {frameIndex}'s "
+                + $"{description} (memoryTypeBits=0x{memoryTypeBits:X}).");
     }
 
     private static void DestroyBestEffort(
@@ -698,7 +1039,10 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         DescriptorPool pool,
         Buffer buffer,
         DeviceMemory memory,
-        void* mapped)
+        void* mapped,
+        Buffer globalBuffer,
+        DeviceMemory globalMemory,
+        void* globalMapped)
     {
         if (pool.Handle != 0)
         {
@@ -725,28 +1069,19 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             }
         }
 
-        if (buffer.Handle != 0)
+        if (globalMapped is not null && globalMemory.Handle != 0)
         {
             try
             {
-                vk.DestroyBuffer(device, buffer, null);
+                vk.UnmapMemory(device, globalMemory);
             }
             catch (Exception exception)
             {
-                logger.LogError(exception, "Vulkan frame instance-buffer destruction failed.");
+                logger.LogError(exception, "Vulkan frame global-buffer unmap failed.");
             }
         }
 
-        if (memory.Handle != 0)
-        {
-            try
-            {
-                vk.FreeMemory(device, memory, null);
-            }
-            catch (Exception exception)
-            {
-                logger.LogError(exception, "Vulkan frame instance-buffer memory free failed.");
-            }
-        }
+        DestroyBufferAndMemory(vk, device, logger, buffer, memory);
+        DestroyBufferAndMemory(vk, device, logger, globalBuffer, globalMemory);
     }
 }

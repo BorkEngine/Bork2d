@@ -23,7 +23,7 @@ namespace Bork2d.Tests.Render.Vulkan;
 /// and per-camera clears.
 /// </summary>
 /// <remarks>
-/// The tests use an internal <see cref="GeneratedTextureAssets"/> so a valid RGBA8 page path exists
+/// The tests use an internal <see cref="TestRendererAssets"/> so a valid RGBA8 page path exists
 /// without a baked pack. They skip when the Vulkan loader/device/validation layer is unavailable
 /// (D-M6-05, D-M6-20) and assert relationships, counters, and defined pixel colors only.
 /// </remarks>
@@ -47,7 +47,7 @@ public sealed class SpriteRenderGpuTests
     [GpuFact]
     public void OffscreenDrawsOneInstancedDrawPerNonEmptyCameraAndPublishesStats()
     {
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         assets.AddTexture("tex/a");
         assets.AddTexture("tex/b");
         SpriteAsset spriteA = MakeSprite("tex/a");
@@ -117,7 +117,7 @@ public sealed class SpriteRenderGpuTests
     [GpuFact]
     public async Task ZeroCamerasAndClearModesRecordOneFullTargetClearAndStayValidationClean()
     {
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         using ILoggerFactory loggerFactory = CreateLoggerFactory(out CapturingLoggerProvider provider);
         VulkanOffscreenRenderer? renderer = null;
         try
@@ -201,7 +201,7 @@ public sealed class SpriteRenderGpuTests
     {
         const int width = 32;
         const int height = 16;
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
 
         using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
         VulkanOffscreenRenderer? renderer = null;
@@ -255,7 +255,7 @@ public sealed class SpriteRenderGpuTests
         const int width = 32;
         const int height = 16;
         const float tintAlpha = 0.5f;
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         assets.AddTexture("tex/a");
         SpriteAsset sprite = MakeSprite("tex/a");
 
@@ -322,7 +322,7 @@ public sealed class SpriteRenderGpuTests
     [GpuFact]
     public void MissingTextureDrawsThePlaceholderAndTheAppContinues()
     {
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         SpriteAsset sprite = MakeSprite("tex/missing");
 
         using ILoggerFactory loggerFactory = CreateLoggerFactory(out CapturingLoggerProvider provider);
@@ -376,7 +376,7 @@ public sealed class SpriteRenderGpuTests
     [GpuFact]
     public void FatalMalformedSpriteFailsTheRendererAndJoinsCleanly()
     {
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         SpriteAsset malformed = MakeSprite(texture: null, scale: 0f);
 
         using ILoggerFactory loggerFactory = CreateLoggerFactory(out CapturingLoggerProvider provider);
@@ -423,7 +423,7 @@ public sealed class SpriteRenderGpuTests
     public void InstanceBufferGrowsToAPowerOfTwoWhenTheFrameExceedsInitialCapacity()
     {
         const int spriteCount = 1500;
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         assets.AddTexture("tex/a");
         SpriteAsset sprite = MakeSprite("tex/a");
 
@@ -475,7 +475,7 @@ public sealed class SpriteRenderGpuTests
     public void TexturePageGrowthBeyondTheSmallStartupReservationRetiresFrameFencesAndStaysValidationClean()
     {
         const int textureCount = 300;
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         var sprites = new SpriteAsset[textureCount];
         for (var index = 0; index < textureCount; index++)
         {
@@ -545,7 +545,7 @@ public sealed class SpriteRenderGpuTests
     public void TheDefaultStartupReservationAvoidsTexturePageGrowthForANormalScene()
     {
         const int textureCount = 300;
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         var sprites = new SpriteAsset[textureCount];
         for (var index = 0; index < textureCount; index++)
         {
@@ -614,7 +614,7 @@ public sealed class SpriteRenderGpuTests
     {
         const int width = 32;
         const int height = 16;
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         assets.AddTexture("tex/a");
         SpriteAsset sprite = MakeSprite("tex/a");
 
@@ -670,7 +670,7 @@ public sealed class SpriteRenderGpuTests
     {
         const int width = 32;
         const int height = 16;
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
 
         using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
         VulkanOffscreenRenderer? renderer = null;
@@ -705,7 +705,7 @@ public sealed class SpriteRenderGpuTests
     [GpuFact]
     public async Task ACaptureRequestPendingAcrossAFatalFaultsInsteadOfReturningBytes()
     {
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         SpriteAsset malformed = MakeSprite(texture: null, scale: 0f);
 
         using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
@@ -740,7 +740,7 @@ public sealed class SpriteRenderGpuTests
     [GpuFact]
     public async Task ACaptureRequestPendingAtStopFaultsInsteadOfReturningBytes()
     {
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
 
         using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
         VulkanOffscreenRenderer? renderer = null;
@@ -765,7 +765,7 @@ public sealed class SpriteRenderGpuTests
     [GpuFact]
     public void BoundsCullingKeepsAFarOffscreenSpriteOutOfTheInstanceBuffer()
     {
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         assets.AddTexture("tex/a");
 
         var window = new FakeWindow { Size = new Vector2(64f, 64f) };
@@ -828,7 +828,7 @@ public sealed class SpriteRenderGpuTests
     [GpuFact]
     public void TextureBudgetsFromTheStartInfoReachThePageStore()
     {
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
         VulkanOffscreenRenderer? renderer = null;
         try
@@ -856,7 +856,7 @@ public sealed class SpriteRenderGpuTests
     {
         const int textureCount = 8;
         const int pageBytes = 4 * 4 * 4;
-        var assets = new GeneratedTextureAssets();
+        using var assets = new TestRendererAssets();
         var sprites = new SpriteAsset[textureCount];
         for (var index = 0; index < textureCount; index++)
         {
@@ -1001,7 +1001,7 @@ public sealed class SpriteRenderGpuTests
     }
 
     private static VulkanOffscreenRenderer StartOffscreen(
-        GeneratedTextureAssets assets,
+        TestRendererAssets assets,
         int width,
         int height,
         ILoggerFactory loggerFactory,

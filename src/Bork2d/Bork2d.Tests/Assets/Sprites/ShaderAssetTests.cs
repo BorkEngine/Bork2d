@@ -25,9 +25,9 @@ public sealed class ShaderAssetTests
     }
 
     [Fact]
-    public void CurrentLayoutVersionIsOne()
+    public void CurrentLayoutVersionIsTwo()
     {
-        Assert.Equal(1u, ShaderLayout.CurrentVersion);
+        Assert.Equal(2u, ShaderLayout.CurrentVersion);
         Assert.Equal(16, ShaderLayout.InstanceBlockFloatCount);
         Assert.Equal(4, ShaderLayout.InstanceBlockVectorCount);
         Assert.Equal(8, ShaderLayout.GlobalBlockSlotCount);

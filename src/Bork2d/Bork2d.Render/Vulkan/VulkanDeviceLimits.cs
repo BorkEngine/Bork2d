@@ -1,7 +1,8 @@
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// The device limits M6 logs and the M8 renderer validates for texture pages and instance storage.
+/// The device limits M6 logs and the M8 renderer validates for texture pages, instance storage, and
+/// the per-frame global uniform buffer.
 /// </summary>
 /// <param name="MaxImageDimension2D">The maximum 2D image dimension.</param>
 /// <param name="MaxImageArrayLayers">The maximum image array layers.</param>
@@ -16,6 +17,12 @@ namespace Bork2d.Render.Vulkan;
 /// this and <paramref name="MaxPerStageDescriptorUpdateAfterBindSampledImages"/>.
 /// </param>
 /// <param name="MaxStorageBufferRange">The maximum storage-buffer range (the instance buffer check).</param>
+/// <param name="MaxUniformBufferRange">
+/// The maximum uniform-buffer descriptor range (the global uniform block check).
+/// </param>
+/// <param name="MinUniformBufferOffsetAlignment">
+/// The required alignment of a dynamic uniform-buffer offset (the global block stride).
+/// </param>
 internal readonly record struct VulkanDeviceLimits(
     uint MaxImageDimension2D,
     uint MaxImageArrayLayers,
@@ -24,4 +31,6 @@ internal readonly record struct VulkanDeviceLimits(
     uint MaxFramebufferHeight,
     uint MaxPerStageDescriptorUpdateAfterBindSampledImages,
     uint MaxDescriptorSetUpdateAfterBindSampledImages,
-    uint MaxStorageBufferRange);
+    uint MaxStorageBufferRange,
+    uint MaxUniformBufferRange,
+    ulong MinUniformBufferOffsetAlignment);
