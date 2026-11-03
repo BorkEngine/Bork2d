@@ -24,6 +24,7 @@ public sealed class PongGame : IGame<GameLayer>
 
     private static readonly Color _clearColor = new(0.04f, 0.04f, 0.06f, 1f);
     private IEngine<GameLayer>? _engine;
+    private SimulationState _lastState = default;
     private string? _title;
 
 
@@ -143,11 +144,13 @@ public sealed class PongGame : IGame<GameLayer>
 
     private void UpdateTitle(IEngine<GameLayer> engine, PongSimulation simulation)
     {
-        string title = PongTitle.Format(simulation);
-        if (string.Equals(title, _title, StringComparison.Ordinal))
+        SimulationState state = simulation.CaptureState();
+        if (_lastState == state)
         {
             return;
         }
+        _lastState = state;
+        string title = PongTitle.Format(state);
 
         engine.Window.Title = title;
         _title = title;

@@ -13,33 +13,30 @@ namespace Pong.Common;
 public static class PongTitle
 {
     /// <summary>Formats the current simulation state as the window title.</summary>
-    /// <param name="simulation">The simulation to read; not stored or modified.</param>
+    /// <param name="state">The simulation state to read.</param>
     /// <returns>The title for the current score and state.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="simulation"/> is <see langword="null"/>.</exception>
-    public static string Format(PongSimulation simulation)
+    public static string Format(SimulationState state)
     {
-        ArgumentNullException.ThrowIfNull(simulation);
-
-        string score = $"{simulation.LeftScore} : {simulation.RightScore}";
+        string score = $"{state.LeftScore} : {state.RightScore}";
 
         // Pause wins over the serve state: a paused serve would otherwise look frozen with no hint
         // about how to continue.
-        if (simulation.IsPaused)
+        if (state.IsPaused)
         {
             return $"Pong - {score} - Paused - Space to resume";
         }
 
-        if (simulation.IsServing)
+        if (state.IsServing)
         {
             return $"Pong - {score} - Serving...";
         }
 
-        if (simulation.Winner == PongSide.Left)
+        if (state.Winner == PongSide.Left)
         {
             return $"Pong - {score} - Left wins - R to restart, Esc to quit";
         }
 
-        if (simulation.Winner == PongSide.Right)
+        if (state.Winner == PongSide.Right)
         {
             return $"Pong - {score} - Right wins - R to restart, Esc to quit";
         }

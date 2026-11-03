@@ -199,6 +199,18 @@ public sealed class PongSimulation
             Math.Clamp(_ballPosition.Y, -_halfHeight + BallRadius, _halfHeight - BallRadius));
     }
 
+    public SimulationState CaptureState()
+    {
+        return new SimulationState
+        {
+            LeftScore = LeftScore,
+            RightScore = RightScore,
+            IsPaused = IsPaused,
+            IsServing = IsServing,
+            Winner = Winner
+        };
+    }
+
     private void MovePaddles(float deltaTime, float leftInput, float rightInput)
     {
         // Math.Clamp(NaN, ...) returns NaN, so a non-finite input is treated as neutral.
