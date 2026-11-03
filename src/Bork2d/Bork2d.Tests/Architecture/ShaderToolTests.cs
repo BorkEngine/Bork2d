@@ -40,12 +40,28 @@ public sealed class ShaderToolTests
     [Fact]
     public void TheLegacyShaderCompilerProjectAndTargetAreGone()
     {
+        string toolDirectory = Path.Combine(
+            RepositoryPaths.Root,
+            "build",
+            "Bork2d.ShaderCompiler");
+
+        // A developer checkout can keep untracked bin/obj output under the old tool directory, so
+        // assert the retired sources and integration are gone rather than that the directory is.
         Assert.False(
-            Directory.Exists(Path.Combine(RepositoryPaths.Root, "build", "Bork2d.ShaderCompiler")),
-            "The retired build/Bork2d.ShaderCompiler tool directory must not exist.");
+            File.Exists(Path.Combine(toolDirectory, "Bork2d.ShaderCompiler.csproj")),
+            "The retired build/Bork2d.ShaderCompiler/Bork2d.ShaderCompiler.csproj must not exist.");
+        Assert.False(
+            File.Exists(Path.Combine(toolDirectory, "Program.cs")),
+            "The retired build/Bork2d.ShaderCompiler/Program.cs must not exist.");
         Assert.False(
             File.Exists(Path.Combine(RepositoryPaths.Root, "build", "Bork2d.ShaderCompiler.targets")),
             "The retired build/Bork2d.ShaderCompiler.targets integration must not exist.");
+
+        if (Directory.Exists(toolDirectory))
+        {
+            Assert.Empty(
+                Directory.EnumerateFiles(toolDirectory, "*.csproj", SearchOption.AllDirectories));
+        }
     }
 
     [Fact]
