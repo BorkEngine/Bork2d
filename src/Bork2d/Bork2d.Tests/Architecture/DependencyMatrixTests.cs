@@ -22,6 +22,8 @@ public sealed class DependencyMatrixTests
     private const string StbImageSharp = "StbImageSharp";
     private const string Shaderc = "Silk.NET.Shaderc";
     private const string ShadercNative = "Silk.NET.Shaderc.Native";
+    private const string BcnEncoder = "BCnEncoder";
+    private const string BcnEncoderPackage = "BCnEncoder.Net";
     private const string MetadataLoadContext = "System.Reflection.MetadataLoadContext";
 
     private static readonly string[] _forbiddenEngineReferencePrefixes =
@@ -32,6 +34,7 @@ public sealed class DependencyMatrixTests
         "ZLogger",
         "Tomlyn",
         "StbImageSharp",
+        "BCnEncoder",
     ];
 
     private static readonly HashSet<string> _allowedBakeEngineNamespaces =
@@ -301,6 +304,7 @@ public sealed class DependencyMatrixTests
         Assert.Contains(Tomlyn, references);
         Assert.Contains(Hashing, references);
         Assert.Contains(Shaderc, references);
+        Assert.Contains(BcnEncoder, references);
         Assert.DoesNotContain(MetadataLoadContext, references);
         Assert.DoesNotContain("Bork2d.Runtime", references);
         Assert.DoesNotContain("Bork2d.Render", references);
@@ -326,6 +330,7 @@ public sealed class DependencyMatrixTests
 
         Assert.Equal("2.23.0", packages[Shaderc]);
         Assert.Equal("2.23.0", packages[ShadercNative]);
+        Assert.Equal("2.3.0", packages[BcnEncoderPackage]);
 
         Dictionary<string, string> properties = project
             .Descendants("PropertyGroup")
@@ -376,11 +381,15 @@ public sealed class DependencyMatrixTests
                 "Bork2d.Bake.AssetProcessor`1",
                 "Bork2d.Bake.BakeApplication",
                 "Bork2d.Bake.BakeApplicationBuilder",
+                "Bork2d.Bake.BakedTexture",
                 "Bork2d.Bake.IAssetOutputSink",
                 "Bork2d.Bake.IAssetProcessor",
                 "Bork2d.Bake.IAssetProcessorDiagnostics",
                 "Bork2d.Bake.IAssetValidator`1",
                 "Bork2d.Bake.SidecarPolicy",
+                "Bork2d.Bake.TextureBaker",
+                "Bork2d.Bake.TextureChannelType",
+                "Bork2d.Bake.TextureCompression",
             },
             exported);
     }
@@ -423,6 +432,8 @@ public sealed class DependencyMatrixTests
         AssertInternal(typeof(Bork2d.Bake.Processors.BakeProcessorRegistration));
         AssertInternal(typeof(Bork2d.Bake.Toml.TomlShapeBinder));
         AssertInternal(typeof(Bork2d.Bake.Textures.StbTextureDecoder));
+        AssertInternal(typeof(Bork2d.Bake.Textures.Ktx2Writer));
+        AssertInternal(typeof(Bork2d.Bake.Textures.TextureFormatInfo));
     }
 
     [Fact]
@@ -509,6 +520,7 @@ public sealed class DependencyMatrixTests
                     $"{assembly.GetName().Name} must not reference '{name}'.");
                 Assert.NotEqual(Tomlyn, name);
                 Assert.NotEqual(StbImageSharp, name);
+                Assert.NotEqual(BcnEncoder, name);
             }
         }
     }

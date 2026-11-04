@@ -2,8 +2,8 @@
 
 `Bork2d.Bake` is the build-time asset pipeline. It is a JIT library used by game-owned assets
 executables; it references `Bork2d.Engine` and the pack writer, but no runtime project references
-it. The bake tooling, TOML parser, image decoder, shader compiler, and processors never enter a
-game's compile or publish graph.
+it. The bake tooling, TOML parser, image decoder, KTX2 writer, block encoder, shader compiler, and
+processors never enter a game's compile or publish graph.
 
 A game owns an assets executable (for example
 [Pong.Assets](../examples/pong/Pong.Assets)) whose `Program` configures `BakeApplicationBuilder`
@@ -88,17 +88,30 @@ type = "Bork2d.Engine.Assets.SpriteAsset"
 dimensions never affect the quad geometry.
 
 `Assets/art/hero.png` is handled by the built-in texture processor. It emits a
-`TextureDescriptor` at `art/hero` and the raw RGBA8 payload at `art/hero-raw`. Its settings sidecar
-`Assets/art/hero.png.toml` overrides sampler state:
+`TextureDescriptor` at `art/hero` and its KTX2 payload at `art/hero-ktx2`. Its settings sidecar
+`Assets/art/hero.png.toml` selects the semantic channel type, the compression mode, and the sampler
+state:
 
 ```toml
-filter = "linear"   # nearest | linear
-wrap = "clamp"      # clamp | repeat
+type = "rgba"          # rgba | rgb | rg | r
+compression = "none"   # none | auto
+filter = "linear"      # nearest | linear
+wrap = "clamp"         # clamp | repeat
 ```
 
-An absent key falls back to `WithTextureDefaults`. A missing sidecar is created with both defaults
-and reported as an informational diagnostic. Texture decoding produces straight-alpha RGBA8 without
-premultiplication, gamma changes, flipping, or resampling; 16-bit PNGs are rejected.
+Every key is optional: an absent key inherits the default (`type = "rgba"`, `compression = "none"`,
+and the builder's filter/wrap values). A missing sidecar is created with all four explicit keys and
+reported as an informational diagnostic. `type` selects the channels the texture semantically owns:
+`rgb` forces alpha to `255`, `rg` stores red and green, and `r` stores red. `compression = "auto"`
+selects the block format that matches the type: BC7 for `rgba`, opaque BC1 for `rgb`, BC5 for `rg`,
+and BC4 for `r`. `none` keeps the matching uncompressed UNORM format and is the default, so a texture
+never becomes lossy without an explicit authoring choice.
+
+The payload is a complete KTX2 2.0 file: one 2D image, one array layer, one face, no
+supercompression, and a full mip chain down to 1x1. Every texture is linear. Mip generation is a
+deterministic box filter over the raw channel values; there is no gamma conversion. Decoding
+produces straight-alpha RGBA8 without premultiplication, gamma changes, flipping, or resampling;
+16-bit PNGs are rejected.
 
 ### Fragment shaders
 
@@ -238,7 +251,7 @@ not validate processor outputs, sidecars, or runtime-loaded assets.
 
 | Source | Name | Outputs | Sidecar |
 | --- | --- | --- | --- |
-| `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tga` | `texture` | `TextureDescriptor` at the base path, raw RGBA8 at `<base>-raw`. | Required; created from `WithTextureDefaults` when missing. |
+| `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tga` | `texture` | `TextureDescriptor` at the base path, KTX2 payload at `<base>-ktx2`. | Required; created with `type`/`compression` and the `WithTextureDefaults` sampler values when missing. |
 | `.frag` | `shader` | `ShaderAsset` at the base path, raw SPIR-V at `<base>-spv`. | Required; created empty when missing. |
 
 Implement `IAssetProcessor` for a sidecar-free source, or derive from `AssetProcessor<TSidecar>` for
@@ -262,6 +275,41 @@ Processors run synchronously on the bake thread and may be reused, so they must 
 per-source state. They never touch MessagePack or the pack writer directly. A failed source emits
 no outputs. See [CircleProcessor.cs](../examples/pong/Pong.Assets/Processors/CircleProcessor.cs)
 for a worked custom processor.
+
+### Texture baking
+
+`TextureBaker.Bake` is the public KTX2 producer. The built-in texture processor and a custom
+processor that generates pixels both call it, so neither hand-writes KTX2 headers or block data:
+
+```csharp
+BakedTexture baked = TextureBaker.Bake(
+    rgba8Pixels,
+    width,
+    height,
+    TextureChannelType.Rgba,
+    TextureCompression.Auto);
+
+TextureDescriptor descriptor = new()
+{
+    Payload = context.BaseAssetPath + "-ktx2",
+    Width = (uint)width,
+    Height = (uint)height,
+    Format = baked.Format,
+    MipLevels = baked.MipLevels,
+};
+context.Outputs.AddAsset(context.BaseAssetPath, descriptor);
+context.Outputs.AddData(context.BaseAssetPath + "-ktx2", baked.Payload.Span);
+```
+
+- `rgba8Pixels` is straight-alpha RGBA8, row-major, exactly `width × height × 4` bytes.
+- `TextureChannelType` is `Rgba`, `Rgb`, `Rg`, or `R`; `TextureCompression` is `None` or `Auto`.
+- `BakedTexture.Payload` is the complete KTX2 file, `Format` is the concrete `TextureFormat`, and
+  `MipLevels` is the full chain length. The descriptor must carry those same values.
+- Invalid arguments throw `ArgumentException`/`ArgumentOutOfRangeException`; an encoding or container
+  failure throws `InvalidOperationException`. The helper exposes no block-encoder types.
+
+The built-in processor maps the sidecar to the same enums, so a custom processor that wants a
+sidecar can use its own typed sidecar and call the helper directly.
 
 ## Built-in asset pack
 
@@ -338,19 +386,20 @@ Codes are stable once a range is released. A diagnostic renders as
 | `BK6xxx` | MSBuild/build integration. |
 | `BK7xxx` | Processor registration and processing. |
 | `BK8xxx` | Registered semantic asset validators, including the built-in sprite validator. |
-| `BK9xxx` | Fragment shader sources and metadata: unreadable or forbidden source (`BK9001`), shaderc compilation failure (`BK9002`), invalid sidecar name/type/default/slots (`BK9003`), and instance/global uniform block overflow (`BK9004`). |
+| `BK9xxx` | Fragment shader sources and metadata: unreadable or forbidden source (`BK9001`), shaderc compilation failure (`BK9002`), invalid sidecar name/type/default/slots (`BK9003`), and instance/global uniform block overflow (`BK9004`). Also bake-side texture failures: KTX2/BC encoding or container writing (`BK9100`) and an impossible sidecar channel-type/compression mapping (`BK9101`). |
 
 ## Incremental builds
 
 `bake` records a schema-3 manifest at `<project root>/obj/bork2d/bake/manifest.json`. It tracks the
 tool version, configuration hash, registered type/processor assembly closure, mode, every input
 path/hash, and every output path/hash. The configuration hash includes the shader tool marker
-`shaderc-2.23.0/layout-2/prologue-3/packer-1`, so upgrading shaderc or changing the fragment layout,
-prologue, or uniform packer invalidates a manifest written by the earlier tool. When all match, the
-bake prints an up-to-date summary and writes nothing. Any changed source, registration, processor,
-pack path, mode, or output triggers a full bake; `--force` bypasses the check, and
-`--check`/`validate` always run the pipeline and its validators. `clean` removes the manifest with
-the packs.
+`shaderc-2.23.0/layout-2/prologue-3/packer-1` and the texture tool marker
+`ktx2-1/bcn-2.3.0/mips-1`, so upgrading shaderc or BCnEncoder.Net, changing the fragment layout,
+prologue, uniform packer, KTX2 writer, or mip filter invalidates a manifest written by the earlier
+tool. When all match, the bake prints an up-to-date summary and writes nothing. Any changed source,
+registration, processor, pack path, mode, or output triggers a full bake; `--force` bypasses the
+check, and `--check`/`validate` always run the pipeline and its validators. `clean` removes the
+manifest with the packs.
 
 ## MSBuild integration
 

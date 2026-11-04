@@ -21,7 +21,7 @@ public sealed class TextureProcessorTests
     private const string TextureType = "Bork2d.Engine.Assets.TextureDescriptor";
 
     [Fact]
-    public async Task DescriptorAndRawPayloadAreEmittedAtTheCanonicalPaths()
+    public async Task DescriptorAndKtx2PayloadAreEmittedAtTheCanonicalPaths()
     {
         using var project = TextureTestProject.Create();
         project.WriteImage("art/player.png", TextureImageFactory.RgbaPng());
@@ -36,32 +36,107 @@ public sealed class TextureProcessorTests
         Assert.Equal(1, result.TextureCount);
         Assert.Equal(1, result.ReferenceCount);
         Assert.Equal(
-            new[] { "art/player", "art/player-raw" },
+            new[] { "art/player", "art/player-ktx2" },
             result.Entries.Select(entry => entry.Path));
         BakedAssetEntry descriptorEntry = Assert.Single(
             result.Entries,
             entry => entry.Path == "art/player");
         Assert.Equal(BakedAssetEntryKind.ProcessorAsset, descriptorEntry.Kind);
         Assert.Equal(TextureType, descriptorEntry.TypeName);
-        BakedAssetEntry rawEntry = Assert.Single(
+        BakedAssetEntry payloadEntry = Assert.Single(
             result.Entries,
-            entry => entry.Path == "art/player-raw");
-        Assert.Equal(BakedAssetEntryKind.ProcessorData, rawEntry.Kind);
-        Assert.True(rawEntry.IsRaw);
+            entry => entry.Path == "art/player-ktx2");
+        Assert.Equal(BakedAssetEntryKind.ProcessorData, payloadEntry.Kind);
+        Assert.True(payloadEntry.IsRaw);
 
         using var host = new AssetServiceHost(project.PackPath);
         host.Start();
 
         TextureDescriptor descriptor = await host.Service.LoadAsset<TextureDescriptor>("art/player");
-        Assert.Equal("art/player-raw", descriptor.Payload.Path);
+        Assert.Equal("art/player-ktx2", descriptor.Payload.Path);
         Assert.Equal(2u, descriptor.Width);
         Assert.Equal(2u, descriptor.Height);
         Assert.Equal(TextureFormat.Rgba8, descriptor.Format);
+        Assert.Equal(2u, descriptor.MipLevels);
         Assert.Equal(TextureFilter.Nearest, descriptor.Filter);
         Assert.Equal(TextureWrap.Repeat, descriptor.Wrap);
-        Assert.Equal(
-            BakeProjectFixture.ExpectedTexturePayload,
-            await host.Service.LoadData("art/player-raw"));
+        byte[] payload = await host.Service.LoadData("art/player-ktx2");
+        Assert.Equal(Ktx2TestDocument.Identifier, payload[..12]);
+        Ktx2TestDocument document = Ktx2TestDocument.Parse(payload);
+        Assert.Equal(descriptor.Width, document.Width);
+        Assert.Equal(descriptor.Height, document.Height);
+        Assert.Equal(descriptor.MipLevels, document.LevelCount);
+        Assert.Equal(BakeProjectFixture.ExpectedSourcePixels, document.GetLevelBytes(0));
+    }
+
+    [Theory]
+    [InlineData("rgba", "none", TextureFormat.Rgba8, 37u)]
+    [InlineData("rgb", "none", TextureFormat.Rgb8, 37u)]
+    [InlineData("rg", "none", TextureFormat.Rg8, 16u)]
+    [InlineData("r", "none", TextureFormat.R8, 9u)]
+    [InlineData("rgba", "auto", TextureFormat.CompRgba8, 145u)]
+    [InlineData("rgb", "auto", TextureFormat.CompRgb8, 131u)]
+    [InlineData("rg", "auto", TextureFormat.CompRg8, 141u)]
+    [InlineData("r", "auto", TextureFormat.CompR8, 139u)]
+    public async Task SidecarTypeAndCompressionSelectTheFormatAndPayload(
+        string type,
+        string compression,
+        TextureFormat expectedFormat,
+        uint expectedVkFormat)
+    {
+        using var project = TextureTestProject.Create();
+        project.WriteImage("art/player.png", TextureImageFactory.RgbaPng());
+        project.WriteText(
+            "art/player.png.toml",
+            $"type = \"{type}\"\ncompression = \"{compression}\"\n");
+
+        BakeResult result = project.Bake();
+
+        Assert.Equal(BakeStatus.Success, result.Status);
+        using var host = new AssetServiceHost(project.PackPath);
+        host.Start();
+        TextureDescriptor descriptor = await host.Service.LoadAsset<TextureDescriptor>("art/player");
+        Assert.Equal(expectedFormat, descriptor.Format);
+        Assert.Equal(2u, descriptor.MipLevels);
+        Ktx2TestDocument document = Ktx2TestDocument.Parse(
+            await host.Service.LoadData("art/player-ktx2"));
+        Assert.Equal(expectedVkFormat, document.VkFormat);
+        Assert.Equal(descriptor.MipLevels, document.LevelCount);
+    }
+
+    [Fact]
+    public async Task SidecarOmittingTypeAndCompressionInheritsTheirDefaults()
+    {
+        using var project = TextureTestProject.Create();
+        project.WriteImage("art/player.png", TextureImageFactory.RgbaPng());
+        project.WriteText("art/player.png.toml", "filter = \"nearest\"\n");
+
+        BakeResult result = project.Bake();
+
+        Assert.Equal(BakeStatus.Success, result.Status);
+        using var host = new AssetServiceHost(project.PackPath);
+        host.Start();
+        TextureDescriptor descriptor = await host.Service.LoadAsset<TextureDescriptor>("art/player");
+        Assert.Equal(TextureFormat.Rgba8, descriptor.Format);
+        Assert.Equal(TextureFilter.Nearest, descriptor.Filter);
+        Assert.Equal(TextureWrap.Clamp, descriptor.Wrap);
+    }
+
+    [Fact]
+    public void FailedDecodeEmitsNoOutputs()
+    {
+        using var project = TextureTestProject.Create();
+        project.WriteImage("art/broken.png", TextureImageFactory.HeaderOnlyPng(2, 2));
+
+        BakeResult result = project.Bake();
+
+        Assert.Equal(BakeStatus.DiagnosticsError, result.Status);
+        Assert.False(result.PackWritten);
+        Assert.Empty(result.Entries);
+        Assert.Contains(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code.StartsWith("BK4", StringComparison.Ordinal));
+        Assert.False(File.Exists(project.PackPath));
     }
 
     [Fact]
@@ -85,7 +160,7 @@ public sealed class TextureProcessorTests
         string sidecarPath = project.FullPath("textures/player.png.toml");
         Assert.True(File.Exists(sidecarPath));
         Assert.Equal(
-            "filter = \"nearest\"\nwrap = \"repeat\"\n",
+            "type = \"rgba\"\ncompression = \"none\"\nfilter = \"nearest\"\nwrap = \"repeat\"\n",
             File.ReadAllText(sidecarPath));
 
         using var host = new AssetServiceHost(project.PackPath);
@@ -249,6 +324,8 @@ public sealed class TextureProcessorTests
     [Theory]
     [InlineData("filter = \"cubic\"", 10)]
     [InlineData("wrap = \"mirror\"", 8)]
+    [InlineData("type = \"rgba16\"", 8)]
+    [InlineData("compression = \"bc7\"", 15)]
     public void UnknownSidecarValueIsBK2006WithTheValueSpan(string toml, int column)
     {
         using var project = TextureTestProject.Create();
@@ -367,7 +444,7 @@ public sealed class TextureProcessorTests
 
         Assert.Equal(BakeStatus.DiagnosticsError, result.Status);
         Assert.False(File.Exists(project.PackPath));
-        // Both the descriptor and the raw payload paths collide, so both are reported.
+        // Both the descriptor and the KTX2 payload paths collide, so both are reported.
         BakeDiagnostic[] collisions =
         [
             .. result.Diagnostics.Where(
@@ -375,15 +452,15 @@ public sealed class TextureProcessorTests
         ];
         Assert.Equal(2, collisions.Length);
         Assert.Contains(collisions, diagnostic => diagnostic.AssetPath == "textures/player");
-        Assert.Contains(collisions, diagnostic => diagnostic.AssetPath == "textures/player-raw");
+        Assert.Contains(collisions, diagnostic => diagnostic.AssetPath == "textures/player-ktx2");
     }
 
     [Fact]
-    public void RawPayloadNamedSourceCollidesWithTheOtherSourcesPayload()
+    public void Ktx2PayloadNamedSourceCollidesWithTheOtherSourcesPayload()
     {
         using var project = TextureTestProject.Create();
         project.WriteImage("art/player.png", TextureImageFactory.RgbaPng());
-        project.WriteImage("art/player-raw.png", TextureImageFactory.RgbaPng());
+        project.WriteImage("art/player-ktx2.png", TextureImageFactory.RgbaPng());
 
         BakeResult result = project.Bake();
 
@@ -391,7 +468,7 @@ public sealed class TextureProcessorTests
         BakeDiagnostic diagnostic = Assert.Single(
             result.Diagnostics,
             candidate => candidate.Code == BakeDiagnosticCodes.AssetPathCollision);
-        Assert.Equal("art/player-raw", diagnostic.AssetPath);
+        Assert.Equal("art/player-ktx2", diagnostic.AssetPath);
     }
 
     [Fact]
@@ -535,7 +612,7 @@ public sealed class TextureProcessorTests
             result.Diagnostics,
             diagnostic => diagnostic.Code == BakeDiagnosticCodes.ProcessorSidecarCreated);
         Assert.Equal("Assets/textures/real.png.toml", created.FilePath);
-        Assert.Equal(["textures/real", "textures/real-raw"], result.Entries.Select(entry => entry.Path));
+        Assert.Equal(["textures/real", "textures/real-ktx2"], result.Entries.Select(entry => entry.Path));
     }
 
     [SymlinkFact]
@@ -620,7 +697,7 @@ public sealed class TextureProcessorTests
 
         Assert.Equal(BakeStatus.Success, result.Status);
         Assert.Equal(
-            "filter = \"nearest\"\nwrap = \"repeat\"\n",
+            "type = \"rgba\"\ncompression = \"none\"\nfilter = \"nearest\"\nwrap = \"repeat\"\n",
             File.ReadAllText(directory.FullPath("Assets/player.png.toml")));
     }
 }
