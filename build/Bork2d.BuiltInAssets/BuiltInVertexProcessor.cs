@@ -7,14 +7,16 @@ using PolyType;
 namespace Bork2d.BuiltInAssets;
 
 /// <summary>
-/// The tool-only processor that compiles the engine-owned sprite vertex stage into the built-in pack's
-/// raw SPIR-V payload.
+/// The tool-only processor that compiles the engine-owned sprite and line vertex stages into the
+/// built-in pack's raw SPIR-V payloads.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The processor is deliberately not part of <c>UseDefaultProcessors()</c>: <c>.vert</c> is not a
 /// user-facing source type. Only this build-time tool registers it, so the built-in pack is produced
 /// by the same bake pipeline, pack writer, and shared <see cref="GlslCompiler"/> as game content.
+/// Every <c>.vert</c> source under the built-in asset tree is compiled, so the sprite stage emits
+/// <c>shader/vertex-spv</c> and the line stage emits <c>shader/line-vertex-spv</c>.
 /// </para>
 /// <para>
 /// A source is read as strict UTF-8 (an optional BOM is stripped) and compiled verbatim with the

@@ -79,6 +79,24 @@ public sealed class ShaderStoreTests
     }
 
     [Fact]
+    public void LayoutVersionTwoIsRejectedAndVersionThreeIsAccepted()
+    {
+        Assert.Equal(3u, ShaderLayout.CurrentVersion);
+
+        ShaderRenderData legacy = ShaderRenderData.Freeze(
+            CreateCustomShader("materials/legacy-spv", layoutVersion: 2));
+
+        Assert.False(ShaderValidation.TryValidateMetadata(legacy, out string rejected));
+        Assert.Contains("layout version 2", rejected, StringComparison.Ordinal);
+
+        ShaderRenderData current = ShaderRenderData.Freeze(
+            CreateCustomShader("materials/current-spv", layoutVersion: 3));
+
+        Assert.True(ShaderValidation.TryValidateMetadata(current, out string accepted));
+        Assert.Empty(accepted);
+    }
+
+    [Fact]
     public void NonMainEntryPointIsAFatalStartupFailure()
     {
         var assets = new FakeShaderAssets(

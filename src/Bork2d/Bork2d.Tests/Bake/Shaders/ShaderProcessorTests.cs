@@ -5,6 +5,7 @@ using Bork2d.Bake.Diagnostics;
 using Bork2d.Bake.Shaders;
 using Bork2d.Engine.Assets;
 using Bork2d.Tests.Assets.Service;
+using Bork2d.Tests.TestSupport;
 using Xunit;
 
 namespace Bork2d.Tests.Bake.Shaders;
@@ -56,7 +57,7 @@ public sealed class ShaderProcessorTests
     public void IncrementalMarkerVersionsTheCompilerLayoutPrologueAndPacker()
     {
         Assert.Equal(
-            "shaderc-2.23.0/layout-2/prologue-3/packer-1",
+            "shaderc-2.23.0/layout-3/prologue-4/packer-1",
             ShaderToolInfo.ConfigurationMarker);
         Assert.Contains(
             $"layout-{ShaderLayout.CurrentVersion}",
@@ -122,6 +123,47 @@ public sealed class ShaderProcessorTests
     }
 
     [Fact]
+    public async Task BuiltInLineShaderBakesAsAVersionThreeAssetWithASpirVPayload()
+    {
+        using var project = ShaderTestProject.Create();
+        project.WriteText(
+            "shader/line.frag",
+            File.ReadAllText(
+                Path.Combine(
+                    RepositoryPaths.Root,
+                    "src",
+                    "Bork2d",
+                    "BuiltInAssets",
+                    "Assets",
+                    "shader",
+                    "line.frag")));
+        project.WriteText("shader/line.frag.toml", string.Empty);
+
+        BakeResult result = project.Bake();
+
+        Assert.Equal(BakeStatus.Success, result.Status);
+        Assert.Equal(
+            ["shader/line", "shader/line-spv"],
+            result.Entries.Select(entry => entry.Path));
+
+        using var host = new AssetServiceHost(project.PackPath);
+        host.Start();
+
+        byte[] spirV = await host.Service.LoadData("shader/line-spv");
+        Assert.True(spirV.Length > sizeof(uint));
+        Assert.Equal(0x07230203u, BinaryPrimitives.ReadUInt32LittleEndian(spirV));
+
+        ShaderAsset shader = await host.Service.LoadAsset<ShaderAsset>("shader/line");
+        Assert.Equal("shader/line-spv", shader.SpirV.Path);
+        Assert.Equal(3u, shader.LayoutVersion);
+        Assert.Equal(ShaderLayout.CurrentVersion, shader.LayoutVersion);
+        Assert.Equal("main", shader.EntryPoint);
+        Assert.Empty(shader.InstanceUniforms);
+        Assert.Empty(shader.GlobalUniforms);
+        Assert.Empty(shader.TextureSlots);
+    }
+
+    [Fact]
     public async Task PackingAlignsWideTypesToVec4LanesAndSortsByOrdinalName()
     {
         using var project = ShaderTestProject.Create();
@@ -176,6 +218,9 @@ public sealed class ShaderProcessorTests
             StringComparison.Ordinal);
         Assert.Contains("layout(location = 5) flat in uint vExtraTextureIndices[4];", prologue, StringComparison.Ordinal);
         Assert.Contains("layout(location = 9) in vec4 vInstanceParams[4];", prologue, StringComparison.Ordinal);
+        Assert.Contains("layout(location = 13) in vec2 vLineUv;", prologue, StringComparison.Ordinal);
+        Assert.Contains("layout(location = 14) in vec4 vColor;", prologue, StringComparison.Ordinal);
+        Assert.Contains("layout(location = 15) flat in float vLineFlags;", prologue, StringComparison.Ordinal);
         Assert.Contains("layout(location = 0) out vec4 outColor;", prologue, StringComparison.Ordinal);
         Assert.Contains(
             "layout(set = 0, binding = 1) uniform sampler2D bork2dTextures[];",
@@ -190,7 +235,25 @@ public sealed class ShaderProcessorTests
         Assert.Contains("#define uDirection (vInstanceParams[1].xyz)", prologue, StringComparison.Ordinal);
         Assert.Contains("#define uTint (vInstanceParams[2].xyzw)", prologue, StringComparison.Ordinal);
         Assert.Contains("#define uWind (bork2dGlobals.globals[1].xy)", prologue, StringComparison.Ordinal);
-        Assert.Equal(28 + instanceUniforms.Length + globalUniforms.Length, ShaderPrologue.CountLines(prologue));
+        Assert.Equal(31 + instanceUniforms.Length + globalUniforms.Length, ShaderPrologue.CountLines(prologue));
+    }
+
+    [Fact]
+    public void EpilogueConsumesTheSharedSpriteAndLineInputs()
+    {
+        Assert.Contains("bork2d_user_main();", ShaderPrologue.Epilogue, StringComparison.Ordinal);
+        Assert.Contains("if (extra > 0x003FFFFFu)", ShaderPrologue.Epilogue, StringComparison.Ordinal);
+        Assert.Contains("vUv", ShaderPrologue.Epilogue, StringComparison.Ordinal);
+        Assert.Contains("vTint", ShaderPrologue.Epilogue, StringComparison.Ordinal);
+        Assert.Contains("vWorldPosition", ShaderPrologue.Epilogue, StringComparison.Ordinal);
+        Assert.Contains("vLocalPosition", ShaderPrologue.Epilogue, StringComparison.Ordinal);
+        Assert.Contains("vTextureIndex", ShaderPrologue.Epilogue, StringComparison.Ordinal);
+        Assert.Contains("vExtraTextureIndices[3]", ShaderPrologue.Epilogue, StringComparison.Ordinal);
+        Assert.Contains("vInstanceParams[3]", ShaderPrologue.Epilogue, StringComparison.Ordinal);
+        Assert.Contains("vLineUv", ShaderPrologue.Epilogue, StringComparison.Ordinal);
+        Assert.Contains("vColor", ShaderPrologue.Epilogue, StringComparison.Ordinal);
+        Assert.Contains("vLineFlags", ShaderPrologue.Epilogue, StringComparison.Ordinal);
+        Assert.Contains("outColor", ShaderPrologue.Epilogue, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -6,6 +6,9 @@
 // buffer: gl_VertexIndex selects one of the four generated quad corners and gl_InstanceIndex
 // selects the instance record.
 //
+// The stage writes the complete version-3 fragment interface, including the line-only inputs at
+// neutral values, so one fragment shader may be assigned to a sprite or a line.
+//
 // FlipX/FlipY are applied by the planner as the sign of size.x/size.y. That is algebraically
 // identical to the approved formula
 //   local = ((c.x - pivot.x) * size.x * sx, (pivot.y - c.y) * size.y * sy)
@@ -43,6 +46,9 @@ layout(location = 3) out vec2 vWorldPosition;
 layout(location = 4) out vec2 vLocalPosition;
 layout(location = 5) flat out uint vExtraTextureIndices[4];
 layout(location = 9) out vec4 vInstanceParams[4];
+layout(location = 13) out vec2 vLineUv;
+layout(location = 14) out vec4 vColor;
+layout(location = 15) flat out float vLineFlags;
 
 void main()
 {
@@ -107,4 +113,11 @@ void main()
         instance.instanceParams1,
         instance.instanceParams2,
         instance.instanceParams3);
+
+    // The fragment interface is shared with the line stage. A sprite has no stroke, so the
+    // line-only inputs stay neutral and a shared shader behaves exactly as it did before they
+    // existed.
+    vLineUv = vec2(0.0);
+    vColor = vec4(0.0);
+    vLineFlags = 0.0;
 }
