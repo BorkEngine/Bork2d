@@ -1,7 +1,9 @@
+using Bork2d.Bake;
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
 using Bork2d.Render.Textures;
 using Bork2d.Tests.TestDoubles;
+using Bork2d.Tests.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -36,7 +38,8 @@ public sealed class TexturePageStoreTests
         Assert.Equal(TextureFormat.Rgba8, upload.Format);
         Assert.Equal(TextureFilter.Nearest, upload.Filter);
         Assert.Equal(TextureWrap.Clamp, upload.Wrap);
-        Assert.Equal(TexturePlaceholder.PayloadBytes, upload.PayloadLength);
+        Assert.Equal(harness.PlaceholderPayload.Length, upload.PayloadLength);
+        Assert.Equal(4u, upload.MipLevels);
         Assert.Equal(0, harness.Assets.LoadAssetCount);
         Assert.Equal(0, harness.Assets.LoadDataCount);
     }
@@ -70,6 +73,63 @@ public sealed class TexturePageStoreTests
         Assert.Equal(TexturePlaceholder.Size, lookup.Height);
         Assert.Equal(0, harness.Assets.LoadAssetCount);
         Assert.Equal(0, harness.Store.PendingLoadCount);
+    }
+
+    [Fact]
+    public void ThePlaceholderLookupUsesTheLoadedDescriptorDimensions()
+    {
+        const int resolution = 4;
+        var assets = new FakeTextureAssets();
+        var gpu = new FakeTexturePageGpu();
+        var store = new TexturePageStore(
+            assets,
+            gpu,
+            DefaultLimit,
+            DefaultMaxDimension,
+            NullLogger.Instance,
+            assets);
+        BakedTexture baked = PlaceholderBaked(resolution);
+        TextureDescriptor descriptor = Ktx2TextureFactory.Descriptor(
+            TexturePlaceholder.PayloadPath,
+            baked,
+            resolution,
+            resolution,
+            TextureFilter.Nearest);
+        store.Start(descriptor, baked.Payload.ToArray());
+
+        TexturePageLookup lookup = store.EnsurePage(path: null);
+
+        Assert.Equal(TexturePageLookupKind.Placeholder, lookup.Kind);
+        Assert.Equal(resolution, lookup.Width);
+        Assert.Equal(resolution, lookup.Height);
+        Assert.Equal(resolution, Assert.Single(gpu.Uploads).Width);
+    }
+
+    [Fact]
+    public void AnInvalidPlaceholderIsAFatalStartupFailure()
+    {
+        var assets = new FakeTextureAssets();
+        var gpu = new FakeTexturePageGpu();
+        var store = new TexturePageStore(
+            assets,
+            gpu,
+            DefaultLimit,
+            DefaultMaxDimension,
+            NullLogger.Instance);
+
+        BakedTexture baked = PlaceholderBaked(TexturePlaceholder.Size);
+        TextureDescriptor descriptor = Ktx2TextureFactory.Descriptor(
+            TexturePlaceholder.PayloadPath,
+            baked,
+            TexturePlaceholder.Size,
+            TexturePlaceholder.Size);
+
+        var exception = Assert.Throws<Bork2dException>(
+            () => store.Start(descriptor, [1, 2, 3, 4]));
+
+        Assert.Contains(TexturePlaceholder.DescriptorPath, exception.Message, StringComparison.Ordinal);
+        Assert.Empty(gpu.Uploads);
+        Assert.False(store.IsPlaceholderReady);
     }
 
     [Fact]
@@ -117,6 +177,38 @@ public sealed class TexturePageStoreTests
         Assert.Equal(0, harness.Store.PendingLoadCount);
     }
 
+    [Theory]
+    [InlineData(TextureFormat.Rgba8)]
+    [InlineData(TextureFormat.Rgb8)]
+    [InlineData(TextureFormat.Rg8)]
+    [InlineData(TextureFormat.R8)]
+    [InlineData(TextureFormat.CompRgba8)]
+    [InlineData(TextureFormat.CompRgb8)]
+    [InlineData(TextureFormat.CompRg8)]
+    [InlineData(TextureFormat.CompR8)]
+    public void EveryMappedFormatIsAcceptedWithItsFullMipChain(TextureFormat format)
+    {
+        Harness harness = CreateHarness();
+        BakedTexture baked = Ktx2TextureFactory.BakeSolid(format, 5, 5, 200, 100, 50);
+        TextureDescriptor descriptor = Ktx2TextureFactory.Descriptor(
+            "textures/format-raw",
+            baked,
+            5,
+            5);
+        LoadPage(harness, "textures/format", descriptor, baked.Payload.ToArray());
+
+        TexturePageUpload upload = harness.Gpu.Uploads[^1];
+        Assert.Equal(format, upload.Format);
+        Assert.Equal(baked.MipLevels, upload.MipLevels);
+        Assert.Equal(5, upload.Width);
+        Assert.Equal(5, upload.Height);
+        Assert.Equal(baked.Payload.Length, upload.PayloadLength);
+        Assert.Equal(3u, upload.MipLevels);
+        Assert.Equal(
+            TexturePageLookupKind.Ready,
+            harness.Store.EnsurePage("textures/format").Kind);
+    }
+
     [Fact]
     public void AReadyPageKeepsItsDescriptorDimensionsAndIndexAndIsLoadedOnce()
     {
@@ -159,11 +251,21 @@ public sealed class TexturePageStoreTests
     public void ZeroDimensionsFailThePathAndUseThePlaceholderSize()
     {
         Harness harness = CreateHarness();
+        var descriptor = new TextureDescriptor
+        {
+            Width = 0,
+            Height = 0,
+            Format = TextureFormat.Rgba8,
+            MipLevels = 1,
+            Filter = TextureFilter.Linear,
+            Wrap = TextureWrap.Clamp,
+            Payload = "textures/zero-raw",
+        };
 
         AssertContentFailure(
             harness,
             "textures/zero",
-            Descriptor(0, 0, "textures/zero-raw"),
+            descriptor,
             [],
             TexturePageFailure.InvalidDimensions,
             expectedWidth: TexturePlaceholder.Size,
@@ -186,7 +288,7 @@ public sealed class TexturePageStoreTests
     }
 
     [Fact]
-    public void APayloadLengthMismatchKeepsTheDeclaredDimensions()
+    public void ATruncatedKtx2PayloadKeepsTheDeclaredDimensions()
     {
         Harness harness = CreateHarness();
 
@@ -195,8 +297,58 @@ public sealed class TexturePageStoreTests
             "textures/short",
             Descriptor(4, 2, "textures/short-raw"),
             new byte[7],
-            TexturePageFailure.PayloadLength,
+            TexturePageFailure.MalformedKtx2,
             expectedWidth: 4,
+            expectedHeight: 2);
+    }
+
+    [Fact]
+    public void AFormatMismatchFailsThePathAndDrawsThePlaceholder()
+    {
+        Harness harness = CreateHarness();
+        TextureDescriptor descriptor = Descriptor(2, 2, "textures/bad-format-raw");
+        descriptor.Format = TextureFormat.CompRgba8;
+
+        AssertContentFailure(
+            harness,
+            "textures/bad-format",
+            descriptor,
+            Payload(2, 2),
+            TexturePageFailure.FormatMismatch,
+            expectedWidth: 2,
+            expectedHeight: 2);
+    }
+
+    [Fact]
+    public void ADimensionMismatchFailsThePathAndDrawsThePlaceholder()
+    {
+        Harness harness = CreateHarness();
+        TextureDescriptor descriptor = Descriptor(3, 2, "textures/bad-dimensions-raw");
+
+        AssertContentFailure(
+            harness,
+            "textures/bad-dimensions",
+            descriptor,
+            Payload(2, 2),
+            TexturePageFailure.DimensionMismatch,
+            expectedWidth: 3,
+            expectedHeight: 2);
+    }
+
+    [Fact]
+    public void AMipCountMismatchFailsThePathAndDrawsThePlaceholder()
+    {
+        Harness harness = CreateHarness();
+        TextureDescriptor descriptor = Descriptor(2, 2, "textures/bad-mips-raw");
+        descriptor.MipLevels = 1;
+
+        AssertContentFailure(
+            harness,
+            "textures/bad-mips",
+            descriptor,
+            Payload(2, 2),
+            TexturePageFailure.MipMismatch,
+            expectedWidth: 2,
             expectedHeight: 2);
     }
 
@@ -286,7 +438,7 @@ public sealed class TexturePageStoreTests
         AssertFailedPath(
             harness,
             "textures/broken",
-            TexturePageFailure.PayloadLength,
+            TexturePageFailure.MalformedKtx2,
             expectedWidth: 2,
             expectedHeight: 2);
         Assert.Equal(1, harness.Assets.LoadAssetCount);
@@ -503,7 +655,8 @@ public sealed class TexturePageStoreTests
     [Fact]
     public void TheUploadBudgetStartsOnlyTheAllowedBytesAndALaterPumpContinuesTheQueue()
     {
-        Harness harness = CreateHarness(uploadBudget: 128);
+        int pageBytes = PayloadBytes(4, 4);
+        Harness harness = CreateHarness(uploadBudget: 2 * pageBytes);
         StagePage(harness, "textures/a", Descriptor(4, 4, "textures/a-raw"), Payload(4, 4));
         StagePage(harness, "textures/b", Descriptor(4, 4, "textures/b-raw"), Payload(4, 4));
         StagePage(harness, "textures/c", Descriptor(4, 4, "textures/c-raw"), Payload(4, 4));
@@ -511,10 +664,10 @@ public sealed class TexturePageStoreTests
 
         harness.Store.Pump();
 
-        // Four 64-byte pages with a 128-byte budget: exactly two uploads start.
+        // Four equal KTX2 payloads with a two-payload budget: exactly two uploads start.
         Assert.Equal(3, harness.Gpu.Uploads.Count);
         Assert.Equal(2, harness.Store.PendingUploadCount);
-        Assert.Equal(128, harness.Store.PendingUploadBytes);
+        Assert.Equal(2 * pageBytes, harness.Store.PendingUploadBytes);
         Assert.Equal(3, harness.Store.TexturePageCount);
         Assert.Equal(TexturePageLookupKind.Ready, harness.Store.EnsurePage("textures/a").Kind);
         Assert.Equal(TexturePageLookupKind.Pending, harness.Store.EnsurePage("textures/c").Kind);
@@ -535,17 +688,18 @@ public sealed class TexturePageStoreTests
     [Fact]
     public void AnOversizedFirstUploadIsAllowedOnce()
     {
+        int pageBytes = PayloadBytes(4, 4);
         Harness harness = CreateHarness(uploadBudget: 16);
         StagePage(harness, "textures/large", Descriptor(4, 4, "textures/large-raw"), Payload(4, 4));
         StagePage(harness, "textures/next", Descriptor(4, 4, "textures/next-raw"), Payload(4, 4));
 
         harness.Store.Pump();
 
-        // The first queued page is 64 bytes against a 16-byte budget and still starts; the second
-        // does not, because a later upload must fit.
+        // The first queued page exceeds a 16-byte budget and still starts; the second does not,
+        // because a later upload must fit.
         Assert.Equal(2, harness.Gpu.Uploads.Count);
         Assert.Equal(1, harness.Store.PendingUploadCount);
-        Assert.Equal(64, harness.Store.PendingUploadBytes);
+        Assert.Equal(pageBytes, harness.Store.PendingUploadBytes);
 
         harness.Store.Pump();
 
@@ -557,7 +711,8 @@ public sealed class TexturePageStoreTests
     [Fact]
     public void TheMostRecentlySeenQueuedPageStartsFirst()
     {
-        Harness harness = CreateHarness(uploadBudget: 40);
+        int twoSmallPages = PayloadBytes(1, 1) + PayloadBytes(2, 2);
+        Harness harness = CreateHarness(uploadBudget: twoSmallPages);
         StagePage(harness, "textures/a", Descriptor(1, 1, "textures/a-raw"), Payload(1, 1));
         StagePage(harness, "textures/b", Descriptor(2, 2, "textures/b-raw"), Payload(2, 2));
         StagePage(harness, "textures/c", Descriptor(3, 3, "textures/c-raw"), Payload(3, 3));
@@ -565,7 +720,7 @@ public sealed class TexturePageStoreTests
 
         harness.Store.Pump();
 
-        // 4 + 16 + 36 > 40, so only the first two start; c and d stay queued.
+        // The 1x1 and 2x2 payloads fit the budget exactly; the 3x3 and 4x4 pages stay queued.
         Assert.Equal(3, harness.Gpu.Uploads.Count);
         Assert.Equal(2, harness.Store.PendingUploadCount);
 
@@ -573,7 +728,8 @@ public sealed class TexturePageStoreTests
         Assert.Equal(TexturePageLookupKind.Pending, harness.Store.EnsurePage("textures/d").Kind);
         harness.Store.Pump();
 
-        // d is now the first upload of the frame (allowed even though 64 exceeds 40); c waits.
+        // d is now the first upload of the frame (allowed even when it alone exceeds the budget); c
+        // waits because d plus c does not fit.
         Assert.Equal(4, harness.Gpu.Uploads.Count);
         Assert.Equal(4, harness.Gpu.Uploads[^1].Width);
         Assert.Equal(1, harness.Store.PendingUploadCount);
@@ -695,13 +851,14 @@ public sealed class TexturePageStoreTests
     [Fact]
     public void ACatalogChangeRetiresQueuedUploads()
     {
-        Harness harness = CreateHarness(uploadBudget: 64);
+        int pageBytes = PayloadBytes(4, 4);
+        Harness harness = CreateHarness(uploadBudget: pageBytes);
         StagePage(harness, "textures/a", Descriptor(4, 4, "textures/a-raw"), Payload(4, 4));
         StagePage(harness, "textures/b", Descriptor(4, 4, "textures/b-raw"), Payload(4, 4));
 
         harness.Store.Pump();
         Assert.Equal(1, harness.Store.PendingUploadCount);
-        Assert.Equal(64, harness.Store.PendingUploadBytes);
+        Assert.Equal(pageBytes, harness.Store.PendingUploadBytes);
 
         harness.Assets.CatalogVersion++;
         harness.Store.Pump();
@@ -827,7 +984,7 @@ public sealed class TexturePageStoreTests
     [Fact]
     public void ASmallResidencyBudgetEvictsTheLeastRecentlySeenReadyPageFirst()
     {
-        const int pageBytes = 4 * 4 * 4;
+        int pageBytes = PayloadBytes(4, 4);
         Harness harness = CreateHarness(residencyBudget: 3 * pageBytes);
 
         LoadPage(
@@ -879,7 +1036,7 @@ public sealed class TexturePageStoreTests
     [Fact]
     public void APageInTheReclaimSafetyAgeIsNeverEvictedAndIsEvictedOnceItAgesOut()
     {
-        const int pageBytes = 4 * 4 * 4;
+        int pageBytes = PayloadBytes(4, 4);
         Harness harness = CreateHarness(residencyBudget: pageBytes - 1);
 
         LoadPage(
@@ -915,7 +1072,7 @@ public sealed class TexturePageStoreTests
     [Fact]
     public void AnEvictedPathReloadsOnItsNextEnsurePageAndReusesItsSlot()
     {
-        const int pageBytes = 4 * 4 * 4;
+        int pageBytes = PayloadBytes(4, 4);
         Harness harness = CreateHarness(residencyBudget: 3 * pageBytes);
 
         LoadPage(
@@ -963,9 +1120,9 @@ public sealed class TexturePageStoreTests
     [Fact]
     public void AFreedDescriptorSlotIsReusedBeforeTheTableGrows()
     {
-        // Each 1x1 page is 4 payload bytes; the budget fits 254 pages, so the 255th page leaves the
-        // 256-entry table exactly full and one byte over the budget.
-        const int pageBytes = 4;
+        // Each 1x1 KTX2 payload is a fixed size; the budget fits 254 pages, so the 255th page leaves
+        // the 256-entry table exactly full and one payload over the budget.
+        int pageBytes = PayloadBytes(1, 1);
         Harness harness = CreateHarness(residencyBudget: 254 * pageBytes);
 
         for (var index = 0; index < TexturePageCapacity.InitialRealPages; index++)
@@ -1004,7 +1161,7 @@ public sealed class TexturePageStoreTests
     [Fact]
     public void ACatalogChangeReclaimsRetiredPagesAfterTheSafetyAge()
     {
-        const int pageBytes = 4 * 4 * 4;
+        int pageBytes = PayloadBytes(4, 4);
         Harness harness = CreateHarness();
 
         LoadPage(
@@ -1062,7 +1219,7 @@ public sealed class TexturePageStoreTests
     [Fact]
     public void ResidentBytesPagesAndEvictionsStayConsistentWhileEvicting()
     {
-        const int pageBytes = 4 * 4 * 4;
+        int pageBytes = PayloadBytes(4, 4);
         Harness harness = CreateHarness(residencyBudget: 2 * pageBytes);
 
         for (var index = 0; index < 8; index++)
@@ -1112,13 +1269,14 @@ public sealed class TexturePageStoreTests
     public void ThePlaceholderIsNeverEvicted()
     {
         Harness harness = CreateHarness(residencyBudget: 1);
+        int pageBytes = PayloadBytes(4, 4);
 
         LoadPage(
             harness,
             "textures/large",
             Descriptor(4, 4, "textures/large-raw"),
             Payload(4, 4));
-        Assert.Equal(4 * 4 * 4, harness.Store.ResidentPayloadBytes);
+        Assert.Equal(pageBytes, harness.Store.ResidentPayloadBytes);
 
         for (var pump = 0; pump < 4; pump++)
         {
@@ -1152,9 +1310,26 @@ public sealed class TexturePageStoreTests
             uploadBudget,
             residencyBudget,
             initialCapacity);
-        store.Start();
-        return new Harness(store, assets, gpu);
+        BakedTexture baked = PlaceholderBaked(TexturePlaceholder.Size);
+        byte[] payload = baked.Payload.ToArray();
+        TextureDescriptor descriptor = Ktx2TextureFactory.Descriptor(
+            TexturePlaceholder.PayloadPath,
+            baked,
+            TexturePlaceholder.Size,
+            TexturePlaceholder.Size,
+            TextureFilter.Nearest);
+        store.Start(descriptor, payload);
+        return new Harness(store, assets, gpu, descriptor, payload);
     }
+
+    private static BakedTexture PlaceholderBaked(int resolution)
+        => Ktx2TextureFactory.BakeSolid(
+            TextureFormat.Rgba8,
+            resolution,
+            resolution,
+            255,
+            0,
+            255);
 
     private static void StagePage(
         Harness harness,
@@ -1244,25 +1419,39 @@ public sealed class TexturePageStoreTests
         Assert.Equal(expectedHeight, lookup.Height);
     }
 
-    private static TextureDescriptor Descriptor(uint width, uint height, string payloadPath) => new()
+    private static TextureDescriptor Descriptor(uint width, uint height, string payloadPath)
     {
-        Width = width,
-        Height = height,
-        Format = TextureFormat.Rgba8,
-        Filter = TextureFilter.Linear,
-        Wrap = TextureWrap.Clamp,
-        Payload = payloadPath,
-    };
+        BakedTexture baked = Ktx2TextureFactory.BakeSolid(
+            TextureFormat.Rgba8,
+            (int)width,
+            (int)height);
+        return Ktx2TextureFactory.Descriptor(payloadPath, baked, width, height);
+    }
 
-    private static byte[] Payload(uint width, uint height) => new byte[width * height * 4];
+    private static byte[] Payload(uint width, uint height)
+        => Ktx2TextureFactory.BakeSolid(
+                TextureFormat.Rgba8,
+                (int)width,
+                (int)height)
+            .Payload
+            .ToArray();
+
+    private static int PayloadBytes(uint width, uint height) => Payload(width, height).Length;
 
     private sealed class Harness
     {
-        internal Harness(TexturePageStore store, FakeTextureAssets assets, FakeTexturePageGpu gpu)
+        internal Harness(
+            TexturePageStore store,
+            FakeTextureAssets assets,
+            FakeTexturePageGpu gpu,
+            TextureDescriptor placeholderDescriptor,
+            byte[] placeholderPayload)
         {
             Store = store;
             Assets = assets;
             Gpu = gpu;
+            PlaceholderDescriptor = placeholderDescriptor;
+            PlaceholderPayload = placeholderPayload;
         }
 
         internal TexturePageStore Store { get; }
@@ -1270,5 +1459,9 @@ public sealed class TexturePageStoreTests
         internal FakeTextureAssets Assets { get; }
 
         internal FakeTexturePageGpu Gpu { get; }
+
+        internal TextureDescriptor PlaceholderDescriptor { get; }
+
+        internal byte[] PlaceholderPayload { get; }
     }
 }

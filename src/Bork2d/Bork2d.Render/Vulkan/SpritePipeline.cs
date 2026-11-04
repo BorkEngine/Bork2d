@@ -29,10 +29,9 @@ namespace Bork2d.Render.Vulkan;
 /// it. A fragment module comes from the shader catalog, which owns it, and the pipeline cache is
 /// keyed by the shader content hash and the output format, so identical content shares one pipeline
 /// and a swapchain format change lazily creates that format's pipeline. The graphics pipeline uses
-/// dynamic rendering with one
-/// sRGB color attachment, no depth/stencil, no vertex input, triangle-strip topology, four vertices
-/// per instance, dynamic viewport/scissor, disabled culling and depth test/write, and straight alpha
-/// blending.
+/// dynamic rendering with one linear UNORM scene color attachment, no depth/stencil, no vertex input,
+/// triangle-strip topology, four vertices per instance, dynamic viewport/scissor, disabled culling and
+/// depth test/write, and straight alpha blending.
 /// </para>
 /// <para>
 /// All objects are render-thread-owned and created once at renderer startup (or when a new output
@@ -295,27 +294,7 @@ internal sealed unsafe class SpritePipeline : IDisposable, IShaderModuleFactory
             return existing;
         }
 
-        bool linear = filter == TextureFilter.Linear;
-        bool repeat = wrap == TextureWrap.Repeat;
-        var info = new SamplerCreateInfo
-        {
-            SType = StructureType.SamplerCreateInfo,
-            MagFilter = linear ? Filter.Linear : Filter.Nearest,
-            MinFilter = linear ? Filter.Linear : Filter.Nearest,
-            MipmapMode = SamplerMipmapMode.Nearest,
-            AddressModeU = repeat ? SamplerAddressMode.Repeat : SamplerAddressMode.ClampToEdge,
-            AddressModeV = repeat ? SamplerAddressMode.Repeat : SamplerAddressMode.ClampToEdge,
-            AddressModeW = repeat ? SamplerAddressMode.Repeat : SamplerAddressMode.ClampToEdge,
-            MipLodBias = 0f,
-            AnisotropyEnable = false,
-            MaxAnisotropy = 1f,
-            CompareEnable = false,
-            CompareOp = CompareOp.Always,
-            MinLod = 0f,
-            MaxLod = 0f,
-            BorderColor = BorderColor.FloatTransparentBlack,
-            UnnormalizedCoordinates = false,
-        };
+        SamplerCreateInfo info = CreateSamplerInfo(filter, wrap);
         Result result = _vk.CreateSampler(_device, in info, null, out Sampler sampler);
         if (result != Result.Success)
         {
@@ -331,6 +310,44 @@ internal sealed unsafe class SpritePipeline : IDisposable, IShaderModuleFactory
             (nint)sampler.Handle,
             $"Bork2d sprite sampler ({filter}, {wrap})");
         return sampler;
+    }
+
+    /// <summary>
+    /// Creates the sampler state for a filter/wrap pair: the filter selects nearest or linear
+    /// magnification/minification, mip filtering is always linear with the full chain available
+    /// (<c>MinLod = 0</c>, <c>MaxLod = 1000</c>), and anisotropy is disabled.
+    /// </summary>
+    /// <remarks>
+    /// The cache key stays <c>(Filter, Wrap)</c> because every page carries a complete mip chain down
+    /// to 1x1 and the sampler's maximum LOD clamps to that chain. Exposing the state as a pure helper
+    /// keeps the sampler contract testable without a GPU.
+    /// </remarks>
+    /// <param name="filter">The descriptor filter.</param>
+    /// <param name="wrap">The descriptor wrap.</param>
+    /// <returns>The sampler creation state.</returns>
+    internal static SamplerCreateInfo CreateSamplerInfo(TextureFilter filter, TextureWrap wrap)
+    {
+        bool linear = filter == TextureFilter.Linear;
+        bool repeat = wrap == TextureWrap.Repeat;
+        return new SamplerCreateInfo
+        {
+            SType = StructureType.SamplerCreateInfo,
+            MagFilter = linear ? Filter.Linear : Filter.Nearest,
+            MinFilter = linear ? Filter.Linear : Filter.Nearest,
+            MipmapMode = SamplerMipmapMode.Linear,
+            AddressModeU = repeat ? SamplerAddressMode.Repeat : SamplerAddressMode.ClampToEdge,
+            AddressModeV = repeat ? SamplerAddressMode.Repeat : SamplerAddressMode.ClampToEdge,
+            AddressModeW = repeat ? SamplerAddressMode.Repeat : SamplerAddressMode.ClampToEdge,
+            MipLodBias = 0f,
+            AnisotropyEnable = false,
+            MaxAnisotropy = 1f,
+            CompareEnable = false,
+            CompareOp = CompareOp.Always,
+            MinLod = 0f,
+            MaxLod = 1000f,
+            BorderColor = BorderColor.FloatTransparentBlack,
+            UnnormalizedCoordinates = false,
+        };
     }
 
     /// <inheritdoc/>

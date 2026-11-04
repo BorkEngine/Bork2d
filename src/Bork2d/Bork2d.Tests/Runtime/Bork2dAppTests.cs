@@ -288,6 +288,8 @@ public sealed class Bork2dAppTests
                 "shader/sprite",
                 "shader/sprite-spv",
                 "shader/vertex-spv",
+                "textures/placeholder",
+                "textures/placeholder-ktx2",
             },
             browse!.Select(info => info.Path));
         Assert.False(exists!.Value);

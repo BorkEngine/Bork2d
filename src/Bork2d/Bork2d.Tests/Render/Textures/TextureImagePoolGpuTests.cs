@@ -173,6 +173,7 @@ public sealed class TextureImagePoolGpuTests
             || exception.Message.Contains("below the required 1.3.0", StringComparison.Ordinal)
             || exception.Message.Contains("requires Vulkan 1.3.0", StringComparison.Ordinal)
             || exception.Message.Contains("vkCreateInstance failed", StringComparison.Ordinal)
+            || exception.Message.Contains("textureCompressionBC", StringComparison.Ordinal)
             || exception.Message.Contains(
                 "maxPerStageDescriptorUpdateAfterBindSampledImages=0",
                 StringComparison.Ordinal);

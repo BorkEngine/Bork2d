@@ -174,7 +174,11 @@ public sealed class AssetServiceLoadAssetTests
 
         DataRef data = SpriteTestSupport.PayloadPath;
         byte[] payload = await host.Service.LoadData(data);
-        Assert.Equal(16, payload.Length);
+        Assert.True(payload.Length > 12);
+        Assert.Equal(0xAB, payload[0]);
+        Assert.Equal(0x4B, payload[1]);
+        Assert.Equal(0x54, payload[2]);
+        Assert.Equal(0x58, payload[3]);
     }
 
     [Fact]

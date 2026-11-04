@@ -138,21 +138,49 @@ internal sealed class RendererTextures : IBindlessPageWriter
     }
 
     /// <summary>
-    /// Creates the texture-page cache, uploads the placeholder (waiting its fence at startup), and
-    /// makes it resident at index 0. Failure is a renderer startup failure.
+    /// Creates the texture-page cache, loads the built-in placeholder descriptor and KTX2 payload
+    /// synchronously from <see cref="IAssets"/>, uploads the placeholder (waiting its fence at
+    /// startup), and makes it resident at index 0. The built-in pack is always mounted, so a missing
+    /// or invalid placeholder is a renderer startup failure.
     /// </summary>
     /// <param name="initialCapacity">
     /// The startup table capacity from <see cref="TexturePageCapacity.StartupCapacity(int)"/>,
     /// including the placeholder. It is passed to the page store so a normal run starts already
     /// reserved instead of growing at the policy's base capacity.
     /// </param>
-    /// <exception cref="Bork2dException">The page store could not be created.</exception>
+    /// <exception cref="Bork2dException">
+    /// The page store could not be created, or the built-in placeholder descriptor/payload is
+    /// missing or invalid.
+    /// </exception>
     internal void CreatePageStore(int initialCapacity)
     {
         SpritePipeline pipeline = _pipeline
             ?? throw new Bork2dException(
                 $"The {_modeDescription} renderer cannot create texture pages without the sprite "
                     + "pipeline.");
+        TextureDescriptor placeholder = LoadBlocking(
+            _assets.LoadAsset<TextureDescriptor>(TexturePlaceholder.DescriptorPath),
+            TexturePlaceholder.DescriptorPath,
+            "the built-in texture placeholder descriptor");
+        if (placeholder is null)
+        {
+            throw new Bork2dException(
+                $"The built-in texture placeholder descriptor '{TexturePlaceholder.DescriptorPath}' "
+                    + "loaded as null.");
+        }
+
+        if (!placeholder.Payload.HasValue)
+        {
+            throw new Bork2dException(
+                $"The built-in texture placeholder descriptor '{TexturePlaceholder.DescriptorPath}' "
+                    + "has no KTX2 payload reference.");
+        }
+
+        byte[] payload = LoadBlocking(
+            _assets.LoadData(placeholder.Payload),
+            placeholder.Payload.Path!,
+            "the built-in texture placeholder payload");
+
         _gpu = new VulkanTexturePages(_device, pipeline, this, _instance, _logger);
         _pages = new TexturePageStore(
             _assets,
@@ -164,8 +192,24 @@ internal sealed class RendererTextures : IBindlessPageWriter
             _textureUploadBudgetBytes,
             _textureResidencyBudgetBytes,
             initialCapacity);
-        _pages.Start();
+        _pages.Start(placeholder, payload);
     }
+
+    private static T LoadBlocking<T>(Task<T> task, string path, string description)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        try
+        {
+            return task.GetAwaiter().GetResult();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            throw new Bork2dException(
+                $"{description} asset '{path}' could not be loaded: {exception.Message}",
+                exception);
+        }
+    }
+
 
     /// <summary>
     /// Advances the shader catalog and the texture-page state machine once per frame, before

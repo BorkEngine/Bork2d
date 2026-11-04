@@ -102,6 +102,7 @@ public sealed class GpuDeviceBootstrapTests
             Assert.True(device.Features.DescriptorBindingSampledImageUpdateAfterBind);
             Assert.True(device.Features.DescriptorBindingUpdateUnusedWhilePending);
             Assert.True(device.Features.DescriptorBindingVariableDescriptorCount);
+            Assert.True(device.Features.TextureCompressionBC);
 
             Assert.NotEqual(nint.Zero, device.Device.Handle);
             Assert.NotEqual(nint.Zero, device.Queue.Handle);
@@ -167,6 +168,7 @@ public sealed class GpuDeviceBootstrapTests
             || exception.Message.Contains("below the required 1.3.0", StringComparison.Ordinal)
             || exception.Message.Contains("requires Vulkan 1.3.0", StringComparison.Ordinal)
             || exception.Message.Contains("vkCreateInstance failed", StringComparison.Ordinal)
+            || exception.Message.Contains("textureCompressionBC", StringComparison.Ordinal)
             || exception.Message.Contains(
                 "maxPerStageDescriptorUpdateAfterBindSampledImages=0",
                 StringComparison.Ordinal);

@@ -56,7 +56,7 @@ internal sealed class TexturePage
     /// </summary>
     internal byte[]? Payload { get; set; }
 
-    /// <summary>Gets or sets the validated payload size in bytes (<c>Width * Height * 4</c>).</summary>
+    /// <summary>Gets or sets the validated KTX2 payload size in bytes.</summary>
     internal long PayloadBytes { get; set; }
 
     /// <summary>

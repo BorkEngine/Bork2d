@@ -855,7 +855,15 @@ public sealed class SpriteRenderGpuTests
     public void ResidencyBudgetEvictsAndReloadsPagesWithoutValidationErrors()
     {
         const int textureCount = 8;
-        const int pageBytes = 4 * 4 * 4;
+        int pageBytes = Ktx2TextureFactory.BakeSolid(
+                TextureFormat.Rgba8,
+                4,
+                4,
+                255,
+                0,
+                255)
+            .Payload
+            .Length;
         using var assets = new TestRendererAssets();
         var sprites = new SpriteAsset[textureCount];
         for (var index = 0; index < textureCount; index++)
@@ -1224,6 +1232,7 @@ public sealed class SpriteRenderGpuTests
             || message.Contains("below the required 1.3.0", StringComparison.Ordinal)
             || message.Contains("requires Vulkan 1.3.0", StringComparison.Ordinal)
             || message.Contains("vkCreateInstance failed", StringComparison.Ordinal)
+            || message.Contains("textureCompressionBC", StringComparison.Ordinal)
             || message.Contains(
                 "maxPerStageDescriptorUpdateAfterBindSampledImages=0",
                 StringComparison.Ordinal)
