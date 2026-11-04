@@ -285,6 +285,9 @@ public sealed class Bork2dAppTests
             {
                 "present/fragment-spv",
                 "present/vertex-spv",
+                "shader/line",
+                "shader/line-spv",
+                "shader/line-vertex-spv",
                 "shader/sprite",
                 "shader/sprite-spv",
                 "shader/vertex-spv",

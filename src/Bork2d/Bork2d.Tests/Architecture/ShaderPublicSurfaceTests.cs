@@ -169,10 +169,10 @@ public sealed class ShaderPublicSurfaceTests
     }
 
     [Fact]
-    public void CurrentShaderLayoutVersionIsInternalAndTwo()
+    public void CurrentShaderLayoutVersionIsInternalAndThree()
     {
         Assert.False(typeof(ShaderLayout).IsPublic);
-        Assert.Equal(2u, ShaderLayout.CurrentVersion);
+        Assert.Equal(3u, ShaderLayout.CurrentVersion);
     }
 
     private static string Describe(MethodInfo method)
