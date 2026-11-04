@@ -291,23 +291,29 @@ texture indices as floats, with `0` for an absent or failed page), and `instance
 `instanceParams3` (the 16-float custom-shader instance uniform block copied from the snapshot; a
 sprite without a custom shader uses the default entry's declared default block). There is no vertex
 buffer: `gl_VertexIndex` selects the quad corner and `gl_InstanceIndex` selects the record. The
-built-in vertex stage writes these interpolants: location `0` `vUv` (`vec2`), `1` `vTint` (`vec4`),
-`2` `vTextureIndex` (`flat uint`), `3` `vWorldPosition` (`vec2`), `4` `vLocalPosition` (`vec2`),
-`5` `vExtraTextureIndices` (`flat uint[4]`), and `9` `vInstanceParams` (`vec4[4]`). Custom fragment
+built-in sprite vertex stage writes these interpolants: location `0` `vUv` (`vec2`), `1` `vTint`
+(`vec4`), `2` `vTextureIndex` (`flat uint`), `3` `vWorldPosition` (`vec2`), `4` `vLocalPosition`
+(`vec2`), `5` `vExtraTextureIndices` (`flat uint[4]`), `9` `vInstanceParams` (`vec4[4]`), and the
+line-only `13` `vLineUv` (`vec2`), `14` `vColor` (`vec4`), and `15` `vLineFlags` (`flat float`),
+which it leaves at zero. The engine-owned line vertex stage (`shader/line-vertex-spv`) reads a
+112-byte vertex record through attribute locations `0` through `7` and writes the complete shared
+interface, including neutral sprite values (`vUv` and `vLocalPosition` from the line coordinate,
+`vTint` from the line color, texture index `0`, and zero extra indices). Custom fragment
 shaders declare the same interface through the fixed bake prologue, which places the bindless
 texture array in set `0` binding `1` and the global block in set `1` binding `2`. The bake prologue
 renames the user `main` and appends an engine wrapper that consumes the full vertex interface in a
 branch that cannot be reached for valid engine data, so every custom shader's pipeline validation
 sees matched inputs and outputs without changing any frame's pixels.
 
-The default sprite shader and the bindless placeholder are asset content, not compiled-in arrays. The
-built-in pack, mounted below every game pack, serves `shader/sprite` as a `ShaderAsset`,
-`shader/sprite-spv` as its raw fragment module, `shader/vertex-spv` as the engine-owned vertex module,
-`present/vertex-spv` plus `present/fragment-spv` as the engine-owned present modules, and
+The default sprite shader, the built-in line shader, and the bindless placeholder are asset content,
+not compiled-in arrays. The built-in pack, mounted below every game pack, serves `shader/sprite` and
+`shader/line` as `ShaderAsset`s, `shader/sprite-spv` and `shader/line-spv` as their raw fragment
+modules, `shader/vertex-spv` and `shader/line-vertex-spv` as the engine-owned sprite and line vertex
+modules, `present/vertex-spv` plus `present/fragment-spv` as the engine-owned present modules, and
 `textures/placeholder` plus `textures/placeholder-ktx2` as the bindless placeholder descriptor and
 KTX2 payload. At renderer startup
 `RendererTextures.EnsurePipeline` loads the vertex module through `IAssets`; `ShaderStore` then
-loads the fragment shader asset, validates a non-null `SpirV` reference, `LayoutVersion` 2, the
+loads the fragment shader asset, validates a non-null `SpirV` reference, `LayoutVersion` 3, the
 `main` entry point, the full declaration set, and a non-empty module whose first little-endian word
 is `0x07230203`, freezes the shader declarations, and creates the fragment module. The present
 pipeline loads its two raw modules the same way and validates their SPIR-V magic. The placeholder
@@ -366,7 +372,7 @@ that path. While the load is outstanding the sprite is skipped and counted in
 store promotes completed loads on the next frame's pump, creates the fragment module, and creates
 that frame's format pipeline at plan time. The render thread never blocks on an asset load.
 
-Every custom declaration set is validated: `LayoutVersion` 2, the `main` entry point, a non-empty
+Every custom declaration set is validated: `LayoutVersion` 3, the `main` entry point, a non-empty
 SPIR-V payload whose first little-endian word is `0x07230203`, at most four texture slots, identifier
 names that are unique within their block, instance-uniform offsets that are aligned, inside the
 16-float block, and non-overlapping, global-uniform offsets that are aligned, unique, and inside the
