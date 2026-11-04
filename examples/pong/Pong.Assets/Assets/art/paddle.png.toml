@@ -1,2 +1,4 @@
+type = "rgba"
+compression = "auto"
 filter = "linear"
 wrap = "clamp"

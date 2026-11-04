@@ -8,7 +8,7 @@ namespace Pong.Assets.Processors;
 /// <summary>
 /// The circle acceptance processor: it parses the processor-owned JSON source, renders a white
 /// straight-alpha antialiased circle on a transparent background, and emits a
-/// <see cref="TextureDescriptor"/> plus its raw RGBA8 payload.
+/// <see cref="TextureDescriptor"/> plus its KTX2 payload.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -20,19 +20,23 @@ namespace Pong.Assets.Processors;
 /// The JSON is owned by this processor, not by the TOML binder: the processor declares
 /// <see cref="SidecarPolicy.None"/> and parses the source itself. An unreadable source or a source
 /// that is not valid JSON is <c>BK7001</c>; a valid JSON document with missing, non-integer, or
-/// out-of-range values is <c>BK7002</c>. A failed source emits no outputs.
+/// out-of-range values is <c>BK7002</c>. A source that renders but cannot be baked into KTX2 is also
+/// <c>BK7002</c>. A failed source emits no outputs.
 /// </para>
 /// <para>
 /// Coverage is supersampled on a 4×4 grid per pixel and quantized to straight alpha, so the center
-/// is fully opaque, the outside is fully transparent, and the edge is antialiased. The descriptor
-/// is emitted at <c>BaseAssetPath</c> and the RGBA8 bytes at <c>BaseAssetPath + "-raw"</c>.
+/// is fully opaque, the outside is fully transparent, and the edge is antialiased. The rendered
+/// pixels go through <see cref="TextureBaker.Bake"/> with <see cref="TextureChannelType.Rgba"/> and
+/// <see cref="TextureCompression.None"/>, so the ball stays uncompressed RGBA8 and gains the full
+/// mip chain. The descriptor is emitted at <c>BaseAssetPath</c> with the baked format and mip count,
+/// and the KTX2 payload at <c>BaseAssetPath + "-ktx2"</c>.
 /// </para>
 /// </remarks>
 internal sealed class CircleProcessor : IAssetProcessor
 {
     private const string SourceCode = "BK7001";
     private const string ValueCode = "BK7002";
-    private const string RawSuffix = "-raw";
+    private const string PayloadSuffix = "-ktx2";
     private const int MaximumResolution = 4096;
     private const int SupersampleFactor = 4;
     private const byte OpaqueWhite = 255;
@@ -75,20 +79,40 @@ internal sealed class CircleProcessor : IAssetProcessor
             return;
         }
 
-        byte[] payload = RenderCircle(resolution, size);
-        string payloadPath = context.BaseAssetPath + RawSuffix;
+        byte[] pixels = RenderCircle(resolution, size);
+        BakedTexture baked;
+        try
+        {
+            baked = TextureBaker.Bake(
+                pixels,
+                resolution,
+                resolution,
+                TextureChannelType.Rgba,
+                TextureCompression.None);
+        }
+        catch (Exception exception)
+        {
+            context.Diagnostics.Error(
+                ValueCode,
+                $"The circle source '{context.RelativePath}' could not be baked into KTX2: "
+                    + exception.Message);
+            return;
+        }
+
+        string payloadPath = context.BaseAssetPath + PayloadSuffix;
         var descriptor = new TextureDescriptor
         {
             Payload = payloadPath,
             Width = (uint)resolution,
             Height = (uint)resolution,
-            Format = TextureFormat.Rgba8,
+            Format = baked.Format,
+            MipLevels = baked.MipLevels,
             Filter = TextureFilter.Linear,
             Wrap = TextureWrap.Clamp,
         };
 
         context.Outputs.AddAsset(context.BaseAssetPath, descriptor);
-        context.Outputs.AddData(payloadPath, payload);
+        context.Outputs.AddData(payloadPath, baked.Payload.Span);
     }
 
     private static bool TryReadValues(
