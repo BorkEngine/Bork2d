@@ -58,12 +58,31 @@ public sealed class SceneCreationTests
     }
 
     [Fact]
-    public void CameraAndSpriteCreatorsRequireAParent()
+    public void LineRenderHasTheDeclaredDefaults()
+    {
+        var engine = TestEngineFactory.Create();
+
+        var line = engine.CreateLineRender(engine.Root);
+
+        Assert.Empty(line.Points);
+        Assert.False(line.Closed);
+        Assert.Equal(1f, line.Width);
+        Assert.Equal(Color.White, line.Color);
+        Assert.True(line.AntiAlias);
+        Assert.Null(line.Shader);
+        Assert.Equal(GameLayer.None, line.Layer);
+        Assert.Equal(0, line.ZIndex);
+        Assert.Same(engine.Root, line.Parent);
+    }
+
+    [Fact]
+    public void RenderableCreatorsRequireAParent()
     {
         var engine = TestEngineFactory.Create();
 
         Assert.Throws<ArgumentNullException>(() => { engine.CreateCamera(null!); });
         Assert.Throws<ArgumentNullException>(() => { engine.CreateSpriteRender(null!); });
+        Assert.Throws<ArgumentNullException>(() => { engine.CreateLineRender(null!); });
     }
 
     [Fact]
@@ -90,6 +109,7 @@ public sealed class SceneCreationTests
         var child = engine.CreateTransform(parent);
         var sprite = engine.CreateSpriteRender(parent);
         var camera = engine.CreateCamera(parent);
+        var line = engine.CreateLineRender(parent);
 
         Assert.Same(parent, child.Parent);
         Assert.Equal(Vector2.Zero, child.LocalPosition);
@@ -97,6 +117,7 @@ public sealed class SceneCreationTests
         Assert.Equal(Vector2.One, child.LocalScale);
         Assert.Same(parent, sprite.Parent);
         Assert.Same(parent, camera.Parent);
+        Assert.Same(parent, line.Parent);
         TestAssertions.Close(new Vector2(10f, 5f), ((Transform)child).WorldPosition());
     }
 
@@ -108,10 +129,12 @@ public sealed class SceneCreationTests
         var transform = engine.CreateTransform(engine.Root);
         var camera = engine.CreateCamera(engine.Root);
         var sprite = engine.CreateSpriteRender(engine.Root);
+        var line = engine.CreateLineRender(engine.Root);
 
         Assert.Same(engine.Root, transform.Parent);
         Assert.Same(engine.Root, camera.Parent);
         Assert.Same(engine.Root, sprite.Parent);
+        Assert.Same(engine.Root, line.Parent);
         Assert.Equal(Vector2.Zero, transform.LocalPosition);
         Assert.Equal(Vector2.One, transform.LocalScale);
     }

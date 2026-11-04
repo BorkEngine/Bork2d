@@ -280,11 +280,13 @@ public sealed class RenderableBoundsTests
     {
         Assert.True(typeof(IRenderable).IsAssignableFrom(typeof(ICamera<GameLayer>)));
         Assert.True(typeof(IRenderable).IsAssignableFrom(typeof(ISpriteRender<GameLayer>)));
+        Assert.True(typeof(IRenderable).IsAssignableFrom(typeof(ILineRender<GameLayer>)));
         Assert.True(typeof(ITransform).IsAssignableFrom(typeof(IRenderable)));
 
         GameEngine<GameLayer> engine = CreateEngine(new FakeWindow());
         Assert.IsAssignableFrom<IRenderable>(engine.CreateCamera(engine.Root));
         Assert.IsAssignableFrom<IRenderable>(engine.CreateSpriteRender(engine.Root));
+        Assert.IsAssignableFrom<IRenderable>(engine.CreateLineRender(engine.Root));
     }
 
     public static TheoryData<SpriteAsset> MalformedAssets()

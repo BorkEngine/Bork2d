@@ -33,8 +33,7 @@ namespace Bork2d.Engine.Scene;
 internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
     where TLayer : struct, Enum
 {
-    private readonly Dictionary<string, InstanceUniformValue> _uniforms =
-        new(StringComparer.Ordinal);
+    private readonly InstanceUniformSet _uniforms = new();
 
     private SpriteAsset? _sprite;
     private SpriteRenderData? _renderData;
@@ -183,18 +182,7 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
             if (shaderData is not null)
             {
                 Span<Vector4> block = stackalloc Vector4[ShaderLayout.InstanceBlockVectorCount];
-                shaderData.DefaultInstanceUniformBlock.CopyTo(block);
-                foreach (KeyValuePair<string, InstanceUniformValue> pair in _uniforms)
-                {
-                    // A stored value survives a shader reassignment; it only applies when the new
-                    // frozen declaration still has the same ordinal name and value type.
-                    if (shaderData.TryGetInstanceUniform(pair.Key, out ShaderUniform uniform)
-                        && uniform.Type == pair.Value.Type)
-                    {
-                        ShaderLayout.WriteUniform(block, in uniform, pair.Value.Value);
-                    }
-                }
-
+                _uniforms.WriteBlock(shaderData, block);
                 uniform0 = block[0];
                 uniform1 = block[1];
                 uniform2 = block[2];
@@ -349,38 +337,15 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
     {
         lock (Sync)
         {
-            _uniforms.Clear();
+            _uniforms.Reset();
         }
     }
 
     private void SetUniformCore(string name, ShaderUniformType type, Vector4 value)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
         lock (Sync)
         {
-            ShaderRenderData? shaderData = _shaderData;
-            if (shaderData is null)
-            {
-                throw new ArgumentException(
-                    $"Cannot set instance uniform '{name}': the sprite has no Shader assigned.",
-                    nameof(name));
-            }
-
-            if (!shaderData.TryGetInstanceUniform(name, out ShaderUniform uniform))
-            {
-                throw new ArgumentException(
-                    $"The assigned shader does not declare an instance uniform named '{name}'.",
-                    nameof(name));
-            }
-
-            if (uniform.Type != type)
-            {
-                throw new ArgumentException(
-                    $"Instance uniform '{name}' is declared as {uniform.Type}, not {type}.",
-                    nameof(name));
-            }
-
-            _uniforms[name] = new InstanceUniformValue(type, value);
+            _uniforms.Set(name, type, value, _shaderData, "sprite");
         }
     }
 
@@ -390,6 +355,4 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
         => textures is not null && index < textures.Length ? textures[index] : default;
 
     private static uint ToMask(TLayer layer) => (uint)Unsafe.As<TLayer, int>(ref layer);
-
-    private readonly record struct InstanceUniformValue(ShaderUniformType Type, Vector4 Value);
 }

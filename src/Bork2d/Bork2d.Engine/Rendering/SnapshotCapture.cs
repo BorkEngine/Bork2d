@@ -24,10 +24,10 @@ namespace Bork2d.Engine.Rendering;
 /// after the pass, so a capture never retains a detached node.
 /// </para>
 /// <para>
-/// <b>Producers.</b> Capture has no central renderable switch. The engine registers its camera and
-/// sprite producers plus any custom renderable producers, in order, and each node is offered to
-/// them in that order; the first match captures the node's typed record and returns its world
-/// matrix. When no producer matches, the pass uses the plain
+/// <b>Producers.</b> Capture has no central renderable switch. The engine registers its camera,
+/// sprite, and line producers plus any custom renderable producers, in order, and each node is
+/// offered to them in that order; the first match captures the node's typed record and returns its
+/// world matrix. When no producer matches, the pass uses the plain
 /// <see cref="Transform.CaptureLocalMatrix"/> path so non-renderable transforms still contribute a
 /// world matrix to their children. A custom renderable kind is added by a new definition or
 /// producer, never by editing this class.
@@ -41,8 +41,9 @@ namespace Bork2d.Engine.Rendering;
 /// </para>
 /// <para>
 /// <b>What is captured.</b> Cameras land in the reserved camera buffer, sprites in the reserved
-/// sprite buffer, and each custom renderable in its producer's typed buffer. The records are
-/// value-only snapshot structs; world matrices include the parent hierarchy and
+/// sprite buffer, lines in the reserved line buffer, and each custom renderable in its producer's
+/// typed buffer. The records are value-only snapshot structs; world matrices include the parent
+/// hierarchy and
 /// <c>TLayer</c> is flattened to a raw <see cref="uint"/> mask by the definition that captures it
 /// (bit 31 survives; invalid <c>0</c>/multi-bit values are preserved, Q3=C2). A sprite carries the
 /// immutable <see cref="Assets.SpriteRenderData"/> frozen when its asset was assigned, never the

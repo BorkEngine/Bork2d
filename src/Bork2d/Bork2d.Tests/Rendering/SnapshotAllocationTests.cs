@@ -137,6 +137,53 @@ public sealed class SnapshotAllocationTests
         Assert.Equal(9, snapshot.GlobalUniformCount);
     }
 
+    [Fact]
+    public void WarmCaptureOfLinesAllocatesNothing()
+    {
+        var engine = new GameEngine<GameLayer>(new FakeTime(), new FakeWindow(), new FakeAssets());
+        var shader = new ShaderAsset
+        {
+            InstanceUniforms =
+            [
+                new ShaderUniform("intensity", ShaderUniformType.Float, 0, Vector4.Zero),
+            ],
+        };
+        for (var index = 0; index < 8; index++)
+        {
+            ILineRender<GameLayer> line = engine.CreateLineRender(engine.Root);
+            line.Points =
+            [
+                new Vector2(index, 0f),
+                new Vector2(index + 10f, 0f),
+                new Vector2(index + 10f, 5f),
+            ];
+            line.Width = 1f + index;
+            line.Color = Color.White;
+            line.AntiAlias = index % 2 == 0;
+            line.Layer = GameLayer.World;
+            line.ZIndex = index;
+            line.Shader = shader;
+            line.SetUniform("intensity", index);
+        }
+
+        var snapshot = new FrameSnapshot();
+        for (var iteration = 0; iteration < WarmupIterations; iteration++)
+        {
+            engine.CaptureSnapshot(snapshot, sequence: iteration + 1);
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var iteration = 0; iteration < MeasuredIterations; iteration++)
+        {
+            engine.CaptureSnapshot(snapshot, sequence: iteration + 1);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
+        Assert.Equal(8, snapshot.LineCount);
+    }
+
     private static GameEngine<GameLayer> CreateFixedScene()
     {
         var engine = new GameEngine<GameLayer>(new FakeTime(), new FakeWindow(), new FakeAssets());
