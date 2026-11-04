@@ -1,0 +1,5 @@
+# The center line sets dash to 1 for the alternating pattern; the border keeps the default 0.
+# The time-driven glow and the anti-aliased edge are always applied.
+
+[uniforms]
+dash = { type = "float", default = 0.0 }

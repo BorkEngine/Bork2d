@@ -12,6 +12,10 @@ public sealed class PongGame : IGame<GameLayer>
     /// <summary>The court half-height in world units (the court is 18 units tall).</summary>
     private const float CourtHalfHeight = 9f;
 
+    /// <summary>The court line width in world units (a few pixels at 720p).</summary>
+    private const float CourtLineWidth = 0.08f;
+
+    private const int CourtZIndex = 5;
     private const int PaddleZIndex = 10;
     private const int BallZIndex = 20;
 
@@ -23,7 +27,11 @@ public sealed class PongGame : IGame<GameLayer>
     private const float MinimumCourtHalfWidth = PongSimulation.PaddleInset + PongSimulation.PaddleHalfWidth;
 
     private static readonly Color _clearColor = new(0.04f, 0.04f, 0.06f, 1f);
+    private static readonly Color _courtColor = new(0.7f, 0.82f, 1f, 1f);
     private IEngine<GameLayer>? _engine;
+    private ILineRender<GameLayer>? _courtBorder;
+    private ILineRender<GameLayer>? _courtCenterLine;
+    private float? _appliedCourtHalfWidth;
     private SimulationState _lastState = default;
     private string? _title;
 
@@ -52,6 +60,7 @@ public sealed class PongGame : IGame<GameLayer>
         SpriteAsset paddleSprite = engine.Assets.LoadAsset(settings.Paddle).GetAwaiter().GetResult();
         SpriteAsset ballSprite = engine.Assets.LoadAsset(settings.Ball).GetAwaiter().GetResult();
         ShaderAsset ballShader = engine.Assets.LoadAsset(settings.BallShader).GetAwaiter().GetResult();
+        ShaderAsset courtShader = engine.Assets.LoadAsset(settings.CourtShader).GetAwaiter().GetResult();
 
         ICamera<GameLayer> camera = engine.CreateCamera(engine.Root);
         camera.Size = CourtHalfHeight;
@@ -71,8 +80,12 @@ public sealed class PongGame : IGame<GameLayer>
         Ball.Shader = ballShader;
         Ball.SetUniform("lastHit", (float)engine.Time.Time);
 
+        _courtBorder = CreateCourtLine(courtShader, dash: 0f);
+        _courtCenterLine = CreateCourtLine(courtShader, dash: 1f);
+
         Simulation = new PongSimulation(settings, ComputeHalfWidth(engine), CourtHalfHeight);
         Simulation.OnBallBounce += () => Ball.SetUniform("lastHit", (float)engine.Time.Time);
+        UpdateCourtGeometry(Simulation.HalfWidth);
 
         _title = null;
         ApplySimulation();
@@ -95,6 +108,8 @@ public sealed class PongGame : IGame<GameLayer>
         {
             simulation.ResizeCourt(halfWidth, CourtHalfHeight);
         }
+
+        UpdateCourtGeometry(simulation.HalfWidth);
 
         float deltaTime = (float)engine.Time.DeltaTime;
         simulation.Step(deltaTime, leftInput, PongAi.Steer(simulation));
@@ -168,6 +183,60 @@ public sealed class PongGame : IGame<GameLayer>
         paddle.ZIndex = PaddleZIndex;
         paddle.Tint = tint;
         return paddle;
+    }
+
+    private ILineRender<GameLayer> CreateCourtLine(ShaderAsset shader, float dash)
+    {
+        IEngine<GameLayer> engine = _engine
+                                    ?? throw new InvalidOperationException(
+                                        "PongGame.Setup must capture the engine first.");
+
+        ILineRender<GameLayer> line = engine.CreateLineRender(engine.Root);
+        line.Layer = GameLayer.Court;
+        line.ZIndex = CourtZIndex;
+        line.Width = CourtLineWidth;
+        line.Color = _courtColor;
+        line.AntiAlias = true;
+        line.Shader = shader;
+        line.SetUniform("dash", dash);
+        return line;
+    }
+
+    private void UpdateCourtGeometry(float halfWidth)
+    {
+        if (_appliedCourtHalfWidth == halfWidth)
+        {
+            return;
+        }
+
+        ILineRender<GameLayer> border = _courtBorder
+                                        ?? throw new InvalidOperationException(
+                                            "PongGame.Setup must create the court border.");
+        ILineRender<GameLayer> centerLine = _courtCenterLine
+                                            ?? throw new InvalidOperationException(
+                                                "PongGame.Setup must create the court center line.");
+
+        // Center each stroke on an inset line so its outer edge lands on the visible court edge and
+        // the full width stays inside the court.
+        float inset = CourtLineWidth / 2f;
+        float bottom = -CourtHalfHeight + inset;
+        float top = CourtHalfHeight - inset;
+        float left = -halfWidth + inset;
+        float right = halfWidth - inset;
+
+        border.Closed = true;
+        border.Points =
+        [
+            new Vector2(left, bottom),
+            new Vector2(right, bottom),
+            new Vector2(right, top),
+            new Vector2(left, top),
+        ];
+
+        centerLine.Closed = false;
+        centerLine.Points = [new Vector2(0f, bottom), new Vector2(0f, top)];
+
+        _appliedCourtHalfWidth = halfWidth;
     }
 
     private void ApplySimulation()
