@@ -87,7 +87,7 @@ signatures are finalized in the implementation tasks.
 | MSDF generation | A managed C# MSDF library, build-time only, rather than a native P/Invoke dependency. |
 | SDF settings | `resolution` is the output texture's maximum dimension in pixels, `range` is the distance spread in pixels, and `padding` adds pixels around the artboard or glyph. |
 | Built-in shaders | `shader/sprite`, `shader/line`, and `shader/sdf` are ordinary assets in an embedded built-in pack mounted below game packs. |
-| API shape | `ShaderAsset` plus `ISpriteRender.Shader` and per-sprite uniform state; no separate material asset in 0.2. |
+| API shape | `ShaderAsset` plus `IRenderable<TLayer>.Shader` and per-renderable uniform state; no separate material asset in 0.2. |
 | Compatibility | 0.2 is a breaking release. Additive APIs are preferred where they do not compromise the design, but shader, texture, and renderable contracts may change. |
 
 ## Workstreams
@@ -99,7 +99,7 @@ signatures are finalized in the implementation tasks.
 - A shader is a baked asset at any canonical asset path (for example `shader/*`), not a hardcoded
   renderer feature.
 - `shader/sprite` is the default and is an ordinary asset that a game pack may shadow.
-- A sprite selects a shader through `ISpriteRender.Shader`; `null` means `shader/sprite`.
+- A sprite selects a shader through `IRenderable<TLayer>.Shader`; `null` means `shader/sprite`.
 - A sprite can bind one main texture and up to four additional textures.
 - A shader declares instance and global uniform names and types; games set values without using
   raw SPIR-V layout offsets.
@@ -299,10 +299,12 @@ public sealed partial class ShaderAsset
     public ShaderTextureSlot[] TextureSlots { get; set; }
 }
 
-public interface ISpriteRender<TLayer> : IRenderable
+public interface IRenderable<TLayer> : IBoundedTransform where TLayer : struct, Enum
 {
     ShaderAsset? Shader { get; set; }
-    AssetRef<TextureDescriptor>[]? AdditionalTextures { get; set; }
+    Color Color { get; set; }
+    TLayer Layer { get; set; }
+    int ZIndex { get; set; }
 
     void SetUniform(string name, float value);
     void SetUniform(string name, Vector2 value);
@@ -310,6 +312,14 @@ public interface ISpriteRender<TLayer> : IRenderable
     void SetUniform(string name, Vector4 value);
     void SetUniform(string name, Color value);
     void ResetUniforms();
+}
+
+public interface ISpriteRender<TLayer> : IRenderable<TLayer> where TLayer : struct, Enum
+{
+    SpriteAsset? Sprite { get; set; }
+    AssetRef<TextureDescriptor>[]? AdditionalTextures { get; set; }
+    bool FlipX { get; set; }
+    bool FlipY { get; set; }
 }
 ```
 
@@ -456,23 +466,12 @@ for only some assets.
 #### Surface
 
 ```csharp
-public interface ILineRender<TLayer> : IRenderable
+public interface ILineRender<TLayer> : IRenderable<TLayer> where TLayer : struct, Enum
 {
     IReadOnlyList<Vector2> Points { get; set; }
     bool Closed { get; set; }
     float Width { get; set; }
-    Color Color { get; set; }
     bool AntiAlias { get; set; }
-    ShaderAsset? Shader { get; set; }
-    TLayer Layer { get; set; }
-    int ZIndex { get; set; }
-
-    void SetUniform(string name, float value);
-    void SetUniform(string name, Vector2 value);
-    void SetUniform(string name, Vector3 value);
-    void SetUniform(string name, Vector4 value);
-    void SetUniform(string name, Color value);
-    void ResetUniforms();
 }
 
 IEngine<TLayer>.CreateLineRender(ISceneNode parent);
@@ -480,8 +479,9 @@ IEngine<TLayer>.CreateLineRender(ISceneNode parent);
 
 `Shader == null` means the built-in `shader/line`. Points are copied when assigned, so mutating the
 caller's array does not change a published snapshot. `AntiAlias` defaults to `true` and `Color` to
-white. Line uniform values are frozen at capture, just like sprite uniforms. A line is a scene
-entity like a sprite: no `Dispose`, and detaching preserves the world transform.
+white. The color, layer, z-index, shader, and line uniform values follow the shared
+`IRenderable<TLayer>` contract and are frozen at capture. A line is a scene entity like a sprite: no
+`Dispose`, and detaching preserves the world transform.
 
 Validation is conservative and happens at capture/draw:
 
@@ -555,7 +555,7 @@ font's bounds are the AABB of its glyph quads. Empty bounds mean unknown and nev
   smooth quadratic, arc, and close.
 - Nonzero and even-odd fill rules, including holes formed by subpaths.
 - Any `fill`, `stroke`, `opacity`, `color`, gradient, filter, mask, clip path, text, image, or CSS
-  is ignored. The output is a silhouette; color comes from the sprite tint or shader. A shape with
+  is ignored. The output is a silhouette; color comes from the sprite color or shader. A shape with
   no fill produces no geometry, so a stroke-only shape is empty in 0.2.
 
 Unsupported elements are skipped with an informational diagnostic; a malformed path is an error.
@@ -592,7 +592,7 @@ extends and therefore how soft a glow can be. `padding` may be 0.
 #### `shader/sdf`
 
 `shader/sdf` is an ordinary built-in fragment shader. It reconstructs a signed distance from the
-three MSDF channels, applies a screen-space antialiasing width, and multiplies by the sprite tint.
+three MSDF channels, applies a screen-space antialiasing width, and multiplies by the sprite color.
 It samples the main texture only. The built-in defaults use threshold `0.5` and a soft edge; a
 sprite may override the exposed threshold and softness uniforms through `SetUniform`.
 
@@ -602,7 +602,7 @@ ShaderAsset sdf = engine.Assets.LoadAsset<ShaderAsset>("shader/sdf").GetAwaiter(
 ISpriteRender<GameLayer> logo = engine.CreateSpriteRender(engine.Root);
 logo.Sprite = wordmark;
 logo.Shader = sdf;
-logo.Tint = new Color(1f, 1f, 1f, 0.15f);
+logo.Color = new Color(1f, 1f, 1f, 0.15f);
 ```
 
 #### Quality and mipmaps
@@ -677,16 +677,13 @@ the atlas closed over the declared selection and makes missing content visible i
 #### `FontRender`
 
 ```csharp
-public interface IFontRender<TLayer> : IRenderable
+public interface IFontRender<TLayer> : IRenderable<TLayer> where TLayer : struct, Enum
 {
     FontAsset? Font { get; set; }
     string Text { get; set; }
     float Size { get; set; }          // world units per em
-    Color Color { get; set; }
     TextAlignment Alignment { get; set; }
     float LineSpacing { get; set; }
-    TLayer Layer { get; set; }
-    int ZIndex { get; set; }
 }
 
 IEngine<TLayer>.CreateFontRender(ISceneNode parent);
@@ -697,8 +694,8 @@ kerning. Layout is cached and rebuilt only when `Font`, `Text`, `Size`, `Alignme
 `LineSpacing` changes, so a static score allocates nothing per frame. Assigning a `FontAsset`
 freezes its atlas reference and metrics; mutating the loaded asset afterwards cannot change a
 published frame. Each glyph is drawn with the built-in `shader/sdf` fragment and the font atlas;
-`FontRender` always uses that fragment and does not expose a per-renderable shader selection in
-0.2.
+`FontRender` always uses that fragment, and the shared `Shader` member of `IRenderable<TLayer>` has
+no effect on it in 0.2.
 
 Text joins the unified 2D order as a third record type. A contiguous run of glyphs from the same
 font is merged into one draw. `FontRender.Bounds` is the AABB of the laid-out quads.
@@ -830,8 +827,11 @@ reader are selected in the task that adds each one; the build-time-only boundary
 New or changed public members in 0.2:
 
 - `ShaderAsset`, `ShaderUniform`, `ShaderTextureSlot`, `ShaderUniformType`.
-- `ISpriteRender.Shader`, `ISpriteRender.AdditionalTextures`, `ISpriteRender.SetUniform`,
-  `ISpriteRender.ResetUniforms`.
+- `IBoundedTransform` (renamed from the non-generic `IRenderable`) and `IRenderable<TLayer>`,
+  which owns the shared `Shader`, `Color`, `Layer`, `ZIndex`, `SetUniform` overloads, and
+  `ResetUniforms`.
+- `ISpriteRender.AdditionalTextures`; `ISpriteRender.Tint` is removed, and the shared
+  `IRenderable.Color` replaces it.
 - `IEngine.SetGlobalUniform`, `IEngine.ResetGlobalUniforms`.
 - `ILineRender<TLayer>`, `IEngine.CreateLineRender`.
 - `IFontRender<TLayer>`, `IEngine.CreateFontRender`, `FontAsset`, `FontGlyph`, `TextAlignment`.
@@ -840,8 +840,8 @@ New or changed public members in 0.2:
 
 The exact overload sets, nullability, and defaults are settled in the implementation tasks and
 recorded in [engine.md](engine.md) and [render.md](render.md). A breaking-change note calls out the
-new `TextureFormat` values, the KTX2 payload contract, the new reserved snapshot slots, and the shader
-asset contract.
+renamed `IBoundedTransform`/`IRenderable<TLayer>` contract, the new `TextureFormat` values, the KTX2
+payload contract, the new reserved snapshot slots, and the shader asset contract.
 
 ## Pong 0.2
 
@@ -903,7 +903,7 @@ through the KTX2 texture helper.
 
 Deliver the shader asset, sidecar binder, bake processor, SPIR-V compiler integration, shared
 pipeline layout, shader module cache, instance record v2, named uniforms, extra textures,
-`ISpriteRender.Shader`, global uniforms, default `shader/sprite`, and the embedded built-in pack.
+`IRenderable<TLayer>.Shader`, global uniforms, default `shader/sprite`, and the embedded built-in pack.
 
 Exit: a sprite draws with a custom fragment shader, a time uniform, an instance uniform, and two
 extra textures; the built-in path is still one draw per camera; shader bake errors are covered.
