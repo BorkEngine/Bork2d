@@ -33,7 +33,7 @@ namespace Bork2d.Engine.Rendering;
 /// <param name="WorldMatrix">The sprite's local-to-world matrix, composed through the hierarchy.</param>
 /// <param name="Tint">The linear RGBA tint multiplied with the sampled texel.</param>
 /// <param name="Layer">The flattened layer bit; invalid values are preserved as-is.</param>
-/// <param name="ZIndex">The sort key within a layer; higher draws later.</param>
+/// <param name="ZIndex">The shared 2D draw order; higher draws later and it is not layer-scoped.</param>
 /// <param name="FlipX">Whether the sprite is mirrored horizontally at draw time (Q2=B1).</param>
 /// <param name="FlipY">Whether the sprite is mirrored vertically at draw time (Q2=B1).</param>
 internal readonly record struct SpriteSnapshot(

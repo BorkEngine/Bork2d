@@ -1,4 +1,5 @@
 using Bork2d.Engine;
+using Bork2d.Render.TwoDimensional;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
 
@@ -79,7 +80,7 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
     /// <param name="frameIndex">The GPU frame index, used for debug names.</param>
     /// <param name="queueFamilyIndex">The graphics queue family.</param>
     /// <param name="extent">The fixed offscreen target extent the scene image matches.</param>
-    /// <param name="pipeline">The sprite pipeline that owns the descriptor-set layout.</param>
+    /// <param name="pipeline">The 2D pipeline that owns the descriptor-set layout.</param>
     /// <param name="present">
     /// The present pipeline that owns the present descriptor-set layout and sampler.
     /// </param>
@@ -100,7 +101,7 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
         int frameIndex,
         uint queueFamilyIndex,
         Extent2D extent,
-        SpritePipeline pipeline,
+        TwoDimensionalPipeline pipeline,
         PresentPipeline present,
         int pageCapacity,
         uint maxStorageBufferRange,

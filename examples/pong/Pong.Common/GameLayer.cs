@@ -13,7 +13,7 @@ public enum GameLayer
     /// <summary>No layer; a renderable with this value is skipped.</summary>
     None = 0,
 
-    /// <summary>The court layer (reserved for the future renderer).</summary>
+    /// <summary>The court border and center line layer.</summary>
     Court = 1,
 
     /// <summary>The paddle layer.</summary>

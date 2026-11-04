@@ -377,10 +377,13 @@ internal sealed class FakeRenderer : IRenderer
         SetStatus(RendererStatus.Starting);
         if (StartFailure is not null)
         {
-            _ring.Stop();
+            // Same fatal-before-stop invariant as PublishFatal: a stopped ring wakes a blocked
+            // producer, which must already observe the fatal.
             Volatile.Write(ref _fatalException, StartFailure);
+            _isReady = false;
             SetStatus(RendererStatus.Faulted);
             Volatile.Write(ref _stopReason, (int)RendererStopReason.Fatal);
+            _ring.Stop();
             _ready.Set();
             CompleteStop();
             throw StartFailure;
@@ -408,11 +411,15 @@ internal sealed class FakeRenderer : IRenderer
     /// <param name="exception">The failure the host observes.</param>
     internal void PublishFatal(Exception exception)
     {
-        _ring.Stop();
+        // A producer parked in Acquire resumes as soon as the ring stops, so the fatal and fault
+        // state must be visible before the stop wakes it. Stopping first leaves a window where the
+        // run observes no fatal and returns normally; production publishes the fatal before the
+        // wake (Q9=I1), and the fake keeps that order.
         Volatile.Write(ref _fatalException, exception);
         _isReady = false;
         SetStatus(RendererStatus.Faulted);
         Volatile.Write(ref _stopReason, (int)RendererStopReason.Fatal);
+        _ring.Stop();
         _ready.Set();
         _changed.Set();
         CompleteStop();

@@ -11,9 +11,9 @@ namespace Bork2d.Render.Vulkan;
 /// independent of which passes exist and in what order they run.
 /// </para>
 /// <para>
-/// <see cref="CameraPlanCount"/> and <see cref="CulledSprites"/> are aggregated for completeness
-/// even though the public snapshot does not expose them. Render-thread-only: the registry owns the
-/// single instance and never shares it with the tick thread.
+/// <see cref="CameraPlanCount"/>, <see cref="CulledSprites"/>, and <see cref="CulledLines"/> are
+/// aggregated for completeness even though the public snapshot does not expose them.
+/// Render-thread-only: the registry owns the single instance and never shares it with the tick thread.
 /// </para>
 /// </remarks>
 internal sealed class RenderPassStats
@@ -24,14 +24,17 @@ internal sealed class RenderPassStats
     /// <summary>Gets or sets the number of cameras with a valid projection (the pass candidates).</summary>
     internal int CameraPlanCount { get; set; }
 
-    /// <summary>Gets or sets the number of <c>vkCmdDraw</c> calls the frame records (one per run).</summary>
+    /// <summary>Gets or sets the number of 2D draw calls the frame records (one per run).</summary>
     internal int DrawCalls { get; set; }
 
-    /// <summary>Gets or sets the number of cameras that record at least one shader run.</summary>
+    /// <summary>Gets or sets the number of cameras that record at least one draw run.</summary>
     internal int NonEmptyCameras { get; set; }
 
-    /// <summary>Gets or sets the total number of instance records written into the frame buffer.</summary>
+    /// <summary>Gets or sets the total number of sprite instance records written into the frame buffer.</summary>
     internal int InstanceCount { get; set; }
+
+    /// <summary>Gets or sets the total number of line records submitted by the frame across cameras.</summary>
+    internal int LineCount { get; set; }
 
     /// <summary>
     /// Gets or sets the number of sprites skipped by the frame (null/layer/non-Quad/pending shader
@@ -39,8 +42,17 @@ internal sealed class RenderPassStats
     /// </summary>
     internal long SkippedSprites { get; set; }
 
+    /// <summary>
+    /// Gets or sets the number of lines skipped by the frame (null geometry, invalid layer, or a
+    /// still-loading custom shader).
+    /// </summary>
+    internal long SkippedLines { get; set; }
+
     /// <summary>Gets or sets the number of sprites whose world bounds cull them from every camera.</summary>
     internal int CulledSprites { get; set; }
+
+    /// <summary>Gets or sets the number of lines whose world bounds cull them from every camera.</summary>
+    internal int CulledLines { get; set; }
 
     /// <summary>Clears every aggregate count before a new planning round.</summary>
     internal void Reset()
@@ -50,7 +62,10 @@ internal sealed class RenderPassStats
         DrawCalls = 0;
         NonEmptyCameras = 0;
         InstanceCount = 0;
+        LineCount = 0;
         SkippedSprites = 0;
+        SkippedLines = 0;
         CulledSprites = 0;
+        CulledLines = 0;
     }
 }

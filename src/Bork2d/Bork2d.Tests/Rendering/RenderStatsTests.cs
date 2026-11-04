@@ -161,6 +161,7 @@ public sealed class RenderStatsTests
         FramebufferHeight: 720,
         DrawCalls: 2,
         Instances: 7,
+        Lines: 3,
         Cameras: 3,
         NonEmptyCameras: 2,
         TexturePages: 4,
@@ -168,6 +169,7 @@ public sealed class RenderStatsTests
         TextureUploadsPending: 2,
         TextureUploadBytesPending: 8192,
         SkippedSprites: 1,
+        SkippedLines: 2,
         ValidationErrors: 0,
         ValidationWarnings: 0);
 }

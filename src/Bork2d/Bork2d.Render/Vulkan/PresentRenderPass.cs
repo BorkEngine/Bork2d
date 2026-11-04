@@ -1,5 +1,6 @@
 using Bork2d.Engine.Rendering;
 using Bork2d.Render.Sprites;
+using Bork2d.Render.TwoDimensional;
 using Silk.NET.Vulkan;
 
 namespace Bork2d.Render.Vulkan;
@@ -42,6 +43,7 @@ internal sealed class PresentRenderPass : IRenderPass
         int framebufferWidth,
         int framebufferHeight,
         IInstanceBuffer instances,
+        ILineBufferSink lines,
         IGlobalUniformBuffer globals,
         Format sceneFormat,
         RenderPassStats stats)

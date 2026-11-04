@@ -2,28 +2,30 @@ using Bork2d.Engine;
 using Bork2d.Engine.Assets;
 using Bork2d.Render.Shaders;
 using Bork2d.Render.Textures;
+using Bork2d.Render.TwoDimensional;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
 
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// The sprite pipeline, default shader store, texture-page store, and bindless page writer shared by
+/// The 2D pipeline, default shader store, texture-page store, and bindless page writer shared by
 /// the windowed and offscreen renderers.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Both target drivers create one sprite pipeline for the linear scene color format, the same
-/// default <see cref="ShaderStore"/> loaded from the built-in pack, the same asynchronous
-/// <see cref="TexturePageStore"/>, and the same production <see cref="VulkanTexturePages"/> GPU seam;
-/// they also retire every in-flight frame fence and rewrite every frame's bindless descriptor set
-/// when the page capacity grows. This composition owns that setup and teardown.
+/// Both target drivers create one 2D pipeline for the linear scene color format, the same
+/// default <see cref="ShaderStore"/> loaded from the built-in pack (both the sprite and line
+/// built-in shaders), the same asynchronous <see cref="TexturePageStore"/>, and the same production
+/// <see cref="VulkanTexturePages"/> GPU seam; they also retire every in-flight frame fence and rewrite
+/// every frame's bindless descriptor set when the page capacity grows. This composition owns that
+/// setup and teardown.
 /// </para>
 /// <para>
 /// The target driver still creates the frames (their descriptor sets come from
-/// <see cref="SpritePipeline.DescriptorSetLayout"/>) and records its own draws. The composition only
-/// implements <see cref="IBindlessPageWriter"/> by forwarding capacity growth and page writes to the
-/// shared frame set, which is the narrow target adapter.
+/// <see cref="TwoDimensionalPipeline.DescriptorSetLayout"/>) and records its own draws. The
+/// composition only implements <see cref="IBindlessPageWriter"/> by forwarding capacity growth and
+/// page writes to the shared frame set, which is the narrow target adapter.
 /// </para>
 /// </remarks>
 internal sealed class RendererTextures : IBindlessPageWriter
@@ -37,7 +39,7 @@ internal sealed class RendererTextures : IBindlessPageWriter
     private readonly long _textureResidencyBudgetBytes;
     private readonly int _textureUploadBudgetBytes;
     private readonly string _modeDescription;
-    private SpritePipeline? _pipeline;
+    private TwoDimensionalPipeline? _pipeline;
     private ShaderStore? _shaders;
     private VulkanTexturePages? _gpu;
     private TexturePageStore? _pages;
@@ -89,8 +91,8 @@ internal sealed class RendererTextures : IBindlessPageWriter
         _textureResidencyBudgetBytes = textureResidencyBudgetBytes;
     }
 
-    /// <summary>Gets the sprite pipeline owner, or <see langword="null"/> before startup.</summary>
-    internal SpritePipeline? Pipeline => _pipeline;
+    /// <summary>Gets the 2D pipeline owner, or <see langword="null"/> before startup.</summary>
+    internal TwoDimensionalPipeline? Pipeline => _pipeline;
 
     /// <summary>Gets the default shader store, or <see langword="null"/> before startup.</summary>
     internal ShaderStore? Shaders => _shaders;
@@ -114,27 +116,35 @@ internal sealed class RendererTextures : IBindlessPageWriter
     internal int StopLogFailedPaths => _stopLogFailedPaths;
 
     /// <summary>
-    /// Creates the sprite pipeline owner, the shader catalog, and the default pipeline for the
-    /// linear scene color format on first use; a later format creates only that format's default
-    /// pipeline.
+    /// Creates the 2D pipeline owner, the shader catalog, and both default pipelines for the linear
+    /// scene color format on first use; a later format creates only that format's default pipelines.
     /// </summary>
     /// <param name="format">The linear scene color format the 2D pipelines render into.</param>
     /// <exception cref="Bork2dException">
-    /// The vertex module, default shader asset/module, or graphics pipeline is missing or invalid.
+    /// A vertex module, default shader asset/module, or graphics pipeline is missing or invalid.
     /// </exception>
     internal void EnsurePipeline(Format format)
     {
         if (_pipeline is null)
         {
-            byte[] vertexSpirV = ShaderStore.LoadSpirV(
+            byte[] spriteVertexSpirV = ShaderStore.LoadSpirV(
                 _assets,
                 ShaderStore.VertexSpirVPath,
                 "the built-in sprite vertex module");
-            _pipeline = SpritePipeline.Create(_device, _instance, _logger, vertexSpirV);
+            byte[] lineVertexSpirV = ShaderStore.LoadSpirV(
+                _assets,
+                ShaderStore.LineVertexSpirVPath,
+                "the built-in line vertex module");
+            _pipeline = TwoDimensionalPipeline.Create(
+                _device,
+                _instance,
+                _logger,
+                spriteVertexSpirV,
+                lineVertexSpirV);
             _shaders = ShaderStore.Create(_assets, _pipeline, _assetCatalogVersion, _logger);
         }
 
-        _shaders!.EnsureDefaultPipeline(format);
+        _shaders!.EnsureDefaultPipelines(format);
     }
 
     /// <summary>
@@ -154,9 +164,9 @@ internal sealed class RendererTextures : IBindlessPageWriter
     /// </exception>
     internal void CreatePageStore(int initialCapacity)
     {
-        SpritePipeline pipeline = _pipeline
+        TwoDimensionalPipeline pipeline = _pipeline
             ?? throw new Bork2dException(
-                $"The {_modeDescription} renderer cannot create texture pages without the sprite "
+                $"The {_modeDescription} renderer cannot create texture pages without the 2D "
                     + "pipeline.");
         TextureDescriptor placeholder = LoadBlocking(
             _assets.LoadAsset<TextureDescriptor>(TexturePlaceholder.DescriptorPath),

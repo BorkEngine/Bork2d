@@ -17,7 +17,7 @@ build/Bork2d.BuiltInAssets ─────────> Bork2d.Bake, Bork2d.Engi
 | Project | Role |
 | --- | --- |
 | [Bork2d.Engine](../src/Bork2d/Bork2d.Engine) | Public contract and implementation: scene, time, input/platform seams, assets, pack reader/writer. No GPU, OS, or logging-provider dependency. |
-| [Bork2d.Render](../src/Bork2d/Bork2d.Render) | Internal Vulkan implementation: device selection, swapchain/offscreen target, linear scene image, sprite and present pipelines, texture pages, snapshot handoff, capture. |
+| [Bork2d.Render](../src/Bork2d/Bork2d.Render) | Internal Vulkan implementation: device selection, swapchain/offscreen target, linear scene image, the unified 2D (sprite and line) and present pipelines, texture pages, snapshot handoff, capture. |
 | [Bork2d.Runtime](../src/Bork2d/Bork2d.Runtime) | Public host: builder, modes, SDL window/input, Vulkan instance/surface, renderer composition, logging. Embeds the built-in asset pack. |
 | [Bork2d.Bake](../src/Bork2d/Bork2d.Bake) | Build-time JIT tooling: TOML binding, processors, texture decode/encode, pack composition, incremental manifest, CLI. |
 | [Bork2d.BuiltInAssets](../build/Bork2d.BuiltInAssets/Bork2d.BuiltInAssets.csproj) | Build-only JIT generator for the embedded built-in asset pack (default shaders and the bindless placeholder). Outside the runtime solution and never referenced by a runtime project. |
@@ -51,7 +51,7 @@ one-time layout transition, and the discard path. They compose four shared compo
 duplicating renderer machinery: one `RendererLifecycle` (render thread, readiness, status/stop
 reason, one-shot fatal, snapshot handoff delegations, counters, stats board), one
 `RendererCaptureService` (bounded capture queue, frame-fence retirement, stop/fatal close), one
-`RendererTextures` (sprite pipeline for the linear scene format, texture-page store, bindless page
+`RendererTextures` (the 2D pipeline for the linear scene format, texture-page store, bindless page
 writes), and one `RenderPassRegistry` (the ordered render passes and the aggregate frame statistics).
 A small `IVulkanFrame`/frame-set seam adapts the two frame types to those services. There is no
 renderer inheritance hierarchy.
@@ -66,8 +66,8 @@ snapshot:
 2. It freezes input, advances the clock, dispatches text, and calls `IGame.Tick`.
 3. It walks the rooted scene once with an iterative, parent-first traversal that composes one world
    matrix and takes one per-object lock per node, and runs the registered typed renderable producers,
-   which capture every camera, sprite, and custom renderable into its typed buffer in the slot as
-   value-only records. After the walk it copies the engine-wide user shader uniforms into their own
+   which capture every camera, sprite, line, and custom renderable into its typed buffer in the slot
+   as value-only records. After the walk it copies the engine-wide user shader uniforms into their own
    value-only snapshot buffer.
 4. It publishes the slot as the newest snapshot. A newer publish supersedes the previous `Ready`
    slot, never a `Rendering` one.
@@ -119,17 +119,23 @@ Assets are built ahead of time, not loaded from loose files at runtime:
   and the detached node keeps its world transform; re-attach the same object later.
 - **Coordinates.** World space is +X right, +Y up, in absolute world units. `Camera.Size` is the
   half visible height; viewports are normalized with a top-left origin.
+- **2D renderables.** Sprites and lines implement the shared `IRenderable<TLayer>` contract over
+  `IBoundedTransform`: custom shader, linear RGBA color, one-bit layer, shared z-index, and instance
+  uniforms. Cameras implement only `IBoundedTransform` because they are not drawn.
 - **Layers and culling.** A layer type is an `int`-backed `[Flags]` enum with 1-32 named single-bit
-  values (`None = 0` allowed). A sprite uses exactly one bit; a camera culls with a mask. After the
-  mask, culling is a conservative world-space AABB test: the camera's visible rectangle and the
-  sprite's drawn quad are converted to world AABBs, and a sprite is skipped only when its known
-  bounds do not intersect the camera's. Empty bounds mean "unknown" and never cull; there is no
-  spatial index and no culling toggle.
+  values (`None = 0` allowed). A sprite or line uses exactly one bit; a camera culls with a mask.
+  `Layer` is only a camera culling bit and never participates in draw order. After the mask, culling
+  is a conservative world-space AABB test: the camera's visible rectangle and the record's world AABB
+  are compared, and a record is skipped only when its known bounds do not intersect the camera's.
+  Empty bounds mean "unknown" and never cull; there is no spatial index and no culling toggle. The
+  masked, in-bounds records of both kinds are ordered per camera by the shared `ZIndex` ascending,
+  then framebuffer screen-space Y ascending, then screen X ascending; `ZIndex` is not layer-scoped
+  and equal keys are unspecified.
 - **Snapshots.** Capture contains no live scene entities. The only object references that cross the
-  tick/render boundary are immutable sprite render data and immutable shader render data, frozen from
-  the loaded `SpriteAsset`/`ShaderAsset` when it was assigned; the mutable assets themselves are
-  never captured. Reusing a slot clears every typed render-data buffer's used range and the user
-  global-uniform buffer, so it retains no obsolete render data or names.
+  tick/render boundary are immutable sprite render data, immutable line geometry, and immutable shader
+  render data, frozen from the loaded `SpriteAsset`/`ShaderAsset` when it was assigned; the mutable
+  assets themselves are never captured. Reusing a slot clears every typed render-data buffer's used
+  range and the user global-uniform buffer, so it retains no obsolete render data or names.
 - **AOT.** Generated shapes are required; there is no reflection-shape fallback or runtime TOML.
   Runtime projects enable trim and AOT analyzers.
 - **Tooling isolation.** The bake tooling, TOML parser, image decoder, KTX2 writer, block encoder,

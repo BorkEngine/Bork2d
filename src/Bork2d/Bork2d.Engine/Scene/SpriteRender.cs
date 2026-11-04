@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.CompilerServices;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Mathematics;
 using Bork2d.Engine.Rendering;
@@ -8,7 +7,8 @@ using Bork2d.Engine.Scene;
 namespace Bork2d.Engine.Scene;
 
 /// <summary>
-/// An engine-owned sprite renderable: a transform plus a sprite asset and draw state.
+/// An engine-owned sprite renderable: a transform plus a sprite asset and sprite-specific draw
+/// state.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -21,43 +21,27 @@ namespace Bork2d.Engine.Scene;
 /// mutating the asset after assignment cannot change a published snapshot or a planned frame.
 /// </para>
 /// <para>
-/// <see cref="Shader"/> follows the same freeze rule for its declarations. <see cref="SetUniform(string, float)"/>
-/// validates immediately against the currently assigned shader's frozen metadata and stores accepted
-/// values in a per-renderable dictionary; <see cref="ResetUniforms"/> clears them so the shader
-/// defaults apply again. Reassigning the shader keeps stored values, and capture applies only those
-/// whose name and type still match the new frozen declarations. Capture builds the four-lane
-/// instance uniform block from the frozen defaults and matching overrides on the stack, so a warm
-/// capture allocates nothing.
+/// The shader, color, layer, z-index, instance-uniform state, and their capture packing come from
+/// <see cref="Renderable2D{TLayer}"/>. Capture reads them through
+/// <see cref="Renderable2D{TLayer}.CaptureShared"/> in the same critical section as the sprite
+/// fields, so a warm capture allocates nothing.
 /// </para>
 /// </remarks>
-internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
+internal sealed class SpriteRender<TLayer> : Renderable2D<TLayer>, ISpriteRender<TLayer>
     where TLayer : struct, Enum
 {
-    private readonly Dictionary<string, InstanceUniformValue> _uniforms =
-        new(StringComparer.Ordinal);
-
     private SpriteAsset? _sprite;
     private SpriteRenderData? _renderData;
-    private ShaderAsset? _shader;
-    private ShaderRenderData? _shaderData;
     private AssetRef<TextureDescriptor>[]? _additionalTextures;
-    private TLayer _layer;
-    private Color _tint;
-    private int _zIndex;
     private bool _flipX;
     private bool _flipY;
 
     internal SpriteRender(Lock structuralLock)
-        : base(structuralLock)
+        : base(structuralLock, "sprite")
     {
         _sprite = null;
         _renderData = null;
-        _shader = null;
-        _shaderData = null;
         _additionalTextures = null;
-        _layer = default;
-        _tint = Color.White;
-        _zIndex = 0;
         _flipX = false;
         _flipY = false;
     }
@@ -79,30 +63,6 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
             {
                 _sprite = value;
                 _renderData = renderData;
-            }
-        }
-    }
-
-    /// <inheritdoc/>
-    public ShaderAsset? Shader
-    {
-        get
-        {
-            lock (Sync)
-            {
-                return _shader;
-            }
-        }
-
-        set
-        {
-            // Freeze outside the lock: a malformed asset must not throw from this setter, and the
-            // conditional weak table publishes exactly one copy for concurrent assignments.
-            ShaderRenderData? shaderData = ShaderRenderData.FreezeOrNull(value);
-            lock (Sync)
-            {
-                _shader = value;
-                _shaderData = shaderData;
             }
         }
     }
@@ -132,7 +92,7 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
     }
 
     /// <inheritdoc/>
-    public Bounds Bounds
+    public override Bounds Bounds
     {
         get
         {
@@ -160,11 +120,11 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
     /// <remarks>
     /// The caller must hold the structural lock. Capture uses this instead of the public property
     /// getters, which would acquire <see cref="Transform.Sync"/> once per field and could observe a
-    /// concurrent writer between fields. The frozen sprite and shader data, the stored uniform
-    /// values, and the additional texture references are read in the same critical section. The
-    /// snapshot's <see cref="SpriteSnapshot.WorldMatrix"/> is the local matrix as a placeholder; the
-    /// capture pass replaces it with the composed world matrix after this method returns and the lock
-    /// is released.
+    /// concurrent writer between fields. The frozen sprite data, the shared shader, color, layer,
+    /// z-index and uniform state, and the additional texture references are read in the same
+    /// critical section. The snapshot's <see cref="SpriteSnapshot.WorldMatrix"/> is the local matrix
+    /// as a placeholder; the capture pass replaces it with the composed world matrix after this
+    /// method returns and the lock is released.
     /// </remarks>
     /// <param name="snapshot">
     /// The sprite values with the local matrix in <see cref="SpriteSnapshot.WorldMatrix"/>.
@@ -175,39 +135,22 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
         lock (Sync)
         {
             var local = LocalMatrixUnderLock;
-            ShaderRenderData? shaderData = _shaderData;
-            var uniform0 = Vector4.Zero;
-            var uniform1 = Vector4.Zero;
-            var uniform2 = Vector4.Zero;
-            var uniform3 = Vector4.Zero;
-            if (shaderData is not null)
-            {
-                Span<Vector4> block = stackalloc Vector4[ShaderLayout.InstanceBlockVectorCount];
-                shaderData.DefaultInstanceUniformBlock.CopyTo(block);
-                foreach (KeyValuePair<string, InstanceUniformValue> pair in _uniforms)
-                {
-                    // A stored value survives a shader reassignment; it only applies when the new
-                    // frozen declaration still has the same ordinal name and value type.
-                    if (shaderData.TryGetInstanceUniform(pair.Key, out ShaderUniform uniform)
-                        && uniform.Type == pair.Value.Type)
-                    {
-                        ShaderLayout.WriteUniform(block, in uniform, pair.Value.Value);
-                    }
-                }
-
-                uniform0 = block[0];
-                uniform1 = block[1];
-                uniform2 = block[2];
-                uniform3 = block[3];
-            }
-
+            CaptureShared(
+                out ShaderRenderData? shaderData,
+                out Vector4 uniform0,
+                out Vector4 uniform1,
+                out Vector4 uniform2,
+                out Vector4 uniform3,
+                out Color color,
+                out uint layer,
+                out int zIndex);
             AssetRef<TextureDescriptor>[]? textures = _additionalTextures;
             snapshot = new SpriteSnapshot(
                 _renderData,
                 local,
-                _tint,
-                ToMask(_layer),
-                _zIndex,
+                color,
+                layer,
+                zIndex,
                 _flipX,
                 _flipY)
             {
@@ -223,63 +166,6 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
                 AdditionalTextureCount = textures?.Length ?? 0,
             };
             return local;
-        }
-    }
-
-    public TLayer Layer
-    {
-        get
-        {
-            lock (Sync)
-            {
-                return _layer;
-            }
-        }
-
-        set
-        {
-            lock (Sync)
-            {
-                _layer = value;
-            }
-        }
-    }
-
-    public Color Tint
-    {
-        get
-        {
-            lock (Sync)
-            {
-                return _tint;
-            }
-        }
-
-        set
-        {
-            lock (Sync)
-            {
-                _tint = value;
-            }
-        }
-    }
-
-    public int ZIndex
-    {
-        get
-        {
-            lock (Sync)
-            {
-                return _zIndex;
-            }
-        }
-
-        set
-        {
-            lock (Sync)
-            {
-                _zIndex = value;
-            }
         }
     }
 
@@ -321,75 +207,8 @@ internal sealed class SpriteRender<TLayer> : Transform, ISpriteRender<TLayer>
         }
     }
 
-    /// <inheritdoc/>
-    public void SetUniform(string name, float value)
-        => SetUniformCore(name, ShaderUniformType.Float, new Vector4(value, 0f, 0f, 0f));
-
-    /// <inheritdoc/>
-    public void SetUniform(string name, Vector2 value)
-        => SetUniformCore(name, ShaderUniformType.Vector2, new Vector4(value.X, value.Y, 0f, 0f));
-
-    /// <inheritdoc/>
-    public void SetUniform(string name, Vector3 value)
-        => SetUniformCore(
-            name,
-            ShaderUniformType.Vector3,
-            new Vector4(value.X, value.Y, value.Z, 0f));
-
-    /// <inheritdoc/>
-    public void SetUniform(string name, Vector4 value)
-        => SetUniformCore(name, ShaderUniformType.Vector4, value);
-
-    /// <inheritdoc/>
-    public void SetUniform(string name, Color value)
-        => SetUniformCore(name, ShaderUniformType.Color, value);
-
-    /// <inheritdoc/>
-    public void ResetUniforms()
-    {
-        lock (Sync)
-        {
-            _uniforms.Clear();
-        }
-    }
-
-    private void SetUniformCore(string name, ShaderUniformType type, Vector4 value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        lock (Sync)
-        {
-            ShaderRenderData? shaderData = _shaderData;
-            if (shaderData is null)
-            {
-                throw new ArgumentException(
-                    $"Cannot set instance uniform '{name}': the sprite has no Shader assigned.",
-                    nameof(name));
-            }
-
-            if (!shaderData.TryGetInstanceUniform(name, out ShaderUniform uniform))
-            {
-                throw new ArgumentException(
-                    $"The assigned shader does not declare an instance uniform named '{name}'.",
-                    nameof(name));
-            }
-
-            if (uniform.Type != type)
-            {
-                throw new ArgumentException(
-                    $"Instance uniform '{name}' is declared as {uniform.Type}, not {type}.",
-                    nameof(name));
-            }
-
-            _uniforms[name] = new InstanceUniformValue(type, value);
-        }
-    }
-
     private static AssetRef<TextureDescriptor> GetAdditionalTexture(
         AssetRef<TextureDescriptor>[]? textures,
         int index)
         => textures is not null && index < textures.Length ? textures[index] : default;
-
-    private static uint ToMask(TLayer layer) => (uint)Unsafe.As<TLayer, int>(ref layer);
-
-    private readonly record struct InstanceUniformValue(ShaderUniformType Type, Vector4 Value);
 }

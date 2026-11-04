@@ -72,7 +72,7 @@ signatures are finalized in the implementation tasks.
 | Area | Decision |
 | --- | --- |
 | Shader model | Fragment-only shaders on the engine-owned sprite vertex ABI. The asset schema is versioned so a future full-pipeline asset can be added without changing fragment-only assets. |
-| Shader batching | Contiguous runs of equal shader, preserving `(Layer, ZIndex)` order. Built-in sprites remain one draw per camera. |
+| Shader batching | Contiguous runs of equal kind and shader, preserving the per-camera `(ZIndex, screen Y, screen X)` order. Built-in sprites remain one draw per camera. |
 | Uniforms | Named typed slots declared in the shader sidecar, packed at bake time. Instance values are frozen at capture and written into the instance record; global values live in a per-frame block. |
 | Built-in globals | `BORK2D_TIME` only; it is `ITime.Time` in seconds. User globals are separate named slots. |
 | Extra textures | A sprite has one main texture plus up to four additional bindless texture paths. |
@@ -81,13 +81,13 @@ signatures are finalized in the implementation tasks.
 | Texture sidecar | Semantic `type` and `compression`; the bake maps them to a concrete linear `TextureFormat`. |
 | Mipmaps | A full mip chain for every baked texture, including MSDF atlases and compressed textures. |
 | Line geometry | CPU-expanded triangles with miter joins and butt caps; anti-aliasing in the fragment shader. |
-| 2D ordering | Sprites, lines, and text share one `(Layer, ZIndex)` sequence and one 2D render pass. |
+| 2D ordering | Sprites, lines, and text share one `ZIndex` draw order (then per-camera screen-space Y and X) and one 2D render pass; `Layer` is only a camera culling bit. |
 | SVG | Shapes, paths, groups, and transforms with fill only; paint, stroke, text, images, CSS, and filters are ignored. Output is an SDF texture plus a ready sprite. |
 | Fonts | TTF/OTF with MSDF, ASCII plus explicit `U+` ranges and single glyphs, left-to-right layout, and basic kerning. `resolution` is the atlas's maximum dimension; glyph em size is derived to fit. |
 | MSDF generation | A managed C# MSDF library, build-time only, rather than a native P/Invoke dependency. |
 | SDF settings | `resolution` is the output texture's maximum dimension in pixels, `range` is the distance spread in pixels, and `padding` adds pixels around the artboard or glyph. |
 | Built-in shaders | `shader/sprite`, `shader/line`, and `shader/sdf` are ordinary assets in an embedded built-in pack mounted below game packs. |
-| API shape | `ShaderAsset` plus `ISpriteRender.Shader` and per-sprite uniform state; no separate material asset in 0.2. |
+| API shape | `ShaderAsset` plus `IRenderable<TLayer>.Shader` and per-renderable uniform state; no separate material asset in 0.2. |
 | Compatibility | 0.2 is a breaking release. Additive APIs are preferred where they do not compromise the design, but shader, texture, and renderable contracts may change. |
 
 ## Workstreams
@@ -99,7 +99,7 @@ signatures are finalized in the implementation tasks.
 - A shader is a baked asset at any canonical asset path (for example `shader/*`), not a hardcoded
   renderer feature.
 - `shader/sprite` is the default and is an ordinary asset that a game pack may shadow.
-- A sprite selects a shader through `ISpriteRender.Shader`; `null` means `shader/sprite`.
+- A sprite selects a shader through `IRenderable<TLayer>.Shader`; `null` means `shader/sprite`.
 - A sprite can bind one main texture and up to four additional textures.
 - A shader declares instance and global uniform names and types; games set values without using
   raw SPIR-V layout offsets.
@@ -242,11 +242,13 @@ Every sprite shader shares one pipeline layout and one descriptor-set layout:
   vertex input, no depth, cull disabled, straight-alpha blending.
 
 Only the fragment shader module differs per shader; the vertex module is shared. Pipelines are
-cached by `(shader content hash, output color format)`. A shader module and its pipelines are keyed
-by content hash, so a catalog remount that changes a shader creates a new entry and retires the old
-one after the frames that reference it complete. A shader that fails to load or create a pipeline
-falls back to `shader/sprite` with a one-time warning; a failure of `shader/sprite` itself is fatal
-at renderer startup.
+cached by `(pipeline kind, shader content hash, output color format)`. A shader module is keyed by
+content hash and its pipelines by kind, content hash, and format, so identical fragment content
+shares its module while the sprite and line pipelines stay distinct. A catalog remount that changes a
+shader creates a new entry and retires the old one after the frames that reference it complete. A
+shader that fails to load or create a pipeline falls back to its kind's default (`shader/sprite` or
+`shader/line`) with a one-time warning; a failure of either default itself is fatal at renderer
+startup.
 
 The instance record grows from 96 to 176 bytes: the current six `vec4` values, one `vec4` holding
 the four additional texture indices, and four `vec4` values holding the packed instance uniforms.
@@ -254,7 +256,8 @@ The main texture index stays in the existing `misc` slot.
 
 The planner extends the existing sprite pass:
 
-1. Sort sprites by `(Layer, ZIndex)` as today.
+1. No global sprite sort: collect each camera's visible candidates and sort them per camera by
+   `(ZIndex, screen Y, screen X)`.
 2. Resolve each sprite's shader and texture pages.
 3. Build a camera-independent instance record containing the existing quad data, the main and
    extra texture indices, and the four `vec4` instance-uniform values.
@@ -296,10 +299,12 @@ public sealed partial class ShaderAsset
     public ShaderTextureSlot[] TextureSlots { get; set; }
 }
 
-public interface ISpriteRender<TLayer> : IRenderable
+public interface IRenderable<TLayer> : IBoundedTransform where TLayer : struct, Enum
 {
     ShaderAsset? Shader { get; set; }
-    AssetRef<TextureDescriptor>[]? AdditionalTextures { get; set; }
+    Color Color { get; set; }
+    TLayer Layer { get; set; }
+    int ZIndex { get; set; }
 
     void SetUniform(string name, float value);
     void SetUniform(string name, Vector2 value);
@@ -307,6 +312,14 @@ public interface ISpriteRender<TLayer> : IRenderable
     void SetUniform(string name, Vector4 value);
     void SetUniform(string name, Color value);
     void ResetUniforms();
+}
+
+public interface ISpriteRender<TLayer> : IRenderable<TLayer> where TLayer : struct, Enum
+{
+    SpriteAsset? Sprite { get; set; }
+    AssetRef<TextureDescriptor>[]? AdditionalTextures { get; set; }
+    bool FlipX { get; set; }
+    bool FlipY { get; set; }
 }
 ```
 
@@ -453,23 +466,12 @@ for only some assets.
 #### Surface
 
 ```csharp
-public interface ILineRender<TLayer> : IRenderable
+public interface ILineRender<TLayer> : IRenderable<TLayer> where TLayer : struct, Enum
 {
     IReadOnlyList<Vector2> Points { get; set; }
     bool Closed { get; set; }
     float Width { get; set; }
-    Color Color { get; set; }
     bool AntiAlias { get; set; }
-    ShaderAsset? Shader { get; set; }
-    TLayer Layer { get; set; }
-    int ZIndex { get; set; }
-
-    void SetUniform(string name, float value);
-    void SetUniform(string name, Vector2 value);
-    void SetUniform(string name, Vector3 value);
-    void SetUniform(string name, Vector4 value);
-    void SetUniform(string name, Color value);
-    void ResetUniforms();
 }
 
 IEngine<TLayer>.CreateLineRender(ISceneNode parent);
@@ -477,8 +479,9 @@ IEngine<TLayer>.CreateLineRender(ISceneNode parent);
 
 `Shader == null` means the built-in `shader/line`. Points are copied when assigned, so mutating the
 caller's array does not change a published snapshot. `AntiAlias` defaults to `true` and `Color` to
-white. Line uniform values are frozen at capture, just like sprite uniforms. A line is a scene
-entity like a sprite: no `Dispose`, and detaching preserves the world transform.
+white. The color, layer, z-index, shader, and line uniform values follow the shared
+`IRenderable<TLayer>` contract and are frozen at capture. A line is a scene entity like a sprite: no
+`Dispose`, and detaching preserves the world transform.
 
 Validation is conservative and happens at capture/draw:
 
@@ -499,10 +502,11 @@ The engine expands a polyline on the CPU into triangles:
 - `AntiAlias` adds a small screen-space coverage term in the fragment shader rather than extra
   geometry. The built-in line shader uses `vLineUv.x` and `fwidth` to soften the edges.
 
-The expansion is cached per line and rebuilt only when points, width, closed state, or color
-changes. The renderer copies the triangles into the frame's line vertex/index buffers and merges
-contiguous lines with the same shader into one draw run. Line records carry the same 64-byte
-instance-uniform block as sprites; the line vertex stage forwards it to the fragment stage, so
+The expansion is cached per line and rebuilt only when points, width, or closed state changes;
+color is a draw state, so changing it never rebuilds geometry. The renderer applies the snapshot
+world matrix while writing the triangles into the frame's line vertex/index buffers and merges
+contiguous lines of the same kind and resolved shader into one draw run. Line records carry the same
+64-byte instance-uniform block as sprites; the line vertex stage forwards it to the fragment stage, so
 lines that share a shader can still merge even when their uniform values differ.
 
 #### Shader interface
@@ -522,13 +526,15 @@ custom court shader with a subtle time-based glow and a dashed center pattern.
 #### Unified 2D order
 
 `LineRender` does not get a separate pass that draws before or after sprites. The 2D pass sorts
-sprite records, line records, and font glyph records together by `(Layer, ZIndex)`. At equal
-`(Layer, ZIndex)`, the tie order is line, then sprite, then font, followed by capture order. This is
-deterministic and keeps background court lines behind gameplay at the same depth.
+sprite records, line records, and font glyph records together per camera by `ZIndex` ascending, then
+screen-space Y ascending, then screen X ascending. `ZIndex` is not layer-scoped, and `Layer` is only a
+camera culling bit. Ties at equal `ZIndex`/screen Y/screen X are explicitly unspecified: there is no
+kind, capture-order, or record-index tie-break. This keeps background court lines behind gameplay at
+the same depth without making the order depend on which kind happened to be captured first.
 
 The existing sprite planner becomes the 2D planner:
 
-1. Sort all 2D records by the combined key.
+1. Build each camera's visible candidate list and sort it by `(ZIndex, screen Y, screen X)`.
 2. Build sprite instance records, line triangles, and font glyph quads.
 3. Compact contiguous runs with the same draw kind and shader.
 4. Record each run in order, binding the pipeline appropriate to the run.
@@ -549,7 +555,7 @@ font's bounds are the AABB of its glyph quads. Empty bounds mean unknown and nev
   smooth quadratic, arc, and close.
 - Nonzero and even-odd fill rules, including holes formed by subpaths.
 - Any `fill`, `stroke`, `opacity`, `color`, gradient, filter, mask, clip path, text, image, or CSS
-  is ignored. The output is a silhouette; color comes from the sprite tint or shader. A shape with
+  is ignored. The output is a silhouette; color comes from the sprite color or shader. A shape with
   no fill produces no geometry, so a stroke-only shape is empty in 0.2.
 
 Unsupported elements are skipped with an informational diagnostic; a malformed path is an error.
@@ -586,7 +592,7 @@ extends and therefore how soft a glow can be. `padding` may be 0.
 #### `shader/sdf`
 
 `shader/sdf` is an ordinary built-in fragment shader. It reconstructs a signed distance from the
-three MSDF channels, applies a screen-space antialiasing width, and multiplies by the sprite tint.
+three MSDF channels, applies a screen-space antialiasing width, and multiplies by the sprite color.
 It samples the main texture only. The built-in defaults use threshold `0.5` and a soft edge; a
 sprite may override the exposed threshold and softness uniforms through `SetUniform`.
 
@@ -596,7 +602,7 @@ ShaderAsset sdf = engine.Assets.LoadAsset<ShaderAsset>("shader/sdf").GetAwaiter(
 ISpriteRender<GameLayer> logo = engine.CreateSpriteRender(engine.Root);
 logo.Sprite = wordmark;
 logo.Shader = sdf;
-logo.Tint = new Color(1f, 1f, 1f, 0.15f);
+logo.Color = new Color(1f, 1f, 1f, 0.15f);
 ```
 
 #### Quality and mipmaps
@@ -671,16 +677,13 @@ the atlas closed over the declared selection and makes missing content visible i
 #### `FontRender`
 
 ```csharp
-public interface IFontRender<TLayer> : IRenderable
+public interface IFontRender<TLayer> : IRenderable<TLayer> where TLayer : struct, Enum
 {
     FontAsset? Font { get; set; }
     string Text { get; set; }
     float Size { get; set; }          // world units per em
-    Color Color { get; set; }
     TextAlignment Alignment { get; set; }
     float LineSpacing { get; set; }
-    TLayer Layer { get; set; }
-    int ZIndex { get; set; }
 }
 
 IEngine<TLayer>.CreateFontRender(ISceneNode parent);
@@ -691,8 +694,8 @@ kerning. Layout is cached and rebuilt only when `Font`, `Text`, `Size`, `Alignme
 `LineSpacing` changes, so a static score allocates nothing per frame. Assigning a `FontAsset`
 freezes its atlas reference and metrics; mutating the loaded asset afterwards cannot change a
 published frame. Each glyph is drawn with the built-in `shader/sdf` fragment and the font atlas;
-`FontRender` always uses that fragment and does not expose a per-renderable shader selection in
-0.2.
+`FontRender` always uses that fragment, and the shared `Shader` member of `IRenderable<TLayer>` has
+no effect on it in 0.2.
 
 Text joins the unified 2D order as a third record type. A contiguous run of glyphs from the same
 font is merged into one draw. `FontRender.Bounds` is the AABB of the laid-out quads.
@@ -715,15 +718,15 @@ The frame snapshot reserves:
 Custom renderable producers start at `4`. This is a breaking change to the reserved-slot contract,
 but it keeps the built-in 2D kinds on the same planner and avoids a hidden second pass.
 
-The capture remains value-only. Sprites carry frozen `SpriteRenderData`; lines carry frozen points
-and style; fonts carry a frozen layout reference. No live scene entity or mutable asset crosses the
-tick/render boundary.
+The capture remains value-only. Sprites carry frozen `SpriteRenderData`; lines carry the immutable
+cached geometry and style; fonts carry a frozen layout reference. No live scene entity or mutable
+asset crosses the tick/render boundary.
 
 ### 2D pass
 
 The sprite pass becomes the 2D pass. For each camera it:
 
-1. Sorts all 2D records by `(Layer, ZIndex, kind, capture order)`.
+1. Sorts each camera's visible records by `(ZIndex, screen Y, screen X)`; ties are unspecified.
 2. Applies the camera's culling mask and conservative world-AABB test.
 3. Builds sprite instance ranges, line triangle ranges, and font glyph ranges.
 4. Uploads the frame's instance, line vertex/index, and glyph buffers.
@@ -740,9 +743,11 @@ pass, so it includes all three kinds.
 - One per-frame instance storage buffer for sprite instances.
 - One per-frame line vertex/index buffer pair.
 - One per-frame glyph instance buffer.
-- A pipeline cache keyed by shader content hash and output color format.
+- A pipeline cache keyed by pipeline kind, shader content hash, and output color format.
 - A shader module cache keyed by canonical shader path and content hash.
-- Texture pages remain the single bindless texture owner; line shaders ignore the texture array.
+- Texture pages remain the single bindless texture owner; the built-in line vertex stage writes the
+  placeholder texture index `0` and zero extra indices, and a shared custom shader may sample the
+  bindless array from a line.
 
 All resources are render-thread-owned. Frame buffers are fenced like the existing instance buffer;
 steady-state frames allocate nothing.
@@ -822,8 +827,11 @@ reader are selected in the task that adds each one; the build-time-only boundary
 New or changed public members in 0.2:
 
 - `ShaderAsset`, `ShaderUniform`, `ShaderTextureSlot`, `ShaderUniformType`.
-- `ISpriteRender.Shader`, `ISpriteRender.AdditionalTextures`, `ISpriteRender.SetUniform`,
-  `ISpriteRender.ResetUniforms`.
+- `IBoundedTransform` (renamed from the non-generic `IRenderable`) and `IRenderable<TLayer>`,
+  which owns the shared `Shader`, `Color`, `Layer`, `ZIndex`, `SetUniform` overloads, and
+  `ResetUniforms`.
+- `ISpriteRender.AdditionalTextures`; `ISpriteRender.Tint` is removed, and the shared
+  `IRenderable.Color` replaces it.
 - `IEngine.SetGlobalUniform`, `IEngine.ResetGlobalUniforms`.
 - `ILineRender<TLayer>`, `IEngine.CreateLineRender`.
 - `IFontRender<TLayer>`, `IEngine.CreateFontRender`, `FontAsset`, `FontGlyph`, `TextAlignment`.
@@ -832,8 +840,8 @@ New or changed public members in 0.2:
 
 The exact overload sets, nullability, and defaults are settled in the implementation tasks and
 recorded in [engine.md](engine.md) and [render.md](render.md). A breaking-change note calls out the
-new `TextureFormat` values, the KTX2 payload contract, the new reserved snapshot slots, and the shader
-asset contract.
+renamed `IBoundedTransform`/`IRenderable<TLayer>` contract, the new `TextureFormat` values, the KTX2
+payload contract, the new reserved snapshot slots, and the shader asset contract.
 
 ## Pong 0.2
 
@@ -863,11 +871,12 @@ through the KTX2 texture helper.
 
 ### Rendering
 
-- **Court.** A closed `LineRender` draws the border, inset by half its width so the full stroke stays
-  inside the visible court. An open vertical `LineRender` draws the center line; `shader/court`
-  applies a time-based glow and an anti-aliased edge. An instance uniform switches the dash pattern
-  on for the center line and off for the border. Width is in world units, so the court scales with
-  the camera.
+- **Court.** A fixed 32x18 world court is created once: a closed `LineRender` draws the border,
+  inset by half its width so the full stroke stays inside the court, and an open vertical
+  `LineRender` draws the center line. `shader/court` applies a time-based glow and an anti-aliased
+  edge; an instance uniform switches the dash pattern on for the center line and off for the border.
+  A window resize changes only the camera size, which fits the whole court and lets the clear color
+  fill the extra axis.
 - **Paddles.** The existing paddle sprite uses a BC7 KTX2 texture. The ball remains a generated
   circle texture; it may use uncompressed KTX2 with mips, but it is not required to be compressed.
 - **Wordmark.** The SDF sprite is centered behind the play field at low alpha, so it does not
@@ -875,13 +884,14 @@ through the KTX2 texture helper.
   `shader/sdf` path.
 - **Score.** Two `FontRender`s show the left and right scores near the top center, right- and
   left-aligned respectively. Text changes only when `LeftScore` or `RightScore` changes.
-- **Ordering.** Court lines, ball, paddles, wordmark, and score all use `(Layer, ZIndex)` and the
-  unified 2D pass; no feature-specific pass is added.
+- **Ordering.** Court lines, ball, paddles, wordmark, and score all use the shared `ZIndex` and
+  per-camera screen-space 2D order in the unified 2D pass; `Layer` only selects cameras. No
+  feature-specific pass is added.
 
 ### Acceptance
 
 - Windowed play is unchanged: W/S, Space, R, Esc, resize, pause, reset, win condition.
-- The court is visible and correctly aligned at multiple window sizes.
+- The whole court stays visible and correctly aligned at multiple window sizes.
 - Paddles show the compressed texture without visible block artifacts at their on-screen size.
 - The wordmark is sharp at 1280x720 and at a reduced window size.
 - The score updates on points and is legible.
@@ -894,7 +904,7 @@ through the KTX2 texture helper.
 
 Deliver the shader asset, sidecar binder, bake processor, SPIR-V compiler integration, shared
 pipeline layout, shader module cache, instance record v2, named uniforms, extra textures,
-`ISpriteRender.Shader`, global uniforms, default `shader/sprite`, and the embedded built-in pack.
+`IRenderable<TLayer>.Shader`, global uniforms, default `shader/sprite`, and the embedded built-in pack.
 
 Exit: a sprite draws with a custom fragment shader, a time uniform, an instance uniform, and two
 extra textures; the built-in path is still one draw per camera; shader bake errors are covered.
@@ -994,7 +1004,7 @@ The release-specific coverage:
   resolution/padding, linear sampling, and mip quality.
 - **Fonts.** Glyph range parsing, atlas derivation, metrics, kerning, line breaks, alignment,
   missing glyphs, layout cache behavior, and score rendering.
-- **2D pass.** Sort key, tie order, camera culling, draw-run accounting, and stats.
+- **2D pass.** Per-camera sort key, run grouping, camera culling, draw-run accounting, and stats.
 
 Bake tests build assets in a temporary directory; no binary fixture, generated pack, or generated
 image is committed. Authored Pong content is content, not a fixture.

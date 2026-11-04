@@ -30,7 +30,7 @@ Windowed and offscreen compose the same internal services instead of duplicating
   board, and the post-join ring drain.
 - `RendererCaptureService` owns the bounded capture queue, per-frame capture retirement from the
   frame fence, and the stop/fatal close path.
-- `RendererTextures` owns the sprite pipeline for the linear scene format, the
+- `RendererTextures` owns the 2D pipeline for the linear scene format, the
   `VulkanTexturePages` GPU seam, the `TexturePageStore`, and bindless page writes/growth across the
   frames.
 - `RenderPassRegistry` owns the ordered render passes and the aggregate frame statistics; both
@@ -42,7 +42,7 @@ Windowed and offscreen compose the same internal services instead of duplicating
 The two target drivers stay separate: `VulkanRenderer` owns swapchain acquire/present, resize,
 recovery, and the minimized drain; `VulkanOffscreenRenderer` owns the fixed UNORM target, its
 one-time layout transition, and the discard path. Each driver creates its frames' linear scene
-images, the sprite pipeline for the scene format, and the present pipeline for the target format.
+images, the 2D pipeline for the scene format, and the present pipeline for the target format.
 There is no renderer inheritance hierarchy.
 
 Useful files: [IRenderer.cs](../src/Bork2d/Bork2d.Render/IRenderer.cs),
@@ -51,11 +51,14 @@ Useful files: [IRenderer.cs](../src/Bork2d/Bork2d.Render/IRenderer.cs),
 [RendererCaptureService.cs](../src/Bork2d/Bork2d.Render/Vulkan/RendererCaptureService.cs),
 [RendererTextures.cs](../src/Bork2d/Bork2d.Render/Vulkan/RendererTextures.cs),
 [RenderPassRegistry.cs](../src/Bork2d/Bork2d.Render/Vulkan/RenderPassRegistry.cs),
-[SpriteRenderPass.cs](../src/Bork2d/Bork2d.Render/Sprites/SpriteRenderPass.cs),
+[TwoDimensionalRenderPass.cs](../src/Bork2d/Bork2d.Render/TwoDimensional/TwoDimensionalRenderPass.cs),
+[TwoDimensionalFramePlanner.cs](../src/Bork2d/Bork2d.Render/TwoDimensional/TwoDimensionalFramePlanner.cs),
+[TwoDimensionalPipeline.cs](../src/Bork2d/Bork2d.Render/TwoDimensional/TwoDimensionalPipeline.cs),
 [PresentRenderPass.cs](../src/Bork2d/Bork2d.Render/Vulkan/PresentRenderPass.cs),
 [PresentPipeline.cs](../src/Bork2d/Bork2d.Render/Vulkan/PresentPipeline.cs),
 [SceneTarget.cs](../src/Bork2d/Bork2d.Render/Vulkan/SceneTarget.cs),
 [SpriteInstance.cs](../src/Bork2d/Bork2d.Render/Sprites/SpriteInstance.cs),
+[LineVertex.cs](../src/Bork2d/Bork2d.Render/TwoDimensional/LineVertex.cs),
 [GlobalUniformBlock.cs](../src/Bork2d/Bork2d.Render/Sprites/GlobalUniformBlock.cs),
 [ShaderStore.cs](../src/Bork2d/Bork2d.Render/Shaders/ShaderStore.cs),
 [VulkanFrameSet.cs](../src/Bork2d/Bork2d.Render/Vulkan/VulkanFrameSet.cs),
@@ -65,12 +68,16 @@ Useful files: [IRenderer.cs](../src/Bork2d/Bork2d.Render/IRenderer.cs),
 ## Device and presentation
 
 A device must support Vulkan 1.3 and the full required feature set: dynamic rendering,
-synchronization 2, runtime descriptor arrays, non-uniform sampled-array indexing, partially bound
-descriptors, sampled-image update-after-bind, update-unused-while-pending, variable descriptor
-counts, and `textureCompressionBC`. `textureCompressionBC` is a desktop Vulkan 1.3 requirement: every
-baked BC texture must sample natively, and there is no RGBA fallback or runtime transcoder, so a
-device without it fails selection with a message naming the feature and that requirement. The device
-must also report a `maxUniformBufferRange` of at least the 144-byte global block; a smaller value is a
+synchronization 2, shader demote-to-helper-invocation, runtime descriptor arrays, non-uniform
+sampled-array indexing, partially bound descriptors, sampled-image update-after-bind,
+update-unused-while-pending, variable descriptor counts, and `textureCompressionBC`.
+`textureCompressionBC` is a desktop Vulkan 1.3 requirement: every baked BC texture must sample
+natively, and there is no RGBA fallback or runtime transcoder, so a device without it fails selection
+with a message naming the feature and that requirement. `shaderDemoteToHelperInvocation` is required
+for fragment shaders that use `discard`/demote: the bake emits the `DemoteToHelperInvocation` SPIR-V
+capability for such a source (the Pong court's dashed center line is one), so a device without the
+feature fails selection with a message naming the feature and that requirement. The device must also
+report a `maxUniformBufferRange` of at least the 144-byte global block; a smaller value is a
 device-selection failure with a clear message. The device's `minUniformBufferOffsetAlignment` sets the
 per-frame global-block stride. Windowed selection additionally requires a graphics queue family that
 presents to the surface. Discrete GPUs are preferred over integrated, then other types.
@@ -90,59 +97,73 @@ out-of-date results. One surface-recovery attempt is available per run.
 The render thread consumes one snapshot and plans it through the registered render-pass list.
 `RenderPassRegistry.Plan` resets the aggregate statistics and each pass's per-frame state, then runs
 every pass in registration order; recording runs the same passes in the same order, so pass order is
-deterministic. Both target drivers register the sprite pass followed by the present pass. The sprite
+deterministic. Both target drivers register the unified 2D pass followed by the present pass. The 2D
 pass renders linear color into the frame's scene image; the present pass samples that image and
 writes the sRGB-encoded result into the UNORM swapchain or offscreen target. A new renderable kind
 adds a typed engine producer and one pass, not a central plan/record switch.
 
-The sprite pass plans its data in one allocation-free pass:
+The 2D pass plans sprites and lines together in one allocation-free pass:
 
-1. Build compact 12-byte `(Layer, ZIndex, captureIndex)` keys and sort those by ascending
-   `(Layer, ZIndex)`, then emit the sorted index order. Sorting keys instead of full captured
-   records keeps a 50,000-sprite frame's ordering pass cache-friendly and allocation-free.
-2. Classify each sprite once from its frozen render data: a null sprite, zero/multi-bit layer,
-   non-`Quad` topology, a still-loading main texture page, or a still-loading custom shader is
-   skipped; malformed fields are fatal. The custom shader binding resolves through the shader
-   catalog: a loading entry skips the sprite, a failed or invalid entry draws with the built-in
-   default, and a ready entry supplies the run identity and its frozen declarations. Additional
-   textures resolve positionally against that entry's declared slots: a pending extra page skips the
-   whole sprite, a failed or absent page uses the bindless placeholder index `0`, references beyond
-   four are ignored with a once-per-renderer warning, and paths beyond the declared slot count are
-   never loaded. The sprite's quad geometry is resolved from the frozen UVs and per-axis world scale,
-   and its camera-independent 176-byte record is built once: the snapshot's four instance-uniform
-   lanes (or the default entry's declared default block for a sprite without a custom shader), the
-   resolved extra texture indices, and the resolved main texture index. The sorted index is compacted
-   into a per-layer range: each single-bit layer maps to one of the 32 mask bits, and each range keeps
-   its ascending `ZIndex` order.
-3. Sort cameras by `ZIndex` and resolve their projections; invalid cameras are skipped.
-4. One camera×sprite visibility pass builds each camera's contiguous visible-index range and groups
-   its visible sprites into contiguous shader runs: two adjacent visible sprites whose resolved
-   shader entries are equal share a run, and a different entry starts a new run without reordering
-   any sprite. Only the layer bits set in the camera's culling mask are visited, and a sprite whose
-   known world AABB does not intersect the camera's world AABB is skipped.
-5. Validate the frame's accumulated instance total against `int.MaxValue`, ensure the frame's
-   dynamic uniform buffer holds one 144-byte global block per run, write each run's block, grow the
-   instance buffer once, and copy the precomputed instance records into their per-camera ranges.
+1. Pre-pass every captured sprite and line once. A sprite is classified from its frozen render data:
+   a null sprite, zero/multi-bit layer, non-`Quad` topology, a still-loading main texture page, or a
+   still-loading custom shader is skipped; malformed fields are fatal. A line is skipped when it has
+   no drawable geometry, an invalid layer, or a still-loading custom shader. Line geometry is
+   validated by the engine at capture time, so a non-drawable line arrives as null geometry and the
+   renderer never repairs or approximates it. A custom shader binding resolves through the shader
+   catalog for the record's kind: a loading entry skips the record, a failed or invalid entry draws
+   with that kind's built-in default (`shader/sprite` or `shader/line`), and a ready entry supplies
+   the run identity and its frozen declarations. Additional textures resolve positionally against a
+   sprite entry's declared slots: a pending extra page skips the whole sprite, a failed or absent
+   page uses the bindless placeholder index `0`, references beyond four are ignored with a
+   once-per-renderer warning, and paths beyond the declared slot count are never loaded. Lines have
+   no main or additional textures. Each sprite's camera-independent 176-byte instance record is built
+   once here, and each line keeps its immutable local-space geometry plus its seeded 16-float
+   instance-uniform block (the snapshot's lanes, or the line default's declared defaults when the
+   line has no custom shader).
+2. Sort cameras by `ZIndex` and resolve their projections; invalid cameras are skipped.
+3. Draw order is computed per camera. For each camera, build the candidate list from records whose
+   layer bit is in the camera's culling mask and whose non-empty world AABB intersects the camera's
+   world AABB, project each record's world-space origin (`WorldMatrix.M31/M32`) to that camera's
+   framebuffer pixels, and sort the candidates by `(ZIndex, screen Y, screen X)` ascending.
+   `ZIndex` is the shared 2D draw order for sprites and lines and is not layer-scoped. Screen space
+   is the framebuffer with a top-left origin, so a record lower on screen has a larger Y and draws
+   later; this is why a 180-degree rotated camera reverses the order of the same records. `Layer` is
+   only a culling bit and never participates in ordering. Ties at equal `ZIndex`/screen Y/screen X
+   are explicitly unspecified: there is no capture-order, kind, or record-index tie-break.
+4. Group the sorted records into contiguous draw runs: a run changes only when the renderable kind or
+   the resolved shader entry changes, so a sprite run and a line run never merge even when they share
+   a shader entry. Within a camera, sprite instances and line vertices/indices are written into
+   contiguous frame-buffer ranges in draw order; a record visible to two cameras is written twice,
+   exactly like a sprite instance.
+5. Validate the frame's accumulated sprite-instance, line-record, line-vertex, and line-index totals
+   against `int.MaxValue`, ensure the instance and line buffers once, write one 144-byte global block
+   per run, and write the precomputed instance records and world-transformed line vertices/indices in
+   draw order.
 
 Bounds culling is always on and conservative. The camera's world AABB is the AABB of its four
 visible world-space corners, so a rotated camera culls with the larger axis-aligned box around its
 rotated rectangle; a sprite's world AABB is the AABB of its four drawn quad corners, including the
-pivot, flips, and any world-matrix rotation, mirror, shear, or non-uniform scale. There is no
-spatial index and no culling toggle. A culled sprite is a normal visibility skip, never a
-malformed-field fatal, and it is not counted in `RenderStats.SkippedSprites`; it only reduces the
-instance count.
+pivot, flips, and any world-matrix rotation, mirror, shear, or non-uniform scale; a line's world AABB
+is the AABB of the four transformed corners of its cached local-space geometry bounds, which already
+include half the width and every miter or bevel extent. Empty bounds mean "unknown" and never cull.
+There is no spatial index and no culling toggle. A culled record is a normal visibility skip, never a
+malformed-field fatal, and it is not counted in `RenderStats.SkippedSprites` or
+`RenderStats.SkippedLines`; it only reduces the instance/line counts.
 
-A captured sprite carries the immutable `SpriteRenderData` frozen when its asset was assigned, never
-the live `SpriteAsset`, so mutating an asset after assignment cannot change a plan or a published
-snapshot. Each camera gets one dynamic-rendering pass. It records exactly one
-`vkCmdDraw(4, run.InstanceCount, 0, run.FirstInstance)` per contiguous shader run, so a camera whose
-sprites all share `shader/sprite` is exactly one run and one draw (plus the frame's present draw),
-while a camera that alternates custom and default shaders records one draw per contiguous group and
-never reorders sprites. A quad
-is a four-vertex triangle strip with no vertex buffer: `gl_VertexIndex` selects the corner, and the
-vertex shader builds the world position from the instance matrix, pivot, size, and UVs. The quad is
-`(maxU - minU) * Scale.X` by `(maxV - minV) * Scale.Y` world units; texture pixel dimensions are
-never used.
+A captured sprite carries the immutable `SpriteRenderData` frozen when its asset was assigned, and a
+captured line carries only its immutable `LineGeometryData`; mutating an asset or a line after
+capture cannot change a plan or a published snapshot. Each camera gets one dynamic-rendering pass.
+Sprite runs record exactly one `vkCmdDraw(4, run.Count, 0, run.First)` per contiguous group; line
+runs bind the frame's line vertex/index buffers once per camera and record one
+`vkCmdDrawIndexed(run.Count, 1, run.First, 0, 0)` per contiguous group, where the indices are
+absolute in the frame's line index buffer. A camera whose sprites all share `shader/sprite` and whose
+lines all share `shader/line` records exactly two runs (one per kind) plus the frame's present draw,
+while a camera that alternates shaders records one per contiguous group and never reorders records.
+The quad is a four-vertex triangle strip with no vertex buffer: `gl_VertexIndex` selects the corner,
+and the vertex shader builds the world position from the instance matrix, pivot, size, and UVs. The
+quad is `(maxU - minU) * Scale.X` by `(maxV - minV) * Scale.Y` world units; texture pixel dimensions
+are never used. A line is a CPU-expanded triangle list; the renderer writes each triangle vertex with
+the world matrix applied, so a transform change never rebuilds the cached local geometry.
 
 Every recorded frame starts with one full-target opaque-black clear into the frame's linear scene
 image after the scene image's initial layout transition and before any camera pass: linear
@@ -156,7 +177,7 @@ target driver records it before the registry records the passes, so the frame cl
 `RenderStats` draw-call/instance accounting. There is no depth attachment.
 
 Recording order per frame is: transition the scene image and the final target to
-`COLOR_ATTACHMENT_OPTIMAL`; record the full-target scene clear; record the 2D passes into the scene
+`COLOR_ATTACHMENT_OPTIMAL`; record the full-target scene clear; record the 2D pass into the scene
 image; the present pass barriers the scene image to `SHADER_READ_ONLY_OPTIMAL` and records its
 fullscreen draw into the final UNORM target; the optional capture copy reads the final target; the
 target then transitions to `PRESENT_SRC_KHR` (windowed) or stays a color attachment (offscreen).
@@ -264,23 +285,28 @@ resident totals.
 
 ## Pipeline and shaders
 
-The sprite pipeline uses descriptor set `0` for the draw inputs and descriptor set `1` for the
+The 2D pipeline uses descriptor set `0` for the draw inputs and descriptor set `1` for the
 per-run global block:
 
 | Set | Binding | Descriptor | Stage | Contents |
 | --- | --- | --- | --- | --- |
-| `0` | `0` | storage buffer | vertex | per-frame array of 176-byte instance records |
+| `0` | `0` | storage buffer | vertex | per-frame array of 176-byte sprite instance records (sprite draws only) |
 | `0` | `1` | combined image sampler array | fragment | bindless texture pages, partially bound with a variable count |
 | `1` | `2` | dynamic uniform buffer | fragment | per-run global block: `vec4 time; vec4 globals[8]`, 144 bytes, std140 |
 
 Set `0` keeps the variable/UAB bindless array as its highest binding, and the dynamic global buffer
 is in its own set because Vulkan forbids a dynamic uniform buffer in a set that contains an
 update-after-bind binding. The pipeline layout carries descriptor sets `0` and `1` and one 64-byte
-view-projection push constant. The graphics pipeline uses the linear `R8G8B8A8_UNORM` scene color
-attachment, dynamic viewport/scissor, triangle strip, no vertex input, no depth test or write, culling
-disabled, and straight-alpha blending. One graphics pipeline exists per `(shader content hash)`: the
-scene format is fixed for the whole run, identical shader content shares its module and its pipeline,
-a swapchain format change never creates a new sprite pipeline variant, and samplers are cached per
+view-projection push constant shared by both kinds. The pipeline owner owns both engine vertex
+modules: `shader/vertex-spv` for sprites and `shader/line-vertex-spv` for lines. Both graphics
+pipelines use the linear `R8G8B8A8_UNORM` scene color attachment, dynamic viewport/scissor, no depth
+test or write, culling disabled, and straight-alpha blending. The sprite pipeline has no vertex input
+and uses triangle-strip topology with four generated quad corners per instance. The line pipeline
+uses triangle-list topology and a 112-byte per-vertex stride with attribute locations `0` through
+`7` (position, line UV, color, misc, and the four instance-uniform lanes). One graphics pipeline
+exists per `(pipeline kind, shader content hash)`: the scene format is fixed for the whole run,
+identical fragment content shares its module but caches a separate sprite and line pipeline, a
+swapchain format change never creates a new scene-format variant, and samplers are cached per
 `(Filter, Wrap)` with linear mip filtering over the full chain and anisotropy disabled.
 
 The instance record is 176 bytes and eleven `vec4` values with no padding: `transform0`
@@ -291,32 +317,51 @@ texture indices as floats, with `0` for an absent or failed page), and `instance
 `instanceParams3` (the 16-float custom-shader instance uniform block copied from the snapshot; a
 sprite without a custom shader uses the default entry's declared default block). There is no vertex
 buffer: `gl_VertexIndex` selects the quad corner and `gl_InstanceIndex` selects the record. The
-built-in vertex stage writes these interpolants: location `0` `vUv` (`vec2`), `1` `vTint` (`vec4`),
-`2` `vTextureIndex` (`flat uint`), `3` `vWorldPosition` (`vec2`), `4` `vLocalPosition` (`vec2`),
-`5` `vExtraTextureIndices` (`flat uint[4]`), and `9` `vInstanceParams` (`vec4[4]`). Custom fragment
+built-in sprite vertex stage writes these interpolants: location `0` `vUv` (`vec2`), `1` `vTint`
+(`vec4`), `2` `vTextureIndex` (`flat uint`), `3` `vWorldPosition` (`vec2`), `4` `vLocalPosition`
+(`vec2`), `5` `vExtraTextureIndices` (`flat uint[4]`), `9` `vInstanceParams` (`vec4[4]`), and the
+line-only `13` `vLineUv` (`vec2`), `14` `vColor` (`vec4`), and `15` `vLineFlags` (`flat float`),
+which it leaves at zero. The engine-owned line vertex stage (`shader/line-vertex-spv`) reads a
+112-byte vertex record through attribute locations `0` through `7` and writes the complete shared
+interface, including neutral sprite values (`vUv` and `vLocalPosition` from the line coordinate,
+`vTint` from the line color, texture index `0`, and zero extra indices). Custom fragment
 shaders declare the same interface through the fixed bake prologue, which places the bindless
 texture array in set `0` binding `1` and the global block in set `1` binding `2`. The bake prologue
 renames the user `main` and appends an engine wrapper that consumes the full vertex interface in a
 branch that cannot be reached for valid engine data, so every custom shader's pipeline validation
 sees matched inputs and outputs without changing any frame's pixels.
 
-The default sprite shader and the bindless placeholder are asset content, not compiled-in arrays. The
-built-in pack, mounted below every game pack, serves `shader/sprite` as a `ShaderAsset`,
-`shader/sprite-spv` as its raw fragment module, `shader/vertex-spv` as the engine-owned vertex module,
-`present/vertex-spv` plus `present/fragment-spv` as the engine-owned present modules, and
+The line vertex record is 112 bytes with no padding: `position` (world-space `vec2`), `lineUv`
+(`vec2`: `x` is `0` on one width edge and `1` on the other, `y` is the accumulated local distance
+along the line), `color` (linear RGBA `vec4`), `misc` (`vec4`; `x` is the anti-alias flag `0`/`1` and
+the rest are zero), and `params0` through `params3` (the 16-float instance uniform block). The 2D
+planner writes one record per expanded triangle vertex into the frame's host-visible line vertex
+buffer with the snapshot world matrix applied, and writes absolute 32-bit vertex indices into the
+frame's line index buffer. The per-frame line buffers start at 4,096 vertex records and 6,144
+indices; when a frame needs more, each grows independently to
+`roundUpToPowerOfTwo(max(required, capacity * 2))` after the frame fence is observed, is checked
+against the device's buffer limit, logs the growth, and never truncates. A normal frame does not
+grow.
+
+The default sprite shader, the built-in line shader, and the bindless placeholder are asset content,
+not compiled-in arrays. The built-in pack, mounted below every game pack, serves `shader/sprite` and
+`shader/line` as `ShaderAsset`s, `shader/sprite-spv` and `shader/line-spv` as their raw fragment
+modules, `shader/vertex-spv` and `shader/line-vertex-spv` as the engine-owned sprite and line vertex
+modules, `present/vertex-spv` plus `present/fragment-spv` as the engine-owned present modules, and
 `textures/placeholder` plus `textures/placeholder-ktx2` as the bindless placeholder descriptor and
-KTX2 payload. At renderer startup
-`RendererTextures.EnsurePipeline` loads the vertex module through `IAssets`; `ShaderStore` then
-loads the fragment shader asset, validates a non-null `SpirV` reference, `LayoutVersion` 2, the
-`main` entry point, the full declaration set, and a non-empty module whose first little-endian word
-is `0x07230203`, freezes the shader declarations, and creates the fragment module. The present
-pipeline loads its two raw modules the same way and validates their SPIR-V magic. The placeholder
-descriptor and payload are loaded synchronously and validated before the renderer becomes ready. A
-missing built-in pack, shader, or placeholder, a malformed asset, a module without the SPIR-V magic,
-or an invalid placeholder payload is a fatal startup
-`Bork2dException` naming the asset path and reason; there is no fallback shader. The shader catalog
-owns every fragment module and the pipeline owns the vertex module and every
-`(content hash, scene format)` pipeline.
+KTX2 payload. At renderer startup `RendererTextures.EnsurePipeline` loads both vertex modules through
+`IAssets` and creates the pipeline owner; `ShaderStore` then loads both fragment shader assets,
+validates each non-null `SpirV` reference, `LayoutVersion` 3, the `main` entry point, the full
+declaration set, and a non-empty module whose first little-endian word is `0x07230203`, freezes the
+declarations, and creates both fragment modules. The built-in sprite default is entry `0` and the
+line default entry `1`; custom entries start at `2`. `EnsureDefaultPipelines` creates both default
+pipelines for the scene format. The present pipeline loads its two raw modules the same way and
+validates their SPIR-V magic. The placeholder descriptor and payload are loaded synchronously and
+validated before the renderer becomes ready. A missing built-in pack, shader, vertex module, or
+placeholder, a malformed asset, a module without the SPIR-V magic, or an invalid placeholder payload
+is a fatal startup `Bork2dException` naming the asset path and reason; there is no fallback shader.
+The shader catalog owns every fragment module and the pipeline owns both vertex modules and every
+`(kind, content hash, scene format)` pipeline.
 
 There is no build-time C# shader generator and no generated SPIR-V array. The retired
 `Bork2d.ShaderCompiler` tool, its targets import, and the checked-in renderer GLSL sources were
@@ -328,7 +373,7 @@ only loads the baked SPIR-V from the asset packs.
 ### Present pipeline
 
 The final present pass has its own minimal pipeline, layout, and sampler; it never reuses or changes
-the sprite bindless set:
+the 2D bindless set:
 
 | Set | Binding | Descriptor | Stage | Contents |
 | --- | --- | --- | --- | --- |
@@ -354,54 +399,57 @@ allocates nothing and creates no Vulkan object.
 
 ### Custom shader catalog
 
-A sprite with `SpriteSnapshot.ShaderData == null` uses the default entry. A custom entry is keyed by
-its raw SPIR-V `DataRef` path because the sprite already carries the frozen `ShaderRenderData`
-metadata; the renderer never loads the `ShaderAsset` object per draw and never parses GLSL or
-reflection. The first frozen declaration set seen for a path supplies that entry's instance/global
-uniform declarations and texture slots.
+A sprite or line with a null `ShaderData` uses its kind's default entry (`shader/sprite` for a
+sprite, `shader/line` for a line). A custom entry is keyed by its raw SPIR-V `DataRef` path because
+the record already carries the frozen `ShaderRenderData` metadata; the renderer never loads the
+`ShaderAsset` object per draw and never parses GLSL or reflection. The first frozen declaration set
+seen for a path supplies that entry's instance/global uniform declarations and texture slots.
 
 On first sighting in the current catalog the store starts one asynchronous `IAssets.LoadData` load for
-that path. While the load is outstanding the sprite is skipped and counted in
-`RenderStats.SkippedSprites`. A load started while planning a frame never completes that frame: the
-store promotes completed loads on the next frame's pump, creates the fragment module, and creates
-that frame's format pipeline at plan time. The render thread never blocks on an asset load.
+that path. While the load is outstanding the record is skipped and counted in
+`RenderStats.SkippedSprites` or `RenderStats.SkippedLines`. A load started while planning a frame
+never completes that frame: the store promotes completed loads on the next frame's pump, creates the
+fragment module, and creates that frame's kind and format pipeline at plan time. The render thread
+never blocks on an asset load.
 
-Every custom declaration set is validated: `LayoutVersion` 2, the `main` entry point, a non-empty
+Every custom declaration set is validated: `LayoutVersion` 3, the `main` entry point, a non-empty
 SPIR-V payload whose first little-endian word is `0x07230203`, at most four texture slots, identifier
 names that are unique within their block, instance-uniform offsets that are aligned, inside the
 16-float block, and non-overlapping, global-uniform offsets that are aligned, unique, and inside the
 eight-`vec4` slots, and no name declared in both blocks. Global names are engine-wide and track
 every live shader that declares them: shaders of the same type may share a name, the name stays
 claimed while any owner is live, and a later shader that declares it with a different type is
-rejected. A failed load, invalid
-metadata, module creation failure, or pipeline creation failure draws with `shader/sprite` and logs
-one warning per shader path; a failure of the default shader itself is a fatal startup error.
-Modules are cached by shader content hash and pipelines by `(content hash, scene format)`, so
-identical content shares both. A failed path is not retried until the catalog changes.
+rejected. A failed load, invalid metadata, module creation failure, or pipeline creation failure
+draws with the requesting kind's default (`shader/sprite` or `shader/line`) and logs one warning per
+shader path; a failure of either default shader itself is a fatal startup error. Modules are cached
+by shader content hash and pipelines by `(kind, content hash, scene format)`, so identical content
+shares its module while the sprite and line pipelines stay distinct; a shader assigned to both kinds
+therefore caches one pipeline for each. A failed path is not retried until the catalog changes.
 
 ### Global block and user values
 
-The frame's global block is written once per shader run, not once per frame: `time.x` is the frame's
+The frame's global block is written once per draw run, not once per frame: `time.x` is the frame's
 `ITime.Time`, the other time components are zero, and each run binds set `1` at that run's block byte
 offset (`blockIndex * BlockStride`). The planner ensures the frame's dynamic uniform buffer holds one
 block per run before writing. For each declared global uniform the run uses the engine-wide value
 captured for its ordinal name when the type matches, or the declaration's own shader default when the
 engine has no such name. A type mismatch between an engine value and a custom shader declaration
-makes that shader fall back to the default entry with a one-time warning; the bytes are never
-reinterpreted. The instance uniform block is the sprite's frozen packed lanes, or the default entry's
-declared default block for a sprite without a custom shader.
+makes that shader fall back to its kind's default entry with a one-time warning; the bytes are never
+reinterpreted. The instance uniform block is the sprite's frozen packed lanes, the line snapshot's
+packed lanes for a custom line shader, or the kind default's declared default block when the record
+has no custom shader.
 
 ### Catalog remount and retirement
 
 The catalog observes the asset catalog version once per frame, in the same pump that advances the
 texture pages. A later mount retires every custom entry, clears the engine-wide global-name registry,
-and starts a replacement default load. The previous ready default entry stays active until the
-replacement validates, so the default path never loses its shader; once the replacement is ready the
-old entry is retired after the safety age. A previously failed path is retried on its next sighting
-in the new catalog. A retired entry's modules and pipelines are destroyed only after every frame that
-could reference them has completed: the same two-frames-in-flight rule as texture pages, so a module
-or pipeline outlives its last planned frame by more than two pumps. A failed default replacement is
-warned once and the previous default stays active.
+and starts a replacement load for each built-in default. A previous ready default entry stays active
+until its replacement validates, so a default path never loses its shader; once the replacement is
+ready the old entry is retired after the safety age. A previously failed path is retried on its next
+sighting in the new catalog. A retired entry's modules and pipelines are destroyed only after every
+frame that could reference them has completed: the same two-frames-in-flight rule as texture pages,
+so a module or pipeline outlives its last planned frame by more than two pumps. A failed default
+replacement is warned once and the previous default stays active.
 
 ### Extra textures
 
@@ -430,13 +478,15 @@ only the target driver differs.
 ## Diagnostics and capture
 
 The renderer publishes an immutable `RenderStats` for the last completed frame: sequence,
-framebuffer size, draw calls, instances, cameras, non-empty cameras, texture pages/capacity, texture
-uploads pending (count and declared bytes), skipped sprites, and cumulative validation
-errors/warnings. `DrawCalls` counts the frame's shader runs plus the final fullscreen present draw,
-one `vkCmdDraw` each, so a default-only frame records one draw per non-empty camera plus the present,
-a camera with contiguous custom/default groups records one per run plus the present, and a frame with
-no camera runs still records the present draw; `NonEmptyCameras` counts the cameras with at least one
-run.
+framebuffer size, draw calls, instances, lines, cameras, non-empty cameras, texture pages/capacity,
+texture uploads pending (count and declared bytes), skipped sprites, skipped lines, and cumulative
+validation errors/warnings. `DrawCalls` counts the frame's draw runs plus the final fullscreen
+present draw: every sprite run records one `vkCmdDraw` and every line run one `vkCmdDrawIndexed`, so
+a default-only camera records one sprite run, one line run when it has lines, and the present draw; a
+camera with contiguous kind/shader groups records one per run plus the present, and a frame with no
+camera runs still records the present draw. `NonEmptyCameras` counts the cameras with at least one
+run. `Instances` counts sprite instance records and `Lines` counts line records submitted by the
+frame, both across cameras.
 `TextureUploadsPending` counts content-ready pages the frame's pump left queued by
 the upload budget, and `TextureUploadBytesPending` is their validated KTX2 payload total. `TexturePages` is
 the resident page count (the placeholder plus ready pages in the current catalog); an evicted page
@@ -444,8 +494,10 @@ leaves it and reappears once its next sighting reloads it. The host installs it 
 `IEngine.RenderStats`; reading it never touches Vulkan. `SkippedSprites` counts the null,
 invalid-layer, non-`Quad`, and still-loading sprites, including a loading custom shader, main texture,
 or declared additional texture; a sprite drawn with the placeholder, the default-shader fallback, or
-an ignored fifth additional reference is not skipped. Bounds-culled sprites are not skipped, they
-only reduce `Instances`.
+an ignored fifth additional reference is not skipped. `SkippedLines` counts the null/invalid-geometry,
+invalid-layer, and still-loading-custom-shader lines; a line drawn with the built-in `shader/line` or
+the line-default fallback is not skipped. Bounds-culled records are not skipped, they only reduce
+`Instances`/`Lines`.
 
 `CaptureFrameAsync` queues a one-shot request through the shared `RendererCaptureService`. The copy
 is recorded after the present pass and before present/discard, so it captures the final UNORM target:

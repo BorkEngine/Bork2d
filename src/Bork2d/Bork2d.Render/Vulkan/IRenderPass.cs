@@ -1,5 +1,6 @@
 using Bork2d.Engine.Rendering;
 using Bork2d.Render.Sprites;
+using Bork2d.Render.TwoDimensional;
 using Silk.NET.Vulkan;
 
 namespace Bork2d.Render.Vulkan;
@@ -33,9 +34,10 @@ internal interface IRenderPass
     /// <param name="snapshot">The consumed snapshot; read-only and never mutated.</param>
     /// <param name="framebufferWidth">The scene/target width in pixels.</param>
     /// <param name="framebufferHeight">The scene/target height in pixels.</param>
-    /// <param name="instances">The frame's instance sink, after its fence has been observed.</param>
+    /// <param name="instances">The frame's sprite instance sink, after its fence has been observed.</param>
+    /// <param name="lines">The frame's line vertex/index sink, after its fence has been observed.</param>
     /// <param name="globals">
-    /// The frame's global uniform sink; the sprite pass writes the frame's single time block.
+    /// The frame's global uniform sink; the 2D pass writes one block per draw run.
     /// </param>
     /// <param name="sceneFormat">
     /// The linear scene color format the 2D pipelines are created for; it is independent of the final
@@ -47,6 +49,7 @@ internal interface IRenderPass
         int framebufferWidth,
         int framebufferHeight,
         IInstanceBuffer instances,
+        ILineBufferSink lines,
         IGlobalUniformBuffer globals,
         Format sceneFormat,
         RenderPassStats stats);

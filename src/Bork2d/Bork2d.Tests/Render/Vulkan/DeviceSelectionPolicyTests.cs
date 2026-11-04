@@ -103,6 +103,7 @@ public sealed class DeviceSelectionPolicyTests
     [Theory]
     [InlineData("dynamicRendering")]
     [InlineData("synchronization2")]
+    [InlineData("shaderDemoteToHelperInvocation")]
     [InlineData("runtimeDescriptorArray")]
     [InlineData("shaderSampledImageArrayNonUniformIndexing")]
     [InlineData("descriptorBindingPartiallyBound")]
@@ -115,6 +116,7 @@ public sealed class DeviceSelectionPolicyTests
         VulkanFeatureSet features = new(
             DynamicRendering: featureName != "dynamicRendering",
             Synchronization2: featureName != "synchronization2",
+            ShaderDemoteToHelperInvocation: featureName != "shaderDemoteToHelperInvocation",
             RuntimeDescriptorArray: featureName != "runtimeDescriptorArray",
             ShaderSampledImageArrayNonUniformIndexing:
                 featureName != "shaderSampledImageArrayNonUniformIndexing",
@@ -133,6 +135,26 @@ public sealed class DeviceSelectionPolicyTests
 
         Assert.False(evaluation.Accepted);
         Assert.Contains(featureName, evaluation.RejectionReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EvaluateRejectsADeviceWithoutShaderDemoteToHelperInvocationAndNamesTheDiscardRequirement()
+    {
+        DeviceCandidate candidate = Candidate(
+            features: VulkanFeatureSet.Required with
+            {
+                ShaderDemoteToHelperInvocation = false,
+            });
+
+        DeviceEvaluation evaluation = VulkanDevicePolicy.Evaluate(candidate, requirePresent: false);
+
+        Assert.False(evaluation.Accepted);
+        Assert.Contains(
+            "shaderDemoteToHelperInvocation",
+            evaluation.RejectionReason,
+            StringComparison.Ordinal);
+        Assert.Contains("discard", evaluation.RejectionReason, StringComparison.Ordinal);
+        Assert.Contains("Pong court", evaluation.RejectionReason, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -7,8 +7,8 @@ namespace Bork2d.Tests.Architecture;
 
 /// <summary>
 /// Pins the public <c>ICamera&lt;TLayer&gt;</c> surface: M8 adds exactly the three approved helper
-/// members and nothing else, and the camera and sprite interfaces derive from the shared
-/// <see cref="IRenderable"/> contract.
+/// members and nothing else, and the camera derives from the shared
+/// <see cref="IBoundedTransform"/> contract but not from the 2D renderable contract.
 /// </summary>
 public sealed class CameraPublicSurfaceTests
 {
@@ -53,17 +53,21 @@ public sealed class CameraPublicSurfaceTests
     }
 
     [Fact]
-    public void RenderablesShareThePublicBoundsContract()
+    public void CameraIsABoundedTransformAndNotA2DRenderable()
     {
-        Assert.True(typeof(IRenderable).IsAssignableFrom(typeof(ICamera<>)));
-        Assert.True(typeof(IRenderable).IsAssignableFrom(typeof(ISpriteRender<>)));
-        Assert.True(typeof(ITransform).IsAssignableFrom(typeof(IRenderable)));
+        Assert.True(typeof(IBoundedTransform).IsAssignableFrom(typeof(ICamera<>)));
+        Assert.True(typeof(ITransform).IsAssignableFrom(typeof(IBoundedTransform)));
+        Assert.False(InheritsGenericInterface(typeof(ICamera<>), typeof(IRenderable<>)));
 
-        PropertyInfo? bounds = typeof(IRenderable).GetProperty(nameof(IRenderable.Bounds));
+        PropertyInfo? bounds = typeof(IBoundedTransform).GetProperty(nameof(IBoundedTransform.Bounds));
         Assert.NotNull(bounds);
         Assert.Equal(typeof(Bounds), bounds.PropertyType);
         Assert.False(bounds.CanWrite);
     }
+
+    private static bool InheritsGenericInterface(Type type, Type definition)
+        => type.GetInterfaces().Any(candidate => candidate.IsGenericType
+            && candidate.GetGenericTypeDefinition() == definition);
 
     private static string Describe(MethodInfo method)
     {

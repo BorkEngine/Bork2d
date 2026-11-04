@@ -1,19 +1,20 @@
 using System.Numerics;
 using Bork2d.Engine.Rendering;
 
-namespace Bork2d.Render.Vulkan;
+namespace Bork2d.Render.TwoDimensional;
 
 /// <summary>
-/// Resolves a captured camera to the renderer's rounded pixel rect and 64-byte view-projection
-/// push constant (M8 §6.3/§6.6).
+/// Resolves a captured camera to the 2D renderer's rounded pixel rect and 64-byte view-projection
+/// push constant.
 /// </summary>
 /// <remarks>
 /// The renderer shares the exact <see cref="CameraProjection"/> math with the public
 /// <c>ICamera.WorldToScreen</c>/<c>ScreenToWorld</c>/<c>WorldSize</c> helpers, so a GPU camera and a
-/// helper call can never disagree on the viewport rect, aspect, or Y flip. WP-2 adds this bridge;
-/// WP-4 records the per-camera pass that consumes it.
+/// helper call can never disagree on the viewport rect, aspect, or Y flip. The same projection
+/// resolves each camera-visible record's screen-space sort position, so draw order and the recorded
+/// viewport always agree.
 /// </remarks>
-internal static class SpriteCameraProjection
+internal static class TwoDimensionalCameraProjection
 {
     /// <summary>Resolves one captured camera against a framebuffer extent.</summary>
     /// <param name="camera">The captured camera values.</param>

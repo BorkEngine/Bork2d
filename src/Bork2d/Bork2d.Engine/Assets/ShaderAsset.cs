@@ -11,8 +11,15 @@ namespace Bork2d.Engine.Assets;
 /// <para>
 /// <see cref="SpirV"/> references the compiled module as raw data; the engine never compiles or
 /// reads shader source. <see cref="LayoutVersion"/> identifies the declaration layout schema this
-/// asset was built for; the current version is <c>2</c> (<see cref="ShaderLayout.CurrentVersion"/>).
+/// asset was built for; the current version is <c>3</c> (<see cref="ShaderLayout.CurrentVersion"/>).
 /// <see cref="EntryPoint"/> names the fragment entry point and defaults to <c>main</c>.
+/// </para>
+/// <para>
+/// Sprite and line renderables share one fragment interface from version <c>3</c> on. Besides the
+/// sprite values, the interface carries the line-only inputs <c>vLineUv</c> (across the stroke width
+/// and along the line), <c>vColor</c>, and <c>vLineFlags</c>; a sprite stage writes them as neutral
+/// values, and a line stage writes neutral sprite values, so the same asset may be assigned to
+/// either renderable kind.
 /// </para>
 /// <para>
 /// <see cref="InstanceUniforms"/> declares the per-renderable uniforms inside the shader's 16-float
@@ -47,7 +54,7 @@ public sealed partial class ShaderAsset
     /// Gets or sets the shader layout schema version the declarations were built for.
     /// </summary>
     /// <remarks>
-    /// The engine's current layout version is <c>2</c>. The loader does not validate this value;
+    /// The engine's current layout version is <c>3</c>. The loader does not validate this value;
     /// the renderer rejects or falls back from a version it does not implement.
     /// </remarks>
     public uint LayoutVersion { get; set; }

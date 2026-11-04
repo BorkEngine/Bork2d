@@ -15,13 +15,13 @@ namespace Bork2d.Engine.Scene;
 /// the owning parent to remove one, and re-attach the same instance later.
 /// </para>
 /// <para>
-/// <see cref="IRenderable.Bounds"/> is the world-space AABB of the visible rectangle: the four
+/// <see cref="IBoundedTransform.Bounds"/> is the world-space AABB of the visible rectangle: the four
 /// view-space corners <c>(±WorldSize.X/2, ±WorldSize.Y/2)</c> transformed by the camera's
 /// view-to-world matrix. It returns <see cref="Bounds.Empty"/> when the camera is invalid or the
 /// app is headless or has shut down, and it never throws for those cases.
 /// </para>
 /// </remarks>
-public interface ICamera<TLayer> : IRenderable where TLayer : struct, Enum
+public interface ICamera<TLayer> : IBoundedTransform where TLayer : struct, Enum
 {
     /// <summary>
     /// Gets or sets the normalized viewport <c>(x, y, width, height)</c> with a top-left origin.

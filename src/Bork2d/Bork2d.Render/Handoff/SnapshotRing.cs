@@ -43,7 +43,12 @@ internal sealed class SnapshotRing : IDisposable
     internal const int SlotCapacity = 3;
 
     private readonly SnapshotSlot[] _slots;
-    private readonly ManualResetEventSlim _producerWake = new(initialState: false);
+
+    // The producer is the only side that blocks on backpressure. ManualResetEvent (unlike
+    // ManualResetEventSlim) creates its kernel event in the constructor, so the first sustained block
+    // does not allocate on the producer thread; the benchmarks assert zero steady-state allocations
+    // on that thread.
+    private readonly ManualResetEvent _producerWake = new(initialState: false);
     private readonly ManualResetEventSlim _consumerWake = new(initialState: false);
     private int _latest = NoLatest;
     private int _stopped;
@@ -183,7 +188,7 @@ internal sealed class SnapshotRing : IDisposable
 
             try
             {
-                _producerWake.Wait();
+                _producerWake.WaitOne();
             }
             catch (ObjectDisposedException)
             {
@@ -509,6 +514,18 @@ internal sealed class SnapshotRing : IDisposable
             }
 
             observed = previous;
+        }
+    }
+
+    private static void Signal(ManualResetEvent wake)
+    {
+        try
+        {
+            wake.Set();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The ring was disposed by the joined host; there is no waiter left to wake.
         }
     }
 

@@ -4,14 +4,15 @@ namespace Bork2d.Render.Shaders;
 
 /// <summary>
 /// One usable fragment-shader entry in the renderer's catalog: the frozen metadata the planner needs
-/// and the identity that groups contiguous sprites into a <see cref="Sprites.ShaderRun"/>.
+/// and the identity that groups contiguous 2D records into a <c>TwoDimensional.DrawRun</c>.
 /// </summary>
 /// <remarks>
-/// A custom entry is keyed by its SPIR-V <see cref="DataRef"/> path because the captured sprite
+/// A custom entry is keyed by its SPIR-V <see cref="DataRef"/> path because the captured renderable
 /// already carries the frozen <see cref="ShaderRenderData"/>; the renderer never reloads the
 /// <see cref="ShaderAsset"/> per draw. The first frozen metadata seen for a path supplies the entry's
 /// declarations, so the path is the shader identity and its declaration set is fixed for that
-/// catalog. The default entry always has id <c>0</c>.
+/// catalog. Each kind's built-in default entry has a fixed id: <c>shader/sprite</c> is <c>0</c> and
+/// <c>shader/line</c> is <c>1</c>.
 /// </remarks>
 internal sealed class ShaderEntry
 {
@@ -19,7 +20,7 @@ internal sealed class ShaderEntry
     /// <param name="id">The entry identity used for run grouping.</param>
     /// <param name="path">The asset path used in diagnostics (the SPIR-V path for a custom shader).</param>
     /// <param name="metadata">The frozen declarations the planner reads.</param>
-    /// <param name="isDefault">Whether this is the built-in <c>shader/sprite</c> entry.</param>
+    /// <param name="isDefault">Whether this is a built-in default entry.</param>
     internal ShaderEntry(int id, string path, ShaderRenderData metadata, bool isDefault)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
@@ -39,6 +40,6 @@ internal sealed class ShaderEntry
     /// <summary>Gets the frozen shader declarations.</summary>
     internal ShaderRenderData Metadata { get; }
 
-    /// <summary>Gets a value indicating whether this is the built-in <c>shader/sprite</c> entry.</summary>
+    /// <summary>Gets a value indicating whether this is a built-in default entry.</summary>
     internal bool IsDefault { get; }
 }
