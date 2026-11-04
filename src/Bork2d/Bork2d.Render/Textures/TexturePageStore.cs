@@ -213,7 +213,7 @@ internal sealed class TexturePageStore
     internal int PendingUploadCount => _uploadQueue.Count;
 
     /// <summary>
-    /// Gets the declared payload bytes of <see cref="PendingUploadCount"/> (public
+    /// Gets the validated KTX2 payload bytes of <see cref="PendingUploadCount"/> (public
     /// <c>TextureUploadBytesPending</c>).
     /// </summary>
     internal long PendingUploadBytes => _pendingUploadBytes;
@@ -228,7 +228,7 @@ internal sealed class TexturePageStore
     internal long ResidencyBudgetBytes => _residencyBudgetBytes;
 
     /// <summary>
-    /// Gets the declared payload bytes of the current catalog's ready pages, which the residency
+    /// Gets the validated KTX2 payload bytes of the current catalog's ready pages, which the residency
     /// budget bounds. Retired pages awaiting reclamation and uploading pages are not counted.
     /// </summary>
     internal long ResidentPayloadBytes => _residentPayloadBytes;

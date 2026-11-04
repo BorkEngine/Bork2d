@@ -31,7 +31,7 @@ internal static class FrameRenderStats
     /// The content-ready pages queued for upload but not begun by this frame's pump.
     /// </param>
     /// <param name="textureUploadBytesPending">
-    /// The declared payload bytes of <paramref name="textureUploadsPending"/>.
+    /// The validated KTX2 payload bytes of <paramref name="textureUploadsPending"/>.
     /// </param>
     /// <param name="validationErrors">The cumulative fatal validation errors for the run.</param>
     /// <param name="validationWarnings">The cumulative validation warnings for the run.</param>
