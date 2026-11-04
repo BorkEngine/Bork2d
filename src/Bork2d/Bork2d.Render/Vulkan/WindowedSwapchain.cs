@@ -112,7 +112,7 @@ internal sealed unsafe class WindowedSwapchain : IDisposable
     /// <param name="logger">The <c>Bork2d.Render</c> logger.</param>
     /// <returns>The created swapchain.</returns>
     /// <exception cref="Bork2dException">
-    /// No sRGB format, no surface format/present mode, a zero extent, or a Vulkan failure.
+    /// No UNORM format, no surface format/present mode, a zero extent, or a Vulkan failure.
     /// </exception>
     internal static WindowedSwapchain Create(
         VulkanDevice device,

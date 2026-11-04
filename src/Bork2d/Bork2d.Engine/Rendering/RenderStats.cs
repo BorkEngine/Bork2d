@@ -7,9 +7,10 @@ namespace Bork2d.Engine.Rendering;
 /// <para>
 /// The values describe the last completed frame, except <see cref="ValidationErrors"/> and
 /// <see cref="ValidationWarnings"/>, which are cumulative for the run. <see cref="DrawCalls"/> counts
-/// the frame's contiguous shader runs (one <c>vkCmdDraw</c> each), so a default-only camera records
-/// exactly one draw while a camera that alternates custom and default sprites records one per
-/// contiguous group; <see cref="NonEmptyCameras"/> counts the cameras with at least one run.
+/// the frame's contiguous shader runs (one <c>vkCmdDraw</c> each) plus the final fullscreen present
+/// draw, so a default-only camera records two draws (its run and the present) while a camera that
+/// alternates custom and default sprites records one per contiguous group plus the present;
+/// <see cref="NonEmptyCameras"/> counts the cameras with at least one run.
 /// <see cref="TexturePages"/>
 /// and <see cref="TexturePageCapacity"/> are current for that frame and include the placeholder at
 /// index <c>0</c>; <see cref="TexturePages"/> counts the ready pages of the current asset catalog, so
@@ -31,7 +32,10 @@ namespace Bork2d.Engine.Rendering;
 /// <param name="FrameSequence">The snapshot sequence of the last completed frame.</param>
 /// <param name="FramebufferWidth">The last completed frame's framebuffer/target width in pixels.</param>
 /// <param name="FramebufferHeight">The last completed frame's framebuffer/target height in pixels.</param>
-/// <param name="DrawCalls">The number of <c>vkCmdDraw</c> calls recorded by the frame, one per shader run.</param>
+/// <param name="DrawCalls">
+/// The number of <c>vkCmdDraw</c> calls recorded by the frame: one per shader run plus the final
+/// fullscreen present draw.
+/// </param>
 /// <param name="Instances">The number of instance records submitted by the frame.</param>
 /// <param name="Cameras">The number of cameras captured for the frame.</param>
 /// <param name="NonEmptyCameras">The number of cameras that recorded at least one shader run.</param>

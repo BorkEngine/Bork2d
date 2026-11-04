@@ -240,7 +240,7 @@ public sealed class WindowedRendererGpuTests
 
             Assert.Equal(1, renderer.RenderStats.Cameras);
             Assert.Equal(1, renderer.RenderStats.NonEmptyCameras);
-            Assert.Equal(1, renderer.RenderStats.DrawCalls);
+            Assert.Equal(2, renderer.RenderStats.DrawCalls);
             Assert.Equal(1, renderer.RenderStats.Instances);
             Assert.True(
                 renderer.RenderStats.TexturePages >= 2,
@@ -287,7 +287,17 @@ public sealed class WindowedRendererGpuTests
             Assert.Equal(TextureFormat.Rgba8, firstResult.Format);
             Assert.Equal(firstResult.Width * firstResult.Height * 4, firstResult.Pixels.Length);
             Assert.Equal(firstResult.Pixels, secondResult.Pixels);
-            Assert.Equal(1, captureStats.DrawCalls);
+            Assert.Equal(2, captureStats.DrawCalls);
+            AssertPixelNear(
+                firstResult,
+                x: 2,
+                y: 2,
+                LinearToSrgbUnormByte(0.05f),
+                LinearToSrgbUnormByte(0.1f),
+                LinearToSrgbUnormByte(0.2f),
+                255,
+                tolerance: 1,
+                "the windowed camera clear encoded by the present pass");
             _output.WriteLine(
                 $"capture: bytes={firstResult.Pixels.Length}, "
                     + $"extent={firstResult.Width}x{firstResult.Height}, "
@@ -585,6 +595,47 @@ public sealed class WindowedRendererGpuTests
         Assert.Equal(-1, renderer.SnapshotRing.LatestIndex);
     }
 
+    private static void AssertPixelNear(
+        FrameCaptureResult result,
+        int x,
+        int y,
+        byte r,
+        byte g,
+        byte b,
+        byte a,
+        int tolerance,
+        string because)
+    {
+        int offset = ((y * result.Width) + x) * 4;
+        ReadOnlySpan<byte> pixels = result.Pixels.Span;
+        byte actualR = pixels[offset];
+        byte actualG = pixels[offset + 1];
+        byte actualB = pixels[offset + 2];
+        byte actualA = pixels[offset + 3];
+        Assert.True(
+            Math.Abs(actualR - r) <= tolerance
+                && Math.Abs(actualG - g) <= tolerance
+                && Math.Abs(actualB - b) <= tolerance
+                && Math.Abs(actualA - a) <= tolerance,
+            $"{because}: pixel ({x}, {y}) is ({actualR}, {actualG}, {actualB}, {actualA}), "
+                + $"expected ({r}, {g}, {b}, {a}) +/- {tolerance}.");
+    }
+
+    /// <summary>
+    /// Encodes a linear component exactly as the pipeline does: the linear scene image stores it as
+    /// UNORM, and the present pass applies the sRGB opto-electronic transfer function.
+    /// </summary>
+    /// <param name="linear">The linear color component.</param>
+    /// <returns>The final UNORM target byte.</returns>
+    private static byte LinearToSrgbUnormByte(float linear)
+    {
+        float stored = MathF.Round(Math.Clamp(linear, 0f, 1f) * 255f) / 255f;
+        float encoded = stored <= 0.0031308f
+            ? 12.92f * stored
+            : (1.055f * MathF.Pow(stored, 1f / 2.4f)) - 0.055f;
+        return (byte)Math.Clamp(MathF.Round(encoded * 255f), 0f, 255f);
+    }
+
     private static string DescribeRing(VulkanRenderer renderer)
         => $"slots=[{string.Join(
             ", ",
@@ -622,7 +673,7 @@ public sealed class WindowedRendererGpuTests
             || message.Contains(
                 "maxPerStageDescriptorUpdateAfterBindSampledImages=0",
                 StringComparison.Ordinal)
-            || message.Contains("No sRGB", StringComparison.Ordinal);
+            || message.Contains("No UNORM", StringComparison.Ordinal);
     }
 
     /// <summary>

@@ -17,7 +17,7 @@ build/Bork2d.BuiltInAssets ─────────> Bork2d.Bake, Bork2d.Engi
 | Project | Role |
 | --- | --- |
 | [Bork2d.Engine](../src/Bork2d/Bork2d.Engine) | Public contract and implementation: scene, time, input/platform seams, assets, pack reader/writer. No GPU, OS, or logging-provider dependency. |
-| [Bork2d.Render](../src/Bork2d/Bork2d.Render) | Internal Vulkan implementation: device selection, swapchain/offscreen target, sprite pipeline, texture pages, snapshot handoff, capture. |
+| [Bork2d.Render](../src/Bork2d/Bork2d.Render) | Internal Vulkan implementation: device selection, swapchain/offscreen target, linear scene image, sprite and present pipelines, texture pages, snapshot handoff, capture. |
 | [Bork2d.Runtime](../src/Bork2d/Bork2d.Runtime) | Public host: builder, modes, SDL window/input, Vulkan instance/surface, renderer composition, logging. Embeds the built-in shader pack. |
 | [Bork2d.Bake](../src/Bork2d/Bork2d.Bake) | Build-time JIT tooling: TOML binding, processors, texture decode/encode, pack composition, incremental manifest, CLI. |
 | [Bork2d.BuiltInAssets](../build/Bork2d.BuiltInAssets/Bork2d.BuiltInAssets.csproj) | Build-only JIT generator for the embedded built-in shader pack. Outside the runtime solution and never referenced by a runtime project. |
@@ -35,7 +35,7 @@ Nerdbank.MessagePack, Microsoft.Extensions.Logging.Abstractions, System.IO.Hashi
 | Thread | Owns | Notes |
 | --- | --- | --- |
 | Tick (game) thread | `IGame` callbacks, scene mutation | The caller's thread. `Run` and all engine members may run on any thread. |
-| Render thread | Vulkan device, swapchain/target, pipelines, texture pages, snapshot consumption | One thread per renderer; started by the host and joined before `Run` returns. |
+| Render thread | Vulkan device, swapchain/target, linear scene images, pipelines, texture pages, snapshot consumption | One thread per renderer; started by the host and joined before `Run` returns. |
 | Window thread | SDL video, the window, the event pump, the Vulkan instance/surface | Window commands are queued and coalesced; getters read the last confirmed state. |
 | Asset loader thread | Pack reads, decompression, MessagePack deserialization | One thread per app; load tasks complete asynchronously. |
 | Bake thread | Source discovery, binding, processing, pack writes | Build time only; never present in the runtime process. |
@@ -46,15 +46,15 @@ Engine-wide user shader uniforms use a separate dedicated lock and never the str
 setting a global never blocks scene capture or per-object work.
 
 The two render target drivers stay separate: `VulkanRenderer` owns swapchain acquire/present,
-resize, recovery, and the minimized drain; `VulkanOffscreenRenderer` owns the fixed sRGB target, its
+resize, recovery, and the minimized drain; `VulkanOffscreenRenderer` owns the fixed UNORM target, its
 one-time layout transition, and the discard path. They compose four shared compositions instead of
 duplicating renderer machinery: one `RendererLifecycle` (render thread, readiness, status/stop
 reason, one-shot fatal, snapshot handoff delegations, counters, stats board), one
 `RendererCaptureService` (bounded capture queue, frame-fence retirement, stop/fatal close), one
-`RendererTextures` (sprite pipeline per output format, texture-page store, bindless page writes), and
-one `RenderPassRegistry` (the ordered render passes and the aggregate frame statistics). A small
-`IVulkanFrame`/frame-set seam adapts the two frame types to those services. There is no renderer
-inheritance hierarchy.
+`RendererTextures` (sprite pipeline for the linear scene format, texture-page store, bindless page
+writes), and one `RenderPassRegistry` (the ordered render passes and the aggregate frame statistics).
+A small `IVulkanFrame`/frame-set seam adapts the two frame types to those services. There is no
+renderer inheritance hierarchy.
 
 ## Frame handoff
 
@@ -83,7 +83,7 @@ snapshot; it only runs the paced game loop.
 | Mode | Window / input | Renderer | Loop |
 | --- | --- | --- | --- |
 | Windowed (default) | SDL window; input available | Vulkan swapchain | Backpressured by the ring; stops on `Exit`, close, renderer fatal, or platform fatal. |
-| Offscreen | Functional window facade reporting the fixed target extent; no input | Fixed sRGB Vulkan target; frames discarded | Same handoff loop; stops on `Exit` or renderer fatal. |
+| Offscreen | Functional window facade reporting the fixed target extent; no input | Fixed UNORM Vulkan target; frames discarded | Same handoff loop; stops on `Exit` or renderer fatal. |
 | Headless | None; `IEngine.Window` is a throwing stub | None, no GPU or SDL | Absolute-deadline paced loop with a synthesized clock; stops on `Exit`. |
 
 Windowed and offscreen run through one internal rendered-run lifecycle: assets, platform startup,

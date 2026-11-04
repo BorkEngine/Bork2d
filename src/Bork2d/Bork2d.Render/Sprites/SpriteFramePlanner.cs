@@ -137,7 +137,7 @@ internal sealed class SpriteFramePlanner
     /// frame time in <c>time.x</c>, the declared engine-wide user values for that run's shader, and
     /// each declaration's shader default where the engine has no matching name and type.
     /// </param>
-    /// <param name="targetFormat">The target's sRGB output color format for this frame.</param>
+    /// <param name="sceneFormat">The linear scene color format the 2D pipelines are created for.</param>
     /// <returns>The refilled plan; valid until the next <see cref="Plan"/> call.</returns>
     /// <exception cref="Bork2dException">
     /// A sprite field is malformed, a shader entry or pipeline invariant is broken, the accumulated
@@ -150,7 +150,7 @@ internal sealed class SpriteFramePlanner
         int framebufferHeight,
         IInstanceBuffer instances,
         IGlobalUniformBuffer globals,
-        Format targetFormat)
+        Format sceneFormat)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(instances);
@@ -180,7 +180,7 @@ internal sealed class SpriteFramePlanner
             SpriteSkipReason reason = ResolveSprite(
                 sprite,
                 spriteIndex,
-                targetFormat,
+                sceneFormat,
                 globalUniforms,
                 out SpriteInstance instance);
             if (reason != SpriteSkipReason.None)
@@ -541,7 +541,7 @@ internal sealed class SpriteFramePlanner
     private SpriteSkipReason ResolveSprite(
         in SpriteSnapshot sprite,
         int spriteIndex,
-        Format targetFormat,
+        Format sceneFormat,
         ReadOnlySpan<GlobalUniformSnapshot> globalUniforms,
         out SpriteInstance instance)
     {
@@ -573,22 +573,22 @@ internal sealed class SpriteFramePlanner
         ShaderEntry entry;
         if (sprite.ShaderData is null)
         {
-            entry = _defaultEntry ??= ResolveDefaultEntry(targetFormat);
+            entry = _defaultEntry ??= ResolveDefaultEntry(sceneFormat);
         }
         else
         {
-            ShaderBinding binding = _shaders.Resolve(sprite.ShaderData, targetFormat);
+            ShaderBinding binding = _shaders.Resolve(sprite.ShaderData, sceneFormat);
             if (binding.State == ShaderBindingState.Pending)
             {
                 return SpriteSkipReason.Pending;
             }
 
             entry = binding.State == ShaderBindingState.Failed
-                ? _defaultEntry ??= ResolveDefaultEntry(targetFormat)
+                ? _defaultEntry ??= ResolveDefaultEntry(sceneFormat)
                 : _shaders.GetEntry(binding.EntryId);
         }
 
-        entry = ApplyGlobalCompatibility(entry, globalUniforms, targetFormat);
+        entry = ApplyGlobalCompatibility(entry, globalUniforms, sceneFormat);
 
         TexturePageLookup lookup = _pages.EnsurePage(data.Texture.Path);
         if (lookup.Kind == TexturePageLookupKind.Pending)
@@ -611,16 +611,16 @@ internal sealed class SpriteFramePlanner
         return SpriteSkipReason.None;
     }
 
-    private ShaderEntry ResolveDefaultEntry(Format targetFormat)
+    private ShaderEntry ResolveDefaultEntry(Format sceneFormat)
     {
-        ShaderBinding binding = _shaders.Resolve(null, targetFormat);
+        ShaderBinding binding = _shaders.Resolve(null, sceneFormat);
         return _shaders.GetEntry(binding.EntryId);
     }
 
     private ShaderEntry ApplyGlobalCompatibility(
         ShaderEntry entry,
         ReadOnlySpan<GlobalUniformSnapshot> globalUniforms,
-        Format targetFormat)
+        Format sceneFormat)
     {
         if (IsGlobalCompatible(entry, globalUniforms))
         {
@@ -635,7 +635,7 @@ internal sealed class SpriteFramePlanner
             return entry;
         }
 
-        ShaderEntry defaultEntry = _defaultEntry ??= ResolveDefaultEntry(targetFormat);
+        ShaderEntry defaultEntry = _defaultEntry ??= ResolveDefaultEntry(sceneFormat);
         if (!IsGlobalCompatible(defaultEntry, globalUniforms))
         {
             LogGlobalTypeMismatch(defaultEntry);

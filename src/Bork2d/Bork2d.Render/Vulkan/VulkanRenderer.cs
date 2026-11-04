@@ -13,22 +13,25 @@ namespace Bork2d.Render.Vulkan;
 
 /// <summary>
 /// The production windowed Vulkan renderer: one render thread owns the device, swapchain, frames,
-/// the snapshot ring, and the dynamic-rendering clear, and records exactly one GPU frame per
-/// consumed snapshot until the host stops it (Q7=G1, D-M6-06).
+/// the snapshot ring, the linear scene image, and the final present pass, and records exactly one GPU
+/// frame per consumed snapshot until the host stops it (Q7=G1, D-M6-06).
 /// </summary>
 /// <remarks>
 /// <para>
 /// <see cref="Start"/> creates one background thread and returns immediately. The thread selects a
-/// present-capable device, creates the swapchain and two frames in flight, then marks the renderer
-/// ready. The host observes readiness, status, counters, and the one-shot fatal error through
-/// <see cref="IRenderer"/>; it drives the snapshot handoff through the slot API in M7 WP-4.
+/// present-capable device, creates the swapchain, two frames in flight (each with its own linear scene
+/// image), and the sprite/present pipelines, then marks the renderer ready. The host observes
+/// readiness, status, counters, and the one-shot fatal error through <see cref="IRenderer"/>; it
+/// drives the snapshot handoff through the slot API in M7 WP-4.
 /// </para>
 /// <para>
 /// The renderer keeps only the swapchain driver: surface/present selection, acquire/present,
 /// resize/recreation, single surface recovery, and the minimized drain. Thread lifecycle, readiness,
 /// counters, snapshot handoff, captures, and texture setup/teardown come from the shared
 /// <see cref="RendererLifecycle"/>, <see cref="RendererCaptureService"/>, and
-/// <see cref="RendererTextures"/> compositions.
+/// <see cref="RendererTextures"/> compositions. The 2D passes render linear color into the scene image
+/// and the registered present pass applies the sRGB encoding into the UNORM swapchain image; capture
+/// reads that final encoded target.
 /// </para>
 /// <para>
 /// With no <c>Ready</c> snapshot the render thread blocks on the combined snapshot/control wait; it
@@ -55,6 +58,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
     private readonly RendererLifecycle _lifecycle;
 
     private RendererTextures? _textures;
+    private PresentPipeline? _present;
     private VulkanDevice? _device;
     private WindowedSwapchain? _swapchain;
     private RenderPassRegistry? _passes;
@@ -253,6 +257,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             _startInfo.AssetCatalogVersion,
             _startInfo.TextureUploadBudgetBytes,
             _startInfo.TextureResidencyBudgetBytes);
+        _present = PresentPipeline.Load(_device, instance, _startInfo.Assets, _logger);
         CreateSwapchain(reason: null);
         if (_lifecycle.Control.IsStopRequested)
         {
@@ -269,7 +274,8 @@ internal sealed unsafe class VulkanRenderer : IRenderer
                 _textures.Pipeline!,
                 _textures.Shaders!,
                 _textures.Pages!,
-                _logger));
+                _logger),
+            new PresentRenderPass(_present));
         _passLabel = instance.CreateDebugLabel("Bork2d windowed passes");
         _lifecycle.UpdateValidationCounters(instance);
         if (_lifecycle.Control.IsStopRequested)
@@ -524,7 +530,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             (int)swapchain.Extent.Height,
             frame.InstanceResources,
             frame.InstanceResources,
-            swapchain.Format);
+            SceneTarget.ColorFormat);
         RecordFrame(frame, imageIndex, swapchain, device);
         Submit(frame, imageIndex, swapchain, device);
         frame.InstanceResources.MarkSubmitted();
@@ -591,8 +597,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             throw new Bork2dException($"vkBeginCommandBuffer failed with VkResult {begin}.");
         }
 
-        // A newly acquired image is UNDEFINED; the frame clear and every camera pass run in
-        // COLOR_ATTACHMENT_OPTIMAL.
+        // A newly acquired image is UNDEFINED; the frame clear and every 2D pass run in the linear
+        // scene image in COLOR_ATTACHMENT_OPTIMAL.
+        frame.Scene.RecordToColorAttachment(commandBuffer);
         var range = new ImageSubresourceRange
         {
             AspectMask = ImageAspectFlags.ColorBit,
@@ -628,12 +635,12 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             commandBuffer.Handle,
             _passLabel);
 
-        // A newly acquired image is UNDEFINED and a camera may load instead of clearing, so one
-        // full-target opaque-black clear defines every pixel before any camera pass runs.
+        // The scene image starts undefined and a camera may load instead of clearing, so one
+        // full-target opaque-black clear defines every linear scene pixel before any camera pass runs.
         SpritePassRecorder.RecordFrameClear(
             device.Api,
             commandBuffer,
-            swapchain.GetView(imageIndex),
+            frame.Scene.View,
             swapchain.Extent);
 
         bool capture = _captures.BeginRecord(
@@ -645,15 +652,21 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             new RenderPassRecordContext(
                 device.Api,
                 commandBuffer,
+                frame.Scene.View,
+                frame.Scene.Image,
                 swapchain.GetView(imageIndex),
                 swapchain.GetImage(imageIndex),
+                swapchain.Extent,
                 frame.InstanceResources.DescriptorSet,
                 frame.InstanceResources.GlobalDescriptorSet,
+                frame.InstanceResources.PresentDescriptorSet,
+                SceneTarget.ColorFormat,
                 swapchain.Format));
 
         if (capture)
         {
-            // The capture copy includes every camera clear/draw and ends in PRESENT_SRC_KHR.
+            // The capture copy includes every camera clear/draw and the present pass's encoding, and
+            // ends in PRESENT_SRC_KHR.
             FrameCaptureRecorder.RecordCopy(
                 device.Api,
                 commandBuffer,
@@ -773,10 +786,11 @@ internal sealed unsafe class VulkanRenderer : IRenderer
 
         old?.Dispose();
 
-        // The sprite pipeline needs the final swapchain color format; a recreation that selects a
-        // different format creates that format's pipeline lazily. Creation failure is fatal and the
-        // new swapchain is already the current one, so cleanup owns it.
-        _textures!.EnsurePipeline(created.Format);
+        // The sprite pipelines bake the linear scene format into their color-attachment state, so a
+        // swapchain format change never creates a new sprite pipeline variant. The present pipeline
+        // writes the final target and caches one pipeline per target format.
+        _textures!.EnsurePipeline(SceneTarget.ColorFormat);
+        _present!.EnsurePipeline(created.Format);
 
         _lastResult = Result.Success;
         if (reason is not null)
@@ -793,7 +807,24 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         // vkDeviceWaitIdle completed every in-flight fence: their snapshot slots are free.
         _lifecycle.ReleaseHeldSnapshots("swapchain recreation");
         CreateSwapchain(reason);
+        RecreateSceneTargets();
         _lastResult = Result.Success;
+    }
+
+    /// <summary>
+    /// Replaces every frame's linear scene image with one for the current swapchain extent.
+    /// </summary>
+    /// <remarks>
+    /// Runs only after a swapchain recreation, which already idled the device, so no GPU frame can
+    /// still reference the previous scene images. The fixed offscreen target never takes this path.
+    /// </remarks>
+    private void RecreateSceneTargets()
+    {
+        WindowedSwapchain swapchain = _swapchain!;
+        for (var index = 0; index < _frames.Count; index++)
+        {
+            _frames[index]?.RecreateScene(_device!, swapchain.Extent, _instance);
+        }
     }
 
     private void RecoverSurface()
@@ -839,6 +870,7 @@ internal sealed unsafe class VulkanRenderer : IRenderer
 
         _surfaceHandle = replacement;
         CreateSwapchain(SwapchainRecreateReason.SurfaceLost);
+        RecreateSceneTargets();
         _logger.LogWarning(
             "Vulkan surface lost and recovered: result={Result}, attempt={Attempt}, "
                 + "newExtent={Width}x{Height}, presentMode={PresentMode}.",
@@ -855,6 +887,10 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         SpritePipeline pipeline = _textures?.Pipeline
             ?? throw new Bork2dException(
                 "The windowed renderer cannot create frames without the sprite pipeline.");
+        PresentPipeline present = _present
+            ?? throw new Bork2dException(
+                "The windowed renderer cannot create frames without the present pipeline.");
+        WindowedSwapchain swapchain = _swapchain!;
         var frames = new WindowedFrame?[FramesInFlight];
 
         // Attach before creating: a mid-loop failure must leave the already-created frames visible
@@ -868,7 +904,9 @@ internal sealed unsafe class VulkanRenderer : IRenderer
                 device.PhysicalDevice,
                 index,
                 device.QueueFamilyIndex,
+                swapchain.Extent,
                 pipeline,
+                present,
                 pageCapacity,
                 device.Limits.MaxStorageBufferRange,
                 device.Limits.MaxUniformBufferRange,
@@ -1015,8 +1053,11 @@ internal sealed unsafe class VulkanRenderer : IRenderer
         _swapchain = null;
 
         // Frame descriptor sets/pools are destroyed before the page images/views they reference,
-        // and the pages before the pipeline that owns their samplers and the device itself.
+        // and the pages before the pipeline that owns their samplers and the device itself. The
+        // present pipeline is destroyed after the frame sets that use its layout.
         _frames.DisposeFrames();
+        _present?.Destroy();
+        _present = null;
         _textures?.Destroy();
 
         _device?.Destroy();
@@ -1035,9 +1076,16 @@ internal sealed unsafe class VulkanRenderer : IRenderer
 
         TexturePageStore? pages = _textures?.Pages;
         RendererCounters counters = _lifecycle.Counters;
+        ulong sceneBytes = 0;
+        for (var index = 0; index < _frames.Count; index++)
+        {
+            sceneBytes += _frames[index]?.Scene.MemoryBytes ?? 0;
+        }
+
         _logger.LogInformation(
             "Vulkan renderer started: mode={Mode}, extent={Width}x{Height}, format={Format}, "
-                + "colorSpace={ColorSpace}, presentMode={PresentMode}, images={ImageCount}, "
+                + "colorSpace={ColorSpace}, sceneFormat={SceneFormat}, sceneBytes={SceneBytes}, "
+                + "presentMode={PresentMode}, images={ImageCount}, "
                 + "framesInFlight={FramesInFlight}, handoff={Handoff}, ringDepth={RingDepth}, "
                 + "oneFramePerSnapshot={OneFramePerSnapshot}, instanceResources={InstanceResources}, "
                 + "instanceCapacity={InstanceCapacity}, texturePages={TexturePages}, "
@@ -1052,6 +1100,8 @@ internal sealed unsafe class VulkanRenderer : IRenderer
             swapchain.Extent.Height,
             swapchain.Format,
             swapchain.ColorSpace,
+            SceneTarget.ColorFormat,
+            sceneBytes,
             swapchain.PresentMode,
             swapchain.ImageCount,
             FramesInFlight,

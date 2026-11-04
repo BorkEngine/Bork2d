@@ -5,14 +5,16 @@ using Silk.NET.Vulkan;
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// One offscreen GPU frame's command pool, command buffer, fence, and the empty instance resources
-/// (instance SSBO and frame descriptor set, Q10=J1) (D-M6-11).
+/// One offscreen GPU frame's command pool, command buffer, fence, linear scene color image, and the
+/// empty instance resources (instance SSBO, frame descriptor sets, and present descriptor set,
+/// Q10=J1) (D-M6-11).
 /// </summary>
 /// <remarks>
 /// The render thread owns the frame. The fence is created signaled so the first wait succeeds
 /// immediately; reuse is gated by the fence. Offscreen rendering has no acquire, no semaphores, no
-/// present, and no readback (D-M6-23), so a frame owns no synchronization beyond its fence.
-/// <see cref="Dispose"/> is idempotent and never throws (D-M6-27).
+/// present, and no readback (D-M6-23), so a frame owns no synchronization beyond its fence. The scene
+/// image matches the fixed target extent and is created once. <see cref="Dispose"/> is idempotent and
+/// never throws (D-M6-27).
 /// </remarks>
 internal sealed unsafe class OffscreenFrame : IVulkanFrame
 {
@@ -29,6 +31,7 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
         CommandBuffer commandBuffer,
         Fence fence,
         FrameInstanceResources instanceResources,
+        SceneTarget scene,
         FrameCapture capture)
     {
         _vk = vk;
@@ -38,6 +41,7 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
         CommandBuffer = commandBuffer;
         Fence = fence;
         InstanceResources = instanceResources;
+        Scene = scene;
         Capture = capture;
     }
 
@@ -50,8 +54,11 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
     /// <summary>Gets the in-flight fence.</summary>
     internal Fence Fence { get; }
 
-    /// <summary>Gets the empty instance buffer and frame descriptor set (Q10=J1).</summary>
+    /// <summary>Gets the empty instance buffer and frame descriptor sets (Q10=J1).</summary>
     internal FrameInstanceResources InstanceResources { get; }
+
+    /// <summary>Gets the frame's linear scene color image the 2D passes render into.</summary>
+    internal SceneTarget Scene { get; }
 
     /// <summary>Gets the frame's pooled readback staging and pending capture requests (M8 §6.9).</summary>
     internal FrameCapture Capture { get; }
@@ -71,7 +78,11 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
     /// <param name="physicalDevice">The physical device used to select instance-buffer memory.</param>
     /// <param name="frameIndex">The GPU frame index, used for debug names.</param>
     /// <param name="queueFamilyIndex">The graphics queue family.</param>
+    /// <param name="extent">The fixed offscreen target extent the scene image matches.</param>
     /// <param name="pipeline">The sprite pipeline that owns the descriptor-set layout.</param>
+    /// <param name="present">
+    /// The present pipeline that owns the present descriptor-set layout and sampler.
+    /// </param>
     /// <param name="pageCapacity">The initial bindless page capacity, including the placeholder.</param>
     /// <param name="maxStorageBufferRange">The device's <c>maxStorageBufferRange</c> limit.</param>
     /// <param name="maxUniformBufferRange">The device's <c>maxUniformBufferRange</c> limit.</param>
@@ -88,7 +99,9 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
         PhysicalDevice physicalDevice,
         int frameIndex,
         uint queueFamilyIndex,
+        Extent2D extent,
         SpritePipeline pipeline,
+        PresentPipeline present,
         int pageCapacity,
         uint maxStorageBufferRange,
         uint maxUniformBufferRange,
@@ -102,6 +115,7 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
         var commandBuffer = default(CommandBuffer);
         var fence = default(Fence);
         FrameInstanceResources? instanceResources = null;
+        SceneTarget? scene = null;
         try
         {
             var poolInfo = new CommandPoolCreateInfo
@@ -147,12 +161,15 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
                 physicalDevice,
                 frameIndex,
                 pipeline,
+                present,
                 pageCapacity,
                 maxStorageBufferRange,
                 maxUniformBufferRange,
                 minUniformBufferOffsetAlignment,
                 instance,
                 logger);
+            scene = SceneTarget.Create(vk, device, physicalDevice, extent, frameIndex, instance, logger);
+            instanceResources.WritePresentView(scene.View);
 
             return new OffscreenFrame(
                 vk,
@@ -162,10 +179,12 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
                 commandBuffer,
                 fence,
                 instanceResources,
+                scene,
                 new FrameCapture(vk, device, physicalDevice, frameIndex, logger));
         }
         catch
         {
+            scene?.Destroy();
             instanceResources?.Destroy();
             DestroyBestEffort(vk, device, logger, pool, fence);
             throw;
@@ -184,6 +203,7 @@ internal sealed unsafe class OffscreenFrame : IVulkanFrame
         }
 
         Capture.Destroy();
+        Scene.Destroy();
         InstanceResources.Destroy();
         DestroyBestEffort(_vk, _device, _logger, Pool, Fence);
     }

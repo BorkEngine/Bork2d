@@ -7,11 +7,12 @@ namespace Bork2d.Render.Vulkan;
 /// Records the optional image-to-buffer copy for <c>IEngine.CaptureFrameAsync</c> (M8 §6.9).
 /// </summary>
 /// <remarks>
-/// The copy runs after the last camera pass and before present/discard. The image transitions
+/// The copy runs after the final present pass and before present/discard. The image transitions
 /// <c>COLOR_ATTACHMENT_OPTIMAL → TRANSFER_SRC_OPTIMAL</c>, is copied into the frame's pooled
 /// host-visible staging buffer, and then transitions to <c>PRESENT_SRC_KHR</c> (windowed) or back to
-/// <c>COLOR_ATTACHMENT_OPTIMAL</c> (offscreen). The copy includes every camera clear and draw and
-/// excludes OS/window chrome. When no capture is requested, none of this is recorded.
+/// <c>COLOR_ATTACHMENT_OPTIMAL</c> (offscreen). The copy includes every camera clear and draw and the
+/// present pass's encoding, and excludes OS/window chrome. When no capture is requested, none of this
+/// is recorded.
 /// </remarks>
 internal static unsafe class FrameCaptureRecorder
 {

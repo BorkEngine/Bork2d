@@ -50,6 +50,9 @@ internal sealed unsafe class VulkanFrameSet<TFrame> : IVulkanFrameSet
     /// <param name="index">The GPU frame index.</param>
     internal TFrame? this[int index] => _frames[index];
 
+    /// <summary>Gets the number of GPU frame slots in the set.</summary>
+    internal int Count => _frames.Length;
+
     /// <summary>Gets a value indicating whether every GPU frame owns its instance resources.</summary>
     internal bool HasInstanceResources
     {

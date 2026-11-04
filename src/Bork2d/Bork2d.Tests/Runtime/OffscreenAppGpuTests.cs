@@ -170,7 +170,7 @@ public sealed class OffscreenAppGpuTests
             || message.Contains(
                 "maxPerStageDescriptorUpdateAfterBindSampledImages=0",
                 StringComparison.Ordinal)
-            || message.Contains("No sRGB offscreen color format", StringComparison.Ordinal);
+            || message.Contains("No UNORM offscreen color format", StringComparison.Ordinal);
     }
 
     private sealed class RecordingRendererFactory : IRendererFactory

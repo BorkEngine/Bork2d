@@ -26,6 +26,8 @@ public sealed class BuiltInAssetPackTests
 
     private static readonly string[] _builtInPaths =
     [
+        "present/fragment-spv",
+        "present/vertex-spv",
         "shader/sprite",
         "shader/sprite-spv",
         "shader/vertex-spv",
@@ -66,19 +68,31 @@ public sealed class BuiltInAssetPackTests
         byte[] vertexSpirV = await host.Service
             .LoadData("shader/vertex-spv")
             .WaitAsync(_loadTimeout);
+        byte[] presentVertexSpirV = await host.Service
+            .LoadData("present/vertex-spv")
+            .WaitAsync(_loadTimeout);
+        byte[] presentFragmentSpirV = await host.Service
+            .LoadData("present/fragment-spv")
+            .WaitAsync(_loadTimeout);
 
         Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(spriteSpirV));
         Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(vertexSpirV));
+        Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(presentVertexSpirV));
+        Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(presentFragmentSpirV));
 
         Assert.True(host.Service.Exists("shader/sprite"));
         Assert.True(host.Service.Exists("shader/sprite-spv"));
         Assert.True(host.Service.Exists("shader/vertex-spv"));
+        Assert.True(host.Service.Exists("present/vertex-spv"));
+        Assert.True(host.Service.Exists("present/fragment-spv"));
         Assert.Equal(_builtInPaths, host.Service.Browse().Select(info => info.Path));
         Assert.All(
             host.Service.Browse(),
             info => Assert.Equal(AssetService.BuiltInPackDisplayPath, info.PackPath));
         Assert.True(Assert.Single(host.Service.Browse("shader/sprite-spv")).IsRaw);
         Assert.True(Assert.Single(host.Service.Browse("shader/vertex-spv")).IsRaw);
+        Assert.True(Assert.Single(host.Service.Browse("present/vertex-spv")).IsRaw);
+        Assert.True(Assert.Single(host.Service.Browse("present/fragment-spv")).IsRaw);
 
         var catalog = Assert.IsAssignableFrom<IAssetCatalogVersion>(host.Service);
         Assert.Equal(1, catalog.CatalogVersion);
@@ -155,7 +169,9 @@ public sealed class BuiltInAssetPackTests
         {
             exists = engine.Assets.Exists("shader/sprite")
                 && engine.Assets.Exists("shader/sprite-spv")
-                && engine.Assets.Exists("shader/vertex-spv");
+                && engine.Assets.Exists("shader/vertex-spv")
+                && engine.Assets.Exists("present/vertex-spv")
+                && engine.Assets.Exists("present/fragment-spv");
             browse = engine.Assets.Browse();
             shader = engine.Assets
                 .LoadAsset<ShaderAsset>("shader/sprite")

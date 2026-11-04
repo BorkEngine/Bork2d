@@ -189,7 +189,14 @@ public sealed class AppAssetRuntimeTests
         AppTestSupport.RunToCompletion(app);
 
         Assert.Equal(
-            new[] { "shader/sprite", "shader/sprite-spv", "shader/vertex-spv" },
+            new[]
+            {
+                "present/fragment-spv",
+                "present/vertex-spv",
+                "shader/sprite",
+                "shader/sprite-spv",
+                "shader/vertex-spv",
+            },
             browse!.Select(info => info.Path));
         Assert.All(
             browse!,
@@ -268,6 +275,8 @@ public sealed class AppAssetRuntimeTests
             {
                 "data/overlay",
                 "data/overlay-config",
+                "present/fragment-spv",
+                "present/vertex-spv",
                 "shader/sprite",
                 "shader/sprite-spv",
                 "shader/vertex-spv",
@@ -367,7 +376,9 @@ public sealed class AppAssetRuntimeTests
         Assert.Contains(browse!, info => info.Path == "shader/sprite");
         Assert.Contains(browse!, info => info.Path == "shader/sprite-spv");
         Assert.Contains(browse!, info => info.Path == "shader/vertex-spv");
-        Assert.Equal(8, browse!.Count);
+        Assert.Contains(browse!, info => info.Path == "present/vertex-spv");
+        Assert.Contains(browse!, info => info.Path == "present/fragment-spv");
+        Assert.Equal(10, browse!.Count);
         Assert.Equal(overlayPath, sharedPackPath);
         Assert.Equal(new byte[] { 2, 3 }, sharedBytes);
         Assert.Equal("overlay", config!.Name);
