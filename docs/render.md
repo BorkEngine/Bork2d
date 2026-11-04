@@ -68,12 +68,16 @@ Useful files: [IRenderer.cs](../src/Bork2d/Bork2d.Render/IRenderer.cs),
 ## Device and presentation
 
 A device must support Vulkan 1.3 and the full required feature set: dynamic rendering,
-synchronization 2, runtime descriptor arrays, non-uniform sampled-array indexing, partially bound
-descriptors, sampled-image update-after-bind, update-unused-while-pending, variable descriptor
-counts, and `textureCompressionBC`. `textureCompressionBC` is a desktop Vulkan 1.3 requirement: every
-baked BC texture must sample natively, and there is no RGBA fallback or runtime transcoder, so a
-device without it fails selection with a message naming the feature and that requirement. The device
-must also report a `maxUniformBufferRange` of at least the 144-byte global block; a smaller value is a
+synchronization 2, shader demote-to-helper-invocation, runtime descriptor arrays, non-uniform
+sampled-array indexing, partially bound descriptors, sampled-image update-after-bind,
+update-unused-while-pending, variable descriptor counts, and `textureCompressionBC`.
+`textureCompressionBC` is a desktop Vulkan 1.3 requirement: every baked BC texture must sample
+natively, and there is no RGBA fallback or runtime transcoder, so a device without it fails selection
+with a message naming the feature and that requirement. `shaderDemoteToHelperInvocation` is required
+for fragment shaders that use `discard`/demote: the bake emits the `DemoteToHelperInvocation` SPIR-V
+capability for such a source (the Pong court's dashed center line is one), so a device without the
+feature fails selection with a message naming the feature and that requirement. The device must also
+report a `maxUniformBufferRange` of at least the 144-byte global block; a smaller value is a
 device-selection failure with a clear message. The device's `minUniformBufferOffsetAlignment` sets the
 per-frame global-block stride. Windowed selection additionally requires a graphics queue family that
 presents to the surface. Discrete GPUs are preferred over integrated, then other types.

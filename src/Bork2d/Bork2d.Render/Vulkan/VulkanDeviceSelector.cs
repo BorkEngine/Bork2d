@@ -260,6 +260,10 @@ internal static unsafe class VulkanDeviceSelector
         {
             SType = StructureType.PhysicalDeviceSynchronization2Features,
         };
+        var demote = new PhysicalDeviceShaderDemoteToHelperInvocationFeatures
+        {
+            SType = StructureType.PhysicalDeviceShaderDemoteToHelperInvocationFeatures,
+        };
         var features2 = new PhysicalDeviceFeatures2
         {
             SType = StructureType.PhysicalDeviceFeatures2,
@@ -267,12 +271,14 @@ internal static unsafe class VulkanDeviceSelector
         };
         indexing.PNext = &dynamicRendering;
         dynamicRendering.PNext = &synchronization2;
+        synchronization2.PNext = &demote;
 
         vk.GetPhysicalDeviceFeatures2(physicalDevice, &features2);
 
         return new VulkanFeatureSet(
             DynamicRendering: dynamicRendering.DynamicRendering,
             Synchronization2: synchronization2.Synchronization2,
+            ShaderDemoteToHelperInvocation: demote.ShaderDemoteToHelperInvocation,
             RuntimeDescriptorArray: indexing.RuntimeDescriptorArray,
             ShaderSampledImageArrayNonUniformIndexing:
                 indexing.ShaderSampledImageArrayNonUniformIndexing,
@@ -344,6 +350,11 @@ internal static unsafe class VulkanDeviceSelector
             SType = StructureType.PhysicalDeviceSynchronization2Features,
             Synchronization2 = true,
         };
+        var demote = new PhysicalDeviceShaderDemoteToHelperInvocationFeatures
+        {
+            SType = StructureType.PhysicalDeviceShaderDemoteToHelperInvocationFeatures,
+            ShaderDemoteToHelperInvocation = true,
+        };
         var features2 = new PhysicalDeviceFeatures2
         {
             SType = StructureType.PhysicalDeviceFeatures2,
@@ -355,6 +366,7 @@ internal static unsafe class VulkanDeviceSelector
         };
         indexing.PNext = &dynamicRendering;
         dynamicRendering.PNext = &synchronization2;
+        synchronization2.PNext = &demote;
 
         nint extensionPointer = 0;
         Device device = default;
@@ -595,6 +607,7 @@ internal static unsafe class VulkanDeviceSelector
         [
             $"dynamicRendering={features.DynamicRendering}",
             $"synchronization2={features.Synchronization2}",
+            $"shaderDemoteToHelperInvocation={features.ShaderDemoteToHelperInvocation}",
             $"runtimeDescriptorArray={features.RuntimeDescriptorArray}",
             "shaderSampledImageArrayNonUniformIndexing="
                 + features.ShaderSampledImageArrayNonUniformIndexing,
