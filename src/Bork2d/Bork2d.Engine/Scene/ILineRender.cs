@@ -145,8 +145,13 @@ public interface ILineRender<TLayer> : IRenderable where TLayer : struct, Enum
     TLayer Layer { get; set; }
 
     /// <summary>
-    /// Gets or sets the sort order within a layer; higher draws later.
+    /// Gets or sets the shared 2D draw order; higher draws later and equal values fall back to
+    /// per-camera screen-space Y then X.
     /// </summary>
+    /// <remarks>
+    /// <c>ZIndex</c> is shared by sprites and lines and is not layer-scoped: <see cref="Layer"/> only
+    /// filters which cameras draw this renderable. The default is <c>0</c>.
+    /// </remarks>
     int ZIndex { get; set; }
 
     /// <summary>

@@ -1,13 +1,13 @@
 using System.Numerics;
 using Bork2d.Engine.Rendering;
-using Bork2d.Render.Sprites;
 using Silk.NET.Vulkan;
+using Buffer = Silk.NET.Vulkan.Buffer;
 
-namespace Bork2d.Render.Vulkan;
+namespace Bork2d.Render.TwoDimensional;
 
 /// <summary>
 /// Records the frame's full-target opaque-black clear and the approved per-camera dynamic-rendering
-/// passes with one instanced draw per contiguous shader run (M8 §6.8/§6.11, custom shaders).
+/// passes with one instanced sprite draw or one indexed line draw per contiguous draw run.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -24,9 +24,10 @@ namespace Bork2d.Render.Vulkan;
 /// color; <c>Clear.None</c>/<c>Clear.Depth</c> use <c>LOAD</c> and never touch depth. A camera with
 /// at least one run sets its viewport/scissor once, pushes the 64-byte view-projection once, then
 /// binds each run's pipeline and descriptor sets with that run's global-block dynamic offset and
-/// issues <c>vkCmdDraw(4, run.InstanceCount, 0, run.FirstInstance)</c>. Consecutive runs that share
-/// both the pipeline and the dynamic offset skip the redundant binds. A camera with no runs records
-/// only its pass when it clears.
+/// issues the kind's draw: <c>vkCmdDraw(4, InstanceCount, 0, FirstInstance)</c> for a sprite run, or
+/// <c>vkCmdDrawIndexed(IndexCount, 1, FirstIndex, 0, 0)</c> for a line run. The line vertex and index
+/// buffers are bound once per camera before the first line run. Consecutive runs that share both the
+/// pipeline and the dynamic offset skip the redundant binds.
 /// </para>
 /// <para>
 /// A scene color-attachment barrier runs before every camera pass so its <c>LOAD</c> observes the
@@ -35,9 +36,9 @@ namespace Bork2d.Render.Vulkan;
 /// pass before the final present pass.
 /// </para>
 /// </remarks>
-internal static unsafe class SpritePassRecorder
+internal static unsafe class TwoDimensionalPassRecorder
 {
-    /// <summary>The vertex count of the shader-generated quad.</summary>
+    /// <summary>The vertex count of the shader-generated sprite quad.</summary>
     internal const uint QuadVertexCount = 4;
 
     /// <summary>
@@ -94,34 +95,38 @@ internal static unsafe class SpritePassRecorder
         vk.CmdEndRendering(commandBuffer);
     }
 
-    /// <summary>Records every valid camera's pass and shader runs from a frame plan.</summary>
+    /// <summary>Records every valid camera's pass and draw runs from a frame plan.</summary>
     /// <param name="vk">The Vulkan API object.</param>
     /// <param name="commandBuffer">The frame command buffer, already begun.</param>
-    /// <param name="spritePipeline">The pipeline owner (pipeline layout for push constants/binding).</param>
+    /// <param name="pipelineOwner">The 2D pipeline owner (pipeline layout for push constants/binding).</param>
     /// <param name="descriptorSet">The frame's bindless descriptor set (set 0).</param>
     /// <param name="globalDescriptorSet">The frame's global uniform descriptor set (set 1).</param>
     /// <param name="sceneView">The linear scene image view in <c>COLOR_ATTACHMENT_OPTIMAL</c>.</param>
     /// <param name="sceneImage">The linear scene image (for the per-pass color-attachment barrier).</param>
+    /// <param name="lineVertexBuffer">The frame's line vertex buffer (bound before the first line run).</param>
+    /// <param name="lineIndexBuffer">The frame's line index buffer (bound before the first line run).</param>
     /// <param name="cameras">The plan's valid camera array.</param>
     /// <param name="cameraCount">The number of valid cameras in <paramref name="cameras"/>.</param>
-    /// <param name="runs">The plan's shader runs.</param>
+    /// <param name="runs">The plan's draw runs.</param>
     /// <param name="runPipelines">
     /// The graphics pipeline for each run, parallel to <paramref name="runs"/>.
     /// </param>
     internal static void RecordPasses(
         Vk vk,
         CommandBuffer commandBuffer,
-        SpritePipeline spritePipeline,
+        TwoDimensionalPipeline pipelineOwner,
         DescriptorSet descriptorSet,
         DescriptorSet globalDescriptorSet,
         ImageView sceneView,
         Image sceneImage,
+        Buffer lineVertexBuffer,
+        Buffer lineIndexBuffer,
         CameraDrawPlan[] cameras,
         int cameraCount,
-        ShaderRun[] runs,
+        DrawRun[] runs,
         Pipeline[] runPipelines)
     {
-        ArgumentNullException.ThrowIfNull(spritePipeline);
+        ArgumentNullException.ThrowIfNull(pipelineOwner);
         ArgumentNullException.ThrowIfNull(cameras);
         ArgumentNullException.ThrowIfNull(runs);
         ArgumentNullException.ThrowIfNull(runPipelines);
@@ -129,8 +134,8 @@ internal static unsafe class SpritePassRecorder
         for (var index = 0; index < cameraCount; index++)
         {
             CameraDrawPlan camera = cameras[index];
-            bool hasInstances = camera.RunCount > 0;
-            if (!hasInstances && camera.Clear != ClearKind.Color)
+            bool hasRuns = camera.RunCount > 0;
+            if (!hasRuns && camera.Clear != ClearKind.Color)
             {
                 // An empty Clear.None/Depth camera records nothing at all.
                 continue;
@@ -186,14 +191,16 @@ internal static unsafe class SpritePassRecorder
             };
             vk.CmdBeginRendering(commandBuffer, &rendering);
 
-            if (hasInstances)
+            if (hasRuns)
             {
                 RecordRuns(
                     vk,
                     commandBuffer,
-                    spritePipeline,
+                    pipelineOwner,
                     descriptorSet,
                     globalDescriptorSet,
+                    lineVertexBuffer,
+                    lineIndexBuffer,
                     camera,
                     runs,
                     runPipelines,
@@ -207,11 +214,13 @@ internal static unsafe class SpritePassRecorder
     private static void RecordRuns(
         Vk vk,
         CommandBuffer commandBuffer,
-        SpritePipeline spritePipeline,
+        TwoDimensionalPipeline pipelineOwner,
         DescriptorSet descriptorSet,
         DescriptorSet globalDescriptorSet,
+        Buffer lineVertexBuffer,
+        Buffer lineIndexBuffer,
         in CameraDrawPlan camera,
-        ShaderRun[] runs,
+        DrawRun[] runs,
         Pipeline[] runPipelines,
         in Rect2D area)
     {
@@ -231,21 +240,24 @@ internal static unsafe class SpritePassRecorder
         Matrix4x4 viewProjection = camera.Projection.ViewProjection;
         vk.CmdPushConstants(
             commandBuffer,
-            spritePipeline.PipelineLayout,
+            pipelineOwner.PipelineLayout,
             ShaderStageFlags.VertexBit,
             0,
-            SpritePipeline.PushConstantBytes,
+            TwoDimensionalPipeline.PushConstantBytes,
             &viewProjection);
 
         var bound = false;
         var boundPipeline = default(Pipeline);
         var boundOffset = 0u;
+        var lineBuffersBound = false;
         int runEnd = camera.FirstRun + camera.RunCount;
         for (var runIndex = camera.FirstRun; runIndex < runEnd; runIndex++)
         {
-            ShaderRun run = runs[runIndex];
+            DrawRun run = runs[runIndex];
             Pipeline pipeline = runPipelines[runIndex];
-            bool rebind = !bound || pipeline.Handle != boundPipeline.Handle || run.GlobalBlockOffset != boundOffset;
+            bool rebind = !bound
+                || pipeline.Handle != boundPipeline.Handle
+                || run.GlobalBlockOffset != boundOffset;
             if (rebind)
             {
                 bound = true;
@@ -254,26 +266,51 @@ internal static unsafe class SpritePassRecorder
                 RecordBindings(
                     vk,
                     commandBuffer,
-                    spritePipeline,
+                    pipelineOwner,
                     descriptorSet,
                     globalDescriptorSet,
                     pipeline,
                     run.GlobalBlockOffset);
             }
 
-            vk.CmdDraw(
+            if (run.Kind == DrawKind.Sprite)
+            {
+                vk.CmdDraw(
+                    commandBuffer,
+                    QuadVertexCount,
+                    (uint)run.Count,
+                    0,
+                    (uint)run.First);
+                continue;
+            }
+
+            if (!lineBuffersBound)
+            {
+                lineBuffersBound = true;
+                Buffer vertexBuffer = lineVertexBuffer;
+                ulong vertexOffset = 0;
+                vk.CmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, &vertexOffset);
+                vk.CmdBindIndexBuffer(
+                    commandBuffer,
+                    lineIndexBuffer,
+                    0,
+                    IndexType.Uint32);
+            }
+
+            vk.CmdDrawIndexed(
                 commandBuffer,
-                QuadVertexCount,
-                (uint)run.InstanceCount,
+                (uint)run.Count,
+                1,
+                (uint)run.First,
                 0,
-                (uint)run.FirstInstance);
+                0);
         }
     }
 
     private static void RecordBindings(
         Vk vk,
         CommandBuffer commandBuffer,
-        SpritePipeline spritePipeline,
+        TwoDimensionalPipeline pipelineOwner,
         DescriptorSet descriptorSet,
         DescriptorSet globalDescriptorSet,
         Pipeline graphicsPipeline,
@@ -287,7 +324,7 @@ internal static unsafe class SpritePassRecorder
         vk.CmdBindDescriptorSets(
             commandBuffer,
             PipelineBindPoint.Graphics,
-            spritePipeline.PipelineLayout,
+            pipelineOwner.PipelineLayout,
             0,
             2,
             sets,

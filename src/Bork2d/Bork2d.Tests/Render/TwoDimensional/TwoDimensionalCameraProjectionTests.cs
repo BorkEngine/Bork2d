@@ -1,15 +1,15 @@
 using System.Numerics;
 using Bork2d.Engine.Rendering;
-using Bork2d.Render.Vulkan;
+using Bork2d.Render.TwoDimensional;
 using Xunit;
 
-namespace Bork2d.Tests.Render.Sprites;
+namespace Bork2d.Tests.Render.TwoDimensional;
 
 /// <summary>
 /// Proves the renderer consumes the same pure camera projection helper as the public camera
 /// helpers (M8 §6.3/§6.9).
 /// </summary>
-public sealed class SpriteCameraProjectionTests
+public sealed class TwoDimensionalCameraProjectionTests
 {
     [Fact]
     public void RendererCameraProjectionMatchesTheSharedHelper()
@@ -24,7 +24,10 @@ public sealed class SpriteCameraProjectionTests
             ClearColor: Color.Black);
         var framebuffer = new Vector2(800f, 600f);
 
-        bool valid = SpriteCameraProjection.TryCreate(camera, framebuffer, out CameraProjectionResult projection);
+        bool valid = TwoDimensionalCameraProjection.TryCreate(
+            camera,
+            framebuffer,
+            out CameraProjectionResult projection);
 
         Assert.True(valid);
         bool expected = CameraProjection.TryCreate(
@@ -57,7 +60,7 @@ public sealed class SpriteCameraProjectionTests
             Clear: ClearKind.None,
             ClearColor: Color.Black);
 
-        bool valid = SpriteCameraProjection.TryCreate(
+        bool valid = TwoDimensionalCameraProjection.TryCreate(
             camera,
             new Vector2(800f, 600f),
             out CameraProjectionResult projection);

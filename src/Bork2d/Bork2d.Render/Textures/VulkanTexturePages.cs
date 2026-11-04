@@ -1,5 +1,6 @@
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
+using Bork2d.Render.TwoDimensional;
 using Bork2d.Render.Vulkan;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
@@ -19,7 +20,7 @@ namespace Bork2d.Render.Textures;
 /// to <c>SHADER_READ_ONLY_OPTIMAL</c> by one barrier range covering every mip. Each KTX2 level is
 /// copied from one staging buffer at its payload offset; compressed levels use a row length and image
 /// height rounded up to the 4x4 texel block (in texels), while uncompressed levels are tightly packed.
-/// Samplers come from the shared <see cref="SpritePipeline"/> cache (no per-page
+/// Samplers come from the shared <see cref="TwoDimensionalPipeline"/> cache (no per-page
 /// sampler). Uploads never block the render thread; only the startup placeholder waits its fence.
 /// </para>
 /// <para>
@@ -46,7 +47,7 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
     private const ulong UploadFenceTimeoutNanoseconds = 1_000_000_000;
 
     private readonly VulkanDevice _device;
-    private readonly SpritePipeline _pipeline;
+    private readonly TwoDimensionalPipeline _pipeline;
     private readonly IBindlessPageWriter _writer;
     private readonly IVulkanInstance? _instance;
     private readonly ILogger _logger;
@@ -61,14 +62,14 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
 
     /// <summary>Initializes a new instance of the <see cref="VulkanTexturePages"/> class.</summary>
     /// <param name="device">The selected device (API, queue, physical device, and limits).</param>
-    /// <param name="pipeline">The sprite pipeline that owns the samplers and the set layout.</param>
+    /// <param name="pipeline">The 2D pipeline that owns the samplers and the set layout.</param>
     /// <param name="writer">The renderer's per-frame bindless descriptor writer.</param>
     /// <param name="instance">The instance seam used for static debug labels; may be <see langword="null"/>.</param>
     /// <param name="logger">The <c>Bork2d.Render</c> logger used by best-effort cleanup.</param>
     /// <exception cref="Bork2dException">The upload command pool could not be created.</exception>
     internal VulkanTexturePages(
         VulkanDevice device,
-        SpritePipeline pipeline,
+        TwoDimensionalPipeline pipeline,
         IBindlessPageWriter writer,
         IVulkanInstance? instance,
         ILogger logger)

@@ -8,39 +8,41 @@ using Silk.NET.Vulkan;
 namespace Bork2d.Render.Shaders;
 
 /// <summary>
-/// The renderer's fragment-shader catalog: the built-in default entry, the per-path custom entries,
-/// asynchronous SPIR-V loads, validation, the engine-wide global-name registry, the content-hash
-/// module/pipeline caches, and catalog-remount retirement.
+/// The renderer's fragment-shader catalog: the two built-in default entries (sprite and line), the
+/// per-path custom entries, asynchronous SPIR-V loads, validation, the engine-wide global-name
+/// registry, the content-hash module/pipeline caches, and catalog-remount retirement.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The built-in pack serves <see cref="DefaultShaderPath"/> as a <see cref="ShaderAsset"/> and its
-/// module <see cref="DefaultSpirVPath"/> as raw data. Both are loaded synchronously before the first
-/// frame, and a failure of that default is a fatal startup <see cref="Bork2dException"/>. A custom
-/// entry is keyed by its SPIR-V <see cref="DataRef"/> path because a captured sprite already carries
-/// the frozen <see cref="ShaderRenderData"/>; the renderer never reloads the <see cref="ShaderAsset"/>
-/// per draw.
+/// The built-in pack serves <see cref="DefaultShaderPath"/> (<c>shader/sprite</c>) and
+/// <see cref="LineShaderPath"/> (<c>shader/line</c>) as <see cref="ShaderAsset"/>s and their modules
+/// as raw data. Both are loaded synchronously before the first frame, and a failure of either is a
+/// fatal startup <see cref="Bork2dException"/>. A custom entry is keyed by its SPIR-V
+/// <see cref="DataRef"/> path because a captured renderable already carries the frozen
+/// <see cref="ShaderRenderData"/>; the renderer never reloads the <see cref="ShaderAsset"/> per draw.
 /// </para>
 /// <para>
 /// A custom metadata set is validated once, when its path is first seen, and its SPIR-V payload is
 /// validated when the asynchronous load completes. An invalid entry, a failed load, a module
-/// creation failure, or a pipeline creation failure draws with the default shader and logs one
-/// warning per shader path; the frame never crashes. The only fatal failure is the default shader.
-/// The engine-wide global-name registry tracks every live owner of a name: shaders of the same type
-/// may share it, and the claim is released only when its last owner retires or fails.
+/// creation failure, or a pipeline creation failure draws with the requesting kind's default shader
+/// and logs one warning per shader path; the frame never crashes. The only fatal failures are the
+/// built-in defaults. The engine-wide global-name registry tracks every live owner of a name: shaders
+/// of the same type may share it, and the claim is released only when its last owner retires or
+/// fails.
 /// </para>
 /// <para>
-/// Loads started while planning a frame never complete that frame: <see cref="Pump"/> advances the
-/// per-frame safety clock and promotes completed loads on the next frame. That keeps one frame's
-/// bindings and run grouping deterministic. Modules are shared by shader content hash and pipelines
-/// by <c>(content hash, output format)</c>, so identical content shares both. A retired entry keeps
-/// its module and pipelines until <see cref="SafetyAgeFrames"/> frame pumps have passed since the
-/// last frame that used them, matching the two-frames-in-flight rule the texture pages use.
+/// Loads started while planning a frame never complete that frame: <see cref="Pump"/> promotes
+/// completed loads on the next frame. That keeps one frame's bindings and run grouping deterministic.
+/// Modules are shared by shader content hash and pipelines by <c>(kind, content hash, output
+/// format)</c>, so identical content shares its module while the sprite and line graphics pipelines
+/// stay distinct. A retired entry keeps its module and pipelines until
+/// <see cref="SafetyAgeFrames"/> frame pumps have passed since the last frame that used them, matching
+/// the two-frames-in-flight rule the texture pages use.
 /// </para>
 /// <para>
 /// The catalog observes <see cref="IAssetCatalogVersion"/> in <see cref="Pump"/>, once per frame
-/// before planning: a later mount retires every custom entry and starts a replacement default
-/// load. The previous ready default entry stays active until the replacement validates, so the
+/// before planning: a later mount retires every custom entry and starts a replacement load for both
+/// defaults. A previous ready default entry stays active until its replacement validates, so the
 /// default path never loses its shader; the old entry is retired after the safety age once the
 /// replacement is ready. A previously failed path is retried on its next sighting in the new
 /// catalog. Render-thread-only.
@@ -57,11 +59,26 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     /// <summary>The canonical path of the built-in sprite vertex SPIR-V payload.</summary>
     internal const string VertexSpirVPath = "shader/vertex-spv";
 
+    /// <summary>The canonical path of the built-in line fragment shader asset.</summary>
+    internal const string LineShaderPath = "shader/line";
+
+    /// <summary>The canonical path of the built-in line fragment SPIR-V payload.</summary>
+    internal const string LineSpirVPath = "shader/line-spv";
+
+    /// <summary>The canonical path of the built-in line vertex SPIR-V payload.</summary>
+    internal const string LineVertexSpirVPath = "shader/line-vertex-spv";
+
     /// <summary>The first little-endian word of every SPIR-V module.</summary>
     internal const uint SpirVMagic = 0x07230203;
 
-    /// <summary>The entry id of the built-in default shader, used for every fallback.</summary>
+    /// <summary>The entry id of the built-in sprite shader, used for sprite fallbacks.</summary>
     internal const int DefaultEntryId = 0;
+
+    /// <summary>The entry id of the built-in line shader, used for line fallbacks.</summary>
+    internal const int LineDefaultEntryId = 1;
+
+    /// <summary>The first entry id assigned to a custom shader.</summary>
+    internal const int FirstCustomEntryId = 2;
 
     /// <summary>
     /// The number of frame pumps a retired module and its pipelines outlive their last use.
@@ -84,12 +101,12 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     private readonly List<ModuleRecord> _unreferencedModules = [];
     private readonly Dictionary<string, GlobalNameClaim> _globalNames = new(StringComparer.Ordinal);
     private readonly HashSet<string> _warnedPaths = new(StringComparer.Ordinal);
-    private StoreEntry? _defaultEntry;
-    private DefaultReload? _defaultReload;
-    private int _nextEntryId = 1;
+    private readonly StoreEntry?[] _defaultEntries = new StoreEntry?[2];
+    private readonly DefaultReload?[] _defaultReloads = new DefaultReload?[2];
+    private int _nextEntryId = FirstCustomEntryId;
     private long _catalogVersionSeen;
     private long _frameSequence;
-    private bool _warnedMissingSpirV;
+    private uint _loggedMissingSpirV;
     private int _disposed;
 
     private ShaderStore(
@@ -105,15 +122,15 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         _catalogVersionSeen = catalogVersion?.CatalogVersion ?? 0;
     }
 
-    /// <inheritdoc/>
-    int IShaderFrameSource.DefaultEntryId => DefaultEntryId;
+    /// <summary>Gets the entry id of the built-in sprite shader.</summary>
+    internal ShaderEntry DefaultEntry => DefaultEntryOrThrow(ShaderPipelineKind.Sprite).Entry;
 
-    /// <summary>Gets the entry id of the built-in default shader.</summary>
-    internal ShaderEntry DefaultEntry => DefaultEntryOrThrow().Entry;
+    /// <summary>Gets the entry id of the built-in line shader.</summary>
+    internal ShaderEntry LineDefaultEntry => DefaultEntryOrThrow(ShaderPipelineKind.Line).Entry;
 
     /// <summary>
-    /// Loads and validates the built-in sprite shader, registers its global names, and creates its
-    /// fragment module.
+    /// Loads and validates both built-in shaders, registers their global names, and creates their
+    /// fragment modules.
     /// </summary>
     /// <param name="assets">The app's started asset service.</param>
     /// <param name="modules">The Vulkan module/pipeline factory.</param>
@@ -123,7 +140,7 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     /// <param name="logger">The <c>Bork2d.Render</c> logger for one-time warnings.</param>
     /// <returns>The created catalog; the caller owns it.</returns>
     /// <exception cref="Bork2dException">
-    /// The default shader asset or module is missing, malformed, unsupported, or has an invalid
+    /// A built-in shader asset or module is missing, malformed, unsupported, or has an invalid
     /// declaration set. A default-shader failure is fatal startup.
     /// </exception>
     internal static ShaderStore Create(
@@ -136,75 +153,78 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         ArgumentNullException.ThrowIfNull(modules);
         ArgumentNullException.ThrowIfNull(logger);
 
-        ShaderRenderData metadata = LoadDefaultShader(assets);
-        string spirVPath = metadata.SpirV.Path
-            ?? throw new Bork2dException(
-                $"The built-in sprite shader asset '{DefaultShaderPath}' has no SPIR-V data "
-                    + "reference.");
-        if (!ShaderValidation.TryValidateMetadata(metadata, out string metadataError))
-        {
-            throw new Bork2dException(
-                $"The built-in sprite shader asset '{DefaultShaderPath}' is not usable: it "
-                    + $"{metadataError}.");
-        }
-
-        byte[] spirV = LoadSpirV(
-            assets,
-            spirVPath,
-            $"the built-in sprite fragment module referenced by '{DefaultShaderPath}'");
         var store = new ShaderStore(assets, modules, catalogVersion, logger);
-        var entry = new StoreEntry(DefaultEntryId, DefaultShaderPath, metadata, isDefault: true);
-        entry.Module = store.GetOrCreateModule(spirV, spirVPath);
-        entry.State = EntryState.Ready;
-        store._defaultEntry = entry;
-        store.AddGlobalNames(entry);
+        StoreEntry sprite = CreateDefaultEntry(
+            store,
+            assets,
+            ShaderPipelineKind.Sprite,
+            DefaultEntryId,
+            DefaultShaderPath,
+            "the built-in sprite shader asset");
+        StoreEntry line = CreateDefaultEntry(
+            store,
+            assets,
+            ShaderPipelineKind.Line,
+            LineDefaultEntryId,
+            LineShaderPath,
+            "the built-in line shader asset");
+        store._defaultEntries[(int)ShaderPipelineKind.Sprite] = sprite;
+        store._defaultEntries[(int)ShaderPipelineKind.Line] = line;
+        store.AddGlobalNames(sprite);
+        store.AddGlobalNames(line);
         return store;
     }
 
     /// <summary>
-    /// Loads and validates the built-in sprite <see cref="ShaderAsset"/> without creating a Vulkan
-    /// object.
+    /// Loads and validates one built-in <see cref="ShaderAsset"/> without creating a Vulkan object.
     /// </summary>
     /// <param name="assets">The app's started asset service.</param>
+    /// <param name="path">The canonical shader asset path.</param>
+    /// <param name="description">The diagnostic description of the built-in shader asset.</param>
     /// <returns>The frozen shader declarations.</returns>
     /// <exception cref="Bork2dException">
     /// The asset is missing or malformed, or has an unsupported layout version or entry point.
     /// </exception>
-    internal static ShaderRenderData LoadDefaultShader(IAssets assets)
+    internal static ShaderRenderData LoadDefaultShader(
+        IAssets assets,
+        string path,
+        string description)
     {
         ArgumentNullException.ThrowIfNull(assets);
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        ArgumentException.ThrowIfNullOrEmpty(description);
 
         ShaderAsset? asset = LoadBlocking(
-            assets.LoadAsset<ShaderAsset>(DefaultShaderPath),
-            DefaultShaderPath,
-            "the built-in sprite shader asset");
+            assets.LoadAsset<ShaderAsset>(path),
+            path,
+            description);
         if (asset is null)
         {
             throw new Bork2dException(
-                $"The built-in sprite shader asset '{DefaultShaderPath}' was not found in the "
-                    + "mounted asset packs.");
+                $"{char.ToUpperInvariant(description[0])}{description[1..]} '{path}' was not found in "
+                    + "the mounted asset packs.");
         }
 
         if (!asset.SpirV.HasValue)
         {
             throw new Bork2dException(
-                $"The built-in sprite shader asset '{DefaultShaderPath}' has no SPIR-V data "
-                    + "reference.");
+                $"{char.ToUpperInvariant(description[0])}{description[1..]} '{path}' has no SPIR-V "
+                    + "data reference.");
         }
 
         if (asset.LayoutVersion != ShaderLayout.CurrentVersion)
         {
             throw new Bork2dException(
-                $"The built-in sprite shader asset '{DefaultShaderPath}' declares layout version "
-                    + $"{asset.LayoutVersion}, but this engine implements version "
+                $"{char.ToUpperInvariant(description[0])}{description[1..]} '{path}' declares layout "
+                    + $"version {asset.LayoutVersion}, but this engine implements version "
                     + $"{ShaderLayout.CurrentVersion}.");
         }
 
         if (!string.Equals(asset.EntryPoint, EntryPointName, StringComparison.Ordinal))
         {
             throw new Bork2dException(
-                $"The built-in sprite shader asset '{DefaultShaderPath}' declares entry point "
-                    + $"'{asset.EntryPoint ?? "(null)"}', but the renderer requires "
+                $"{char.ToUpperInvariant(description[0])}{description[1..]} '{path}' declares entry "
+                    + $"point '{asset.EntryPoint ?? "(null)"}', but the renderer requires "
                     + $"'{EntryPointName}'.");
         }
 
@@ -247,19 +267,26 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     }
 
     /// <inheritdoc/>
-    public ShaderBinding Resolve(ShaderRenderData? shader, Format outputFormat)
+    public int GetDefaultEntryId(ShaderPipelineKind kind)
+        => kind == ShaderPipelineKind.Sprite ? DefaultEntryId : LineDefaultEntryId;
+
+    /// <inheritdoc/>
+    public ShaderBinding Resolve(
+        ShaderRenderData? shader,
+        ShaderPipelineKind kind,
+        Format outputFormat)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
 
         if (shader is null)
         {
-            return ResolveDefault(outputFormat);
+            return ResolveDefault(kind, outputFormat);
         }
 
         if (!shader.SpirV.HasValue)
         {
-            WarnMissingSpirV();
-            return new ShaderBinding(DefaultEntryId, ShaderBindingState.Failed);
+            WarnMissingSpirV(kind);
+            return new ShaderBinding(GetDefaultEntryId(kind), ShaderBindingState.Failed);
         }
 
         string path = shader.SpirV.Path!;
@@ -270,7 +297,7 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             _entriesById.Add(entry.Id, entry);
         }
 
-        return ResolveCustom(entry, outputFormat);
+        return ResolveCustom(entry, kind, outputFormat);
     }
 
     /// <inheritdoc/>
@@ -278,7 +305,12 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     {
         if (entryId == DefaultEntryId)
         {
-            return DefaultEntryOrThrow().Entry;
+            return DefaultEntryOrThrow(ShaderPipelineKind.Sprite).Entry;
+        }
+
+        if (entryId == LineDefaultEntryId)
+        {
+            return DefaultEntryOrThrow(ShaderPipelineKind.Line).Entry;
         }
 
         if (_entriesById.TryGetValue(entryId, out StoreEntry? entry))
@@ -290,37 +322,45 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             $"Shader entry {entryId} is not in the current asset catalog.");
     }
 
-    /// <summary>Gets the graphics pipeline for one ready entry and the target output format.</summary>
+    /// <summary>Gets the graphics pipeline for one ready entry, kind, and target output format.</summary>
     /// <param name="entryId">A ready entry id from <see cref="Resolve"/>.</param>
+    /// <param name="kind">The vertex-stage kind the run draws with.</param>
     /// <param name="outputFormat">The target's sRGB output color format.</param>
     /// <returns>The cached pipeline.</returns>
     /// <exception cref="Bork2dException">The entry or its pipeline is not in the current catalog.</exception>
-    internal Pipeline GetPipeline(int entryId, Format outputFormat)
+    internal Pipeline GetPipeline(
+        int entryId,
+        ShaderPipelineKind kind,
+        Format outputFormat)
     {
-        StoreEntry entry = entryId == DefaultEntryId
-            ? DefaultEntryOrThrow()
-            : _entriesById.TryGetValue(entryId, out StoreEntry? found)
-                ? found
-                : throw new Bork2dException(
-                    $"Shader entry {entryId} is not in the current asset catalog.");
+        StoreEntry entry = FindEntry(entryId);
         if (entry.Module is not { } module
-            || !_modules.TryGetPipeline(module.ContentHash, outputFormat, out Pipeline pipeline))
+            || !_modules.TryGetPipeline(kind, module.ContentHash, outputFormat, out Pipeline pipeline))
         {
             throw new Bork2dException(
-                $"Shader entry '{entry.Entry.Path}' has no pipeline for output format "
-                    + $"{outputFormat}.");
+                $"Shader entry '{entry.Entry.Path}' has no {Describe(kind)} pipeline for output "
+                    + $"format {outputFormat}.");
         }
 
         return pipeline;
     }
 
-    /// <summary>
-    /// Ensures the built-in default shader's pipeline exists for an output format.
-    /// </summary>
+    /// <summary>Ensures both built-in default shaders' pipelines exist for an output format.</summary>
     /// <param name="outputFormat">The target's sRGB output color format.</param>
-    /// <exception cref="Bork2dException">The default pipeline could not be created.</exception>
-    internal void EnsureDefaultPipeline(Format outputFormat)
-        => EnsurePipeline(DefaultEntryOrThrow(), outputFormat, fatal: true);
+    /// <exception cref="Bork2dException">A default pipeline could not be created.</exception>
+    internal void EnsureDefaultPipelines(Format outputFormat)
+    {
+        EnsurePipeline(
+            DefaultEntryOrThrow(ShaderPipelineKind.Sprite),
+            ShaderPipelineKind.Sprite,
+            outputFormat,
+            fatal: true);
+        EnsurePipeline(
+            DefaultEntryOrThrow(ShaderPipelineKind.Line),
+            ShaderPipelineKind.Line,
+            outputFormat,
+            fatal: true);
+    }
 
     /// <summary>
     /// Advances the catalog one frame: observes a catalog mount, promotes completed loads, and
@@ -340,7 +380,8 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         _frameSequence++;
         ObserveCatalogVersion();
         CompleteLoadingEntries();
-        CompleteDefaultReload();
+        CompleteDefaultReload(ShaderPipelineKind.Sprite);
+        CompleteDefaultReload(ShaderPipelineKind.Line);
         RetireUnreferencedModules();
     }
 
@@ -363,20 +404,25 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             }
         }
 
-        if (_defaultReload is { AssetLoad.IsFaulted: true } assetReload)
+        for (var kindIndex = 0; kindIndex < _defaultReloads.Length; kindIndex++)
         {
-            _ = assetReload.AssetLoad.Exception;
-        }
+            DefaultReload? reload = _defaultReloads[kindIndex];
+            if (reload is { AssetLoad.IsFaulted: true } assetReload)
+            {
+                _ = assetReload.AssetLoad.Exception;
+            }
 
-        if (_defaultReload is { SpirVLoad.IsFaulted: true } spirVReload)
-        {
-            _ = spirVReload.SpirVLoad.Exception;
+            if (reload is { SpirVLoad.IsFaulted: true } spirVReload)
+            {
+                _ = spirVReload.SpirVLoad.Exception;
+            }
         }
 
         foreach (ModuleRecord module in _modulesByHash.Values)
         {
-            _modules.DestroyPipelines(module.ContentHash);
-            _modules.DestroyModule(module.Module);
+            _modules.DestroyPipelines(ShaderPipelineKind.Sprite, module.ContentHash);
+            _modules.DestroyPipelines(ShaderPipelineKind.Line, module.ContentHash);
+            _modules.DestroyModule(module.Kind, module.Module);
         }
 
         _modulesByHash.Clear();
@@ -384,32 +430,91 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         _entries.Clear();
         _entriesById.Clear();
         _globalNames.Clear();
-        _defaultReload = null;
-        _defaultEntry = null;
+        Array.Clear(_defaultReloads);
+        Array.Clear(_defaultEntries);
     }
 
-    private ShaderBinding ResolveDefault(Format outputFormat)
+    private static StoreEntry CreateDefaultEntry(
+        ShaderStore store,
+        IAssets assets,
+        ShaderPipelineKind kind,
+        int id,
+        string shaderPath,
+        string description)
     {
-        StoreEntry entry = DefaultEntryOrThrow();
-        EnsurePipeline(entry, outputFormat, fatal: true);
-        MarkUsed(entry);
-        return new ShaderBinding(DefaultEntryId, ShaderBindingState.Ready);
+        ShaderRenderData metadata = LoadDefaultShader(assets, shaderPath, description);
+        string spirVPath = metadata.SpirV.Path
+            ?? throw new Bork2dException(
+                $"{char.ToUpperInvariant(description[0])}{description[1..]} '{shaderPath}' has no "
+                    + "SPIR-V data reference.");
+        if (!ShaderValidation.TryValidateMetadata(metadata, out string metadataError))
+        {
+            throw new Bork2dException(
+                $"{char.ToUpperInvariant(description[0])}{description[1..]} '{shaderPath}' is not "
+                    + $"usable: it {metadataError}.");
+        }
+
+        byte[] spirV = LoadSpirV(
+            assets,
+            spirVPath,
+            $"the built-in {Describe(kind)} fragment module referenced by '{shaderPath}'");
+        var entry = new StoreEntry(id, shaderPath, metadata, isDefault: true);
+        entry.Module = store.GetOrCreateModule(spirV, spirVPath, kind);
+        entry.State = EntryState.Ready;
+        return entry;
     }
 
-    private ShaderBinding ResolveCustom(StoreEntry entry, Format outputFormat)
+    private static string Describe(ShaderPipelineKind kind)
+        => kind == ShaderPipelineKind.Sprite ? "sprite" : "line";
+
+    private static string ShaderPathFor(ShaderPipelineKind kind)
+        => kind == ShaderPipelineKind.Sprite ? DefaultShaderPath : LineShaderPath;
+
+    private StoreEntry FindEntry(int entryId)
+    {
+        if (entryId == DefaultEntryId)
+        {
+            return DefaultEntryOrThrow(ShaderPipelineKind.Sprite);
+        }
+
+        if (entryId == LineDefaultEntryId)
+        {
+            return DefaultEntryOrThrow(ShaderPipelineKind.Line);
+        }
+
+        return _entriesById.TryGetValue(entryId, out StoreEntry? found)
+            ? found
+            : throw new Bork2dException(
+                $"Shader entry {entryId} is not in the current asset catalog.");
+    }
+
+    private ShaderBinding ResolveDefault(ShaderPipelineKind kind, Format outputFormat)
+    {
+        StoreEntry entry = DefaultEntryOrThrow(kind);
+        EnsurePipeline(entry, kind, outputFormat, fatal: true);
+        MarkUsed(entry);
+        return new ShaderBinding(GetDefaultEntryId(kind), ShaderBindingState.Ready);
+    }
+
+    private ShaderBinding ResolveCustom(
+        StoreEntry entry,
+        ShaderPipelineKind kind,
+        Format outputFormat)
     {
         switch (entry.State)
         {
             case EntryState.Loading:
+                entry.LastRequestedKind = kind;
                 return new ShaderBinding(entry.Id, ShaderBindingState.Pending);
 
             case EntryState.Failed:
-                return new ShaderBinding(DefaultEntryId, ShaderBindingState.Failed);
+                return new ShaderBinding(GetDefaultEntryId(kind), ShaderBindingState.Failed);
 
             default:
-                if (!EnsurePipeline(entry, outputFormat, fatal: false))
+                entry.LastRequestedKind = kind;
+                if (!EnsurePipeline(entry, kind, outputFormat, fatal: false))
                 {
-                    return new ShaderBinding(DefaultEntryId, ShaderBindingState.Failed);
+                    return new ShaderBinding(GetDefaultEntryId(kind), ShaderBindingState.Failed);
                 }
 
                 MarkUsed(entry);
@@ -425,8 +530,8 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             entry.State = EntryState.Failed;
             WarnOnce(
                 path,
-                $"Shader '{path}' is not usable and its sprites draw with the default shader: it "
-                    + $"{error}.");
+                $"Shader '{path}' is not usable and its renderables draw with the kind's default "
+                    + $"shader: it {error}.");
             return entry;
         }
 
@@ -439,8 +544,8 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             entry.State = EntryState.Failed;
             WarnOnce(
                 path,
-                $"Shader '{path}' could not start loading and its sprites draw with the default "
-                    + $"shader: {exception.Message}.");
+                $"Shader '{path}' could not start loading and its renderables draw with the kind's "
+                    + $"default shader: {exception.Message}.");
         }
 
         return entry;
@@ -453,7 +558,11 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         return load;
     }
 
-    private bool EnsurePipeline(StoreEntry entry, Format outputFormat, bool fatal)
+    private bool EnsurePipeline(
+        StoreEntry entry,
+        ShaderPipelineKind kind,
+        Format outputFormat,
+        bool fatal)
     {
         if (entry.Module is not { } module)
         {
@@ -461,14 +570,18 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             return false;
         }
 
-        if (_modules.TryGetPipeline(module.ContentHash, outputFormat, out _))
+        if (_modules.TryGetPipeline(kind, module.ContentHash, outputFormat, out _))
         {
             return true;
         }
 
         try
         {
-            _ = _modules.GetOrCreatePipeline(outputFormat, module.ContentHash, module.Module);
+            _ = _modules.GetOrCreatePipeline(
+                kind,
+                outputFormat,
+                module.ContentHash,
+                module.Module);
             return true;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -476,16 +589,16 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             if (fatal)
             {
                 throw new Bork2dException(
-                    $"The built-in sprite shader pipeline could not be created for output format "
-                        + $"{outputFormat}: {exception.Message}",
+                    $"The built-in {Describe(kind)} shader pipeline could not be created for output "
+                        + $"format {outputFormat}: {exception.Message}",
                     exception);
             }
 
             WarnOnce(
                 entry.Entry.Path,
-                $"Shader '{entry.Entry.Path}' could not create its pipeline for output format "
-                    + $"{outputFormat} and its sprites draw with the default shader: "
-                    + $"{exception.Message}.");
+                $"Shader '{entry.Entry.Path}' could not create its {Describe(kind)} pipeline for "
+                    + $"output format {outputFormat} and its renderables draw with the kind's default "
+                    + $"shader: {exception.Message}.");
             entry.State = EntryState.Failed;
             UnregisterGlobalNames(entry);
             ReleaseModule(entry);
@@ -511,8 +624,8 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             _ = load.Exception;
             WarnOnce(
                 entry.Entry.Path,
-                $"Shader '{entry.Entry.Path}' failed to load and its sprites draw with the default "
-                    + $"shader: {DescribeLoadFailure(load)}.");
+                $"Shader '{entry.Entry.Path}' failed to load and its renderables draw with the "
+                    + $"kind's default shader: {DescribeLoadFailure(load)}.");
             entry.State = EntryState.Failed;
             return;
         }
@@ -522,8 +635,8 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         {
             WarnOnce(
                 entry.Entry.Path,
-                $"Shader '{entry.Entry.Path}' is not usable and its sprites draw with the default "
-                    + $"shader: it {error}.");
+                $"Shader '{entry.Entry.Path}' is not usable and its renderables draw with the kind's "
+                    + $"default shader: it {error}.");
             entry.State = EntryState.Failed;
             return;
         }
@@ -532,22 +645,22 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         {
             WarnOnce(
                 entry.Entry.Path,
-                $"Shader '{entry.Entry.Path}' is not usable and its sprites draw with the default "
-                    + $"shader: {nameError}.");
+                $"Shader '{entry.Entry.Path}' is not usable and its renderables draw with the kind's "
+                    + $"default shader: {nameError}.");
             entry.State = EntryState.Failed;
             return;
         }
 
         try
         {
-            entry.Module = GetOrCreateModule(spirV, entry.Entry.Path);
+            entry.Module = GetOrCreateModule(spirV, entry.Entry.Path, entry.LastRequestedKind);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             WarnOnce(
                 entry.Entry.Path,
-                $"Shader '{entry.Entry.Path}' could not create its module and its sprites draw with "
-                    + $"the default shader: {exception.Message}.");
+                $"Shader '{entry.Entry.Path}' could not create its module and its renderables draw "
+                    + $"with the kind's default shader: {exception.Message}.");
             entry.State = EntryState.Failed;
             return;
         }
@@ -556,9 +669,9 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         entry.State = EntryState.Ready;
     }
 
-    private void CompleteDefaultReload()
+    private void CompleteDefaultReload(ShaderPipelineKind kind)
     {
-        DefaultReload? reload = _defaultReload;
+        DefaultReload? reload = _defaultReloads[(int)kind];
         if (reload is null)
         {
             return;
@@ -574,16 +687,16 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             if (reload.AssetLoad.IsFaulted || reload.AssetLoad.IsCanceled)
             {
                 _ = reload.AssetLoad.Exception;
-                _defaultReload = null;
-                WarnDefaultReload(DescribeLoadFailure(reload.AssetLoad));
+                _defaultReloads[(int)kind] = null;
+                WarnDefaultReload(kind, DescribeLoadFailure(reload.AssetLoad));
                 return;
             }
 
             ShaderAsset asset = reload.AssetLoad.Result;
             if (!asset.SpirV.HasValue)
             {
-                _defaultReload = null;
-                WarnDefaultReload("the replacement has no SPIR-V data reference");
+                _defaultReloads[(int)kind] = null;
+                WarnDefaultReload(kind, "the replacement has no SPIR-V data reference");
                 return;
             }
 
@@ -595,8 +708,10 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                _defaultReload = null;
-                WarnDefaultReload($"the replacement SPIR-V could not start loading: {exception.Message}");
+                _defaultReloads[(int)kind] = null;
+                WarnDefaultReload(
+                    kind,
+                    $"the replacement SPIR-V could not start loading: {exception.Message}");
                 return;
             }
         }
@@ -607,11 +722,11 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             return;
         }
 
-        _defaultReload = null;
+        _defaultReloads[(int)kind] = null;
         if (spirVLoad.IsFaulted || spirVLoad.IsCanceled)
         {
             _ = spirVLoad.Exception;
-            WarnDefaultReload(DescribeLoadFailure(spirVLoad));
+            WarnDefaultReload(kind, DescribeLoadFailure(spirVLoad));
             return;
         }
 
@@ -620,35 +735,39 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         ShaderRenderData metadata = ShaderRenderData.Freeze(replacement);
         if (!ShaderValidation.TryValidateMetadata(metadata, out string error))
         {
-            WarnDefaultReload($"it {error}");
+            WarnDefaultReload(kind, $"it {error}");
             return;
         }
 
         if (!ShaderValidation.TryValidateSpirV(spirV, out error))
         {
-            WarnDefaultReload($"it {error}");
+            WarnDefaultReload(kind, $"it {error}");
             return;
         }
 
-        StoreEntry? previous = _defaultEntry;
+        StoreEntry? previous = _defaultEntries[(int)kind];
         if (!TryValidateGlobalNames(metadata, previous, out error))
         {
-            WarnDefaultReload(error);
+            WarnDefaultReload(kind, error);
             return;
         }
 
         ModuleRecord module;
         try
         {
-            module = GetOrCreateModule(spirV, replacement.SpirV.Path!);
+            module = GetOrCreateModule(spirV, replacement.SpirV.Path!, kind);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            WarnDefaultReload($"its module could not be created: {exception.Message}");
+            WarnDefaultReload(kind, $"its module could not be created: {exception.Message}");
             return;
         }
 
-        var entry = new StoreEntry(DefaultEntryId, DefaultShaderPath, metadata, isDefault: true)
+        var entry = new StoreEntry(
+            GetDefaultEntryId(kind),
+            ShaderPathFor(kind),
+            metadata,
+            isDefault: true)
         {
             Module = module,
             State = EntryState.Ready,
@@ -667,31 +786,34 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             ReleaseModule(previous);
         }
 
-        _defaultEntry = entry;
+        _defaultEntries[(int)kind] = entry;
     }
 
-    private void StartDefaultReload()
+    private void StartDefaultReload(ShaderPipelineKind kind)
     {
-        if (_defaultReload is { AssetLoad.IsFaulted: true } faultedAsset)
+        DefaultReload? current = _defaultReloads[(int)kind];
+        if (current is { AssetLoad.IsFaulted: true } faultedAsset)
         {
             _ = faultedAsset.AssetLoad.Exception;
         }
 
-        if (_defaultReload is { SpirVLoad.IsFaulted: true } faultedSpirV)
+        if (current is { SpirVLoad.IsFaulted: true } faultedSpirV)
         {
             _ = faultedSpirV.SpirVLoad.Exception;
         }
 
         try
         {
-            Task<ShaderAsset> assetLoad = _assets.LoadAsset<ShaderAsset>(DefaultShaderPath);
+            Task<ShaderAsset> assetLoad = _assets.LoadAsset<ShaderAsset>(ShaderPathFor(kind));
             ObserveFault(assetLoad);
-            _defaultReload = new DefaultReload(assetLoad);
+            _defaultReloads[(int)kind] = new DefaultReload(assetLoad);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            _defaultReload = null;
-            WarnDefaultReload($"the replacement asset could not start loading: {exception.Message}");
+            _defaultReloads[(int)kind] = null;
+            WarnDefaultReload(
+                kind,
+                $"the replacement asset could not start loading: {exception.Message}");
         }
     }
 
@@ -711,12 +833,16 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         _catalogVersionSeen = version;
         RetireAllCustomEntries();
         _globalNames.Clear();
-        if (_defaultEntry is { } entry)
+        for (var kindIndex = 0; kindIndex < _defaultEntries.Length; kindIndex++)
         {
-            AddGlobalNames(entry);
+            if (_defaultEntries[kindIndex] is { } entry)
+            {
+                AddGlobalNames(entry);
+            }
         }
 
-        StartDefaultReload();
+        StartDefaultReload(ShaderPipelineKind.Sprite);
+        StartDefaultReload(ShaderPipelineKind.Line);
     }
 
     private void RetireAllCustomEntries()
@@ -745,7 +871,10 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         }
     }
 
-    private ModuleRecord GetOrCreateModule(byte[] spirV, string name)
+    private ModuleRecord GetOrCreateModule(
+        byte[] spirV,
+        string name,
+        ShaderPipelineKind kind)
     {
         ulong contentHash = XxHash64.HashToUInt64(spirV);
         if (_modulesByHash.TryGetValue(contentHash, out ModuleRecord? existing))
@@ -761,8 +890,8 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             return existing;
         }
 
-        ShaderModule module = _modules.CreateModule(spirV, name);
-        var record = new ModuleRecord(contentHash, module)
+        ShaderModule module = _modules.CreateModule(kind, spirV, name);
+        var record = new ModuleRecord(contentHash, kind, module)
         {
             ReferenceCount = 1,
             LastUsedFrame = _frameSequence,
@@ -810,8 +939,9 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
 
             _unreferencedModules.RemoveAt(index);
             _ = _modulesByHash.Remove(module.ContentHash);
-            _modules.DestroyPipelines(module.ContentHash);
-            _modules.DestroyModule(module.Module);
+            _modules.DestroyPipelines(ShaderPipelineKind.Sprite, module.ContentHash);
+            _modules.DestroyPipelines(ShaderPipelineKind.Line, module.ContentHash);
+            _modules.DestroyModule(module.Kind, module.Module);
         }
     }
 
@@ -890,6 +1020,7 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             }
         }
     }
+
     private void WarnOnce(string path, string message)
     {
         if (!_warnedPaths.Add(path))
@@ -902,30 +1033,33 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             message);
     }
 
-    private void WarnDefaultReload(string reason)
+    private void WarnDefaultReload(ShaderPipelineKind kind, string reason)
     {
         WarnOnce(
-            DefaultShaderPath,
-            $"Reloading the built-in sprite shader failed and the previous shader remains active: "
-                + $"{reason}.");
+            ShaderPathFor(kind),
+            $"Reloading the built-in {Describe(kind)} shader failed and the previous shader remains "
+                + $"active: {reason}.");
     }
 
-    private void WarnMissingSpirV()
+    private void WarnMissingSpirV(ShaderPipelineKind kind)
     {
-        if (_warnedMissingSpirV)
+        uint bit = 1u << (int)kind;
+        if ((_loggedMissingSpirV & bit) != 0)
         {
             return;
         }
 
-        _warnedMissingSpirV = true;
+        _loggedMissingSpirV |= bit;
         _logger.LogWarning(
-            "A sprite assigns a custom shader with no SPIR-V data reference; its sprites draw with "
-                + "the default shader. This diagnostic is logged once per renderer.");
+            "A {Kind} assigns a custom shader with no SPIR-V data reference; its renderables draw "
+                + "with the kind's default shader. This diagnostic is logged once per renderer.",
+            Describe(kind));
     }
 
-    private StoreEntry DefaultEntryOrThrow()
-        => _defaultEntry
-            ?? throw new Bork2dException("The built-in sprite shader catalog is not initialized.");
+    private StoreEntry DefaultEntryOrThrow(ShaderPipelineKind kind)
+        => _defaultEntries[(int)kind]
+            ?? throw new Bork2dException(
+                $"The built-in {Describe(kind)} shader catalog is not initialized.");
 
     private static string DescribeLoadFailure(Task load)
     {
@@ -945,7 +1079,7 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     /// <remarks>
     /// The continuation is best-effort and runs only for a faulted antecedent; it keeps the
     /// observation independent of whether the catalog ever pumps again (shutdown, a mount that
-    /// retires the entry, or a sprite that never returns).
+    /// retires the entry, or a renderable that never returns).
     /// </remarks>
     /// <param name="load">The load task to observe.</param>
     private static void ObserveFault(Task load)
@@ -997,17 +1131,23 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         internal ModuleRecord? Module { get; set; }
 
         internal long LastUsedFrame { get; set; }
+
+        /// <summary>Gets or sets the vertex-stage kind of the most recent resolution.</summary>
+        internal ShaderPipelineKind LastRequestedKind { get; set; }
     }
 
     private sealed class ModuleRecord
     {
-        internal ModuleRecord(ulong contentHash, ShaderModule module)
+        internal ModuleRecord(ulong contentHash, ShaderPipelineKind kind, ShaderModule module)
         {
             ContentHash = contentHash;
+            Kind = kind;
             Module = module;
         }
 
         internal ulong ContentHash { get; }
+
+        internal ShaderPipelineKind Kind { get; }
 
         internal ShaderModule Module { get; }
 

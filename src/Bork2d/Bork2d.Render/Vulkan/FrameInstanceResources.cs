@@ -1,6 +1,7 @@
 using System.Numerics;
 using Bork2d.Engine;
 using Bork2d.Render.Sprites;
+using Bork2d.Render.TwoDimensional;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
 using Buffer = Silk.NET.Vulkan.Buffer;
@@ -9,8 +10,8 @@ namespace Bork2d.Render.Vulkan;
 
 /// <summary>
 /// One GPU frame's growable instance buffer (set 0 binding 0), bindless page array (set 0 binding 1),
-/// growable global uniform buffer (set 1 binding 2), and present scene-image sampler (the present
-/// pipeline's set 0 binding 0) (M8 §6.5/§6.6, shader ABI v2).
+/// growable global uniform buffer (set 1 binding 2), growable line vertex/index buffers, and present
+/// scene-image sampler (the present pipeline's set 0 binding 0) (M8 §6.5/§6.6, shader ABI v3).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -25,7 +26,7 @@ namespace Bork2d.Render.Vulkan;
 /// </para>
 /// <para>
 /// Binding 1 of the sprite descriptor set is the bindless combined-image-sampler array from the
-/// shared <see cref="SpritePipeline"/> layout, allocated with a variable descriptor count equal to
+/// shared <see cref="TwoDimensionalPipeline"/> layout, allocated with a variable descriptor count equal to
 /// the current page capacity and the <c>PARTIALLY_BOUND | UPDATE_AFTER_BIND |
 /// VARIABLE_DESCRIPTOR_COUNT</c> flags. Page descriptors are written by <see cref="WritePage"/> as
 /// pages become ready and rewritten after a capacity growth (the frame set waits every frame fence,
@@ -47,14 +48,27 @@ namespace Bork2d.Render.Vulkan;
 /// set because the present pipeline has its own layout and must not reuse or change the sprite
 /// bindless set. <see cref="Destroy"/> is best-effort, idempotent, and never throws (D-M6-27).
 /// </para>
+/// <para>
+/// The line vertex and index buffers are a host-visible coherent, mapped, growable pair; the 2D
+/// planner writes the frame's line geometry straight into the mappings and the 2D pass binds them for
+/// its indexed draws. They grow by the same power-of-two, fence-gated rule as the instance buffer, are
+/// checked against the device's buffer limit, log every growth, and never truncate.
+/// </para>
 /// </remarks>
-internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuffer, IGlobalUniformBuffer
+internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuffer, IGlobalUniformBuffer,
+    ILineBufferSink
 {
     /// <summary>The approved initial per-frame capacity in 176-byte records.</summary>
     internal const int InitialCapacity = InstanceBufferGrowth.InitialCapacity;
 
     /// <summary>The initial number of global uniform blocks per frame.</summary>
     internal const int InitialGlobalBlockCapacity = 16;
+
+    /// <summary>The initial per-frame line vertex capacity.</summary>
+    internal const int InitialLineVertexCapacity = 4096;
+
+    /// <summary>The initial per-frame line 32-bit index capacity.</summary>
+    internal const int InitialLineIndexCapacity = 6144;
 
     private readonly Vk _vk;
     private readonly Device _device;
@@ -80,6 +94,19 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     private int _globalCapacity;
     private readonly int _globalBlockStride;
     private int _globalGrowthCount;
+    private Buffer _lineVertexBuffer;
+    private DeviceMemory _lineVertexMemory;
+    private void* _lineVertexMapped;
+    private ulong _lineVertexBufferBytes;
+    private int _lineVertexCapacity;
+    private int _lineVertexGrowthCount;
+    private Buffer _lineIndexBuffer;
+    private DeviceMemory _lineIndexMemory;
+    private void* _lineIndexMapped;
+    private ulong _lineIndexBufferBytes;
+    private int _lineIndexCapacity;
+    private int _lineIndexGrowthCount;
+    private bool _lineInFlight;
     private DescriptorPool _pool;
     private DescriptorSet _descriptorSet;
     private DescriptorSet _globalSet;
@@ -169,6 +196,18 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     void IGlobalUniformBuffer.WriteBlock(int index, in GlobalUniformBlock block)
         => WriteGlobalBlock(index, block);
 
+    int ILineBufferSink.VertexCapacity => _lineVertexCapacity;
+
+    int ILineBufferSink.IndexCapacity => _lineIndexCapacity;
+
+    void ILineBufferSink.EnsureCapacity(int vertexCount, int indexCount)
+        => EnsureLineCapacity(vertexCount, indexCount);
+
+    void ILineBufferSink.WriteVertex(int index, in LineVertex vertex)
+        => WriteLineVertex(index, vertex);
+
+    void ILineBufferSink.WriteIndex(int index, uint value) => WriteLineIndex(index, value);
+
     /// <summary>Gets the number of capacity growths this frame's instance buffer performed.</summary>
     internal int GrowthCount => _growthCount;
 
@@ -195,6 +234,30 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
 
     /// <summary>Gets the number of global block capacity growths this frame performed.</summary>
     internal int GlobalGrowthCount => _globalGrowthCount;
+
+    /// <summary>Gets the line vertex buffer handle.</summary>
+    internal Buffer LineVertexBuffer => _lineVertexBuffer;
+
+    /// <summary>Gets the line 32-bit index buffer handle.</summary>
+    internal Buffer LineIndexBuffer => _lineIndexBuffer;
+
+    /// <summary>Gets the current line vertex capacity (initially 4096).</summary>
+    internal int LineVertexCapacity => _lineVertexCapacity;
+
+    /// <summary>Gets the current line index capacity (initially 6144).</summary>
+    internal int LineIndexCapacity => _lineIndexCapacity;
+
+    /// <summary>Gets the allocated line vertex buffer size in bytes.</summary>
+    internal ulong LineVertexBufferBytes => _lineVertexBufferBytes;
+
+    /// <summary>Gets the allocated line index buffer size in bytes.</summary>
+    internal ulong LineIndexBufferBytes => _lineIndexBufferBytes;
+
+    /// <summary>Gets the number of line vertex capacity growths this frame performed.</summary>
+    internal int LineVertexGrowthCount => _lineVertexGrowthCount;
+
+    /// <summary>Gets the number of line index capacity growths this frame performed.</summary>
+    internal int LineIndexGrowthCount => _lineIndexGrowthCount;
 
     /// <summary>Gets the frame descriptor set (instance buffer and bindless page array).</summary>
     internal DescriptorSet DescriptorSet => _descriptorSet;
@@ -240,7 +303,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         Device device,
         PhysicalDevice physicalDevice,
         int frameIndex,
-        SpritePipeline pipeline,
+        TwoDimensionalPipeline pipeline,
         PresentPipeline present,
         int pageCapacity,
         uint maxStorageBufferRange,
@@ -296,6 +359,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         void* mapped = null;
         void* globalMapped = null;
         var allocationBytes = 0UL;
+        FrameInstanceResources? resources = null;
         try
         {
             CreateMappedBuffer(
@@ -339,7 +403,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
                 out globalDescriptorSet,
                 out presentDescriptorSet);
 
-            var resources = new FrameInstanceResources(
+            resources = new FrameInstanceResources(
                 vk,
                 logicalDevice,
                 physicalDevice,
@@ -370,6 +434,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
                 frameIndex);
             resources.WriteInstanceBuffer();
             resources.WriteGlobalBuffer();
+            resources.CreateLineBuffers(instance);
 
             if (instance is not null)
             {
@@ -404,17 +469,25 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         }
         catch
         {
-            DestroyBestEffort(
-                vk,
-                logicalDevice,
-                logger,
-                pool,
-                buffer,
-                memory,
-                mapped,
-                globalBuffer,
-                globalMemory,
-                globalMapped);
+            if (resources is not null)
+            {
+                resources.Destroy();
+            }
+            else
+            {
+                DestroyBestEffort(
+                    vk,
+                    logicalDevice,
+                    logger,
+                    pool,
+                    buffer,
+                    memory,
+                    mapped,
+                    globalBuffer,
+                    globalMemory,
+                    globalMapped);
+            }
+
             throw;
         }
     }
@@ -423,10 +496,18 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     public void Dispose() => Destroy();
 
     /// <summary>Records that the frame was submitted and the buffers are in flight.</summary>
-    internal void MarkSubmitted() => _growth.MarkInFlight();
+    internal void MarkSubmitted()
+    {
+        _growth.MarkInFlight();
+        _lineInFlight = true;
+    }
 
     /// <summary>Records that the frame fence signaled and the buffers may be replaced.</summary>
-    internal void MarkFenceSignaled() => _growth.MarkFenceSignaled();
+    internal void MarkFenceSignaled()
+    {
+        _growth.MarkFenceSignaled();
+        _lineInFlight = false;
+    }
 
     /// <inheritdoc cref="IInstanceBuffer.EnsureCapacity"/>
     internal void EnsureCapacity(int requiredInstances)
@@ -621,6 +702,299 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     }
 
     /// <summary>
+    /// Ensures the frame holds at least the required line vertex and index counts.
+    /// </summary>
+    /// <remarks>
+    /// The growth rule mirrors <see cref="EnsureCapacity"/>: the frame fence must already have
+    /// signaled, the new capacity is <c>roundUpToPowerOfTwo(max(required, capacity * 2))</c>, and the
+    /// replacement buffer is created and remapped before the old one is released. The two buffers grow
+    /// independently, so a vertex-heavy frame never inflates the index buffer (or the reverse).
+    /// </remarks>
+    /// <param name="vertexCount">The frame's required vertex count.</param>
+    /// <param name="indexCount">The frame's required index count.</param>
+    /// <exception cref="ArgumentOutOfRangeException">A count is negative.</exception>
+    /// <exception cref="InvalidOperationException">The frame is still in flight.</exception>
+    /// <exception cref="Bork2dException">A new capacity cannot be represented or allocated.</exception>
+    internal void EnsureLineCapacity(int vertexCount, int indexCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(vertexCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(indexCount);
+        if (vertexCount > _lineVertexCapacity)
+        {
+            GrowLineVertexBuffer(vertexCount);
+        }
+
+        if (indexCount > _lineIndexCapacity)
+        {
+            GrowLineIndexBuffer(indexCount);
+        }
+    }
+
+    /// <inheritdoc cref="ILineBufferSink.WriteVertex"/>
+    internal void WriteLineVertex(int index, in LineVertex vertex)
+    {
+        if ((uint)index >= (uint)_lineVertexCapacity)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(index),
+                index,
+                $"The line vertex index must be inside the current capacity of "
+                    + $"{_lineVertexCapacity} records.");
+        }
+
+        var destination = (byte*)_lineVertexMapped + ((long)index * LineVertex.SizeInBytes);
+        LineVertexWriter.Write(destination, vertex);
+    }
+
+    /// <inheritdoc cref="ILineBufferSink.WriteIndex"/>
+    internal void WriteLineIndex(int index, uint value)
+    {
+        if ((uint)index >= (uint)_lineIndexCapacity)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(index),
+                index,
+                $"The line index must be inside the current capacity of {_lineIndexCapacity} "
+                    + "entries.");
+        }
+
+        ((uint*)_lineIndexMapped)[index] = value;
+    }
+
+    private void CreateLineBuffers(IVulkanInstance? instance)
+    {
+        ulong vertexBytes = (ulong)InitialLineVertexCapacity * LineVertex.SizeInBytes;
+        ulong indexBytes = (ulong)InitialLineIndexCapacity * sizeof(uint);
+        if (vertexBytes > _maxStorageBufferRange)
+        {
+            throw new Bork2dException(
+                $"The per-frame line vertex buffer needs {vertexBytes} bytes for "
+                    + $"{InitialLineVertexCapacity} 112-byte records, which exceeds the selected "
+                    + $"device's maxStorageBufferRange of {_maxStorageBufferRange}.");
+        }
+
+        if (indexBytes > _maxStorageBufferRange)
+        {
+            throw new Bork2dException(
+                $"The per-frame line index buffer needs {indexBytes} bytes for "
+                    + $"{InitialLineIndexCapacity} 32-bit indices, which exceeds the selected "
+                    + $"device's maxStorageBufferRange of {_maxStorageBufferRange}.");
+        }
+
+        CreateMappedBuffer(
+            _vk,
+            _device,
+            _physicalDevice,
+            _logger,
+            _frameIndex,
+            vertexBytes,
+            BufferUsageFlags.VertexBufferBit,
+            "line vertex buffer",
+            out _lineVertexBuffer,
+            out _lineVertexMemory,
+            out _lineVertexMapped,
+            out _);
+        CreateMappedBuffer(
+            _vk,
+            _device,
+            _physicalDevice,
+            _logger,
+            _frameIndex,
+            indexBytes,
+            BufferUsageFlags.IndexBufferBit,
+            "line index buffer",
+            out _lineIndexBuffer,
+            out _lineIndexMemory,
+            out _lineIndexMapped,
+            out _);
+
+        _lineVertexBufferBytes = vertexBytes;
+        _lineIndexBufferBytes = indexBytes;
+        _lineVertexCapacity = InitialLineVertexCapacity;
+        _lineIndexCapacity = InitialLineIndexCapacity;
+        if (instance is not null)
+        {
+            instance.SetObjectName(
+                _device.Handle,
+                ObjectType.Buffer,
+                (nint)_lineVertexBuffer.Handle,
+                $"Bork2d frame {_frameIndex} line vertex buffer");
+            instance.SetObjectName(
+                _device.Handle,
+                ObjectType.Buffer,
+                (nint)_lineIndexBuffer.Handle,
+                $"Bork2d frame {_frameIndex} line index buffer");
+        }
+    }
+
+    private void GrowLineVertexBuffer(int requiredVertices)
+    {
+        if (_lineInFlight)
+        {
+            throw new InvalidOperationException(
+                $"The per-frame line vertex buffer cannot grow from {_lineVertexCapacity} to hold "
+                    + $"{requiredVertices} records while the frame is in flight; the renderer must "
+                    + "observe the frame fence before growing.");
+        }
+
+        int newCapacity = ComputeLineCapacity(
+            requiredVertices,
+            _lineVertexCapacity,
+            LineVertex.SizeInBytes,
+            "line vertex buffer",
+            "vertex records");
+        ulong bytes = (ulong)newCapacity * LineVertex.SizeInBytes;
+        CreateMappedBuffer(
+            _vk,
+            _device,
+            _physicalDevice,
+            _logger,
+            _frameIndex,
+            bytes,
+            BufferUsageFlags.VertexBufferBit,
+            "line vertex buffer",
+            out Buffer buffer,
+            out DeviceMemory memory,
+            out void* mapped,
+            out _);
+
+        Buffer previousBuffer = _lineVertexBuffer;
+        DeviceMemory previousMemory = _lineVertexMemory;
+        void* previousMapped = _lineVertexMapped;
+        ulong previousBytes = _lineVertexBufferBytes;
+        int previousCapacity = _lineVertexCapacity;
+
+        _lineVertexBuffer = buffer;
+        _lineVertexMemory = memory;
+        _lineVertexMapped = mapped;
+        _lineVertexBufferBytes = bytes;
+        _lineVertexCapacity = newCapacity;
+        _lineVertexGrowthCount++;
+        DestroyMappedBuffer(previousBuffer, previousMemory, previousMapped);
+
+        _logger.LogInformation(
+            "Line vertex buffer capacity grew: frame={Frame}, from={PreviousCapacity}, "
+                + "to={Capacity}, previousBytes={PreviousBytes}, bytes={Bytes}, limit={Limit}.",
+            _frameIndex,
+            previousCapacity,
+            newCapacity,
+            previousBytes,
+            _lineVertexBufferBytes,
+            _maxStorageBufferRange);
+    }
+
+    private void GrowLineIndexBuffer(int requiredIndices)
+    {
+        if (_lineInFlight)
+        {
+            throw new InvalidOperationException(
+                $"The per-frame line index buffer cannot grow from {_lineIndexCapacity} to hold "
+                    + $"{requiredIndices} indices while the frame is in flight; the renderer must "
+                    + "observe the frame fence before growing.");
+        }
+
+        int newCapacity = ComputeLineCapacity(
+            requiredIndices,
+            _lineIndexCapacity,
+            sizeof(uint),
+            "line index buffer",
+            "indices");
+        ulong bytes = (ulong)newCapacity * sizeof(uint);
+        CreateMappedBuffer(
+            _vk,
+            _device,
+            _physicalDevice,
+            _logger,
+            _frameIndex,
+            bytes,
+            BufferUsageFlags.IndexBufferBit,
+            "line index buffer",
+            out Buffer buffer,
+            out DeviceMemory memory,
+            out void* mapped,
+            out _);
+
+        Buffer previousBuffer = _lineIndexBuffer;
+        DeviceMemory previousMemory = _lineIndexMemory;
+        void* previousMapped = _lineIndexMapped;
+        ulong previousBytes = _lineIndexBufferBytes;
+        int previousCapacity = _lineIndexCapacity;
+
+        _lineIndexBuffer = buffer;
+        _lineIndexMemory = memory;
+        _lineIndexMapped = mapped;
+        _lineIndexBufferBytes = bytes;
+        _lineIndexCapacity = newCapacity;
+        _lineIndexGrowthCount++;
+        DestroyMappedBuffer(previousBuffer, previousMemory, previousMapped);
+
+        _logger.LogInformation(
+            "Line index buffer capacity grew: frame={Frame}, from={PreviousCapacity}, "
+                + "to={Capacity}, previousBytes={PreviousBytes}, bytes={Bytes}, limit={Limit}.",
+            _frameIndex,
+            previousCapacity,
+            newCapacity,
+            previousBytes,
+            _lineIndexBufferBytes,
+            _maxStorageBufferRange);
+    }
+
+    private int ComputeLineCapacity(
+        int required,
+        int currentCapacity,
+        int recordSizeInBytes,
+        string description,
+        string recordDescription)
+    {
+        long doubled = (long)currentCapacity * 2L;
+        long target = Math.Max(required, doubled);
+        if (target > int.MaxValue)
+        {
+            throw new Bork2dException(
+                $"The per-frame {description} cannot grow from {currentCapacity} to hold "
+                    + $"{required} {recordDescription}: the requested capacity {target} exceeds the "
+                    + "maximum representable count.");
+        }
+
+        uint rounded = BitOperations.RoundUpToPowerOf2((uint)target);
+        if (rounded == 0 || rounded > int.MaxValue)
+        {
+            throw new Bork2dException(
+                $"The per-frame {description} cannot grow from {currentCapacity} to hold "
+                    + $"{required} {recordDescription}: the requested capacity {target} cannot be "
+                    + "rounded up to a power of two.");
+        }
+
+        ulong bytes = (ulong)rounded * (ulong)recordSizeInBytes;
+        if (bytes > _maxStorageBufferRange)
+        {
+            throw new Bork2dException(
+                $"The per-frame {description} cannot grow from {currentCapacity} to hold "
+                    + $"{required} {recordDescription}: it needs {bytes} bytes, which exceeds the "
+                    + $"selected device's maxStorageBufferRange of {_maxStorageBufferRange}. No "
+                    + "record is truncated.");
+        }
+
+        return (int)rounded;
+    }
+
+    private void DestroyLineBuffers()
+    {
+        DestroyMappedBuffer(_lineVertexBuffer, _lineVertexMemory, _lineVertexMapped);
+        DestroyMappedBuffer(_lineIndexBuffer, _lineIndexMemory, _lineIndexMapped);
+        _lineVertexBuffer = default;
+        _lineVertexMemory = default;
+        _lineVertexMapped = null;
+        _lineVertexBufferBytes = 0;
+        _lineVertexCapacity = 0;
+        _lineIndexBuffer = default;
+        _lineIndexMemory = default;
+        _lineIndexMapped = null;
+        _lineIndexBufferBytes = 0;
+        _lineIndexCapacity = 0;
+    }
+
+    /// <summary>
     /// Recreates the descriptor pool and both frame descriptor sets with a new variable descriptor
     /// count.
     /// </summary>
@@ -692,6 +1066,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             return;
         }
 
+        DestroyLineBuffers();
         DestroyBestEffort(
             _vk,
             _device,
@@ -741,7 +1116,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         {
             SType = StructureType.WriteDescriptorSet,
             DstSet = _descriptorSet,
-            DstBinding = SpritePipeline.TextureBinding,
+            DstBinding = TwoDimensionalPipeline.TextureBinding,
             DstArrayElement = (uint)pageIndex,
             DescriptorCount = 1,
             DescriptorType = DescriptorType.CombinedImageSampler,
@@ -1051,7 +1426,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         {
             SType = StructureType.WriteDescriptorSet,
             DstSet = _descriptorSet,
-            DstBinding = SpritePipeline.InstanceBinding,
+            DstBinding = TwoDimensionalPipeline.InstanceBinding,
             DstArrayElement = 0,
             DescriptorCount = 1,
             DescriptorType = DescriptorType.StorageBuffer,
@@ -1072,7 +1447,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         {
             SType = StructureType.WriteDescriptorSet,
             DstSet = _globalSet,
-            DstBinding = SpritePipeline.GlobalBinding,
+            DstBinding = TwoDimensionalPipeline.GlobalBinding,
             DstArrayElement = 0,
             DescriptorCount = 1,
             DescriptorType = DescriptorType.UniformBufferDynamic,

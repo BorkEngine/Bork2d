@@ -7,10 +7,12 @@ namespace Bork2d.Engine.Rendering;
 /// <para>
 /// The values describe the last completed frame, except <see cref="ValidationErrors"/> and
 /// <see cref="ValidationWarnings"/>, which are cumulative for the run. <see cref="DrawCalls"/> counts
-/// the frame's contiguous shader runs (one <c>vkCmdDraw</c> each) plus the final fullscreen present
-/// draw, so a default-only camera records two draws (its run and the present) while a camera that
-/// alternates custom and default sprites records one per contiguous group plus the present;
-/// <see cref="NonEmptyCameras"/> counts the cameras with at least one run.
+/// the frame's contiguous draw runs (one <c>vkCmdDraw</c> per sprite run and one
+/// <c>vkCmdDrawIndexed</c> per line run) plus the final fullscreen present draw, so a default-only
+/// camera records two draws (its run and the present) while a camera that alternates kinds or shaders
+/// records one per contiguous group plus the present; <see cref="NonEmptyCameras"/> counts the cameras
+/// with at least one run. <see cref="Instances"/> counts sprite instance records and
+/// <see cref="Lines"/> counts line records submitted by the frame, both across cameras.
 /// <see cref="TexturePages"/>
 /// and <see cref="TexturePageCapacity"/> are current for that frame and include the placeholder at
 /// index <c>0</c>; <see cref="TexturePages"/> counts the ready pages of the current asset catalog, so
@@ -20,7 +22,9 @@ namespace Bork2d.Engine.Rendering;
 /// later frame. <see cref="SkippedSprites"/> counts the null, invalid-layer, non-<c>Quad</c>, and
 /// still-loading sprites (a loading custom shader, main texture, or declared additional texture)
 /// skipped by that frame; a sprite drawn with the placeholder or the default shader fallback is not
-/// skipped.
+/// skipped. <see cref="SkippedLines"/> counts the null-geometry, invalid-layer, and still-loading
+/// lines skipped by that frame; a line drawn with the built-in line shader or the line default
+/// fallback is not skipped.
 /// </para>
 /// <para>
 /// The type is a value, so reading <c>IEngine.RenderStats</c> allocates nothing and cannot throw.
@@ -33,12 +37,13 @@ namespace Bork2d.Engine.Rendering;
 /// <param name="FramebufferWidth">The last completed frame's framebuffer/target width in pixels.</param>
 /// <param name="FramebufferHeight">The last completed frame's framebuffer/target height in pixels.</param>
 /// <param name="DrawCalls">
-/// The number of <c>vkCmdDraw</c> calls recorded by the frame: one per shader run plus the final
+/// The number of draw calls recorded by the frame: one per sprite or line draw run plus the final
 /// fullscreen present draw.
 /// </param>
-/// <param name="Instances">The number of instance records submitted by the frame.</param>
+/// <param name="Instances">The number of sprite instance records submitted by the frame.</param>
+/// <param name="Lines">The number of line records submitted by the frame.</param>
 /// <param name="Cameras">The number of cameras captured for the frame.</param>
-/// <param name="NonEmptyCameras">The number of cameras that recorded at least one shader run.</param>
+/// <param name="NonEmptyCameras">The number of cameras that recorded at least one draw run.</param>
 /// <param name="TexturePages">
 /// The ready texture pages in the current asset catalog, including the placeholder at index <c>0</c>.
 /// Images retired by an asset mount and awaiting residency reclamation are not counted.
@@ -56,6 +61,10 @@ namespace Bork2d.Engine.Rendering;
 /// The sprites skipped by the frame (null, invalid layer, non-<c>Quad</c>, or a still-loading shader,
 /// main texture, or additional texture page).
 /// </param>
+/// <param name="SkippedLines">
+/// The lines skipped by the frame (null/invalid geometry, invalid layer, or a still-loading custom
+/// shader).
+/// </param>
 /// <param name="ValidationErrors">The cumulative fatal validation errors for the run.</param>
 /// <param name="ValidationWarnings">The cumulative validation warnings for the run.</param>
 public readonly record struct RenderStats(
@@ -64,6 +73,7 @@ public readonly record struct RenderStats(
     int FramebufferHeight,
     int DrawCalls,
     int Instances,
+    int Lines,
     int Cameras,
     int NonEmptyCameras,
     int TexturePages,
@@ -71,5 +81,6 @@ public readonly record struct RenderStats(
     int TextureUploadsPending,
     long TextureUploadBytesPending,
     long SkippedSprites,
+    long SkippedLines,
     long ValidationErrors,
     long ValidationWarnings);

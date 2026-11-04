@@ -22,7 +22,7 @@ namespace Bork2d.Render.Sprites;
 /// <para>
 /// A malformed field is a fatal renderer error naming the field and the frozen texture reference; a
 /// known non-<c>Quad</c> topology is a non-fatal skip handled by
-/// <see cref="SpritePlanning.Classify"/> and never reaches this resolver.
+/// <see cref="TwoDimensional.TwoDimensionalPlanning.Classify"/> and never reaches this resolver.
 /// </para>
 /// </remarks>
 /// <param name="WorldWidth">The unsigned world-unit width.</param>

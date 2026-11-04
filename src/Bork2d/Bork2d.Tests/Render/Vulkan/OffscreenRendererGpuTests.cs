@@ -111,8 +111,8 @@ public sealed class OffscreenRendererGpuTests
                 renderer.HasInstanceResources,
                 "The renderer did not create the per-frame instance SSBO/descriptor set (Q10=J1).");
             Assert.True(
-                renderer.HasSpritePipeline,
-                "The renderer did not create the sprite pipeline.");
+                renderer.HasTwoDimensionalPipeline,
+                "The renderer did not create the 2D pipeline.");
             TexturePageStore pages = Assert.IsType<TexturePageStore>(renderer.PageStore);
             Assert.True(pages.IsPlaceholderReady, "The startup placeholder page is not resident.");
             Assert.Equal(1, pages.TexturePageCount);

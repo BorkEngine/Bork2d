@@ -2,8 +2,8 @@ using Bork2d.Engine;
 using Bork2d.Engine.Rendering;
 using Bork2d.Render.Diagnostics;
 using Bork2d.Render.Handoff;
-using Bork2d.Render.Sprites;
 using Bork2d.Render.Textures;
+using Bork2d.Render.TwoDimensional;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
 
@@ -133,8 +133,8 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
     /// <summary>Gets a value indicating whether every GPU frame owns its empty instance resources.</summary>
     internal bool HasInstanceResources => _frames.HasInstanceResources;
 
-    /// <summary>Gets a value indicating whether the sprite pipeline was created at startup.</summary>
-    internal bool HasSpritePipeline => _textures?.Pipeline is not null;
+    /// <summary>Gets a value indicating whether the 2D pipeline was created at startup.</summary>
+    internal bool HasTwoDimensionalPipeline => _textures?.Pipeline is not null;
 
     /// <summary>Gets the texture-page cache (GPU tests observe the placeholder and counts).</summary>
     internal TexturePageStore? PageStore => _textures?.Pages;
@@ -302,7 +302,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
         CreateFrames(startupPageCapacity);
         _textures.CreatePageStore(startupPageCapacity);
         _passes = new RenderPassRegistry(
-            new SpriteRenderPass(
+            new TwoDimensionalRenderPass(
                 _textures.Pipeline!,
                 _textures.Shaders!,
                 _textures.Pages!,
@@ -402,6 +402,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 (int)target.Extent.Height,
                 frame.InstanceResources,
                 frame.InstanceResources,
+                frame.InstanceResources,
                 SceneTarget.ColorFormat);
             RecordFrame(frame, _frameIndex);
             Submit(frame);
@@ -448,7 +449,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
         // The scene image starts undefined every frame and a camera may load instead of clearing, so
         // one full-target opaque-black clear defines every linear scene pixel before any camera pass.
         frame.Scene.RecordToColorAttachment(commandBuffer);
-        SpritePassRecorder.RecordFrameClear(
+        TwoDimensionalPassRecorder.RecordFrameClear(
             device.Api,
             commandBuffer,
             frame.Scene.View,
@@ -471,6 +472,8 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 frame.InstanceResources.DescriptorSet,
                 frame.InstanceResources.GlobalDescriptorSet,
                 frame.InstanceResources.PresentDescriptorSet,
+                frame.InstanceResources.LineVertexBuffer,
+                frame.InstanceResources.LineIndexBuffer,
                 SceneTarget.ColorFormat,
                 target.Format));
 
@@ -525,9 +528,9 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
     private void CreateFrames(int pageCapacity)
     {
         VulkanDevice device = _device!;
-        SpritePipeline pipeline = _textures?.Pipeline
+        TwoDimensionalPipeline pipeline = _textures?.Pipeline
             ?? throw new Bork2dException(
-                "The offscreen renderer cannot create frames without the sprite pipeline.");
+                "The offscreen renderer cannot create frames without the 2D pipeline.");
         PresentPipeline present = _present
             ?? throw new Bork2dException(
                 "The offscreen renderer cannot create frames without the present pipeline.");
@@ -804,8 +807,9 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 + "texturePageCapacity={TexturePageCapacity}, pageGrowths={PageGrowths}, "
                 + "failedPages={FailedPages}, instanceCapacity={InstanceCapacity}, "
                 + "instanceGrowths={InstanceGrowths}, drawCalls={DrawCalls}, "
-                + "instances={Instances}, cameras={Cameras}, "
+                + "instances={Instances}, lines={Lines}, cameras={Cameras}, "
                 + "nonEmptyCameras={NonEmptyCameras}, skippedSprites={SkippedSprites}, "
+                + "skippedLines={SkippedLines}, "
                 + "validationErrors={ValidationErrors}, validationWarnings={ValidationWarnings}, "
                 + "lastFrameNumber={LastFrameNumber}, lastPresentResult={LastPresentResult}.",
             nameof(RendererMode.Offscreen),
@@ -827,9 +831,11 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             _frames.StopLogInstanceGrowths,
             stats.DrawCalls,
             stats.Instances,
+            stats.Lines,
             stats.Cameras,
             stats.NonEmptyCameras,
             stats.SkippedSprites,
+            stats.SkippedLines,
             _lifecycle.ValidationErrorCount,
             _lifecycle.ValidationWarningCount,
             counters.LastFrameNumber,
