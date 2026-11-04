@@ -19,7 +19,7 @@ build/Bork2d.BuiltInAssets ─────────> Bork2d.Bake, Bork2d.Engi
 | [Bork2d.Engine](../src/Bork2d/Bork2d.Engine) | Public contract and implementation: scene, time, input/platform seams, assets, pack reader/writer. No GPU, OS, or logging-provider dependency. |
 | [Bork2d.Render](../src/Bork2d/Bork2d.Render) | Internal Vulkan implementation: device selection, swapchain/offscreen target, sprite pipeline, texture pages, snapshot handoff, capture. |
 | [Bork2d.Runtime](../src/Bork2d/Bork2d.Runtime) | Public host: builder, modes, SDL window/input, Vulkan instance/surface, renderer composition, logging. Embeds the built-in shader pack. |
-| [Bork2d.Bake](../src/Bork2d/Bork2d.Bake) | Build-time JIT tooling: TOML binding, processors, texture decode, pack composition, incremental manifest, CLI. |
+| [Bork2d.Bake](../src/Bork2d/Bork2d.Bake) | Build-time JIT tooling: TOML binding, processors, texture decode/encode, pack composition, incremental manifest, CLI. |
 | [Bork2d.BuiltInAssets](../build/Bork2d.BuiltInAssets/Bork2d.BuiltInAssets.csproj) | Build-only JIT generator for the embedded built-in shader pack. Outside the runtime solution and never referenced by a runtime project. |
 | [Bork2d.Tests](../src/Bork2d/Bork2d.Tests) | xUnit suite, including dependency-matrix and public-surface tests. |
 
@@ -132,10 +132,11 @@ Assets are built ahead of time, not loaded from loose files at runtime:
   global-uniform buffer, so it retains no obsolete render data or names.
 - **AOT.** Generated shapes are required; there is no reflection-shape fallback or runtime TOML.
   Runtime projects enable trim and AOT analyzers.
-- **Tooling isolation.** The bake tooling, TOML parser, image decoder, shader compiler, and the
-  built-in pack generator never enter a runtime project's output or publish graph. The built-in pack
-  itself is different: it is generated at build time and embedded in `Bork2d.Runtime` as C#, so the
-  runtime carries its default shader assets without a loose pack file or tooling dependency.
+- **Tooling isolation.** The bake tooling, TOML parser, image decoder, KTX2 writer, block encoder,
+  shader compiler, and the built-in pack generator never enter a runtime project's output or publish
+  graph. The built-in pack itself is different: it is generated at build time and embedded in
+  `Bork2d.Runtime` as C#, so the runtime carries its default shader assets without a loose pack file
+  or tooling dependency.
 
 ## Quality gates
 

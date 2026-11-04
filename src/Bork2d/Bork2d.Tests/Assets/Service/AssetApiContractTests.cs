@@ -103,11 +103,15 @@ public sealed class AssetApiContractTests
         Assert.Equal(TextureFormat.Rgba8, descriptor.Format);
         Assert.Equal(TextureFilter.Linear, descriptor.Filter);
         Assert.Equal(TextureWrap.Clamp, descriptor.Wrap);
+        Assert.Equal(1u, descriptor.MipLevels);
 
         Type type = typeof(TextureDescriptor);
         Assert.Equal(
             typeof(TextureFormat),
             type.GetProperty(nameof(TextureDescriptor.Format))!.PropertyType);
+        Assert.Equal(
+            typeof(uint),
+            type.GetProperty(nameof(TextureDescriptor.MipLevels))!.PropertyType);
         Assert.Equal(
             typeof(TextureFilter),
             type.GetProperty(nameof(TextureDescriptor.Filter))!.PropertyType);
@@ -115,8 +119,16 @@ public sealed class AssetApiContractTests
             typeof(TextureWrap),
             type.GetProperty(nameof(TextureDescriptor.Wrap))!.PropertyType);
 
-        // The zero value is the default for every enum, and Rgba8 is the only v1 format.
+        // The wire values are stable: zero is the default for every enum, and Rgba8 is the default
+        // format while the compressed formats occupy 4 through 7.
         Assert.Equal(0, (int)TextureFormat.Rgba8);
+        Assert.Equal(1, (int)TextureFormat.Rgb8);
+        Assert.Equal(2, (int)TextureFormat.Rg8);
+        Assert.Equal(3, (int)TextureFormat.R8);
+        Assert.Equal(4, (int)TextureFormat.CompRgba8);
+        Assert.Equal(5, (int)TextureFormat.CompRgb8);
+        Assert.Equal(6, (int)TextureFormat.CompRg8);
+        Assert.Equal(7, (int)TextureFormat.CompR8);
         Assert.Equal(0, (int)TextureFilter.Linear);
         Assert.Equal(1, (int)TextureFilter.Nearest);
         Assert.Equal(0, (int)TextureWrap.Clamp);

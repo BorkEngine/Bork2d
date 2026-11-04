@@ -22,7 +22,7 @@ public sealed class SpriteAssetBakeTests
     private const string SpriteType = "Bork2d.Engine.Assets.SpriteAsset";
     private const string SpritePath = "sprites/player";
     private const string TexturePath = "textures/player";
-    private const string TexturePayloadPath = "textures/player-raw";
+    private const string TexturePayloadPath = "textures/player-ktx2";
 
     [Fact]
     public async Task SpriteTomlWithAllPublicFieldsBindsAndRoundTripsThroughAPack()

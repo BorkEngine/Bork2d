@@ -154,11 +154,14 @@ type = "Bork2d.Engine.Assets.SpriteAsset"
 `scale` is the per-axis world size of a full UV quad: this hero draws one world unit square, and
 the source texture's pixel dimensions never affect the geometry.
 
-Texture sources (`png`, `jpg`, `jpeg`, `bmp`, `tga`) become a descriptor plus a raw RGBA8 payload.
-An optional sidecar overrides sampler state:
+Texture sources (`png`, `jpg`, `jpeg`, `bmp`, `tga`) become a descriptor plus a linear KTX2 payload
+with a full mip chain. An optional sidecar selects the semantic channels, compression, and sampler
+state:
 
 ```toml
 # Assets/art/hero.png.toml
+type = "rgba"          # rgba | rgb | rg | r
+compression = "none"   # none | auto
 filter = "linear"
 wrap = "clamp"
 ```

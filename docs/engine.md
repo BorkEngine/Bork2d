@@ -11,7 +11,7 @@ provider package.
 | `Bork2d.Engine` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
 | `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `IRenderable`, `ICamera<TLayer>`, `ISpriteRender<TLayer>` |
 | `Bork2d.Engine.Rendering` | `Color` (immutable linear RGBA), `RenderStats`, `ClearKind`, `FrameCaptureResult` |
-| `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `ShaderAsset`, `ShaderUniform`, `ShaderTextureSlot`, `ShaderUniformType`, `TextureDescriptor`, `AssetRef<T>`, `DataRef`, enums |
+| `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `ShaderAsset`, `ShaderUniform`, `ShaderTextureSlot`, `ShaderUniformType`, `TextureDescriptor`, `TextureFormat`, `AssetRef<T>`, `DataRef`, enums |
 | `Bork2d.Engine.Assets.Pack` | `PackBuilder`, `PackCompressionMode` (tooling only) |
 | `Bork2d.Engine.Input` | `IInput`, `KeyCode`, `MouseButton` |
 | `Bork2d.Engine.Mathematics` | `Bounds`, `Ray2D`, `Vector2Extensions`, `Vector2ApproximatelyExtensions` |
@@ -279,6 +279,35 @@ extensions therefore never appear in an asset path.
 runtime loader treats a pack as trusted content: it does not validate asset fields or follow
 references. Pack creation validates reference integrity and the bake tooling validates fields through
 registered asset validators.
+
+### Textures
+
+`TextureDescriptor` is the MessagePack texture contract. `Payload` references a complete KTX2 2.0
+file with one 2D image, one array layer, one face, no supercompression, and a full mip chain down to
+1x1. `Width` and `Height` are the base level's pixel dimensions, `Format` is the concrete linear
+format, `MipLevels` is the number of levels (at least one, default one), and `Filter`/`Wrap` are
+sampler state with `Linear`/`Clamp` defaults. The descriptor's dimensions, format, and mip count must
+match the KTX2 metadata; the runtime rejects a mismatch instead of guessing. Loading a descriptor does
+not read or decode the payload.
+
+Every texture is linear. There is no sRGB format and no color-space field; the bake never applies a
+gamma conversion. `TextureFormat` has eight stable integer values:
+
+| Value | Format | Storage |
+| --- | --- | --- |
+| `Rgba8` | RGBA8 UNORM | Four 8-bit channels. |
+| `Rgb8` | RGBA8 UNORM | Logical RGB; alpha is forced to `255`. |
+| `Rg8` | RG8 UNORM | Red and green. |
+| `R8` | R8 UNORM | Red only. |
+| `CompRgba8` | BC7 UNORM | Four channels. |
+| `CompRgb8` | BC1 RGB UNORM | Opaque RGB; decoded alpha is `1`. |
+| `CompRg8` | BC5 UNORM | Two channels. |
+| `CompR8` | BC4 UNORM | One channel. |
+
+The bake selects a format from the texture sidecar's semantic `type` (`rgba`, `rgb`, `rg`, `r`) and
+`compression` (`none`, `auto`). `none` maps to the matching uncompressed format and is the default, so
+an existing texture never becomes lossy without an explicit authoring choice; `auto` maps to BC7 for
+`rgba`, opaque BC1 for `rgb`, BC5 for `rg`, and BC4 for `r`.
 
 ### Pack format
 

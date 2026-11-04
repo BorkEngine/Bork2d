@@ -123,10 +123,12 @@ public sealed class BakeApplicationBuilder
     /// precedes the custom registrations.
     /// </para>
     /// <para>
-    /// The texture processor emits a <c>TextureDescriptor</c> and its raw payload;
+    /// The texture processor emits a <c>TextureDescriptor</c> and its KTX2 payload;
     /// <see cref="WithTextureDefaults(TextureFilter, TextureWrap)"/> supplies the sampler values of the
     /// canonical sidecar created for a texture that has none, even when it is called after this
-    /// method: the processor reads the builder's shared defaults at bake time.
+    /// method: the processor reads the builder's shared defaults at bake time. The sidecar's
+    /// <c>type</c> and <c>compression</c> keys select the semantic channel type and the optional block
+    /// compression; a sidecar without those keys inherits <c>rgba</c>/<c>none</c>.
     /// </para>
     /// <para>
     /// The fragment shader processor compiles a GLSL <c>.frag</c> source with the fixed engine

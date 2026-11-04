@@ -33,7 +33,7 @@ public sealed class MultiPackBakeTests
         Assert.Equal(Path.Combine(output.RootPath, "assets.pck"), result.Packs[0].PackPath);
         Assert.Equal(Path.Combine(output.RootPath, "dlc1.pck"), result.Packs[1].PackPath);
         Assert.Equal(
-            new[] { "art/player", "art/player-raw", "data/game", "roots/stats", "sprites/player" },
+            new[] { "art/player", "art/player-ktx2", "data/game", "roots/stats", "sprites/player" },
             result.Packs[0].Entries.Select(entry => entry.Path));
         Assert.Equal(
             new[] { BakeProjectFixture.DlcGamePath },
@@ -125,7 +125,7 @@ public sealed class MultiPackBakeTests
             new[] { BakeProjectFixture.DlcGamePath },
             result.Packs[1].Entries.Select(entry => entry.Path));
         Assert.Equal(
-            new[] { "art/player", "art/player-raw" },
+            new[] { "art/player", "art/player-ktx2" },
             result.Packs[2].Entries.Select(entry => entry.Path));
     }
 

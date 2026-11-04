@@ -52,7 +52,8 @@ The current engine is a strong fixed-function sprite renderer:
 
 - The sprite pipeline uses a 96-byte instanced record, one vertex/fragment shader pair, a 64-byte
   view-projection push constant, a bindless texture array, and one draw per non-empty camera.
-- `SpriteAsset` references one `TextureDescriptor`; textures are raw RGBA8, sRGB, single-mip.
+- Before this workstream, `SpriteAsset` referenced one `TextureDescriptor` whose textures were raw
+  RGBA8, sRGB, single-mip.
 - Shaders are compiled at engine build time into generated C# arrays; there is no shader asset and
   no runtime shader I/O.
 - There is no line, SVG, or font renderable, and the Pong scene is three textured quads plus a
@@ -77,7 +78,7 @@ signatures are finalized in the implementation tasks.
 | Extra textures | A sprite has one main texture plus up to four additional bindless texture paths. |
 | Shader compilation | `Bork2d.Bake` compiles GLSL 460 to SPIR-V through shaderc. The compiler is build-only and never enters a runtime or AOT output. |
 | KTX2 | Native Vulkan BC formats inside KTX2, encoded at bake time. There is no RGBA fallback and no runtime transcoder. |
-| Texture sidecar | Semantic `type`, `compression`, and `colorSpace`; the bake maps them to a concrete `TextureFormat`. |
+| Texture sidecar | Semantic `type` and `compression`; the bake maps them to a concrete linear `TextureFormat`. |
 | Mipmaps | A full mip chain for every baked texture, including MSDF atlases and compressed textures. |
 | Line geometry | CPU-expanded triangles with miter joins and butt caps; anti-aliasing in the fragment shader. |
 | 2D ordering | Sprites, lines, and text share one `(Layer, ZIndex)` sequence and one 2D render pass. |
@@ -344,22 +345,20 @@ engine.SetGlobalUniform("uWind", new Vector2(1f, 0f));
 
 #### Texture types and formats
 
-The sidecar `type` is semantic; the descriptor stores the concrete Vulkan-facing format:
+The sidecar `type` is semantic; the descriptor stores the concrete linear format:
 
 | Sidecar type | Uncompressed format (`compression = "none"`) | Auto compressed format (`compression = "auto"`) | Notes |
 | --- | --- | --- | --- |
-| `rgba` | `Rgba8Srgb` or `Rgba8Unorm` | `Bc7Srgb` or `Bc7Unorm` | Full alpha; BC7 is the high-quality default. |
-| `rgb` | `Rgba8Srgb` or `Rgba8Unorm` (alpha written as 1) | `Bc1Srgb` or `Bc1Unorm` | Alpha is not part of the asset. |
-| `rg` | `Rg8Unorm` | `Bc5Unorm` | Linear only; B is read as 0 and A as 1. |
-| `r` | `R8Unorm` | `Bc4Unorm` | Linear only; G and B are read as 0 and A as 1. |
+| `rgba` | `Rgba8` | `CompRgba8` (BC7) | Full alpha; BC7 is the high-quality choice. |
+| `rgb` | `Rgb8` (RGBA8 with alpha forced to 255) | `CompRgb8` (opaque BC1) | Alpha is not part of the asset. |
+| `rg` | `Rg8` | `CompRg8` (BC5) | B is read as 0 and A as 1. |
+| `r` | `R8` | `CompR8` (BC4) | G and B are read as 0 and A as 1. |
 
-Vulkan has no sRGB variants of BC5 or BC4. `colorSpace = "srgb"` is therefore rejected for `rg`
-and `r`; those types default to linear. `rgba` and `rgb` accept both `srgb` and `linear`.
+All textures are linear. There is no sRGB texture format and no `colorSpace` key, so the bake never
+applies a transfer function.
 
-The `compression` key accepts `auto`, `none`, `bc7`, `bc5`, `bc4`, and `bc1`. The explicit choice is
-validated against the type: `bc7` for `rgba`/`rgb`, `bc1` for `rgba`/`rgb`, `bc5` for `rg`, and
-`bc4` for `r`. A mismatch is a bake error. `none` is the default so existing color textures are
-not silently made lossy; a sidecar opts into compression.
+The `compression` key accepts `auto` and `none`. `none` is the default so existing color textures are
+not silently made lossy; `auto` selects the block format listed for the channel type.
 
 #### KTX2 container
 
@@ -388,28 +387,27 @@ processor does not hand-write KTX2 headers or block data.
 | --- | --- |
 | `Payload` | `DataRef` to the KTX2 payload. |
 | `Width`, `Height` | Base-level pixel dimensions. |
-| `Format` | Concrete format such as `Bc7Srgb`, `Bc5Unorm`, or `Rgba8Unorm`. |
+| `Format` | Concrete format such as `CompRgba8`, `CompRg8`, or `Rgba8`. |
 | `MipLevels` | Number of levels, at least 1. |
 | `Filter`, `Wrap` | Sampler state. |
 
-`TextureFormat` is no longer a single `Rgba8` value. It expands to the concrete uncompressed and
-BC values above. The old `TextureFormat.Rgba8` name is removed; 0.2 is a breaking release.
+`TextureFormat` keeps `Rgba8` as RGBA8 UNORM and adds `Rgb8`, `Rg8`, `R8`, `CompRgba8`, `CompRgb8`,
+`CompRg8`, and `CompR8`, in that order and as stable integer values. `Rgba8` remains the default.
 
 #### Sidecar
 
 ```toml
 # Assets/art/paddle.png.toml
 type = "rgba"          # rgba | rgb | rg | r
-compression = "auto"   # auto | none | bc7 | bc1 | bc5 | bc4
-colorSpace = "srgb"    # srgb | linear
+compression = "auto"   # auto | none
 filter = "linear"
 wrap = "clamp"
 ```
 
-A missing sidecar is created with `type = "rgba"`, `compression = "none"`,
-`colorSpace = "srgb"`, and the builder's filter/wrap defaults. This preserves existing textures
-while making compression an explicit authoring choice. Pong's paddle sidecar uses
-`compression = "auto"`, which selects BC7 at its current channel type.
+A missing sidecar is created with `type = "rgba"`, `compression = "none"`, and the builder's
+filter/wrap defaults. This preserves existing textures while making compression an explicit
+authoring choice. Pong's paddle sidecar uses `compression = "auto"`, which selects BC7 at its current
+channel type.
 
 #### Runtime
 
@@ -428,8 +426,8 @@ while making compression an explicit authoring choice. Pong's paddle sidecar use
 
 #### Mipmaps
 
-All baked textures get a full chain. For color textures, the bake downsamples in linear space and
-encodes each level with the same block format. For SDF and MSDF textures, the bake uses a
+All baked textures get a full chain. For color textures, the bake box-filters the raw linear values
+and encodes each level with the same block format. For SDF and MSDF textures, the bake uses a
 distance-preserving downsample rather than a naive color average:
 
 - Each channel is filtered as a signed distance, with the valid range preserved.
@@ -561,8 +559,8 @@ Unsupported elements are skipped with an informational diagnostic; a malformed p
 
 An SVG source at `Assets/art/wordmark.svg` with sidecar `wordmark.svg.toml` produces:
 
-- A `TextureDescriptor` at `art/wordmark-sdf`, using `type = "rgb"`, `colorSpace = "linear"`,
-  `compression = "none"`, and a full mip chain.
+- A `TextureDescriptor` at `art/wordmark-sdf`, using `type = "rgb"`, `compression = "none"`, and a
+  full mip chain.
 - A `SpriteAsset` at `art/wordmark` that references that texture with full UVs, a center pivot, and
   a scale that makes the visible artboard one unit high while the SDF margin extends outside it.
 - The SDF texture reserves the field margin around the artboard; the sprite's UVs and scale include
@@ -650,9 +648,8 @@ character sets such as Pong's digits while still failing clearly for an oversize
 atlas is packed with a deterministic shelf algorithm, sorted by glyph height and codepoint, so
 incremental bakes are stable.
 
-The atlas texture uses `type = "rgb"`, `colorSpace = "linear"`, `compression = "none"`, and a full
-mip chain. MSDF distance data is not color data; it must never be sRGB-decoded or BC7-compressed by
-default.
+The atlas texture uses `type = "rgb"`, `compression = "none"`, and a full mip chain. MSDF distance
+data is not color data; it must never be BC7-compressed by the generic color path.
 
 #### `FontAsset`
 
@@ -829,12 +826,13 @@ New or changed public members in 0.2:
 - `IEngine.SetGlobalUniform`, `IEngine.ResetGlobalUniforms`.
 - `ILineRender<TLayer>`, `IEngine.CreateLineRender`.
 - `IFontRender<TLayer>`, `IEngine.CreateFontRender`, `FontAsset`, `FontGlyph`, `TextAlignment`.
-- `TextureFormat` expanded to concrete sRGB/linear and BC values; `TextureDescriptor.MipLevels`.
+- `TextureFormat` expanded to the linear UNORM and BC values; `TextureDescriptor.MipLevels`.
 - `RenderStats` line and glyph counters.
 
 The exact overload sets, nullability, and defaults are settled in the implementation tasks and
 recorded in [engine.md](engine.md) and [render.md](render.md). A breaking-change note calls out the
-removed `TextureFormat.Rgba8`, the new reserved snapshot slots, and the shader asset contract.
+new `TextureFormat` values, the KTX2 payload contract, the new reserved snapshot slots, and the shader
+asset contract.
 
 ## Pong 0.2
 
@@ -845,7 +843,7 @@ Pong keeps the existing simulation, controls, camera, and window title. Its asse
 ```text
 examples/pong/Pong.Assets/Assets/
   art/paddle.png
-  art/paddle.png.toml          # type = "rgba", compression = "auto", colorSpace = "srgb"
+  art/paddle.png.toml          # type = "rgba", compression = "auto"
   art/wordmark.svg
   art/wordmark.svg.toml        # resolution = 512, range = 8, padding = 2
   fonts/score.ttf

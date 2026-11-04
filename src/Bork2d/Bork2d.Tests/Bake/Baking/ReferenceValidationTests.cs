@@ -30,7 +30,7 @@ public sealed class ReferenceValidationTests
             ],
             [
                 ProcessorAsset("textures/player", _textureType),
-                ProcessorData("textures/player-raw"),
+                ProcessorData("textures/player-ktx2"),
             ],
             diagnostics);
 
@@ -41,7 +41,7 @@ public sealed class ReferenceValidationTests
                 "data/game",
                 "sprites/player",
                 "textures/player",
-                "textures/player-raw",
+                "textures/player-ktx2",
             },
             index.Entries.Select(entry => entry.Path));
 
@@ -68,7 +68,7 @@ public sealed class ReferenceValidationTests
                 "data/game",
                 _gameConfigType,
                 Reference("texture", "textures/player", target: _textureType),
-                Reference("payload", "textures/player-raw", isData: true),
+                Reference("payload", "textures/player-ktx2", isData: true),
                 Reference("stats", "roots/stats", target: _statsRootType)),
             Custom("data/absent", _gameConfigType),
             Custom("roots/stats", _statsRootType),
@@ -78,7 +78,7 @@ public sealed class ReferenceValidationTests
             assets,
             [
                 ProcessorAsset("textures/player", _textureType),
-                ProcessorData("textures/player-raw"),
+                ProcessorData("textures/player-ktx2"),
             ],
             diagnostics);
 
@@ -117,7 +117,7 @@ public sealed class ReferenceValidationTests
     public void AssetReferenceToARawPayloadIsBK3003()
     {
         BakeDiagnostic diagnostic = ValidateSingleError(
-            Reference("texture", "textures/player-raw", target: _textureType),
+            Reference("texture", "textures/player-ktx2", target: _textureType),
             BakeDiagnosticCodes.ReferenceWrongKind);
 
         Assert.Contains("a MessagePack asset", diagnostic.Message, StringComparison.Ordinal);
@@ -189,13 +189,13 @@ public sealed class ReferenceValidationTests
         var diagnostics = new BakeDiagnostics();
 
         _ = BakedAssetIndex.Build(
-            [Custom("textures/player-raw", _gameConfigType)],
-            [ProcessorData("textures/player-raw")],
+            [Custom("textures/player-ktx2", _gameConfigType)],
+            [ProcessorData("textures/player-ktx2")],
             diagnostics);
 
         BakeDiagnostic diagnostic = Assert.Single(diagnostics.GetSorted());
         Assert.Equal(BakeDiagnosticCodes.AssetPathCollision, diagnostic.Code);
-        Assert.Equal("textures/player-raw", diagnostic.AssetPath);
+        Assert.Equal("textures/player-ktx2", diagnostic.AssetPath);
         Assert.Contains("raw payload", diagnostic.Message, StringComparison.Ordinal);
         Assert.Contains("MessagePack asset", diagnostic.Message, StringComparison.Ordinal);
     }
@@ -241,7 +241,7 @@ public sealed class ReferenceValidationTests
             assets,
             [
                 ProcessorAsset("textures/player", _textureType),
-                ProcessorData("textures/player-raw"),
+                ProcessorData("textures/player-ktx2"),
             ],
             diagnostics);
         Assert.Empty(diagnostics.GetSorted());

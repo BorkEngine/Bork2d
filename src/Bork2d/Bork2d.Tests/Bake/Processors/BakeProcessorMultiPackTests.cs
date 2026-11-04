@@ -24,7 +24,7 @@ public sealed class BakeProcessorMultiPackTests
                 ReferenceProcessor(new ProcessorRefAsset
                 {
                     Texture = "art/player",
-                    Payload = "art/player-raw",
+                    Payload = "art/player-ktx2",
                 }),
             ]);
         project.WriteAssetBytesUnder("Assets", "art/player.png", TextureImageFactory.RgbaPng());
