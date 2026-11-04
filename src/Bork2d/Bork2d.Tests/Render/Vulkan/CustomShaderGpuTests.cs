@@ -86,7 +86,7 @@ public sealed class CustomShaderGpuTests
                     x: 4f,
                     uniform0: new Vector4(0f, 0f, 1f, 1f));
             };
-            PublishUntil(renderer, producer, fill, stats => stats.DrawCalls == 1 && stats.Instances == 2);
+            PublishUntil(renderer, producer, fill, stats => stats.DrawCalls == 2 && stats.Instances == 2);
 
             FrameCaptureResult result = await CaptureAsync(renderer, producer, fill);
             AssertPixelNear(result, 19, 32, 255, 0, 0, 255, 2, "the red instance uniform sprite");
@@ -127,7 +127,7 @@ public sealed class CustomShaderGpuTests
                 AddCamera(snapshot);
                 AddSprite(snapshot, sprite, metadata, zIndex: 0, x: 0f);
             };
-            PublishUntil(renderer, producer, fill, stats => stats.DrawCalls == 1);
+            PublishUntil(renderer, producer, fill, stats => stats.DrawCalls == 2);
 
             FrameCaptureResult result = await CaptureAsync(renderer, producer, fill);
             AssertPixelNear(
@@ -183,7 +183,7 @@ public sealed class CustomShaderGpuTests
                 renderer,
                 producer,
                 fill,
-                stats => stats.DrawCalls == 1 && stats.TexturePages >= 3);
+                stats => stats.DrawCalls == 2 && stats.TexturePages >= 3);
 
             FrameCaptureResult result = await CaptureAsync(renderer, producer, fill);
             AssertPixelNear(result, 32, 32, 255, 255, 0, 255, 2, "both extra textures sampled");
@@ -226,7 +226,7 @@ public sealed class CustomShaderGpuTests
                 AddCamera(snapshot);
                 AddSprite(snapshot, sprite, metadata, zIndex: 0, x: 0f);
             };
-            PublishUntil(renderer, producer, fill, stats => stats.DrawCalls == 1);
+            PublishUntil(renderer, producer, fill, stats => stats.DrawCalls == 2);
 
             FrameCaptureResult result = await CaptureAsync(renderer, producer, fill);
             AssertPixelNear(result, 32, 32, 0, 0, 255, 255, 2, "the engine global uniform value");
@@ -269,11 +269,11 @@ public sealed class CustomShaderGpuTests
                 renderer,
                 producer,
                 fill,
-                stats => stats.DrawCalls == 5 && stats.TexturePages >= 2);
+                stats => stats.DrawCalls == 6 && stats.TexturePages >= 2);
 
             RenderStats stats = renderer.RenderStats;
             Assert.Equal(1, stats.NonEmptyCameras);
-            Assert.Equal(5, stats.DrawCalls);
+            Assert.Equal(6, stats.DrawCalls);
             Assert.Equal(5, stats.Instances);
             Assert.Equal(0, stats.SkippedSprites);
 
@@ -313,12 +313,12 @@ public sealed class CustomShaderGpuTests
                 AddSprite(snapshot, sprite, metadata, zIndex: 0, x: 0f);
             };
             PublishUntil(renderer, producer, fill, stats => stats.SkippedSprites == 1);
-            Assert.Equal(0, renderer.RenderStats.DrawCalls);
+            Assert.Equal(1, renderer.RenderStats.DrawCalls);
             Assert.Equal(0, renderer.RenderStats.Instances);
             Assert.Null(renderer.FatalException);
 
             assets.CompleteShader("materials/pending", spirV);
-            PublishUntil(renderer, producer, fill, stats => stats.DrawCalls == 1);
+            PublishUntil(renderer, producer, fill, stats => stats.DrawCalls == 2);
 
             FrameCaptureResult result = await CaptureAsync(renderer, producer, fill);
             AssertPixelNear(result, 32, 32, 255, 0, 0, 255, 2, "the completed custom shader");
@@ -357,7 +357,7 @@ public sealed class CustomShaderGpuTests
                 renderer,
                 producer,
                 fill,
-                stats => stats.DrawCalls == 1 && stats.TexturePages >= 2);
+                stats => stats.DrawCalls == 2 && stats.TexturePages >= 2);
 
             FrameCaptureResult result = await CaptureAsync(renderer, producer, fill);
             AssertPixelNear(result, 32, 32, 255, 255, 255, 255, 2, "the default shader fallback");
@@ -643,7 +643,7 @@ public sealed class CustomShaderGpuTests
             || message.Contains(
                 "maxPerStageDescriptorUpdateAfterBindSampledImages=0",
                 StringComparison.Ordinal)
-            || message.Contains("No sRGB offscreen color format", StringComparison.Ordinal);
+            || message.Contains("No UNORM offscreen color format", StringComparison.Ordinal);
     }
 
     private sealed class Producer

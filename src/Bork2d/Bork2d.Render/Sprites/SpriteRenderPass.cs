@@ -10,21 +10,23 @@ namespace Bork2d.Render.Sprites;
 /// <summary>
 /// The registered sprite render pass: it plans the snapshot's sprites and shader runs through the
 /// allocation-free <see cref="SpriteFramePlanner"/>, resolves each run's cached pipeline for the
-/// target format, and records one instanced draw per run.
+/// linear scene format, and records one instanced draw per run.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The pass owns the planner and the <see cref="SpriteFramePlan"/> it refills, so planning stays
 /// allocation-free after warm-up. During planning the pass resolves every run's pipeline for the
-/// target format from the shader catalog (the planner already validated/created it), adds its plan
+/// scene format from the shader catalog (the planner already validated/created it), adds its plan
 /// counts to the shared <see cref="RenderPassStats"/>, and keeps the plan for recording. During
 /// recording it records through <see cref="SpritePassRecorder.RecordPasses"/> with its own
-/// <see cref="SpritePipeline"/>, the frame descriptor sets, the target view/image, and the planned
-/// run pipelines.
+/// <see cref="SpritePipeline"/>, the frame descriptor sets, the linear scene view/image, and the
+/// planned run pipelines.
 /// </para>
 /// <para>
-/// The full-target frame clear is not this pass: the target driver records it once before the
-/// registry records any pass, because it defines the target every pass loads from. Render-thread-only.
+/// The full-target frame clear is not this pass: the target driver records it once into the scene
+/// image before the registry records any pass, because it defines the scene every pass loads from.
+/// The final present pass runs after this pass and encodes the scene into the swapchain/offscreen
+/// target. Render-thread-only.
 /// </para>
 /// </remarks>
 internal sealed class SpriteRenderPass : IRenderPass
@@ -65,7 +67,7 @@ internal sealed class SpriteRenderPass : IRenderPass
         int framebufferHeight,
         IInstanceBuffer instances,
         IGlobalUniformBuffer globals,
-        Format targetFormat,
+        Format sceneFormat,
         RenderPassStats stats)
     {
         ArgumentNullException.ThrowIfNull(stats);
@@ -76,13 +78,13 @@ internal sealed class SpriteRenderPass : IRenderPass
             framebufferHeight,
             instances,
             globals,
-            targetFormat);
+            sceneFormat);
         _plan = plan;
         EnsureRunPipelineCapacity(plan.RunCount);
         for (var runIndex = 0; runIndex < plan.RunCount; runIndex++)
         {
             ShaderRun run = plan.Runs[runIndex];
-            _runPipelines[runIndex] = _shaders.GetPipeline(run.ShaderEntryId, targetFormat);
+            _runPipelines[runIndex] = _shaders.GetPipeline(run.ShaderEntryId, sceneFormat);
         }
 
         stats.CameraCount += plan.CameraCount;
@@ -102,8 +104,8 @@ internal sealed class SpriteRenderPass : IRenderPass
             _pipeline,
             context.DescriptorSet,
             context.GlobalDescriptorSet,
-            context.AttachmentView,
-            context.AttachmentImage,
+            context.SceneView,
+            context.SceneImage,
             _plan.Cameras,
             _plan.CameraPlanCount,
             _plan.Runs,

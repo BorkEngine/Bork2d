@@ -176,7 +176,7 @@ public sealed class WindowedAppGpuTests
             || message.Contains("SDL_", StringComparison.Ordinal)
             || message.Contains("SDL ", StringComparison.Ordinal)
             || message.Contains("zero Vulkan surface", StringComparison.Ordinal)
-            || message.Contains("No sRGB", StringComparison.Ordinal);
+            || message.Contains("No UNORM", StringComparison.Ordinal);
     }
 
     private sealed class RecordingRendererFactory : IRendererFactory

@@ -8,18 +8,18 @@ namespace Bork2d.Tests.TestDoubles;
 
 /// <summary>
 /// The <see cref="IAssets"/> seam for real-GPU renderer tests: generated RGBA8 textures complete
-/// immediately, while the built-in shader assets resolve through a started <see cref="AssetService"/>
-/// that mounts the embedded built-in pack.
+/// immediately, while the engine-owned built-in assets resolve through a started
+/// <see cref="AssetService"/> that mounts the embedded built-in pack.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The renderer loads its default shader from the asset service at startup, so a real renderer cannot
-/// start against <see cref="FakeAssets"/>. This seam keeps the deterministic generated texture path
-/// while serving <c>shader/*</c> entries from <see cref="BuiltInAssets.PackBytes"/>. It also serves
-/// test-authored custom <see cref="ShaderAsset"/> metadata and raw SPIR-V payloads, including a
-/// controllable pending payload, and implements the internal catalog-version seam so a remount can be
-/// modelled. Dispose it after the renderer has joined: it stops the asset service and its loader
-/// thread.
+/// The renderer loads its default and present shaders from the asset service at startup, so a real
+/// renderer cannot start against <see cref="FakeAssets"/>. This seam keeps the deterministic
+/// generated texture path while serving the <c>shader/*</c> and <c>present/*</c> entries from
+/// <see cref="BuiltInAssets.PackBytes"/>. It also serves test-authored custom
+/// <see cref="ShaderAsset"/> metadata and raw SPIR-V payloads, including a controllable pending
+/// payload, and implements the internal catalog-version seam so a remount can be modelled. Dispose it
+/// after the renderer has joined: it stops the asset service and its loader thread.
 /// </para>
 /// <para>
 /// The shader maps are guarded by one lock because the loader thread can read them while the test
@@ -28,7 +28,7 @@ namespace Bork2d.Tests.TestDoubles;
 /// </remarks>
 internal sealed class TestRendererAssets : IAssets, IAssetCatalogVersion, IDisposable
 {
-    private const string ShaderPathPrefix = "shader/";
+    private static readonly string[] _builtInPathPrefixes = ["shader/", "present/"];
 
     private readonly GeneratedTextureAssets _textures = new();
     private readonly AssetService _service;
@@ -212,7 +212,7 @@ internal sealed class TestRendererAssets : IAssets, IAssetCatalogVersion, IDispo
             }
         }
 
-        return IsShaderPath(assetPath)
+        return IsBuiltInAssetPath(assetPath)
             ? _service.LoadData(assetPath)
             : _textures.LoadData(assetPath);
     }
@@ -240,7 +240,7 @@ internal sealed class TestRendererAssets : IAssets, IAssetCatalogVersion, IDispo
             }
         }
 
-        return IsShaderPath(assetPath) && _service.Exists(assetPath);
+        return IsBuiltInAssetPath(assetPath) && _service.Exists(assetPath);
     }
 
     /// <inheritdoc/>
@@ -255,6 +255,16 @@ internal sealed class TestRendererAssets : IAssets, IAssetCatalogVersion, IDispo
         _loggerFactory.Dispose();
     }
 
-    private static bool IsShaderPath(string assetPath)
-        => assetPath.StartsWith(ShaderPathPrefix, StringComparison.Ordinal);
+    private static bool IsBuiltInAssetPath(string assetPath)
+    {
+        foreach (string prefix in _builtInPathPrefixes)
+        {
+            if (assetPath.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

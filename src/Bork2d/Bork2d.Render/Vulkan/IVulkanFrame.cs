@@ -18,7 +18,7 @@ internal interface IVulkanFrame : IDisposable
     /// <summary>Gets the in-flight fence.</summary>
     Fence Fence { get; }
 
-    /// <summary>Gets the empty instance buffer and frame descriptor set.</summary>
+    /// <summary>Gets the empty instance buffer and the frame's descriptor sets.</summary>
     FrameInstanceResources InstanceResources { get; }
 
     /// <summary>Gets the pooled readback staging and pending capture requests.</summary>

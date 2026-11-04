@@ -5,53 +5,57 @@ using Silk.NET.Vulkan;
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// The pure sRGB format selection policy (D-M6-04, D-M6-26).
+/// The pure target-format selection policy: every target is a UNORM image and the sRGB encoding is
+/// the final present pass's job.
 /// </summary>
 /// <remarks>
-/// M6 never falls back to a UNORM format. A missing sRGB format is a startup failure naming the
-/// enumerated candidates so the driver's actual format list reaches the log.
+/// The 2D passes render linear color into a linear scene image, and the final present pass applies the
+/// sRGB opto-electronic transfer function when it writes the target. The target therefore must not be
+/// an sRGB format, or the encoding would be applied twice. A missing UNORM format is a startup
+/// failure naming the enumerated candidates so the driver's actual format list reaches the log.
 /// </remarks>
 internal static class SurfaceFormatPolicy
 {
     /// <summary>
-    /// Selects the windowed surface format: <c>B8G8R8A8_SRGB</c>, then <c>R8G8B8A8_SRGB</c>, always
+    /// Selects the windowed surface format: <c>B8G8R8A8_UNORM</c>, then <c>R8G8B8A8_UNORM</c>, always
     /// with <c>VK_COLOR_SPACE_SRGB_NONLINEAR_KHR</c>.
     /// </summary>
     /// <param name="available">The formats reported for the surface.</param>
     /// <returns>The selected format and color space.</returns>
     /// <exception cref="Bork2dException">
-    /// No supported sRGB format/color-space pair is available.
+    /// No supported UNORM format/color-space pair is available.
     /// </exception>
     internal static VulkanSurfaceFormat SelectWindowed(IReadOnlyList<VulkanSurfaceFormat> available)
     {
-        if (TryFindWindowed(available, Format.B8G8R8A8Srgb, out VulkanSurfaceFormat selected)
-            || TryFindWindowed(available, Format.R8G8B8A8Srgb, out selected))
+        if (TryFindWindowed(available, Format.B8G8R8A8Unorm, out VulkanSurfaceFormat selected)
+            || TryFindWindowed(available, Format.R8G8B8A8Unorm, out selected))
         {
             return selected;
         }
 
         throw new Bork2dException(
-            "No sRGB windowed surface format is available. Supported sRGB formats use "
-                + $"VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; enumerated formats: {DescribeWindowed(available)}.");
+            "No UNORM windowed surface format is available. Supported UNORM formats use "
+                + "VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; enumerated formats: "
+                + $"{DescribeWindowed(available)}.");
     }
 
     /// <summary>
-    /// Selects the offscreen color format: <c>R8G8B8A8_SRGB</c>, then <c>B8G8R8A8_SRGB</c>, among
+    /// Selects the offscreen color format: <c>R8G8B8A8_UNORM</c>, then <c>B8G8R8A8_UNORM</c>, among
     /// formats that support color attachment with optimal tiling.
     /// </summary>
     /// <param name="available">The format candidates and their optimal-tiling support.</param>
     /// <returns>The selected format.</returns>
-    /// <exception cref="Bork2dException">No supported sRGB format is available.</exception>
+    /// <exception cref="Bork2dException">No supported UNORM format is available.</exception>
     internal static Format SelectOffscreen(IReadOnlyList<OffscreenFormatSupport> available)
     {
-        if (TryFindOffscreen(available, Format.R8G8B8A8Srgb, out Format selected)
-            || TryFindOffscreen(available, Format.B8G8R8A8Srgb, out selected))
+        if (TryFindOffscreen(available, Format.R8G8B8A8Unorm, out Format selected)
+            || TryFindOffscreen(available, Format.B8G8R8A8Unorm, out selected))
         {
             return selected;
         }
 
         throw new Bork2dException(
-            "No sRGB offscreen color format is available with optimal tiling and color-attachment "
+            "No UNORM offscreen color format is available with optimal tiling and color-attachment "
                 + $"usage; enumerated formats: {DescribeOffscreen(available)}.");
     }
 

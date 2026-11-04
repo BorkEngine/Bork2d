@@ -6,42 +6,49 @@ using Semaphore = Silk.NET.Vulkan.Semaphore;
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// One GPU frame's command pool, command buffer, fence, image-available semaphore, and the empty
-/// instance resources (instance SSBO and frame descriptor set, Q10=J1) (D-M6-11).
+/// One GPU frame's command pool, command buffer, fence, image-available semaphore, linear scene color
+/// image, and the empty instance resources (instance SSBO, frame descriptor sets, and present
+/// descriptor set, Q10=J1) (D-M6-11).
 /// </summary>
 /// <remarks>
 /// The render thread owns the frame. The fence is created signaled so the first wait succeeds
 /// immediately; reuse is gated by the fence. The render-finished semaphores are per swapchain image
 /// (owned by <see cref="WindowedSwapchain"/>), not per frame, so a presentation operation that still
-/// uses a semaphore can never race a later submit that reuses it. <see cref="Dispose"/> is
-/// idempotent and never throws (D-M6-27).
+/// uses a semaphore can never race a later submit that reuses it. The scene image is recreated at the
+/// new extent after a swapchain recreation, which already idled the device.
+/// <see cref="Dispose"/> is idempotent and never throws (D-M6-27).
 /// </remarks>
 internal sealed unsafe class WindowedFrame : IVulkanFrame
 {
     private readonly Vk _vk;
     private readonly Device _device;
     private readonly ILogger _logger;
+    private readonly int _frameIndex;
     private int _destroyed;
 
     private WindowedFrame(
         Vk vk,
         Device device,
         ILogger logger,
+        int frameIndex,
         CommandPool pool,
         CommandBuffer commandBuffer,
         Fence fence,
         Semaphore imageAvailable,
         FrameInstanceResources instanceResources,
+        SceneTarget scene,
         FrameCapture capture)
     {
         _vk = vk;
         _device = device;
         _logger = logger;
+        _frameIndex = frameIndex;
         Pool = pool;
         CommandBuffer = commandBuffer;
         Fence = fence;
         ImageAvailable = imageAvailable;
         InstanceResources = instanceResources;
+        Scene = scene;
         Capture = capture;
     }
 
@@ -57,8 +64,11 @@ internal sealed unsafe class WindowedFrame : IVulkanFrame
     /// <summary>Gets the image-available semaphore signalled by acquire.</summary>
     internal Semaphore ImageAvailable { get; }
 
-    /// <summary>Gets the empty instance buffer and frame descriptor set (Q10=J1).</summary>
+    /// <summary>Gets the empty instance buffer and frame descriptor sets (Q10=J1).</summary>
     internal FrameInstanceResources InstanceResources { get; }
+
+    /// <summary>Gets the frame's linear scene color image the 2D passes render into.</summary>
+    internal SceneTarget Scene { get; private set; }
 
     /// <summary>Gets the frame's pooled readback staging and pending capture requests (M8 §6.9).</summary>
     internal FrameCapture Capture { get; }
@@ -78,7 +88,11 @@ internal sealed unsafe class WindowedFrame : IVulkanFrame
     /// <param name="physicalDevice">The physical device used to select instance-buffer memory.</param>
     /// <param name="frameIndex">The GPU frame index, used for debug names.</param>
     /// <param name="queueFamilyIndex">The graphics queue family.</param>
+    /// <param name="extent">The swapchain extent the frame's scene image matches.</param>
     /// <param name="pipeline">The sprite pipeline that owns the descriptor-set layout.</param>
+    /// <param name="present">
+    /// The present pipeline that owns the present descriptor-set layout and sampler.
+    /// </param>
     /// <param name="pageCapacity">The initial bindless page capacity, including the placeholder.</param>
     /// <param name="maxStorageBufferRange">The device's <c>maxStorageBufferRange</c> limit.</param>
     /// <param name="maxUniformBufferRange">The device's <c>maxUniformBufferRange</c> limit.</param>
@@ -95,7 +109,9 @@ internal sealed unsafe class WindowedFrame : IVulkanFrame
         PhysicalDevice physicalDevice,
         int frameIndex,
         uint queueFamilyIndex,
+        Extent2D extent,
         SpritePipeline pipeline,
+        PresentPipeline present,
         int pageCapacity,
         uint maxStorageBufferRange,
         uint maxUniformBufferRange,
@@ -110,6 +126,7 @@ internal sealed unsafe class WindowedFrame : IVulkanFrame
         var fence = default(Fence);
         var imageAvailable = default(Semaphore);
         FrameInstanceResources? instanceResources = null;
+        SceneTarget? scene = null;
         try
         {
             var poolInfo = new CommandPoolCreateInfo
@@ -165,30 +182,69 @@ internal sealed unsafe class WindowedFrame : IVulkanFrame
                 physicalDevice,
                 frameIndex,
                 pipeline,
+                present,
                 pageCapacity,
                 maxStorageBufferRange,
                 maxUniformBufferRange,
                 minUniformBufferOffsetAlignment,
                 instance,
                 logger);
+            scene = SceneTarget.Create(vk, device, physicalDevice, extent, frameIndex, instance, logger);
+            instanceResources.WritePresentView(scene.View);
 
             return new WindowedFrame(
                 vk,
                 device,
                 logger,
+                frameIndex,
                 pool,
                 commandBuffer,
                 fence,
                 imageAvailable,
                 instanceResources,
+                scene,
                 new FrameCapture(vk, device, physicalDevice, frameIndex, logger));
         }
         catch
         {
+            scene?.Destroy();
             instanceResources?.Destroy();
             DestroyBestEffort(vk, device, logger, pool, fence, imageAvailable);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Replaces the frame's linear scene image with one for a new swapchain extent.
+    /// </summary>
+    /// <remarks>
+    /// The caller must have idled the device (swapchain recreation does), so no in-flight frame can
+    /// still reference the previous image. The replacement is created before the old target is
+    /// destroyed, and the frame's present descriptor is rewritten for the new view.
+    /// </remarks>
+    /// <param name="device">The logical device and its physical device.</param>
+    /// <param name="extent">The new swapchain extent in pixels.</param>
+    /// <param name="instance">The instance seam used for debug labels; may be <see langword="null"/>.</param>
+    /// <exception cref="Bork2dException">The replacement scene image could not be created.</exception>
+    internal void RecreateScene(
+        VulkanDevice device,
+        Extent2D extent,
+        IVulkanInstance? instance)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+
+        SceneTarget replacement = SceneTarget.Create(
+            device.Api,
+            device.Device,
+            device.PhysicalDevice,
+            extent,
+            _frameIndex,
+            instance,
+            _logger);
+        SceneTarget previous = Scene;
+        Scene = replacement;
+        previous.Destroy();
+        InstanceResources.WritePresentView(Scene.View);
     }
 
     /// <inheritdoc/>
@@ -203,6 +259,7 @@ internal sealed unsafe class WindowedFrame : IVulkanFrame
         }
 
         Capture.Destroy();
+        Scene.Destroy();
         InstanceResources.Destroy();
         DestroyBestEffort(
             _vk,

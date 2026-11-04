@@ -9,12 +9,12 @@ namespace Bork2d.Render.Vulkan;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Both target drivers create one registry during startup with the passes they support (currently
-/// the sprite pass only), then call <see cref="Plan"/> and <see cref="Record"/> from their own frame
-/// loops. Planning resets the aggregate and each pass's per-frame state, then runs the passes in
-/// registration order; recording runs the same passes in the same order. Pass order is therefore
-/// deterministic, and adding a renderable kind registers a producer plus one pass instead of editing
-/// a central plan/record switch.
+/// Both target drivers create one registry during startup with the passes they support (the sprite
+/// pass followed by the present pass), then call <see cref="Plan"/> and <see cref="Record"/> from
+/// their own frame loops. Planning resets the aggregate and each pass's per-frame state, then runs the
+/// passes in registration order; recording runs the same passes in the same order. Pass order is
+/// therefore deterministic, and adding a renderable kind registers a producer plus one pass instead of
+/// editing a central plan/record switch.
 /// </para>
 /// <para>
 /// Render-thread-only. The registry owns no Vulkan object; the target driver owns the resources it
@@ -51,11 +51,11 @@ internal sealed class RenderPassRegistry
     /// registered pass in order.
     /// </summary>
     /// <param name="snapshot">The consumed snapshot; read-only and never mutated.</param>
-    /// <param name="framebufferWidth">The target/framebuffer width in pixels.</param>
-    /// <param name="framebufferHeight">The target/framebuffer height in pixels.</param>
+    /// <param name="framebufferWidth">The scene/target width in pixels.</param>
+    /// <param name="framebufferHeight">The scene/target height in pixels.</param>
     /// <param name="instances">The frame's instance sink, after its fence has been observed.</param>
     /// <param name="globals">The frame's global uniform sink.</param>
-    /// <param name="targetFormat">The target's sRGB output color format for this frame.</param>
+    /// <param name="sceneFormat">The linear scene color format for this frame.</param>
     /// <exception cref="Bork2d.Engine.Bork2dException">A pass's plan is malformed or cannot fit.</exception>
     internal void Plan(
         FrameSnapshot snapshot,
@@ -63,7 +63,7 @@ internal sealed class RenderPassRegistry
         int framebufferHeight,
         IInstanceBuffer instances,
         IGlobalUniformBuffer globals,
-        Format targetFormat)
+        Format sceneFormat)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(instances);
@@ -80,7 +80,7 @@ internal sealed class RenderPassRegistry
                 framebufferHeight,
                 instances,
                 globals,
-                targetFormat,
+                sceneFormat,
                 _stats);
         }
     }

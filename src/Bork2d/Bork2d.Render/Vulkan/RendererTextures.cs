@@ -13,8 +13,8 @@ namespace Bork2d.Render.Vulkan;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Both target drivers create the same sprite pipeline per output format, the same default
-/// <see cref="ShaderStore"/> loaded from the built-in pack, the same asynchronous
+/// Both target drivers create one sprite pipeline for the linear scene color format, the same
+/// default <see cref="ShaderStore"/> loaded from the built-in pack, the same asynchronous
 /// <see cref="TexturePageStore"/>, and the same production <see cref="VulkanTexturePages"/> GPU seam;
 /// they also retire every in-flight frame fence and rewrite every frame's bindless descriptor set
 /// when the page capacity grows. This composition owns that setup and teardown.
@@ -114,10 +114,11 @@ internal sealed class RendererTextures : IBindlessPageWriter
     internal int StopLogFailedPaths => _stopLogFailedPaths;
 
     /// <summary>
-    /// Creates the sprite pipeline owner, the shader catalog, and the pipeline for the output
-    /// format on first use; a later format creates only that format's default pipeline.
+    /// Creates the sprite pipeline owner, the shader catalog, and the default pipeline for the
+    /// linear scene color format on first use; a later format creates only that format's default
+    /// pipeline.
     /// </summary>
-    /// <param name="format">The target's sRGB output color format.</param>
+    /// <param name="format">The linear scene color format the 2D pipelines render into.</param>
     /// <exception cref="Bork2dException">
     /// The vertex module, default shader asset/module, or graphics pipeline is missing or invalid.
     /// </exception>

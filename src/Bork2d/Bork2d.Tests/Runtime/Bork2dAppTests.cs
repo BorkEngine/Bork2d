@@ -281,7 +281,14 @@ public sealed class Bork2dAppTests
         // The real asset service has no game base pack, but the embedded built-in shader pack is
         // mounted and the service is present (D-M3-14).
         Assert.Equal(
-            new[] { "shader/sprite", "shader/sprite-spv", "shader/vertex-spv" },
+            new[]
+            {
+                "present/fragment-spv",
+                "present/vertex-spv",
+                "shader/sprite",
+                "shader/sprite-spv",
+                "shader/vertex-spv",
+            },
             browse!.Select(info => info.Path));
         Assert.False(exists!.Value);
 

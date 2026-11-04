@@ -11,15 +11,15 @@ namespace Bork2d.Render.Vulkan;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every recorded frame starts with one full-target clear to opaque black, recorded after the
-/// target's initial layout transition and before any camera pass. It is a normal dynamic-rendering
-/// pass with a single sRGB color attachment, no depth/stencil, <c>loadOp=CLEAR</c>, and
-/// <c>storeOp=STORE</c>; it is not a camera and not a draw call, so statistics and draw accounting
-/// are unchanged.
+/// Every recorded frame starts with one full-target clear to opaque black, recorded after the linear
+/// scene image's initial layout transition and before any camera pass. It is a normal
+/// dynamic-rendering pass with a single linear <c>R8G8B8A8_UNORM</c> scene color attachment, no
+/// depth/stencil, <c>loadOp=CLEAR</c>, and <c>storeOp=STORE</c>; it is not a camera and not a draw
+/// call, so statistics and draw accounting are unchanged.
 /// </para>
 /// <para>
 /// Each valid camera owns one <c>vkCmdBeginRendering</c>/<c>vkCmdEndRendering</c> pair over its
-/// rounded pixel rect with a single sRGB color attachment, no depth/stencil, and
+/// rounded pixel rect with a single linear scene color attachment, no depth/stencil, and
 /// <c>storeOp=STORE</c>. <c>Clear.Color</c> uses <c>loadOp=CLEAR</c> with the camera's linear RGBA
 /// color; <c>Clear.None</c>/<c>Clear.Depth</c> use <c>LOAD</c> and never touch depth. A camera with
 /// at least one run sets its viewport/scissor once, pushes the 64-byte view-projection once, then
@@ -29,9 +29,10 @@ namespace Bork2d.Render.Vulkan;
 /// only its pass when it clears.
 /// </para>
 /// <para>
-/// A color-attachment barrier runs before every camera pass so its <c>LOAD</c> observes the frame
-/// clear and the earlier cameras' stored output (and, offscreen, the previous submission's output).
-/// It is a synchronization dependency, not a pass: the frame clear is the only extra render pass.
+/// A scene color-attachment barrier runs before every camera pass so its <c>LOAD</c> observes the
+/// frame clear and the earlier cameras' stored output (and, offscreen, the previous submission's
+/// output). It is a synchronization dependency, not a pass: the frame clear is the only extra render
+/// pass before the final present pass.
 /// </para>
 /// </remarks>
 internal static unsafe class SpritePassRecorder
@@ -44,18 +45,18 @@ internal static unsafe class SpritePassRecorder
     /// </summary>
     /// <param name="vk">The Vulkan API object.</param>
     /// <param name="commandBuffer">The frame command buffer, already begun.</param>
-    /// <param name="attachmentView">The target image view in <c>COLOR_ATTACHMENT_OPTIMAL</c>.</param>
+    /// <param name="sceneView">The linear scene image view in <c>COLOR_ATTACHMENT_OPTIMAL</c>.</param>
     /// <param name="extent">The full target extent in pixels.</param>
     internal static void RecordFrameClear(
         Vk vk,
         CommandBuffer commandBuffer,
-        ImageView attachmentView,
+        ImageView sceneView,
         Extent2D extent)
     {
         var attachment = new RenderingAttachmentInfo
         {
             SType = StructureType.RenderingAttachmentInfo,
-            ImageView = attachmentView,
+            ImageView = sceneView,
             ImageLayout = ImageLayout.ColorAttachmentOptimal,
             LoadOp = AttachmentLoadOp.Clear,
             StoreOp = AttachmentStoreOp.Store,
@@ -99,8 +100,8 @@ internal static unsafe class SpritePassRecorder
     /// <param name="spritePipeline">The pipeline owner (pipeline layout for push constants/binding).</param>
     /// <param name="descriptorSet">The frame's bindless descriptor set (set 0).</param>
     /// <param name="globalDescriptorSet">The frame's global uniform descriptor set (set 1).</param>
-    /// <param name="attachmentView">The target image view in <c>COLOR_ATTACHMENT_OPTIMAL</c>.</param>
-    /// <param name="attachmentImage">The target image (for the per-pass color-attachment barrier).</param>
+    /// <param name="sceneView">The linear scene image view in <c>COLOR_ATTACHMENT_OPTIMAL</c>.</param>
+    /// <param name="sceneImage">The linear scene image (for the per-pass color-attachment barrier).</param>
     /// <param name="cameras">The plan's valid camera array.</param>
     /// <param name="cameraCount">The number of valid cameras in <paramref name="cameras"/>.</param>
     /// <param name="runs">The plan's shader runs.</param>
@@ -113,8 +114,8 @@ internal static unsafe class SpritePassRecorder
         SpritePipeline spritePipeline,
         DescriptorSet descriptorSet,
         DescriptorSet globalDescriptorSet,
-        ImageView attachmentView,
-        Image attachmentImage,
+        ImageView sceneView,
+        Image sceneImage,
         CameraDrawPlan[] cameras,
         int cameraCount,
         ShaderRun[] runs,
@@ -135,7 +136,7 @@ internal static unsafe class SpritePassRecorder
                 continue;
             }
 
-            RecordColorAttachmentBarrier(vk, commandBuffer, attachmentImage);
+            RecordColorAttachmentBarrier(vk, commandBuffer, sceneImage);
 
             var area = new Rect2D
             {
@@ -153,7 +154,7 @@ internal static unsafe class SpritePassRecorder
             var attachment = new RenderingAttachmentInfo
             {
                 SType = StructureType.RenderingAttachmentInfo,
-                ImageView = attachmentView,
+                ImageView = sceneView,
                 ImageLayout = ImageLayout.ColorAttachmentOptimal,
                 LoadOp = camera.Clear == ClearKind.Color
                     ? AttachmentLoadOp.Clear
