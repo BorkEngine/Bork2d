@@ -22,6 +22,16 @@ namespace Bork2d.Bake.Shaders;
 /// the packed slot of <c>bork2dGlobals.globals</c>; the packer keeps every declaration inside one
 /// <c>vec4</c> lane, so a swizzle never crosses a lane boundary and never truncates a component.
 /// </para>
+/// <para>
+/// Version <c>3</c> is shared by sprite and line renderables and adds the line-only inputs at
+/// locations <c>13</c>, <c>14</c>, and <c>15</c> (the extra-texture array occupies <c>5</c> through
+/// <c>8</c> and the instance-parameter array <c>9</c> through <c>12</c>). <c>vLineUv.x</c> runs
+/// across the stroke width (<c>0</c> at one edge, <c>1</c> at the other) and <c>vLineUv.y</c> is the
+/// distance along the line in world units. <c>vColor</c> is the line's linear RGBA color. The flat
+/// <c>vLineFlags</c> bit <c>0</c> (value above <c>0.5</c>) means anti-aliasing is enabled; the
+/// remaining bits are reserved zero. A sprite stage writes zero for all three; a line stage writes
+/// neutral sprite inputs, so one fragment interface serves both renderable kinds.
+/// </para>
 /// </remarks>
 internal static class ShaderPrologue
 {
@@ -36,6 +46,9 @@ internal static class ShaderPrologue
         layout(location = 4) in vec2 vLocalPosition;
         layout(location = 5) flat in uint vExtraTextureIndices[4];
         layout(location = 9) in vec4 vInstanceParams[4];
+        layout(location = 13) in vec2 vLineUv;
+        layout(location = 14) in vec4 vColor;
+        layout(location = 15) flat in float vLineFlags;
 
         layout(set = 0, binding = 1) uniform sampler2D bork2dTextures[];
         layout(set = 1, binding = 2) uniform Bork2dGlobalBlock
@@ -71,7 +84,9 @@ internal static class ShaderPrologue
     /// <para>
     /// The guard is the same one the built-in default shader used before the wrapper existed: every
     /// bindless index is below the engine's 1,048,576-entry cap (<c>0x00100000</c>), so an OR of the
-    /// four extra indices above <c>0x003FFFFF</c> is impossible and the branch body never runs.
+    /// four extra indices above <c>0x003FFFFF</c> is impossible and the branch body never runs. The
+    /// body also references the line-only inputs, so a shader assigned to either renderable kind
+    /// consumes every engine vertex output.
     /// </para>
     /// </remarks>
     internal const string Epilogue = """
@@ -90,6 +105,9 @@ internal static class ShaderPrologue
                 keepAlive += vec4(vWorldPosition.x, vLocalPosition.x, float(vTextureIndex), 0.0);
                 keepAlive += vInstanceParams[0] + vInstanceParams[1]
                     + vInstanceParams[2] + vInstanceParams[3];
+                keepAlive += vColor;
+                keepAlive.xy += vLineUv;
+                keepAlive.z += vLineFlags;
                 outColor += keepAlive;
             }
         }

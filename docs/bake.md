@@ -131,28 +131,38 @@ The prefix defines `main` as `bork2d_user_main`, and the processor appends a fix
 source that undefines the macro and supplies the real `void main()`. The epilogue calls the user body
 and then references every fixed-interface input in a branch that cannot be reached for valid engine
 data: it ORs the four extra bindless indices and compares them against `0x003FFFFF`, above the
-engine's 1,048,576-entry bindless cap. This keeps a user source that does not consume every varying
-from making the engine-owned vertex stage's outputs appear unconsumed (a Vulkan
-`WARNING-Shader-OutputNotConsumed`), and the branch body never runs, so no valid frame's pixels
-change. The epilogue suffix is not part of the prologue line count used to map shaderc diagnostics
-back to the source; the `#define main` line is part of the prefix and is included in that offset.
+engine's 1,048,576-entry bindless cap, and the unreachable body also references the remaining
+varyings, including the line-only `vLineUv`, `vColor`, and `vLineFlags`. This keeps a user source that
+does not consume every varying from making the engine-owned vertex stage's outputs appear unconsumed
+(a Vulkan `WARNING-Shader-OutputNotConsumed`), and the branch body never runs, so no valid frame's
+pixels change. The epilogue suffix is not part of the prologue line count used to map shaderc
+diagnostics back to the source; the `#define main` line is part of the prefix and is included in that
+offset.
 
-The fixed interface is versioned by the shader layout version `2`:
+The fixed interface is versioned by the shader layout version `3`. Version `3` is the first version
+shared by sprite and line renderables: every fragment shader declares the same interface, and both
+engine-owned vertex stages write all of it. Each renderable kind writes neutral values for the other
+kind's inputs, so one shader asset may be assigned to either kind.
 
 | Input | Meaning |
 | --- | --- |
-| `vUv` | Interpolated sprite UV. |
-| `vTint` | Sprite linear RGBA tint. |
+| `vUv` | Interpolated sprite UV; on a line, the line's `vLineUv`. |
+| `vTint` | Sprite linear RGBA tint; on a line, the line's linear color. |
 | `vWorldPosition` | Fragment world position. |
-| `vLocalPosition` | Fragment position in the sprite's local quad space. |
-| `vTextureIndex` | Bindless index of the sprite's main texture. |
-| `vExtraTextureIndices[4]` | Bindless indices of up to four additional textures. |
+| `vLocalPosition` | Fragment position in the sprite's local quad space; on a line, the line's `vLineUv`. |
+| `vTextureIndex` | Bindless index of the sprite's main texture; `0` (the placeholder) on a line. |
+| `vExtraTextureIndices[4]` | Bindless indices of up to four additional textures; all zero on a line. |
 | `vInstanceParams[4]` | The packed per-renderable uniform block. |
+| `vLineUv` | Line stroke coordinate: `x` across the width (`0` at one edge, `1` at the other), `y` the distance along the line in world units. Zero on a sprite. |
+| `vColor` | The line's linear RGBA color. Zero on a sprite. |
+| `vLineFlags` | Flat line flags: bit `0` (value above `0.5`) means anti-aliasing is enabled; the other bits are reserved zero. Zero on a sprite. |
 | `outColor` | The linear RGBA output. |
 
 The prologue places the bindless sampler array at set `0`, binding `1` and the global block
-(`vec4 time; vec4 globals[8]`) at set `1`, binding `2`. Layout version `2` is the first version with
-that fixed placement.
+(`vec4 time; vec4 globals[8]`) at set `1`, binding `2`. Layout version `2` was the first version with
+that fixed placement; version `3` keeps it unchanged and adds the line-only inputs at locations `13`
+through `15`, after `vExtraTextureIndices` (`5` through `8`) and `vInstanceParams` (`9` through
+`12`).
 
 The prologue also defines the direct-use macros `BORK2D_MAIN_TEXTURE`, `BORK2D_TEXTURE0` through
 `BORK2D_TEXTURE3`, and `BORK2D_TIME`, plus one macro per sidecar-declared uniform so a declared name
@@ -330,12 +340,15 @@ its assembly and mounts the pack below the game packs; no loose pack file is pub
 
 The source tree uses the same processors as game content. `shader/sprite.frag` and its checked-in
 empty `shader/sprite.frag.toml` sidecar produce the `shader/sprite` `ShaderAsset` and the
-`shader/sprite-spv` payload, exactly like a game shader; the sidecar is committed so a clean build
-never creates or mutates a source file. The tool-only `builtin-vertex` processor owns `.vert`: it
-reads the source as strict UTF-8, compiles it through the shared `GlslCompiler`, and emits
-`shader/vertex-spv`. `.vert` is not registered by `UseDefaultProcessors()`, so it is not a
-user-facing source type. `builtin-present` does the same for the engine-owned `.pvert`/`.pfrag`
-present stages and emits `present/vertex-spv` and `present/fragment-spv`.
+`shader/sprite-spv` payload, exactly like a game shader, and `shader/line.frag` with its empty
+`shader/line.frag.toml` sidecar produces the built-in line fragment `shader/line` and its
+`shader/line-spv` payload; the sidecars are committed so a clean build never creates or mutates a
+source file. The tool-only `builtin-vertex` processor owns `.vert`: it reads each source as strict
+UTF-8, compiles it through the shared `GlslCompiler`, and emits `<base>-spv`, so the sprite stage
+yields `shader/vertex-spv` and the new line stage yields `shader/line-vertex-spv`. `.vert` is not
+registered by `UseDefaultProcessors()`, so it is not a user-facing source type. `builtin-present`
+does the same for the engine-owned `.pvert`/`.pfrag` present stages and emits `present/vertex-spv` and
+`present/fragment-spv`.
 
 `textures/placeholder.checker` is a UTF-8 text source containing one integer resolution (8). The
 tool-only `builtin-placeholder` processor validates it against a small range, generates a magenta and
@@ -408,7 +421,7 @@ Codes are stable once a range is released. A diagnostic renders as
 `bake` records a schema-3 manifest at `<project root>/obj/bork2d/bake/manifest.json`. It tracks the
 tool version, configuration hash, registered type/processor assembly closure, mode, every input
 path/hash, and every output path/hash. The configuration hash includes the shader tool marker
-`shaderc-2.23.0/layout-2/prologue-3/packer-1` and the texture tool marker
+`shaderc-2.23.0/layout-3/prologue-4/packer-1` and the texture tool marker
 `ktx2-1/bcn-2.3.0/mips-1`, so upgrading shaderc or BCnEncoder.Net, changing the fragment layout,
 prologue, uniform packer, KTX2 writer, or mip filter invalidates a manifest written by the earlier
 tool. When all match, the bake prints an up-to-date summary and writes nothing. Any changed source,

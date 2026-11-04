@@ -13,6 +13,12 @@ namespace Bork2d.Engine.Assets;
 /// the renderer rather than being reinterpreted here.
 /// </para>
 /// <para>
+/// Version <c>3</c> is the first version shared by sprites and lines: every fragment shader declares
+/// one interface, and the sprite and line vertex stages both write all of it. The sprite stage writes
+/// neutral line-only values, and the line stage writes neutral sprite-only values, so a shader may be
+/// assigned to either renderable kind.
+/// </para>
+/// <para>
 /// Offsets in <see cref="ShaderUniform"/> are float-lane offsets. The instance block is 16 float
 /// lanes, stored as four <see cref="Vector4"/> lanes; the global block is eight
 /// <see cref="Vector4"/> slots. The lane helpers below read and write one component at a time and
@@ -23,9 +29,10 @@ namespace Bork2d.Engine.Assets;
 internal static class ShaderLayout
 {
     /// <summary>
-    /// The shader layout version implemented by this engine build.
+    /// The shader layout version implemented by this engine build: the first version shared by sprite
+    /// and line renderables.
     /// </summary>
-    internal const uint CurrentVersion = 2;
+    internal const uint CurrentVersion = 3;
 
     /// <summary>
     /// The number of float lanes in the per-instance uniform block.

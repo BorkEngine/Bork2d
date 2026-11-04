@@ -20,8 +20,11 @@ public sealed class ShaderToolTests
     private static readonly string[] _builtInShaderSources =
     [
         Path.Combine("src", "Bork2d", "BuiltInAssets", "Assets", "shader", "vertex.vert"),
+        Path.Combine("src", "Bork2d", "BuiltInAssets", "Assets", "shader", "line-vertex.vert"),
         Path.Combine("src", "Bork2d", "BuiltInAssets", "Assets", "shader", "sprite.frag"),
         Path.Combine("src", "Bork2d", "BuiltInAssets", "Assets", "shader", "sprite.frag.toml"),
+        Path.Combine("src", "Bork2d", "BuiltInAssets", "Assets", "shader", "line.frag"),
+        Path.Combine("src", "Bork2d", "BuiltInAssets", "Assets", "shader", "line.frag.toml"),
         Path.Combine("src", "Bork2d", "BuiltInAssets", "Assets", "present", "vertex.pvert"),
         Path.Combine("src", "Bork2d", "BuiltInAssets", "Assets", "present", "fragment.pfrag"),
     ];
