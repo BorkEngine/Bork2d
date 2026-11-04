@@ -370,6 +370,7 @@ public sealed class TransformHierarchyTests
         Assert.Throws<Bork2dException>(() => { engine.CreateTransform(fake); });
         Assert.Throws<Bork2dException>(() => { engine.CreateCamera(fake); });
         Assert.Throws<Bork2dException>(() => { engine.CreateSpriteRender(fake); });
+        Assert.Throws<Bork2dException>(() => { engine.CreateLineRender(fake); });
         Assert.Same(engine.Root, transform.Parent);
     }
 

@@ -57,6 +57,7 @@ public sealed class CameraPublicSurfaceTests
     {
         Assert.True(typeof(IRenderable).IsAssignableFrom(typeof(ICamera<>)));
         Assert.True(typeof(IRenderable).IsAssignableFrom(typeof(ISpriteRender<>)));
+        Assert.True(typeof(IRenderable).IsAssignableFrom(typeof(ILineRender<>)));
         Assert.True(typeof(ITransform).IsAssignableFrom(typeof(IRenderable)));
 
         PropertyInfo? bounds = typeof(IRenderable).GetProperty(nameof(IRenderable.Bounds));

@@ -5,9 +5,9 @@ namespace Bork2d.Engine.Rendering;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Slot <c>0</c> and slot <c>1</c> are reserved for cameras and sprites; every other slot belongs
-/// to a registered renderable producer. A slot's buffer is created on first access and then kept
-/// for the lifetime of the snapshot, so a warm capture only appends values.
+/// Slots <c>0</c>, <c>1</c>, and <c>2</c> are reserved for cameras, sprites, and lines; every other
+/// slot belongs to a registered renderable producer. A slot's buffer is created on first access and
+/// then kept for the lifetime of the snapshot, so a warm capture only appends values.
 /// </para>
 /// <para>
 /// A slot is typed by its first user. Asking for an occupied slot with a different element type is

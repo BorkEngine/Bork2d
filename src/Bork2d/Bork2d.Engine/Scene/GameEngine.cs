@@ -23,10 +23,11 @@ namespace Bork2d.Engine.Scene;
 /// </para>
 /// <para>
 /// Renderable creation and capture are registry-driven: the engine constructs one
-/// <see cref="RenderableRegistry"/> with the camera and sprite definitions, delegates
-/// <see cref="CreateCamera"/> and <see cref="CreateSpriteRender"/> to it, and passes its ordered
-/// producer list to the capture pass. Adding a renderable kind therefore registers a definition
-/// instead of editing the engine's creation methods or a capture switch.
+/// <see cref="RenderableRegistry"/> with the camera, sprite, and line definitions, delegates
+/// <see cref="CreateCamera"/>, <see cref="CreateSpriteRender"/>, and <see cref="CreateLineRender"/>
+/// to it, and passes its ordered producer list to the capture pass. Adding a renderable kind
+/// therefore registers a definition instead of editing the engine's creation methods or a capture
+/// switch.
 /// </para>
 /// <para>
 /// The window and input implementations are injected by the composition root: a windowed app gets
@@ -85,7 +86,8 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
         _renderables = new RenderableRegistry(
             FrameSnapshot.ReservedSlotCount,
             new CameraRenderableDefinition<TLayer>(_structuralLock, window),
-            new SpriteRenderableDefinition<TLayer>(_structuralLock));
+            new SpriteRenderableDefinition<TLayer>(_structuralLock),
+            new LineRenderableDefinition<TLayer>(_structuralLock));
         _capture = new SnapshotCapture(_structuralLock, _root, _renderables.Producers);
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _input = input;
@@ -274,6 +276,14 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
             parentNode);
     }
 
+    public ILineRender<TLayer> CreateLineRender(ITransform parent)
+    {
+        var parentNode = RequireEngineNode(parent);
+        return (ILineRender<TLayer>)_renderables.Create(
+            typeof(LineRender<TLayer>),
+            parentNode);
+    }
+
     /// <inheritdoc/>
     public void SetGlobalUniform(string name, float value)
         => SetGlobalUniformCore(name, ShaderUniformType.Float, new Vector4(value, 0f, 0f, 0f));
@@ -390,8 +400,8 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     /// The engine reuses one internal capture object, so a warm capture allocates nothing. The
     /// traversal is iterative and parent-first under the structural lock: each node is read under
     /// one per-object lock acquisition, and its world matrix is composed once by the registered
-    /// producer that matches it (or by the plain transform fallback). The engine's camera and
-    /// sprite producers are registered first and fill the reserved snapshot buffers.
+    /// producer that matches it (or by the plain transform fallback). The engine's camera, sprite,
+    /// and line producers are registered first and fill the reserved snapshot buffers.
     /// </para>
     /// </remarks>
     /// <param name="snapshot">The slot-owned snapshot to reset and fill.</param>

@@ -139,11 +139,39 @@ path. A sprite with no custom shader has a zero instance-uniform block in the sn
 seeds it from the default entry's declared default block, so a game pack that shadows
 `shader/sprite` with instance-uniform declarations behaves correctly without per-sprite overrides.
 
-Cameras and sprites are `IRenderable`s and expose a read-only world-space `Bounds` AABB for
+Line renderables are transforms plus an ordered local-space polyline: `Points`, `Closed`, `Width`,
+`Color`, `AntiAlias`, an optional custom fragment `Shader`, one-bit `Layer`, and `ZIndex`. Defaults
+are empty points, an open line, width `1`, white, anti-aliasing on, no shader, layer `0`, and
+z-index `0`. The `Points` setter copies the supplied list and stores `null` as empty; the getter
+returns a cached read-only view of that copy, so mutating the caller's array cannot change a
+renderable or a published snapshot and reading it allocates nothing. A line with `Layer` `0` or a
+combined mask is captured as-is and skipped later, exactly like a sprite.
+
+The engine expands a line on the CPU into immutable local-space triangles with per-vertex line UVs
+and `uint32` indices, and caches the result per renderable. Points, width, and closed state rebuild
+it; color, anti-aliasing, shader, layer, z-index, and transform changes do not. An open line needs
+at least two distinct points after duplicate consecutive points are skipped, and a closed line
+needs at least three; a closed line drops a final point equal to the first before joining the last
+point to the first. Every point must be finite and `Width` must be finite and greater than zero;
+otherwise the line is captured as not drawable and the renderer skips it later with a one-time
+diagnostic, while capture and bounds reads never throw. Open ends are butt caps, interior corners use
+a miter join with limit `4`, a miter beyond the limit becomes a bevel, and a closed line has no caps.
+Line UV `x` runs from `0` to `1` across the width and `y` is the accumulated local-space distance
+along the line.
+
+A line's `Shader` uses the same freeze rule as a sprite's, so capture carries only the frozen
+`ShaderRenderData`; a line without a custom shader selects the built-in `shader/line` entry when the
+line renderer consumes the snapshot. Instance uniform values follow the same strict rules:
+`SetUniform` validates immediately against the assigned shader's frozen declarations and stores
+accepted values per renderable, `ResetUniforms` clears them, reassigning `Shader` keeps them, and
+capture applies only values whose name and type still match.
+
+Cameras, sprites, and lines are `IRenderable`s and expose a read-only world-space `Bounds` AABB for
 conservative renderer culling. A camera's bounds contain its transformed visible rectangle; a
 sprite's bounds contain the drawn quad, derived from the frozen render data, pivot, flips, and
-composed world matrix. Both return `Bounds.Empty` for an invalid renderable, a headless or
-shut-down app, or a sprite with no drawable frozen data, and reading them never throws for those
+composed world matrix; a line's bounds contain its expanded geometry, including half the width and
+every miter or bevel extent. All return `Bounds.Empty` for an invalid renderable, a headless or
+shut-down app, or a renderable with no drawable content, and reading them never throws for those
 cases. Empty bounds mean "unknown": the renderer must not treat them as "outside".
 
 `SpriteAsset` is a mutable authoring and loading DTO, but rendering reads only an immutable frozen
@@ -164,7 +192,7 @@ are ignored. The declaration arrays are non-null and empty by default. The loade
 names, types, offsets, overlaps, or the layout version; freezing tolerates malformed declarations,
 and the renderer owns rejecting or falling back from them.
 
-Like `SpriteAsset`, `ShaderAsset` freezes once per asset instance when assigned to a sprite
+Like `SpriteAsset`, `ShaderAsset` freezes once per asset instance when assigned to a sprite or line
 renderable: mutating it afterwards (including replacing or editing its declaration arrays) does not
 change a published snapshot, and re-assigning the same asset keeps the first frozen values. Freezing
 is tolerant of malformed metadata: null arrays become empty, null and duplicate names are skipped

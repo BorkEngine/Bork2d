@@ -11,12 +11,13 @@ namespace Bork2d.Engine.Rendering;
 /// Producers are registered in <see cref="SnapshotCapture"/> order and tried for every traversed
 /// node. The first producer that recognizes the node's type captures it and supplies the node's
 /// world matrix; when none matches, the capture pass falls back to the plain transform path. The
-/// engine's camera and sprite renderables are producers too, so capture has no central type switch.
+/// engine's camera, sprite, and line renderables are producers too, so capture has no central type
+/// switch.
 /// </para>
 /// <para>
 /// A producer owns exactly one render-data slot. Slots are assigned by the renderable registry at
-/// construction; the camera and sprite producers occupy the snapshot's reserved slots and a custom
-/// producer uses a slot at or above <see cref="FrameSnapshot.ReservedSlotCount"/>.
+/// construction; the camera, sprite, and line producers occupy the snapshot's reserved slots and a
+/// custom producer uses a slot at or above <see cref="FrameSnapshot.ReservedSlotCount"/>.
 /// </para>
 /// </remarks>
 internal interface IRenderDataProducer
