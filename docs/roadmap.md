@@ -48,12 +48,12 @@ The version is complete only when all of the following are true:
 
 ## Baseline
 
-The current engine is a strong fixed-function sprite renderer:
+The 0.1 engine is a strong fixed-function sprite renderer:
 
 - The sprite pipeline uses a 96-byte instanced record, one vertex/fragment shader pair, a 64-byte
   view-projection push constant, a bindless texture array, and one draw per non-empty camera.
-- Before this workstream, `SpriteAsset` referenced one `TextureDescriptor` whose textures were raw
-  RGBA8, sRGB, single-mip.
+- Its `SpriteAsset` referenced one `TextureDescriptor` whose textures were raw RGBA8, sRGB,
+  single-mip.
 - Shaders are compiled at engine build time into generated C# arrays; there is no shader asset and
   no runtime shader I/O.
 - There is no line, SVG, or font renderable, and the Pong scene is three textured quads plus a
@@ -338,7 +338,7 @@ engine.SetGlobalUniform("uWind", new Vector2(1f, 0f));
 #### Goals
 
 - Every baked texture payload is a KTX2 file with a full mip chain.
-- The sidecar selects a semantic channel type, a compression mode, and a color space.
+- The sidecar selects a semantic channel type and a compression mode.
 - Native Vulkan BC formats are used for compressed textures: BC7, BC1, BC5, and BC4.
 - BC support is a hard renderer requirement; there is no RGBA fallback and no runtime transcoder.
 - Pong's paddles are compressed, reducing both pack size and sampled bandwidth.
@@ -413,8 +413,8 @@ channel type.
 
 - Renderer startup requires the Vulkan `textureCompressionBC` feature. If it is absent, startup
   fails with a message naming the feature and the engine's desktop requirement.
-- Each requested BC format is checked with the device's format properties. A missing format for a
-  baked texture is a startup failure, not a silent placeholder.
+- Each requested BC format is checked with the device's format properties. A format the device
+  cannot sample is a fatal renderer error, not a silent placeholder.
 - Image creation uses the descriptor's format and mip count. Each level is copied from the KTX2
   payload with the correct block extent and row length; uncompressed levels follow the same path.
 - Samplers use the descriptor filter for minification and magnification, linear mip filtering, and
