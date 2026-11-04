@@ -72,7 +72,7 @@ signatures are finalized in the implementation tasks.
 | Area | Decision |
 | --- | --- |
 | Shader model | Fragment-only shaders on the engine-owned sprite vertex ABI. The asset schema is versioned so a future full-pipeline asset can be added without changing fragment-only assets. |
-| Shader batching | Contiguous runs of equal shader, preserving `(Layer, ZIndex)` order. Built-in sprites remain one draw per camera. |
+| Shader batching | Contiguous runs of equal kind and shader, preserving the per-camera `(ZIndex, screen Y, screen X)` order. Built-in sprites remain one draw per camera. |
 | Uniforms | Named typed slots declared in the shader sidecar, packed at bake time. Instance values are frozen at capture and written into the instance record; global values live in a per-frame block. |
 | Built-in globals | `BORK2D_TIME` only; it is `ITime.Time` in seconds. User globals are separate named slots. |
 | Extra textures | A sprite has one main texture plus up to four additional bindless texture paths. |
@@ -81,7 +81,7 @@ signatures are finalized in the implementation tasks.
 | Texture sidecar | Semantic `type` and `compression`; the bake maps them to a concrete linear `TextureFormat`. |
 | Mipmaps | A full mip chain for every baked texture, including MSDF atlases and compressed textures. |
 | Line geometry | CPU-expanded triangles with miter joins and butt caps; anti-aliasing in the fragment shader. |
-| 2D ordering | Sprites, lines, and text share one `(Layer, ZIndex)` sequence and one 2D render pass. |
+| 2D ordering | Sprites, lines, and text share one `ZIndex` draw order (then per-camera screen-space Y and X) and one 2D render pass; `Layer` is only a camera culling bit. |
 | SVG | Shapes, paths, groups, and transforms with fill only; paint, stroke, text, images, CSS, and filters are ignored. Output is an SDF texture plus a ready sprite. |
 | Fonts | TTF/OTF with MSDF, ASCII plus explicit `U+` ranges and single glyphs, left-to-right layout, and basic kerning. `resolution` is the atlas's maximum dimension; glyph em size is derived to fit. |
 | MSDF generation | A managed C# MSDF library, build-time only, rather than a native P/Invoke dependency. |
@@ -242,11 +242,13 @@ Every sprite shader shares one pipeline layout and one descriptor-set layout:
   vertex input, no depth, cull disabled, straight-alpha blending.
 
 Only the fragment shader module differs per shader; the vertex module is shared. Pipelines are
-cached by `(shader content hash, output color format)`. A shader module and its pipelines are keyed
-by content hash, so a catalog remount that changes a shader creates a new entry and retires the old
-one after the frames that reference it complete. A shader that fails to load or create a pipeline
-falls back to `shader/sprite` with a one-time warning; a failure of `shader/sprite` itself is fatal
-at renderer startup.
+cached by `(pipeline kind, shader content hash, output color format)`. A shader module is keyed by
+content hash and its pipelines by kind, content hash, and format, so identical fragment content
+shares its module while the sprite and line pipelines stay distinct. A catalog remount that changes a
+shader creates a new entry and retires the old one after the frames that reference it complete. A
+shader that fails to load or create a pipeline falls back to its kind's default (`shader/sprite` or
+`shader/line`) with a one-time warning; a failure of either default itself is fatal at renderer
+startup.
 
 The instance record grows from 96 to 176 bytes: the current six `vec4` values, one `vec4` holding
 the four additional texture indices, and four `vec4` values holding the packed instance uniforms.
@@ -254,7 +256,8 @@ The main texture index stays in the existing `misc` slot.
 
 The planner extends the existing sprite pass:
 
-1. Sort sprites by `(Layer, ZIndex)` as today.
+1. No global sprite sort: collect each camera's visible candidates and sort them per camera by
+   `(ZIndex, screen Y, screen X)`.
 2. Resolve each sprite's shader and texture pages.
 3. Build a camera-independent instance record containing the existing quad data, the main and
    extra texture indices, and the four `vec4` instance-uniform values.
@@ -499,10 +502,11 @@ The engine expands a polyline on the CPU into triangles:
 - `AntiAlias` adds a small screen-space coverage term in the fragment shader rather than extra
   geometry. The built-in line shader uses `vLineUv.x` and `fwidth` to soften the edges.
 
-The expansion is cached per line and rebuilt only when points, width, closed state, or color
-changes. The renderer copies the triangles into the frame's line vertex/index buffers and merges
-contiguous lines with the same shader into one draw run. Line records carry the same 64-byte
-instance-uniform block as sprites; the line vertex stage forwards it to the fragment stage, so
+The expansion is cached per line and rebuilt only when points, width, or closed state changes;
+color is a draw state, so changing it never rebuilds geometry. The renderer applies the snapshot
+world matrix while writing the triangles into the frame's line vertex/index buffers and merges
+contiguous lines of the same kind and resolved shader into one draw run. Line records carry the same
+64-byte instance-uniform block as sprites; the line vertex stage forwards it to the fragment stage, so
 lines that share a shader can still merge even when their uniform values differ.
 
 #### Shader interface
@@ -522,13 +526,15 @@ custom court shader with a subtle time-based glow and a dashed center pattern.
 #### Unified 2D order
 
 `LineRender` does not get a separate pass that draws before or after sprites. The 2D pass sorts
-sprite records, line records, and font glyph records together by `(Layer, ZIndex)`. At equal
-`(Layer, ZIndex)`, the tie order is line, then sprite, then font, followed by capture order. This is
-deterministic and keeps background court lines behind gameplay at the same depth.
+sprite records, line records, and font glyph records together per camera by `ZIndex` ascending, then
+screen-space Y ascending, then screen X ascending. `ZIndex` is not layer-scoped, and `Layer` is only a
+camera culling bit. Ties at equal `ZIndex`/screen Y/screen X are explicitly unspecified: there is no
+kind, capture-order, or record-index tie-break. This keeps background court lines behind gameplay at
+the same depth without making the order depend on which kind happened to be captured first.
 
 The existing sprite planner becomes the 2D planner:
 
-1. Sort all 2D records by the combined key.
+1. Build each camera's visible candidate list and sort it by `(ZIndex, screen Y, screen X)`.
 2. Build sprite instance records, line triangles, and font glyph quads.
 3. Compact contiguous runs with the same draw kind and shader.
 4. Record each run in order, binding the pipeline appropriate to the run.
@@ -715,15 +721,15 @@ The frame snapshot reserves:
 Custom renderable producers start at `4`. This is a breaking change to the reserved-slot contract,
 but it keeps the built-in 2D kinds on the same planner and avoids a hidden second pass.
 
-The capture remains value-only. Sprites carry frozen `SpriteRenderData`; lines carry frozen points
-and style; fonts carry a frozen layout reference. No live scene entity or mutable asset crosses the
-tick/render boundary.
+The capture remains value-only. Sprites carry frozen `SpriteRenderData`; lines carry the immutable
+cached geometry and style; fonts carry a frozen layout reference. No live scene entity or mutable
+asset crosses the tick/render boundary.
 
 ### 2D pass
 
 The sprite pass becomes the 2D pass. For each camera it:
 
-1. Sorts all 2D records by `(Layer, ZIndex, kind, capture order)`.
+1. Sorts each camera's visible records by `(ZIndex, screen Y, screen X)`; ties are unspecified.
 2. Applies the camera's culling mask and conservative world-AABB test.
 3. Builds sprite instance ranges, line triangle ranges, and font glyph ranges.
 4. Uploads the frame's instance, line vertex/index, and glyph buffers.
@@ -740,9 +746,11 @@ pass, so it includes all three kinds.
 - One per-frame instance storage buffer for sprite instances.
 - One per-frame line vertex/index buffer pair.
 - One per-frame glyph instance buffer.
-- A pipeline cache keyed by shader content hash and output color format.
+- A pipeline cache keyed by pipeline kind, shader content hash, and output color format.
 - A shader module cache keyed by canonical shader path and content hash.
-- Texture pages remain the single bindless texture owner; line shaders ignore the texture array.
+- Texture pages remain the single bindless texture owner; the built-in line vertex stage writes the
+  placeholder texture index `0` and zero extra indices, and a shared custom shader may sample the
+  bindless array from a line.
 
 All resources are render-thread-owned. Frame buffers are fenced like the existing instance buffer;
 steady-state frames allocate nothing.
@@ -875,8 +883,9 @@ through the KTX2 texture helper.
   `shader/sdf` path.
 - **Score.** Two `FontRender`s show the left and right scores near the top center, right- and
   left-aligned respectively. Text changes only when `LeftScore` or `RightScore` changes.
-- **Ordering.** Court lines, ball, paddles, wordmark, and score all use `(Layer, ZIndex)` and the
-  unified 2D pass; no feature-specific pass is added.
+- **Ordering.** Court lines, ball, paddles, wordmark, and score all use the shared `ZIndex` and
+  per-camera screen-space 2D order in the unified 2D pass; `Layer` only selects cameras. No
+  feature-specific pass is added.
 
 ### Acceptance
 
@@ -994,7 +1003,7 @@ The release-specific coverage:
   resolution/padding, linear sampling, and mip quality.
 - **Fonts.** Glyph range parsing, atlas derivation, metrics, kerning, line breaks, alignment,
   missing glyphs, layout cache behavior, and score rendering.
-- **2D pass.** Sort key, tie order, camera culling, draw-run accounting, and stats.
+- **2D pass.** Per-camera sort key, run grouping, camera culling, draw-run accounting, and stats.
 
 Bake tests build assets in a temporary directory; no binary fixture, generated pack, or generated
 image is committed. Authored Pong content is content, not a fixture.
