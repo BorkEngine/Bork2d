@@ -135,6 +135,7 @@ internal static class Program
             .UseDefaultProcessors()
             .AddProcessor(new BuiltInVertexProcessor())
             .AddProcessor(new BuiltInPresentProcessor())
+            .AddProcessor(new BuiltInPlaceholderProcessor())
             .Build();
 
         string[] arguments =

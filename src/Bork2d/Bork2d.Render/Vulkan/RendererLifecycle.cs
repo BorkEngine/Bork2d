@@ -336,7 +336,7 @@ internal sealed class RendererLifecycle
     /// </param>
     /// <param name="texturePageCapacity">The current bindless page capacity, including the placeholder.</param>
     /// <param name="textureUploadsPending">The pages queued for upload but not begun by the pump.</param>
-    /// <param name="textureUploadBytesPending">The declared payload bytes of the pending uploads.</param>
+    /// <param name="textureUploadBytesPending">The validated KTX2 payload bytes of the pending uploads.</param>
     internal void PublishStats(
         long sequence,
         int width,

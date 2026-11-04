@@ -22,8 +22,9 @@ internal enum TexturePageLookupKind
 /// <para>
 /// <see cref="Width"/>/<see cref="Height"/> are the quad-size source. A ready page reports the
 /// loaded descriptor's dimensions. A placeholder lookup reports the failed descriptor's declared
-/// dimensions when that descriptor loaded and they are valid, and otherwise the placeholder's own
-/// 8×8 extent (the owner-approved M8 sizing rule for failed/absent textures).
+/// dimensions when that descriptor loaded and they are valid, and otherwise the built-in
+/// placeholder's loaded descriptor dimensions (the owner-approved M8 sizing rule for failed/absent
+/// textures).
 /// </para>
 /// <para>
 /// A pending lookup reports <c>0</c> for both dimensions; the sprite is skipped, so no size is

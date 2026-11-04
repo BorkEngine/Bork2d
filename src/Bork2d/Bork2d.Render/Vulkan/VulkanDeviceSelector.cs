@@ -282,7 +282,8 @@ internal static unsafe class VulkanDeviceSelector
             DescriptorBindingUpdateUnusedWhilePending:
                 indexing.DescriptorBindingUpdateUnusedWhilePending,
             DescriptorBindingVariableDescriptorCount:
-                indexing.DescriptorBindingVariableDescriptorCount);
+                indexing.DescriptorBindingVariableDescriptorCount,
+            TextureCompressionBC: features2.Features.TextureCompressionBC);
     }
 
     private static VulkanDevice CreateDevice(
@@ -346,6 +347,10 @@ internal static unsafe class VulkanDeviceSelector
         var features2 = new PhysicalDeviceFeatures2
         {
             SType = StructureType.PhysicalDeviceFeatures2,
+            Features = new PhysicalDeviceFeatures
+            {
+                TextureCompressionBC = true,
+            },
             PNext = &indexing,
         };
         indexing.PNext = &dynamicRendering;
@@ -600,6 +605,7 @@ internal static unsafe class VulkanDeviceSelector
                 + features.DescriptorBindingUpdateUnusedWhilePending,
             "descriptorBindingVariableDescriptorCount="
                 + features.DescriptorBindingVariableDescriptorCount,
+            $"textureCompressionBC={features.TextureCompressionBC}",
         ];
         return string.Join(", ", enabled);
     }

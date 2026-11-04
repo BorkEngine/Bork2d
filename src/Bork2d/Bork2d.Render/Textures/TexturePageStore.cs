@@ -29,15 +29,16 @@ namespace Bork2d.Render.Textures;
 /// then recycled.
 /// </para>
 /// <para>
-/// Residency is bounded by <see cref="ResidencyBudgetBytes"/> over the declared payload bytes
-/// (<c>width * height * 4</c>) of the current catalog's ready pages. When the total exceeds the
-/// budget, <see cref="Pump"/> evicts ready pages least recently seen first, but only pages the safety
-/// age proves no in-flight frame can sample: with two GPU frames in flight, a page is reclaimable
-/// only when <c>_frameSequence - LastSeenFrame &gt; 2</c>, so the two plans that could still be in
-/// flight can never reference it. If every ready page is still recent, the over-budget set is kept
-/// and eviction is retried on a later pump; the placeholder is never a candidate. A reclaimed
-/// descriptor slot goes to a free list and the next upload reuses it before growing the table, and a
-/// reclaimed image-memory range returns to the image pool for reuse.
+/// Residency is bounded by <see cref="ResidencyBudgetBytes"/> over the validated KTX2 payload bytes
+/// of the current catalog's ready pages; the payload byte length, not
+/// <c>width * height * 4</c>, is the upload and residency budget. When the total exceeds the budget,
+/// <see cref="Pump"/> evicts ready pages least recently seen first, but only pages the safety age
+/// proves no in-flight frame can sample: with two GPU frames in flight, a page is reclaimable only
+/// when <c>_frameSequence - LastSeenFrame &gt; 2</c>, so the two plans that could still be in flight
+/// can never reference it. If every ready page is still recent, the over-budget set is kept and
+/// eviction is retried on a later pump; the placeholder is never a candidate. A reclaimed descriptor
+/// slot goes to a free list and the next upload reuses it before growing the table, and a reclaimed
+/// image-memory range returns to the image pool for reuse.
 /// </para>
 /// <para>
 /// The state machine is <see cref="TexturePageState.Pending"/> (the descriptor/payload load runs on
@@ -51,9 +52,9 @@ namespace Bork2d.Render.Textures;
 /// path never consumes capacity or triggers growth.
 /// </para>
 /// <para>
-/// <see cref="Pump"/> starts uploads up to the per-frame byte budget, charging
-/// <c>width * height * 4</c> per page. The first queued upload of a frame always starts even when it
-/// alone exceeds the budget, so one large texture cannot starve forever. Pages seen most recently by
+/// <see cref="Pump"/> starts uploads up to the per-frame byte budget, charging the validated KTX2
+/// payload length per page. The first queued upload of a frame always starts even when it alone
+/// exceeds the budget, so one large texture cannot starve forever. Pages seen most recently by
 /// <see cref="EnsurePage"/> start first; because the planner marks visibility during the frame
 /// before the next pump, that priority is a next-frame ordering, not a same-frame guarantee.
 /// </para>
@@ -113,6 +114,8 @@ internal sealed class TexturePageStore
     private long _loadSequence;
     private long _pendingUploadBytes;
     private long _residentPayloadBytes;
+    private int _placeholderWidth;
+    private int _placeholderHeight;
     private bool _placeholderReady;
     private bool _destroyed;
 
@@ -210,7 +213,7 @@ internal sealed class TexturePageStore
     internal int PendingUploadCount => _uploadQueue.Count;
 
     /// <summary>
-    /// Gets the declared payload bytes of <see cref="PendingUploadCount"/> (public
+    /// Gets the validated KTX2 payload bytes of <see cref="PendingUploadCount"/> (public
     /// <c>TextureUploadBytesPending</c>).
     /// </summary>
     internal long PendingUploadBytes => _pendingUploadBytes;
@@ -225,7 +228,7 @@ internal sealed class TexturePageStore
     internal long ResidencyBudgetBytes => _residencyBudgetBytes;
 
     /// <summary>
-    /// Gets the declared payload bytes of the current catalog's ready pages, which the residency
+    /// Gets the validated KTX2 payload bytes of the current catalog's ready pages, which the residency
     /// budget bounds. Retired pages awaiting reclamation and uploading pages are not counted.
     /// </summary>
     internal long ResidentPayloadBytes => _residentPayloadBytes;
@@ -272,19 +275,34 @@ internal sealed class TexturePageStore
     internal bool IsPlaceholderReady => _placeholderReady;
 
     /// <summary>
-    /// Creates, uploads (waiting for its fence), and makes the placeholder page resident at index
-    /// <c>0</c>. Failure is a renderer startup failure.
+    /// Uploads the built-in placeholder at index <c>0</c> (waiting for its fence) and records its
+    /// dimensions for absent and failed texture lookups. The payload is validated as a narrow-profile
+    /// KTX2 file against the descriptor; an absent or invalid built-in placeholder is a renderer
+    /// startup failure.
     /// </summary>
-    /// <exception cref="Bork2dException">The placeholder image or upload could not be created.</exception>
-    internal void Start()
+    /// <param name="descriptor">The loaded built-in placeholder descriptor.</param>
+    /// <param name="payload">The loaded built-in placeholder KTX2 payload.</param>
+    /// <exception cref="Bork2dException">
+    /// The placeholder content is missing, malformed, or mismatched, or its image/upload cannot be
+    /// created.
+    /// </exception>
+    internal void Start(TextureDescriptor descriptor, byte[] payload)
     {
         ObjectDisposedException.ThrowIf(_destroyed, this);
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(payload);
 
+        if (!TryValidateContent(descriptor, payload, out TexturePageFailure failure))
+        {
+            throw new Bork2dException(
+                $"The built-in texture placeholder '{TexturePlaceholder.DescriptorPath}' is invalid: "
+                    + $"{failure}. The embedded built-in pack does not serve a valid KTX2 placeholder.");
+        }
+
+        _placeholderWidth = (int)descriptor.Width;
+        _placeholderHeight = (int)descriptor.Height;
         _gpu.EnsureCapacity(_capacity);
-        _gpu.Upload(
-            TexturePageCapacity.PlaceholderIndex,
-            TexturePlaceholder.CreateDescriptor(),
-            TexturePlaceholder.CreatePixels());
+        _gpu.Upload(TexturePageCapacity.PlaceholderIndex, descriptor, payload);
         _gpu.WaitForUpload(TexturePageCapacity.PlaceholderIndex);
         _placeholderReady = true;
     }
@@ -298,8 +316,8 @@ internal sealed class TexturePageStore
     /// (an already-known path) is a dictionary lookup returning a value struct, so it allocates
     /// nothing and never blocks. It records the frame as the path's last-seen marker, which the
     /// upload planner uses as the next-frame priority. A null or empty path maps straight to the
-    /// placeholder with the placeholder's own 8×8 extent. A catalog change observed here retires the
-    /// previous pages first, so the path reloads from the new catalog.
+    /// placeholder with the built-in descriptor's dimensions. A catalog change observed here retires
+    /// the previous pages first, so the path reloads from the new catalog.
     /// </remarks>
     /// <param name="path">The canonical texture descriptor path, or <see langword="null"/>.</param>
     /// <returns>The page lookup for this frame.</returns>
@@ -848,9 +866,22 @@ internal sealed class TexturePageStore
     }
 
     private bool Validate(TexturePage page, byte[] payload, out TexturePageFailure failure)
+        => TryValidateContent(page.Descriptor!, payload, out failure);
+
+    /// <summary>
+    /// Validates a descriptor and its KTX2 payload without touching GPU state: the format must map,
+    /// the declared dimensions must be nonzero and inside the device limit, and the payload's KTX2
+    /// header, DFD, and level index must match the descriptor exactly.
+    /// </summary>
+    private bool TryValidateContent(
+        TextureDescriptor descriptor,
+        byte[] payload,
+        out TexturePageFailure failure)
     {
-        TextureDescriptor descriptor = page.Descriptor!;
-        if (descriptor.Format != TextureFormat.Rgba8)
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(payload);
+
+        if (RenderTextureFormat.TryGet(descriptor.Format) is null)
         {
             failure = TexturePageFailure.UnsupportedFormat;
             return false;
@@ -869,15 +900,7 @@ internal sealed class TexturePageStore
             return false;
         }
 
-        ulong expected = (ulong)descriptor.Width * descriptor.Height * 4UL;
-        if ((ulong)payload.Length != expected)
-        {
-            failure = TexturePageFailure.PayloadLength;
-            return false;
-        }
-
-        failure = TexturePageFailure.None;
-        return true;
+        return Ktx2Reader.TryParse(payload, descriptor, out _, out failure);
     }
 
     private void RecordDeclaredSize(TexturePage page, TextureDescriptor descriptor)
@@ -940,12 +963,13 @@ internal sealed class TexturePageStore
         _ => new TexturePageLookup(TexturePageLookupKind.Pending, 0, 0, 0),
     };
 
-    private static TexturePageLookup PlaceholderLookup(int declaredWidth, int declaredHeight)
+    private TexturePageLookup PlaceholderLookup(int declaredWidth, int declaredHeight)
     {
         // Owner-approved sizing: a failed texture keeps its declared dimensions when the descriptor
-        // loaded and they are valid, even if the payload failed; otherwise the placeholder's 8x8.
-        int width = declaredWidth > 0 ? declaredWidth : TexturePlaceholder.Size;
-        int height = declaredHeight > 0 ? declaredHeight : TexturePlaceholder.Size;
+        // loaded and they are valid, even if the payload failed; otherwise the built-in placeholder's
+        // loaded descriptor dimensions (never a static assumption about the built-in resolution).
+        int width = declaredWidth > 0 ? declaredWidth : _placeholderWidth;
+        int height = declaredHeight > 0 ? declaredHeight : _placeholderHeight;
         return new TexturePageLookup(
             TexturePageLookupKind.Placeholder,
             TexturePageCapacity.PlaceholderIndex,

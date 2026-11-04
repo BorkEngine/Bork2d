@@ -238,8 +238,8 @@ Every sprite shader shares one pipeline layout and one descriptor-set layout:
 - Set `0`, binding `1`: bindless combined image sampler array, read by the fragment stage.
 - Set `0`, binding `2`: per-frame global uniform buffer.
 - Push constant: the 64-byte view-projection matrix.
-- Fixed state: sRGB color attachment, dynamic viewport/scissor, triangle strip, no vertex input,
-  no depth, cull disabled, straight-alpha blending.
+- Fixed state: linear UNORM scene color attachment, dynamic viewport/scissor, triangle strip, no
+  vertex input, no depth, cull disabled, straight-alpha blending.
 
 Only the fragment shader module differs per shader; the vertex module is shared. Pipelines are
 cached by `(shader content hash, output color format)`. A shader module and its pipelines are keyed
@@ -417,12 +417,12 @@ channel type.
   baked texture is a startup failure, not a silent placeholder.
 - Image creation uses the descriptor's format and mip count. Each level is copied from the KTX2
   payload with the correct block extent and row length; uncompressed levels follow the same path.
-- Samplers use linear minification and `MipmapMode.Linear` for all textures. Anisotropy is not
-  enabled in 0.2.
+- Samplers use the descriptor filter for minification and magnification, linear mip filtering, and
+  `MaxLod = VK_LOD_CLAMP_NONE`; anisotropy is not enabled in 0.2.
 - Texture-page budgets use the KTX2 payload byte length. Compressed pages therefore consume less
   upload and residency budget than an equivalent RGBA8 page.
-- The placeholder page stays available at bindless index 0. It is created from a tiny uncompressed
-  KTX2 payload at startup; no sprite may sample an incomplete page.
+- The placeholder page stays available at bindless index 0. It is loaded from the embedded built-in
+  pack as an uncompressed KTX2 texture at startup; no sprite may sample an incomplete page.
 
 #### Mipmaps
 
@@ -756,9 +756,10 @@ state; the renderer never reads live game objects.
 ### Texture formats and sampler
 
 The texture page upload path handles both uncompressed and BC KTX2 levels, the descriptor's mip
-count, and the concrete format. The sampler cache is keyed by `(Filter, Wrap, MipLevels)` and uses
-mip-linear filtering with the chain's maximum LOD. Placeholder and KTX2 pages can coexist in the
-same bindless array.
+count, and the concrete format. The sampler cache is keyed by `(Filter, Wrap)` and uses linear mip
+filtering with `MaxLod = VK_LOD_CLAMP_NONE`; every page has a complete chain, so the maximum LOD
+clamps to it and the mip count does not need to be part of the key. Placeholder and KTX2 pages can
+coexist in the same bindless array.
 
 ## Asset pipeline
 
