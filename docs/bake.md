@@ -125,7 +125,10 @@ not a reserved directory: it may live under any canonical asset path.
 The processor supplies `#version 460`, `#extension GL_EXT_nonuniform_qualifier : require`, the fixed
 fragment interface, and the `main` entry point. A source therefore contains only its own functions
 and `void main()`; a `#version` or `#extension` directive (after optional leading whitespace) is a
-bake error. The source is read as strict UTF-8.
+bake error. The source is read as strict UTF-8. A source may use `discard`: the bake emits the
+`DemoteToHelperInvocation` SPIR-V capability for it, so the render device must enable
+`shaderDemoteToHelperInvocation` (see
+[render.md](render.md#device-and-presentation)).
 
 The prefix defines `main` as `bork2d_user_main`, and the processor appends a fixed epilogue after the
 source that undefines the macro and supplies the real `void main()`. The epilogue calls the user body

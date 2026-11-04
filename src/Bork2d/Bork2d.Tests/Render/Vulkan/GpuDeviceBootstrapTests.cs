@@ -96,6 +96,7 @@ public sealed class GpuDeviceBootstrapTests
             Assert.Equal(VulkanFeatureSet.Required, device.Features);
             Assert.True(device.Features.DynamicRendering);
             Assert.True(device.Features.Synchronization2);
+            Assert.True(device.Features.ShaderDemoteToHelperInvocation);
             Assert.True(device.Features.RuntimeDescriptorArray);
             Assert.True(device.Features.ShaderSampledImageArrayNonUniformIndexing);
             Assert.True(device.Features.DescriptorBindingPartiallyBound);

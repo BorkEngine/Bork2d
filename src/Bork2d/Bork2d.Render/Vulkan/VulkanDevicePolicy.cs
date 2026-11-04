@@ -46,6 +46,13 @@ internal static class VulkanDevicePolicy
         if (missingFeatures.Count > 0)
         {
             reasons.Add($"missing required device features: {string.Join(", ", missingFeatures)}");
+            if (Contains(missingFeatures, "shaderDemoteToHelperInvocation"))
+            {
+                reasons.Add(
+                    "shaderDemoteToHelperInvocation is required for fragment shaders that use "
+                        + "discard (for example the Pong court's dashed center line)");
+            }
+
             if (Contains(missingFeatures, "textureCompressionBC"))
             {
                 reasons.Add(

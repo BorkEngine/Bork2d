@@ -21,7 +21,8 @@ namespace Bork2d.Tests.Render.Vulkan;
 /// Opt-in real-GPU proof for the custom fragment shader path: instance uniforms, the frame time
 /// input, declared additional textures sampled at their bindless slots, engine-wide global uniforms,
 /// contiguous custom/default run batching with correct draw accounting, deterministic pending
-/// behavior across a controllable load, and invalid-metadata fallback — all with defined captured
+/// behavior across a controllable load, invalid-metadata fallback, and a <c>discard</c> shader that
+/// needs the device's <c>shaderDemoteToHelperInvocation</c> feature — all with defined captured
 /// colors and validation 0 errors/0 warnings.
 /// </summary>
 /// <remarks>
@@ -365,6 +366,46 @@ public sealed class CustomShaderGpuTests
             Assert.Contains(
                 provider.Entries,
                 entry => entry.Message.Contains("materials/invalid", StringComparison.Ordinal));
+            StopAndAssertClean(renderer);
+        }
+        finally
+        {
+            Finish(renderer);
+        }
+    }
+
+    [GpuFact]
+    public async Task DiscardFragmentShaderIsValidationCleanWithTheDemoteFeatureEnabled()
+    {
+        using var assets = new TestRendererAssets();
+        ShaderAsset shader = MakeShader("materials/discard-spv");
+        byte[] spirV = Compile(
+            "void main() { if (vUv.x > 0.5) { discard; } outColor = vec4(1.0, 0.0, 0.0, 1.0); }");
+        assets.AddShader("materials/discard", shader, spirV);
+        ShaderRenderData metadata = ShaderRenderData.Freeze(shader);
+        SpriteAsset sprite = MakeSpriteAsset(texture: null, scale: 10f);
+
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
+        VulkanOffscreenRenderer? renderer = null;
+        try
+        {
+            renderer = StartOffscreen(assets, loggerFactory);
+            var producer = new Producer(renderer);
+            Action<FrameSnapshot> fill = snapshot =>
+            {
+                AddCamera(snapshot);
+                AddSprite(snapshot, sprite, metadata, zIndex: 0, x: 0f);
+            };
+            PublishUntil(renderer, producer, fill, stats => stats.DrawCalls == 2);
+
+            FrameCaptureResult result = await CaptureAsync(renderer, producer, fill);
+            AssertPixelNear(result, 16, 32, 255, 0, 0, 255, 2, "the kept left half");
+            AssertPixelNear(result, 48, 32, 0, 0, 0, 255, 2, "the discarded right half");
+
+            // The bake emits the DemoteToHelperInvocation capability for this shader, so a device
+            // created without the feature would log VUID-VkShaderModuleCreateInfo-pCode-08740 here.
+            Assert.Equal(0, renderer.Counters.ValidationErrorCount);
+            Assert.Equal(0, renderer.Counters.ValidationWarningCount);
             StopAndAssertClean(renderer);
         }
         finally
