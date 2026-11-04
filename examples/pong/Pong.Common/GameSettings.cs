@@ -5,8 +5,8 @@ using PolyType;
 namespace Pong.Common;
 
 /// <summary>
-/// The baked game settings: the two sprite references, the ball's custom fragment shader, the
-/// movement speeds, the winning score, and the per-player paddle tints.
+/// The baked game settings: the two sprite references, the ball's and court's custom fragment
+/// shaders, the movement speeds, the winning score, and the per-player paddle tints.
 /// </summary>
 /// <param name="Paddle">The paddle sprite reference baked from <c>game_settings.toml</c>.</param>
 /// <param name="Ball">The ball sprite reference baked from <c>game_settings.toml</c>.</param>
@@ -16,6 +16,7 @@ namespace Pong.Common;
 /// <param name="LeftPaddleTint">The linear tint of the left paddle.</param>
 /// <param name="RightPaddleTint">The linear tint of the right paddle.</param>
 /// <param name="BallShader">The custom fragment shader reference baked for the ball.</param>
+/// <param name="CourtShader">The custom fragment shader reference baked for the court.</param>
 /// <remarks>
 /// The type is a positional record struct with a compiled <c>[GenerateShape]</c>, so the bake
 /// tooling binds <c>Assets/game_settings.toml</c> by constructor parameter name and the runtime
@@ -32,4 +33,5 @@ public readonly partial record struct GameSettings(
     int WinningScore,
     Color LeftPaddleTint,
     Color RightPaddleTint,
-    AssetRef<ShaderAsset> BallShader);
+    AssetRef<ShaderAsset> BallShader,
+    AssetRef<ShaderAsset> CourtShader);
