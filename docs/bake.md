@@ -313,14 +313,14 @@ sidecar can use its own typed sidecar and call the helper directly.
 
 ## Built-in asset pack
 
-The engine's own shader assets live under
+The engine's own shader and placeholder assets live under
 [src/Bork2d/BuiltInAssets/Assets](../src/Bork2d/BuiltInAssets/Assets) and are baked by the build-only
 [Bork2d.BuiltInAssets](../build/Bork2d.BuiltInAssets/Bork2d.BuiltInAssets.csproj) generator. The
 generator configures the ordinary builder with `WithPack("bork2d-builtin.pck", "Assets")`,
-`UseDefaultProcessors()`, and one tool-only processor for the engine-owned vertex stage, runs the
-normal `bake` command into a unique temporary output directory, and writes the pack as a generated C#
-byte array. `Bork2d.Runtime` compiles that file into its assembly and mounts the pack below the game
-packs; no loose pack file is published.
+`UseDefaultProcessors()`, and the tool-only `builtin-vertex`, `builtin-present`, and
+`builtin-placeholder` processors, runs the normal `bake` command into a unique temporary output
+directory, and writes the pack as a generated C# byte array. `Bork2d.Runtime` compiles that file into
+its assembly and mounts the pack below the game packs; no loose pack file is published.
 
 The source tree uses the same processors as game content. `shader/sprite.frag` and its checked-in
 empty `shader/sprite.frag.toml` sidecar produce the `shader/sprite` `ShaderAsset` and the
@@ -328,7 +328,16 @@ empty `shader/sprite.frag.toml` sidecar produce the `shader/sprite` `ShaderAsset
 never creates or mutates a source file. The tool-only `builtin-vertex` processor owns `.vert`: it
 reads the source as strict UTF-8, compiles it through the shared `GlslCompiler`, and emits
 `shader/vertex-spv`. `.vert` is not registered by `UseDefaultProcessors()`, so it is not a
-user-facing source type.
+user-facing source type. `builtin-present` does the same for the engine-owned `.pvert`/`.pfrag`
+present stages and emits `present/vertex-spv` and `present/fragment-spv`.
+
+`textures/placeholder.checker` is a UTF-8 text source containing one integer resolution (8). The
+tool-only `builtin-placeholder` processor validates it against a small range, generates a magenta and
+opaque-black checkerboard, and calls `TextureBaker.Bake` with the uncompressed RGBA channel type and
+the full mip chain. It emits an uncompressed RGBA8 `TextureDescriptor` at `textures/placeholder` with
+nearest filtering and clamp wrapping, plus the KTX2 payload at `textures/placeholder-ktx2`. The
+runtime loads and validates that pair at renderer startup as the bindless placeholder page at index
+`0`; it is ordinary pack content and has no generated-pixel fallback path.
 
 [build/Bork2d.BuiltInAssets.targets](../build/Bork2d.BuiltInAssets.targets) is imported by
 `Bork2d.Runtime.csproj`. Before `CoreCompile` it restores and builds the generator out of process,

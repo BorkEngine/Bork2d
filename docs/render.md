@@ -66,12 +66,14 @@ Useful files: [IRenderer.cs](../src/Bork2d/Bork2d.Render/IRenderer.cs),
 
 A device must support Vulkan 1.3 and the full required feature set: dynamic rendering,
 synchronization 2, runtime descriptor arrays, non-uniform sampled-array indexing, partially bound
-descriptors, sampled-image update-after-bind, update-unused-while-pending, and variable descriptor
-counts. The device must also report a `maxUniformBufferRange` of at least the 144-byte global block;
-a smaller value is a device-selection failure with a clear message. The device's
-`minUniformBufferOffsetAlignment` sets the per-frame global-block stride. Windowed selection
-additionally requires a graphics queue family that presents to the surface. Discrete GPUs are
-preferred over integrated, then other types.
+descriptors, sampled-image update-after-bind, update-unused-while-pending, variable descriptor
+counts, and `textureCompressionBC`. `textureCompressionBC` is a desktop Vulkan 1.3 requirement: every
+baked BC texture must sample natively, and there is no RGBA fallback or runtime transcoder, so a
+device without it fails selection with a message naming the feature and that requirement. The device
+must also report a `maxUniformBufferRange` of at least the 144-byte global block; a smaller value is a
+device-selection failure with a clear message. The device's `minUniformBufferOffsetAlignment` sets the
+per-frame global-block stride. Windowed selection additionally requires a graphics queue family that
+presents to the surface. Discrete GPUs are preferred over integrated, then other types.
 
 Windowed output uses a UNORM surface format (`B8G8R8A8_UNORM`, then `R8G8B8A8_UNORM`) with
 `SRGB_NONLINEAR`; offscreen uses a UNORM color-attachment format (`R8G8B8A8_UNORM`, then
@@ -162,7 +164,13 @@ target then transitions to `PRESENT_SRC_KHR` (windowed) or stays a color attachm
 ## Textures
 
 Texture pages are keyed by canonical `TextureDescriptor` path within the current asset catalog.
-Index `0` is a placeholder page; sprites with an absent texture reference draw with it. The table
+Index `0` is the built-in placeholder page; sprites with an absent texture reference draw with it. The
+placeholder is ordinary content baked into the embedded pack: a `TextureDescriptor` at
+`textures/placeholder` and an uncompressed RGBA8 KTX2 payload at `textures/placeholder-ktx2` with a
+full mip chain, nearest filtering, and clamped wrapping. Renderer startup loads both synchronously
+from `IAssets`, validates the payload, uploads it, and records the descriptor's dimensions for absent
+and failed lookups; a missing or invalid built-in placeholder is a fatal `Bork2dException`, and no
+sprite ever samples an incomplete page. The table
 starts at the startup capacity: the device's bindless limit clamped to the 256-entry base capacity
 (placeholder plus 255 pages) and the 4096-entry startup reservation. A normal run therefore starts
 at 4096 entries and does not grow at 256/512. The reservation is an internal
@@ -172,6 +180,36 @@ update-after-bind sampled-image limits (capped at 1,048,576). Growth waits every
 fence before recreating each frame's descriptor pool/set, so the device is never idled for growth
 and no descriptor set is recreated while a frame using it is in flight. Reaching the limit is a
 fatal `Bork2dException`; pages are never silently dropped.
+
+Every page payload is a complete KTX2 2.0 file. The renderer's internal reader accepts only the narrow
+profile the bake writes: the KTX2 identifier, one 2D image with `pixelDepth = 0`, `layerCount = 0`,
+`faceCount = 1`, `supercompressionScheme = 0`, absent key/value and supercompression-global-data
+sections, `typeSize = 1`, a complete mip chain with the base level first in the level index, and no
+alignment or bounds violation. It cross-checks the header `vkFormat` against the descriptor's format
+mapping (RGBA8 UNORM `37`, RG8 UNORM `16`, R8 UNORM `9`, BC7 UNORM `145`, BC1 RGB UNORM
+`131`, BC5 UNORM `141`, BC4 UNORM `139`), the base dimensions, and the mip count. The DFD must be
+inside the payload with `dfdTotalSize == dfdByteLength`, every level entry must be inside the payload
+with `byteLength == uncompressedByteLength`, each level's length must equal the format's computed
+level size, and each level offset must be aligned to `lcm(texelBlockSize, 4)`. A malformed or
+mismatched payload is a content failure for that path (the sprite draws the placeholder); the
+built-in placeholder is the only payload whose failure is fatal, because it is required startup
+content. Parsing happens on load/upload only, never per frame.
+
+Upload creates one image with the descriptor's concrete Vulkan format and its full mip count, then
+copies every KTX2 level from one staging buffer at that level's payload offset. Compressed levels set
+`BufferRowLength`/`BufferImageHeight` to the level extent rounded up to the 4x4 block (in texels) and
+use the actual level extent as `ImageExtent`; uncompressed levels are tightly packed. One barrier range
+covers every mip for `UNDEFINED -> TRANSFER_DST_OPTIMAL` and `TRANSFER_DST_OPTIMAL ->
+SHADER_READ_ONLY_OPTIMAL`, and the image view covers all mips. Before creating the image, the renderer
+queries the device's format properties: a format without `VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT` on
+optimal tiling is a fatal `Bork2dException` naming the format and the `textureCompressionBC`
+requirement. There is no fallback format, decode, or silent placeholder for a requested texture the
+device cannot sample.
+
+Samplers come from one cache keyed by `(Filter, Wrap)`: the descriptor filter selects nearest or
+linear magnification/minification, mip filtering is always linear with `MinLod = 0` and
+`MaxLod = VK_LOD_CLAMP_NONE` (1000), and anisotropy is disabled. Every page has a complete chain, so
+the maximum LOD clamps to that chain and the key does not need the mip count.
 
 A page moves through `Pending -> Uploading -> Ready`, or `Failed`:
 
@@ -192,8 +230,8 @@ retired in-flight upload joins the retirement list when it completes. Retired pa
 in GPU memory but are no longer counted as resident until the residency policy reclaims them.
 
 Completed descriptor/payload loads are content-validated and queued for upload; `Pump` starts at most
-the per-frame upload budget (default 128 MiB, `WithTextureUploadBudget`) and charges
-`width * height * 4` bytes per page. The rest stay queued for later frames. The first queued upload
+the per-frame upload budget (default 128 MiB, `WithTextureUploadBudget`) and charges the validated
+KTX2 payload byte length per page. The rest stay queued for later frames. The first queued upload
 of a frame always starts even when it alone exceeds the budget, so one large texture cannot starve
 forever; later uploads start only while the frame total fits. Queued pages seen most recently by
 `EnsurePage` start first. Because the planner marks visibility during a frame and the next `Pump`
@@ -201,7 +239,8 @@ plans the queue, that priority is a next-frame ordering, not a same-frame guaran
 fall back to first-sighting order.
 
 The builder's texture residency budget (default 1 GiB, `WithTextureResidencyBudget`) bounds the
-declared payload bytes (`width * height * 4`) of the current catalog's ready pages. `Pump` enforces it
+validated KTX2 payload bytes of the current catalog's ready pages, so a BC page consumes less upload
+and residency budget than the equivalent RGBA8 page. `Pump` enforces it
 before starting uploads: when the total exceeds the budget it evicts ready pages least recently seen
 first, with first-sighting order breaking ties, until the total fits. A page is reclaimable only once
 its last-seen frame is more than two frame pumps behind the current pump
@@ -242,7 +281,7 @@ attachment, dynamic viewport/scissor, triangle strip, no vertex input, no depth 
 disabled, and straight-alpha blending. One graphics pipeline exists per `(shader content hash)`: the
 scene format is fixed for the whole run, identical shader content shares its module and its pipeline,
 a swapchain format change never creates a new sprite pipeline variant, and samplers are cached per
-`(Filter, Wrap)`.
+`(Filter, Wrap)` with linear mip filtering over the full chain and anisotropy disabled.
 
 The instance record is 176 bytes and eleven `vec4` values with no padding: `transform0`
 (M11, M12, M21, M22), `transform1` (M31, M32, signed sizeX, signed sizeY), `uv0` (top-left,
@@ -261,17 +300,20 @@ renames the user `main` and appends an engine wrapper that consumes the full ver
 branch that cannot be reached for valid engine data, so every custom shader's pipeline validation
 sees matched inputs and outputs without changing any frame's pixels.
 
-The default sprite shader is asset content, not a compiled-in array. The built-in pack, mounted
-below every game pack, serves `shader/sprite` as a `ShaderAsset`, `shader/sprite-spv` as its raw
-fragment module, `shader/vertex-spv` as the engine-owned vertex module, and `present/vertex-spv` plus
-`present/fragment-spv` as the engine-owned present modules. At renderer startup
+The default sprite shader and the bindless placeholder are asset content, not compiled-in arrays. The
+built-in pack, mounted below every game pack, serves `shader/sprite` as a `ShaderAsset`,
+`shader/sprite-spv` as its raw fragment module, `shader/vertex-spv` as the engine-owned vertex module,
+`present/vertex-spv` plus `present/fragment-spv` as the engine-owned present modules, and
+`textures/placeholder` plus `textures/placeholder-ktx2` as the bindless placeholder descriptor and
+KTX2 payload. At renderer startup
 `RendererTextures.EnsurePipeline` loads the vertex module through `IAssets`; `ShaderStore` then
 loads the fragment shader asset, validates a non-null `SpirV` reference, `LayoutVersion` 2, the
 `main` entry point, the full declaration set, and a non-empty module whose first little-endian word
 is `0x07230203`, freezes the shader declarations, and creates the fragment module. The present
-pipeline loads its two raw modules the same way and validates their SPIR-V magic. The load is
-synchronous on the render thread before the renderer becomes ready. A missing built-in pack or
-shader, a malformed asset, or a module without the SPIR-V magic is a fatal startup
+pipeline loads its two raw modules the same way and validates their SPIR-V magic. The placeholder
+descriptor and payload are loaded synchronously and validated before the renderer becomes ready. A
+missing built-in pack, shader, or placeholder, a malformed asset, a module without the SPIR-V magic,
+or an invalid placeholder payload is a fatal startup
 `Bork2dException` naming the asset path and reason; there is no fallback shader. The shader catalog
 owns every fragment module and the pipeline owns the vertex module and every
 `(content hash, scene format)` pipeline.
@@ -396,7 +438,7 @@ a camera with contiguous custom/default groups records one per run plus the pres
 no camera runs still records the present draw; `NonEmptyCameras` counts the cameras with at least one
 run.
 `TextureUploadsPending` counts content-ready pages the frame's pump left queued by
-the upload budget, and `TextureUploadBytesPending` is their declared payload total. `TexturePages` is
+the upload budget, and `TextureUploadBytesPending` is their validated KTX2 payload total. `TexturePages` is
 the resident page count (the placeholder plus ready pages in the current catalog); an evicted page
 leaves it and reappears once its next sighting reloads it. The host installs it as
 `IEngine.RenderStats`; reading it never touches Vulkan. `SkippedSprites` counts the null,

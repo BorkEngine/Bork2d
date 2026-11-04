@@ -292,6 +292,14 @@ sampler state with `Linear`/`Clamp` defaults. The descriptor's dimensions, forma
 match the KTX2 metadata; the runtime rejects a mismatch instead of guessing. Loading a descriptor does
 not read or decode the payload.
 
+The renderer's KTX2 reader validates the narrow container and cross-checks the header format, base
+dimensions, and mip count against the descriptor before any GPU work. A malformed or mismatched page
+is a content failure that draws the bindless placeholder; the built-in placeholder itself is ordinary
+pack content (`textures/placeholder` plus its KTX2 payload), loaded and validated at renderer startup,
+and its failure is fatal. The runtime uploads every level in the descriptor's concrete linear or BC
+Vulkan format and requires the desktop Vulkan 1.3 `textureCompressionBC` feature for the compressed
+formats; there is no format fallback or runtime transcode.
+
 Every texture is linear. There is no sRGB format and no color-space field; the bake never applies a
 gamma conversion. `TextureFormat` has eight stable integer values:
 
