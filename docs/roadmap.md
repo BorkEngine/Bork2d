@@ -871,11 +871,12 @@ through the KTX2 texture helper.
 
 ### Rendering
 
-- **Court.** A closed `LineRender` draws the border, inset by half its width so the full stroke stays
-  inside the visible court. An open vertical `LineRender` draws the center line; `shader/court`
-  applies a time-based glow and an anti-aliased edge. An instance uniform switches the dash pattern
-  on for the center line and off for the border. Width is in world units, so the court scales with
-  the camera.
+- **Court.** A fixed 32x18 world court is created once: a closed `LineRender` draws the border,
+  inset by half its width so the full stroke stays inside the court, and an open vertical
+  `LineRender` draws the center line. `shader/court` applies a time-based glow and an anti-aliased
+  edge; an instance uniform switches the dash pattern on for the center line and off for the border.
+  A window resize changes only the camera size, which fits the whole court and lets the clear color
+  fill the extra axis.
 - **Paddles.** The existing paddle sprite uses a BC7 KTX2 texture. The ball remains a generated
   circle texture; it may use uncompressed KTX2 with mips, but it is not required to be compressed.
 - **Wordmark.** The SDF sprite is centered behind the play field at low alpha, so it does not
@@ -890,7 +891,7 @@ through the KTX2 texture helper.
 ### Acceptance
 
 - Windowed play is unchanged: W/S, Space, R, Esc, resize, pause, reset, win condition.
-- The court is visible and correctly aligned at multiple window sizes.
+- The whole court stays visible and correctly aligned at multiple window sizes.
 - Paddles show the compressed texture without visible block artifacts at their on-screen size.
 - The wordmark is sharp at 1280x720 and at a reduced window size.
 - The score updates on points and is legible.

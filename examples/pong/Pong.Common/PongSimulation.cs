@@ -5,6 +5,12 @@ namespace Pong.Common;
 
 public sealed class PongSimulation
 {
+    /// <summary>The fixed court half-width in world units; the court is 32 wide in a 16:9 frame.</summary>
+    public const float CourtHalfWidth = 16f;
+
+    /// <summary>The fixed court half-height in world units; the court is 18 tall in a 16:9 frame.</summary>
+    public const float CourtHalfHeight = 9f;
+
     /// <summary>The paddle half-width in world units (the full paddle is 0.25 wide).</summary>
     public const float PaddleHalfWidth = 0.125f;
 
@@ -28,8 +34,6 @@ public sealed class PongSimulation
 
     private readonly GameSettings _settings;
     private readonly Random _random;
-    private float _halfWidth;
-    private float _halfHeight;
     private float _leftPaddleY;
     private float _rightPaddleY;
     private Vector2 _ballPosition;
@@ -43,32 +47,24 @@ public sealed class PongSimulation
     /// state with both paddles centered.
     /// </summary>
     /// <param name="settings">The game settings that supply the speeds, winning score, and tints.</param>
-    /// <param name="halfWidth">The court half-width in world units; must be at least 1.125.</param>
-    /// <param name="halfHeight">The court half-height in world units; must be at least 0.75.</param>
-    /// <exception cref="ArgumentOutOfRangeException">
-    /// <paramref name="halfWidth"/> or <paramref name="halfHeight"/> is not finite, is too small to
-    /// hold a paddle, or <paramref name="halfWidth"/> cannot hold a paddle inset.
-    /// </exception>
-    public PongSimulation(GameSettings settings, float halfWidth, float halfHeight)
+    public PongSimulation(GameSettings settings)
     {
         _settings = settings;
         _random = new Random((int)(Stopwatch.GetTimestamp() % int.MaxValue));
-        _halfWidth = ValidateHalfWidth(halfWidth);
-        _halfHeight = ValidateHalfHeight(halfHeight);
         ResetMatch();
     }
 
-    /// <summary>Gets the court half-width in world units.</summary>
-    public float HalfWidth => _halfWidth;
+    /// <summary>Gets the fixed court half-width in world units.</summary>
+    public float HalfWidth => CourtHalfWidth;
 
     /// <summary>Gets the greatest allowed paddle Y (the paddle just touches the top wall).</summary>
-    public float MaxPaddleY => _halfHeight - PaddleHalfHeight;
+    public float MaxPaddleY => CourtHalfHeight - PaddleHalfHeight;
 
     /// <summary>Gets the left paddle center X.</summary>
-    public float LeftPaddleX => -_halfWidth + PaddleInset;
+    public float LeftPaddleX => -CourtHalfWidth + PaddleInset;
 
     /// <summary>Gets the right paddle center X.</summary>
-    public float RightPaddleX => _halfWidth - PaddleInset;
+    public float RightPaddleX => CourtHalfWidth - PaddleInset;
 
     /// <summary>Gets the left paddle center Y.</summary>
     public float LeftPaddleY => _leftPaddleY;
@@ -180,25 +176,6 @@ public sealed class PongSimulation
         BeginServe(PongSide.Left, InitialServeDelay);
     }
 
-    /// <summary>
-    /// Changes the court size and clamps the paddles and the ball into the new court.
-    /// </summary>
-    /// <param name="halfWidth">The new court half-width in world units; must be at least 1.125.</param>
-    /// <param name="halfHeight">The new court half-height in world units; must be at least 0.75.</param>
-    /// <exception cref="ArgumentOutOfRangeException">
-    /// <paramref name="halfWidth"/> or <paramref name="halfHeight"/> is not finite or is too small.
-    /// </exception>
-    public void ResizeCourt(float halfWidth, float halfHeight)
-    {
-        _halfWidth = ValidateHalfWidth(halfWidth);
-        _halfHeight = ValidateHalfHeight(halfHeight);
-        _leftPaddleY = ClampPaddle(_leftPaddleY);
-        _rightPaddleY = ClampPaddle(_rightPaddleY);
-        _ballPosition = new Vector2(
-            Math.Clamp(_ballPosition.X, -_halfWidth + BallRadius, _halfWidth - BallRadius),
-            Math.Clamp(_ballPosition.Y, -_halfHeight + BallRadius, _halfHeight - BallRadius));
-    }
-
     public SimulationState CaptureState()
     {
         return new SimulationState
@@ -224,15 +201,15 @@ public sealed class PongSimulation
     {
         _ballPosition += _ballVelocity * deltaTime;
 
-        if (_ballPosition.Y + BallRadius > _halfHeight)
+        if (_ballPosition.Y + BallRadius > CourtHalfHeight)
         {
-            _ballPosition.Y = _halfHeight - BallRadius;
+            _ballPosition.Y = CourtHalfHeight - BallRadius;
             _ballVelocity.Y = -MathF.Abs(_ballVelocity.Y);
             OnBallBounce.Invoke();
         }
-        else if (_ballPosition.Y - BallRadius < -_halfHeight)
+        else if (_ballPosition.Y - BallRadius < -CourtHalfHeight)
         {
-            _ballPosition.Y = -_halfHeight + BallRadius;
+            _ballPosition.Y = -CourtHalfHeight + BallRadius;
             _ballVelocity.Y = MathF.Abs(_ballVelocity.Y);
             OnBallBounce.Invoke();
         }
@@ -240,11 +217,11 @@ public sealed class PongSimulation
         TryBounceOffPaddle(left: true);
         TryBounceOffPaddle(left: false);
 
-        if (_ballPosition.X < -_halfWidth)
+        if (_ballPosition.X < -CourtHalfWidth)
         {
             ScorePoint(PongSide.Right);
         }
-        else if (_ballPosition.X > _halfWidth)
+        else if (_ballPosition.X > CourtHalfWidth)
         {
             ScorePoint(PongSide.Left);
         }
@@ -269,7 +246,7 @@ public sealed class PongSimulation
         // paddle and a later Y overlap must not reflect it from behind.
         bool courtSide = left ? _ballPosition.X >= paddleFace : _ballPosition.X <= paddleFace;
         bool withinReach = MathF.Abs(_ballPosition.Y - paddleY) <= PaddleHalfHeight + BallRadius;
-        bool insideCourt = left ? _ballPosition.X >= -_halfWidth : _ballPosition.X <= _halfWidth;
+        bool insideCourt = left ? _ballPosition.X >= -CourtHalfWidth : _ballPosition.X <= CourtHalfWidth;
         if (!atFace || !courtSide || !withinReach || !insideCourt)
         {
             return;
@@ -329,30 +306,4 @@ public sealed class PongSimulation
     }
 
     private float ClampPaddle(float y) => Math.Clamp(y, -MaxPaddleY, MaxPaddleY);
-
-    private static float ValidateHalfWidth(float halfWidth)
-    {
-        if (!float.IsFinite(halfWidth) || halfWidth < PaddleInset + PaddleHalfWidth)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(halfWidth),
-                halfWidth,
-                $"The court half-width must be finite and at least {PaddleInset + PaddleHalfWidth}.");
-        }
-
-        return halfWidth;
-    }
-
-    private static float ValidateHalfHeight(float halfHeight)
-    {
-        if (!float.IsFinite(halfHeight) || halfHeight < PaddleHalfHeight)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(halfHeight),
-                halfHeight,
-                $"The court half-height must be finite and at least {PaddleHalfHeight}.");
-        }
-
-        return halfHeight;
-    }
 }
