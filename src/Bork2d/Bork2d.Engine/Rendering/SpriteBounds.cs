@@ -18,9 +18,9 @@ namespace Bork2d.Engine.Rendering;
 /// </para>
 /// <para>
 /// Field validation mirrors <c>SpriteQuad.Resolve</c>, but a malformed or absent quad reports
-/// <see cref="Bounds.Empty"/> instead of throwing: the public <c>ISpriteRender.Bounds</c> getter
-/// must never throw. The live renderable and the capture definition share this helper, so the
-/// published snapshot bounds and the live bounds use exactly the same math.
+/// <see cref="Bounds.Empty"/> instead of throwing: the public <c>IBoundedTransform.Bounds</c>
+/// getter must never throw. The live renderable and the capture definition share this helper, so
+/// the published snapshot bounds and the live bounds use exactly the same math.
 /// </para>
 /// </remarks>
 internal static class SpriteBounds

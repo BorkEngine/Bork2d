@@ -55,8 +55,8 @@ internal sealed class SpriteRenderableDefinition<TLayer>
         Matrix3x2 local = node.CaptureForSnapshot(out SpriteSnapshot sprite);
         world = local * parentWorld;
 
-        // The snapshot and the live ISpriteRender.Bounds getter share SpriteBounds, so culling in
-        // the renderer sees exactly the quad the shader draws.
+        // The snapshot and the live IBoundedTransform.Bounds getter share SpriteBounds, so culling
+        // in the renderer sees exactly the quad the shader draws.
         Bounds bounds = SpriteBounds.CreateWorldBounds(
             sprite.SpriteData,
             world,

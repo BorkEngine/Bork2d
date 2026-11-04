@@ -276,17 +276,19 @@ public sealed class RenderableBoundsTests
     }
 
     [Fact]
-    public void RenderablesAreAssignableToTheSharedContract()
+    public void RenderablesAreAssignableToTheSharedContracts()
     {
-        Assert.True(typeof(IRenderable).IsAssignableFrom(typeof(ICamera<GameLayer>)));
-        Assert.True(typeof(IRenderable).IsAssignableFrom(typeof(ISpriteRender<GameLayer>)));
-        Assert.True(typeof(IRenderable).IsAssignableFrom(typeof(ILineRender<GameLayer>)));
-        Assert.True(typeof(ITransform).IsAssignableFrom(typeof(IRenderable)));
+        Assert.True(typeof(IBoundedTransform).IsAssignableFrom(typeof(ICamera<GameLayer>)));
+        Assert.True(typeof(IBoundedTransform).IsAssignableFrom(typeof(ISpriteRender<GameLayer>)));
+        Assert.True(typeof(IBoundedTransform).IsAssignableFrom(typeof(ILineRender<GameLayer>)));
+        Assert.True(typeof(ITransform).IsAssignableFrom(typeof(IBoundedTransform)));
+        Assert.True(typeof(IRenderable<GameLayer>).IsAssignableFrom(typeof(ISpriteRender<GameLayer>)));
+        Assert.True(typeof(IRenderable<GameLayer>).IsAssignableFrom(typeof(ILineRender<GameLayer>)));
 
         GameEngine<GameLayer> engine = CreateEngine(new FakeWindow());
-        Assert.IsAssignableFrom<IRenderable>(engine.CreateCamera(engine.Root));
-        Assert.IsAssignableFrom<IRenderable>(engine.CreateSpriteRender(engine.Root));
-        Assert.IsAssignableFrom<IRenderable>(engine.CreateLineRender(engine.Root));
+        Assert.IsAssignableFrom<IBoundedTransform>(engine.CreateCamera(engine.Root));
+        Assert.IsAssignableFrom<IRenderable<GameLayer>>(engine.CreateSpriteRender(engine.Root));
+        Assert.IsAssignableFrom<IRenderable<GameLayer>>(engine.CreateLineRender(engine.Root));
     }
 
     public static TheoryData<SpriteAsset> MalformedAssets()

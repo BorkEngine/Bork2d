@@ -14,9 +14,10 @@ namespace Bork2d.Engine.Rendering;
 /// </para>
 /// <para>
 /// A malformed or absent geometry and a collapsed or non-finite world matrix report
-/// <see cref="Bounds.Empty"/> instead of throwing, because the public <c>ILineRender.Bounds</c>
-/// getter must never throw. The live renderable and the capture definition share this helper, so
-/// the published snapshot bounds and the live bounds use exactly the same math.
+/// <see cref="Bounds.Empty"/> instead of throwing, because the public
+/// <c>IBoundedTransform.Bounds</c> getter must never throw. The live renderable and the capture
+/// definition share this helper, so the published snapshot bounds and the live bounds use exactly
+/// the same math.
 /// </para>
 /// </remarks>
 internal static class LineBounds

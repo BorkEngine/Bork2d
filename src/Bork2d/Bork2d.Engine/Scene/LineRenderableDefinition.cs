@@ -57,8 +57,8 @@ internal sealed class LineRenderableDefinition<TLayer>
         Matrix3x2 local = node.CaptureForSnapshot(out LineSnapshot line);
         world = local * parentWorld;
 
-        // The snapshot and the live ILineRender.Bounds getter share LineBounds, so culling in the
-        // renderer sees exactly the expanded line the renderer draws.
+        // The snapshot and the live IBoundedTransform.Bounds getter share LineBounds, so culling in
+        // the renderer sees exactly the expanded line the renderer draws.
         Bounds bounds = LineBounds.CreateWorldBounds(line.Geometry, world);
         snapshot.GetBuffer<LineSnapshot>(Slot).Add(
             line with { WorldMatrix = world, Bounds = bounds });
