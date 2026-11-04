@@ -1,4 +1,4 @@
-﻿namespace Pong.Common;
+namespace Pong.Common;
 
 public readonly record struct SimulationState(
     int LeftScore,

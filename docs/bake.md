@@ -107,6 +107,9 @@ selects the block format that matches the type: BC7 for `rgba`, opaque BC1 for `
 and BC4 for `r`. `none` keeps the matching uncompressed UNORM format and is the default, so a texture
 never becomes lossy without an explicit authoring choice.
 
+Pong's `Assets/art/paddle.png.toml` sets `type = "rgba"` and `compression = "auto"`, so the paddle
+bakes as BC7 with a full mip chain.
+
 The payload is a complete KTX2 2.0 file: one 2D image, one array layer, one face, no
 supercompression, and a full mip chain down to 1x1. Every texture is linear. Mip generation is a
 deterministic box filter over the raw channel values; there is no gamma conversion. Decoding
@@ -274,7 +277,10 @@ diagnostics, or policy model.
 Processors run synchronously on the bake thread and may be reused, so they must not keep
 per-source state. They never touch MessagePack or the pack writer directly. A failed source emits
 no outputs. See [CircleProcessor.cs](../examples/pong/Pong.Assets/Processors/CircleProcessor.cs)
-for a worked custom processor.
+for a worked custom processor: it renders the ball pixels and calls `TextureBaker.Bake` with
+`TextureChannelType.Rgba` and `TextureCompression.None`, so the ball is an uncompressed RGBA8 KTX2
+texture with the full mip chain, and the helper's format and mip count go into the emitted
+descriptor.
 
 ### Texture baking
 
