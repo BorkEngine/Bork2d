@@ -27,7 +27,10 @@ public sealed class ShaderStoreTests
     {
         var assets = new FakeShaderAssets(CreateShader(), CreateSpirV());
 
-        ShaderRenderData shader = ShaderStore.LoadDefaultShader(assets);
+        ShaderRenderData shader = ShaderStore.LoadDefaultShader(
+            assets,
+            ShaderStore.DefaultShaderPath,
+            "the built-in sprite shader asset");
         byte[] spirV = ShaderStore.LoadSpirV(
             assets,
             ShaderStore.DefaultSpirVPath,
@@ -40,12 +43,234 @@ public sealed class ShaderStoreTests
     }
 
     [Fact]
+    public void BothBuiltInDefaultsLoadAtStartupWithFixedIdsAndModuleKinds()
+    {
+        using var fixture = new StoreFixture();
+
+        Assert.Equal(ShaderStore.DefaultEntryId, fixture.Store.DefaultEntry.Id);
+        Assert.Equal(ShaderStore.LineDefaultEntryId, fixture.Store.LineDefaultEntry.Id);
+        Assert.True(fixture.Store.DefaultEntry.IsDefault);
+        Assert.True(fixture.Store.LineDefaultEntry.IsDefault);
+        Assert.Equal(
+            ShaderStore.DefaultSpirVPath,
+            fixture.Store.DefaultEntry.Metadata.SpirV.Path);
+        Assert.Equal(
+            ShaderStore.LineSpirVPath,
+            fixture.Store.LineDefaultEntry.Metadata.SpirV.Path);
+        Assert.Equal(2, fixture.Factory.CreateModuleCount);
+        Assert.Equal(
+            [ShaderPipelineKind.Sprite, ShaderPipelineKind.Line],
+            fixture.Factory.ModuleKinds);
+        Assert.Equal(ShaderStore.DefaultEntryId, fixture.Store.GetEntry(ShaderStore.DefaultEntryId).Id);
+        Assert.Equal(
+            ShaderStore.LineDefaultEntryId,
+            fixture.Store.GetEntry(ShaderStore.LineDefaultEntryId).Id);
+    }
+
+    [Fact]
+    public void ResolvingWithNoShaderSelectsTheRequestingKindsDefault()
+    {
+        using var fixture = new StoreFixture();
+
+        ShaderBinding sprite = fixture.Store.Resolve(
+            null,
+            ShaderPipelineKind.Sprite,
+            Format.R8G8B8A8Srgb);
+        ShaderBinding line = fixture.Store.Resolve(
+            null,
+            ShaderPipelineKind.Line,
+            Format.R8G8B8A8Srgb);
+
+        Assert.Equal(ShaderBindingState.Ready, sprite.State);
+        Assert.Equal(ShaderStore.DefaultEntryId, sprite.EntryId);
+        Assert.Equal(ShaderBindingState.Ready, line.State);
+        Assert.Equal(ShaderStore.LineDefaultEntryId, line.EntryId);
+        Assert.Equal(2, fixture.Factory.CreatedPipelines.Count);
+        Assert.Contains(
+            fixture.Factory.CreatedPipelines,
+            key => key.Kind == ShaderPipelineKind.Sprite);
+        Assert.Contains(
+            fixture.Factory.CreatedPipelines,
+            key => key.Kind == ShaderPipelineKind.Line);
+    }
+
+    [Fact]
+    public void EnsureDefaultPipelinesCreatesBothKindPipelines()
+    {
+        using var fixture = new StoreFixture();
+
+        fixture.Store.EnsureDefaultPipelines(Format.R8G8B8A8Srgb);
+
+        Assert.Equal(2, fixture.Factory.CreatedPipelines.Count);
+        Assert.Contains(
+            fixture.Factory.CreatedPipelines,
+            key => key.Kind == ShaderPipelineKind.Sprite);
+        Assert.Contains(
+            fixture.Factory.CreatedPipelines,
+            key => key.Kind == ShaderPipelineKind.Line);
+    }
+
+    [Fact]
+    public void OneCustomContentCachesSeparateSpriteAndLinePipelines()
+    {
+        using var fixture = new StoreFixture();
+        ShaderRenderData metadata = fixture.Freeze(CreateCustomShader("materials/two-kinds"));
+
+        _ = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
+        fixture.Assets.CompleteSpirV("materials/two-kinds", CreateSpirV(seed: 11));
+        fixture.Store.Pump();
+
+        ShaderBinding sprite = fixture.Store.Resolve(
+            metadata,
+            ShaderPipelineKind.Sprite,
+            Format.R8G8B8A8Srgb);
+        ShaderBinding line = fixture.Store.Resolve(
+            metadata,
+            ShaderPipelineKind.Line,
+            Format.R8G8B8A8Srgb);
+
+        Assert.Equal(ShaderBindingState.Ready, sprite.State);
+        Assert.Equal(ShaderBindingState.Ready, line.State);
+        Assert.Equal(sprite.EntryId, line.EntryId);
+        Assert.Equal(3, fixture.Factory.CreateModuleCount);
+        Assert.Equal(2, fixture.Factory.CreatedPipelines.Count);
+        Assert.Equal(
+            fixture.Factory.CreatedPipelines[0].ContentHash,
+            fixture.Factory.CreatedPipelines[1].ContentHash);
+        Assert.Contains(
+            fixture.Factory.CreatedPipelines,
+            key => key.Kind == ShaderPipelineKind.Sprite);
+        Assert.Contains(
+            fixture.Factory.CreatedPipelines,
+            key => key.Kind == ShaderPipelineKind.Line);
+    }
+
+    [Fact]
+    public void FailedCustomShaderFallsBackToTheRequestingKindsDefault()
+    {
+        using var fixture = new StoreFixture();
+        ShaderRenderData metadata = fixture.Freeze(CreateCustomShader("materials/two-kinds-failed"));
+
+        _ = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
+        fixture.Assets.CompleteSpirV("materials/two-kinds-failed", [1, 2, 3, 4]);
+        fixture.Store.Pump();
+
+        ShaderBinding sprite = fixture.Store.Resolve(
+            metadata,
+            ShaderPipelineKind.Sprite,
+            Format.R8G8B8A8Srgb);
+        ShaderBinding line = fixture.Store.Resolve(
+            metadata,
+            ShaderPipelineKind.Line,
+            Format.R8G8B8A8Srgb);
+
+        Assert.Equal(ShaderBindingState.Failed, sprite.State);
+        Assert.Equal(ShaderStore.DefaultEntryId, sprite.EntryId);
+        Assert.Equal(ShaderBindingState.Failed, line.State);
+        Assert.Equal(ShaderStore.LineDefaultEntryId, line.EntryId);
+        Assert.Empty(fixture.Factory.CreatedPipelines);
+    }
+
+    [Fact]
+    public void MissingLineDefaultAssetIsAFatalStartupFailureNamingThePath()
+    {
+        var assets = new ControllableShaderAssets
+        {
+            DefaultAsset = CreateShader(),
+            LineDefaultAsset = null,
+        };
+        assets.CompleteSpirV(ShaderStore.DefaultSpirVPath);
+        var factory = new FakeShaderModuleFactory();
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
+
+        Bork2dException exception = Assert.Throws<Bork2dException>(
+            () => ShaderStore.Create(
+                assets,
+                factory,
+                assets,
+                loggerFactory.CreateLogger("Bork2d.Render")));
+
+        Assert.Contains(ShaderStore.LineShaderPath, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingLineDefaultSpirVIsAFatalStartupFailureNamingThePath()
+    {
+        var assets = new ControllableShaderAssets
+        {
+            DefaultAsset = CreateShader(),
+            LineDefaultAsset = new ShaderAsset
+            {
+                SpirV = "shader/line-spv-missing",
+                LayoutVersion = ShaderLayout.CurrentVersion,
+                EntryPoint = "main",
+            },
+        };
+        assets.CompleteSpirV(ShaderStore.DefaultSpirVPath);
+        assets.FailSpirV("shader/line-spv-missing", new IOException("line module missing"));
+        var factory = new FakeShaderModuleFactory();
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
+
+        Bork2dException exception = Assert.Throws<Bork2dException>(
+            () => ShaderStore.Create(
+                assets,
+                factory,
+                assets,
+                loggerFactory.CreateLogger("Bork2d.Render")));
+
+        Assert.Contains("shader/line-spv-missing", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LineDefaultReloadKeepsThePreviousEntryUntilTheReplacementIsReady()
+    {
+        using var fixture = new StoreFixture();
+        ShaderRenderData initial = fixture.Store.LineDefaultEntry.Metadata;
+        const string replacementPath = "shader/line-spv-v2";
+        fixture.Assets.LineDefaultAsset = CreateCustomShader(
+            replacementPath,
+            instance:
+            [
+                new ShaderUniform(
+                    "uLine",
+                    ShaderUniformType.Float,
+                    0,
+                    new Vector4(1f, 0f, 0f, 0f)),
+            ]);
+        fixture.Assets.CatalogVersion++;
+        fixture.Store.Pump();
+
+        Assert.Same(initial, fixture.Store.LineDefaultEntry.Metadata);
+        Assert.Contains(replacementPath, fixture.Assets.LoadedDataPaths);
+        Assert.Equal(
+            ShaderBindingState.Ready,
+            fixture.Store.Resolve(null, ShaderPipelineKind.Line, Format.R8G8B8A8Srgb).State);
+        Assert.Empty(fixture.Store.LineDefaultEntry.Metadata.InstanceUniforms);
+
+        fixture.Assets.CompleteSpirV(replacementPath, CreateSpirV(seed: 6));
+        fixture.Store.Pump();
+
+        Assert.Single(fixture.Store.LineDefaultEntry.Metadata.InstanceUniforms);
+        Assert.Equal("uLine", fixture.Store.LineDefaultEntry.Metadata.InstanceUniforms[0].Name);
+        Assert.Equal(3, fixture.Factory.CreateModuleCount);
+
+        // The previous line default module retires only after every frame that could use it completes.
+        fixture.Store.Pump();
+        Assert.Equal(0, fixture.Factory.DestroyModuleCount);
+        fixture.Store.Pump();
+        Assert.Equal(1, fixture.Factory.DestroyModuleCount);
+    }
+
+    [Fact]
     public void MissingShaderAssetIsAFatalStartupFailureNamingThePath()
     {
         var assets = new FakeShaderAssets(shader: null, spirV: CreateSpirV());
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => ShaderStore.LoadDefaultShader(assets));
+            () => ShaderStore.LoadDefaultShader(
+                assets,
+                ShaderStore.DefaultShaderPath,
+                "the built-in sprite shader asset"));
 
         Assert.Contains(ShaderStore.DefaultShaderPath, exception.Message, StringComparison.Ordinal);
     }
@@ -58,7 +283,10 @@ public sealed class ShaderStoreTests
             CreateSpirV());
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => ShaderStore.LoadDefaultShader(assets));
+            () => ShaderStore.LoadDefaultShader(
+                assets,
+                ShaderStore.DefaultShaderPath,
+                "the built-in sprite shader asset"));
 
         Assert.Contains(ShaderStore.DefaultShaderPath, exception.Message, StringComparison.Ordinal);
         Assert.Contains("SPIR-V", exception.Message, StringComparison.Ordinal);
@@ -72,7 +300,10 @@ public sealed class ShaderStoreTests
             CreateSpirV());
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => ShaderStore.LoadDefaultShader(assets));
+            () => ShaderStore.LoadDefaultShader(
+                assets,
+                ShaderStore.DefaultShaderPath,
+                "the built-in sprite shader asset"));
 
         Assert.Contains(ShaderStore.DefaultShaderPath, exception.Message, StringComparison.Ordinal);
         Assert.Contains("layout version", exception.Message, StringComparison.Ordinal);
@@ -104,7 +335,10 @@ public sealed class ShaderStoreTests
             CreateSpirV());
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => ShaderStore.LoadDefaultShader(assets));
+            () => ShaderStore.LoadDefaultShader(
+                assets,
+                ShaderStore.DefaultShaderPath,
+                "the built-in sprite shader asset"));
 
         Assert.Contains(ShaderStore.DefaultShaderPath, exception.Message, StringComparison.Ordinal);
         Assert.Contains("entry point", exception.Message, StringComparison.Ordinal);
@@ -160,23 +394,23 @@ public sealed class ShaderStoreTests
         using var fixture = new StoreFixture();
         ShaderRenderData metadata = fixture.Freeze(CreateCustomShader("materials/pending"));
 
-        ShaderBinding pending = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        ShaderBinding pending = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         Assert.Equal(ShaderBindingState.Pending, pending.State);
         Assert.Equal(1, fixture.Assets.LoadedDataPaths.Count(path => path == "materials/pending"));
-        Assert.Equal(1, fixture.Factory.CreateModuleCount);
+        Assert.Equal(2, fixture.Factory.CreateModuleCount);
 
         // Resolving again while the load is outstanding starts no second load.
-        _ = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         Assert.Equal(1, fixture.Assets.LoadedDataPaths.Count(path => path == "materials/pending"));
 
         fixture.Assets.CompleteSpirV("materials/pending");
         fixture.Store.Pump();
-        ShaderBinding ready = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        ShaderBinding ready = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
 
         Assert.Equal(ShaderBindingState.Ready, ready.State);
         Assert.NotEqual(ShaderStore.DefaultEntryId, ready.EntryId);
-        Assert.Equal(ShaderStore.DefaultEntryId + 1, ready.EntryId);
-        Assert.Equal(2, fixture.Factory.CreateModuleCount);
+        Assert.Equal(ShaderStore.FirstCustomEntryId, ready.EntryId);
+        Assert.Equal(3, fixture.Factory.CreateModuleCount);
         Assert.Single(fixture.Factory.CreatedPipelines);
         Assert.Equal(Format.R8G8B8A8Srgb, fixture.Factory.CreatedPipelines[0].Format);
     }
@@ -278,20 +512,20 @@ public sealed class ShaderStoreTests
         using var fixture = new StoreFixture();
         ShaderRenderData metadata = fixture.Freeze(CreateCustomShader("materials/bad-spv"));
 
-        _ = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.CompleteSpirV("materials/bad-spv", [1, 2, 3, 4]);
         fixture.Store.Pump();
 
-        ShaderBinding failed = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        ShaderBinding failed = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         Assert.Equal(ShaderBindingState.Failed, failed.State);
         Assert.Equal(ShaderStore.DefaultEntryId, failed.EntryId);
-        Assert.Equal(1, fixture.Factory.CreateModuleCount);
+        Assert.Equal(2, fixture.Factory.CreateModuleCount);
         Assert.Equal(
             1,
             fixture.Logs.Entries.Count(
                 entry => entry.Message.Contains("materials/bad-spv", StringComparison.Ordinal)));
 
-        _ = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         Assert.Equal(
             1,
             fixture.Logs.Entries.Count(
@@ -304,16 +538,16 @@ public sealed class ShaderStoreTests
         using var fixture = new StoreFixture();
         ShaderRenderData metadata = fixture.Freeze(CreateCustomShader("materials/faulted"));
 
-        _ = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.FailSpirV("materials/faulted", new IOException("loader failed"));
         fixture.Store.Pump();
 
-        ShaderBinding failed = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        ShaderBinding failed = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         Assert.Equal(ShaderBindingState.Failed, failed.State);
         Assert.Contains(
             fixture.Logs.Entries,
             entry => entry.Message.Contains("loader failed", StringComparison.Ordinal));
-        _ = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         Assert.Equal(
             1,
             fixture.Logs.Entries.Count(
@@ -327,8 +561,8 @@ public sealed class ShaderStoreTests
         ShaderRenderData metadata = fixture.Freeze(CreateCustomShader("materials/throw"));
         fixture.Assets.DataLoadException = new IOException("synchronous load failed");
 
-        ShaderBinding first = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
-        ShaderBinding second = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        ShaderBinding first = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
+        ShaderBinding second = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
 
         Assert.Equal(ShaderBindingState.Failed, first.State);
         Assert.Equal(ShaderBindingState.Failed, second.State);
@@ -356,7 +590,7 @@ public sealed class ShaderStoreTests
             entry => entry.Message.Contains("synchronous asset load failed", StringComparison.Ordinal));
         Assert.Equal(
             ShaderBindingState.Ready,
-            fixture.Store.Resolve(null, Format.R8G8B8A8Srgb).State);
+            fixture.Store.Resolve(null, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb).State);
     }
 
     [Fact]
@@ -369,12 +603,15 @@ public sealed class ShaderStoreTests
             EntryPoint = "main",
         });
 
-        ShaderBinding first = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
-        ShaderBinding second = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        ShaderBinding first = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
+        ShaderBinding second = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
 
         Assert.Equal(ShaderBindingState.Failed, first.State);
         Assert.Equal(ShaderBindingState.Failed, second.State);
-        Assert.Single(fixture.Assets.LoadedDataPaths);
+
+        // Only the two built-in defaults ever requested data; a shader with no SPIR-V reference
+        // starts no load.
+        Assert.Equal(2, fixture.Assets.LoadedDataPaths.Count);
         Assert.Equal(
             1,
             fixture.Logs.Entries.Count(
@@ -388,11 +625,11 @@ public sealed class ShaderStoreTests
         ShaderRenderData metadata = fixture.Freeze(CreateCustomShader("materials/module"));
         fixture.Factory.ModuleFailure = new Bork2dException("module creation failed");
 
-        _ = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.CompleteSpirV("materials/module");
         fixture.Store.Pump();
 
-        ShaderBinding failed = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        ShaderBinding failed = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         Assert.Equal(ShaderBindingState.Failed, failed.State);
         Assert.Contains(
             fixture.Logs.Entries,
@@ -406,18 +643,18 @@ public sealed class ShaderStoreTests
         using var fixture = new StoreFixture();
         ShaderRenderData metadata = fixture.Freeze(CreateCustomShader("materials/pipeline"));
 
-        _ = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.CompleteSpirV("materials/pipeline");
         fixture.Store.Pump();
         fixture.Factory.PipelineFailure = new Bork2dException("pipeline creation failed");
 
-        ShaderBinding failed = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        ShaderBinding failed = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         Assert.Equal(ShaderBindingState.Failed, failed.State);
         Assert.Contains(
             fixture.Logs.Entries,
             entry => entry.Message.Contains("pipeline creation failed", StringComparison.Ordinal));
 
-        _ = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         Assert.Equal(
             1,
             fixture.Logs.Entries.Count(
@@ -450,29 +687,29 @@ public sealed class ShaderStoreTests
                     new ShaderUniform("gValue", ShaderUniformType.Float, 0, Vector4.Zero),
                 ]));
 
-        _ = fixture.Store.Resolve(first, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(first, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.CompleteSpirV("materials/global-first");
         fixture.Store.Pump();
         Assert.Equal(
             ShaderBindingState.Ready,
-            fixture.Store.Resolve(first, Format.R8G8B8A8Srgb).State);
+            fixture.Store.Resolve(first, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb).State);
 
-        _ = fixture.Store.Resolve(conflicting, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(conflicting, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.CompleteSpirV("materials/global-conflict");
         fixture.Store.Pump();
-        ShaderBinding rejected = fixture.Store.Resolve(conflicting, Format.R8G8B8A8Srgb);
+        ShaderBinding rejected = fixture.Store.Resolve(conflicting, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
 
         Assert.Equal(ShaderBindingState.Failed, rejected.State);
         Assert.Contains(
             fixture.Logs.Entries,
             entry => entry.Message.Contains("already registered", StringComparison.Ordinal));
 
-        _ = fixture.Store.Resolve(compatible, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(compatible, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.CompleteSpirV("materials/global-compatible");
         fixture.Store.Pump();
         Assert.Equal(
             ShaderBindingState.Ready,
-            fixture.Store.Resolve(compatible, Format.R8G8B8A8Srgb).State);
+            fixture.Store.Resolve(compatible, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb).State);
     }
 
     [Fact]
@@ -509,22 +746,22 @@ public sealed class ShaderStoreTests
         fixture.Factory.PipelineFailure = new Bork2dException("pipeline failed");
         Assert.Equal(
             ShaderBindingState.Failed,
-            fixture.Store.Resolve(second, Format.B8G8R8A8Srgb).State);
+            fixture.Store.Resolve(second, ShaderPipelineKind.Sprite, Format.B8G8R8A8Srgb).State);
         fixture.Factory.PipelineFailure = null;
 
-        _ = fixture.Store.Resolve(conflicting, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(conflicting, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.CompleteSpirV("materials/owner-conflict");
         fixture.Store.Pump();
 
         Assert.Equal(
             ShaderBindingState.Failed,
-            fixture.Store.Resolve(conflicting, Format.R8G8B8A8Srgb).State);
+            fixture.Store.Resolve(conflicting, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb).State);
         Assert.Contains(
             fixture.Logs.Entries,
             entry => entry.Message.Contains("already registered", StringComparison.Ordinal));
         Assert.Equal(
             ShaderBindingState.Ready,
-            fixture.Store.Resolve(first, Format.R8G8B8A8Srgb).State);
+            fixture.Store.Resolve(first, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb).State);
     }
 
     [Fact]
@@ -557,8 +794,8 @@ public sealed class ShaderStoreTests
         Assert.Equal(ShaderBindingState.Ready, MakeReady(fixture, second).State);
 
         fixture.Factory.PipelineFailure = new Bork2dException("pipeline failed");
-        _ = fixture.Store.Resolve(first, Format.B8G8R8A8Srgb);
-        _ = fixture.Store.Resolve(second, Format.B8G8R8A8Srgb);
+        _ = fixture.Store.Resolve(first, ShaderPipelineKind.Sprite, Format.B8G8R8A8Srgb);
+        _ = fixture.Store.Resolve(second, ShaderPipelineKind.Sprite, Format.B8G8R8A8Srgb);
         fixture.Factory.PipelineFailure = null;
 
         // Both owners retired, so the name is free again for a different type.
@@ -605,15 +842,15 @@ public sealed class ShaderStoreTests
         Assert.Empty(fixture.Store.DefaultEntry.Metadata.GlobalUniforms);
         Assert.Equal(
             ShaderBindingState.Ready,
-            fixture.Store.Resolve(custom, Format.R8G8B8A8Srgb).State);
+            fixture.Store.Resolve(custom, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb).State);
 
-        _ = fixture.Store.Resolve(conflicting, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(conflicting, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.CompleteSpirV("materials/custom-claim-conflict");
         fixture.Store.Pump();
 
         Assert.Equal(
             ShaderBindingState.Failed,
-            fixture.Store.Resolve(conflicting, Format.R8G8B8A8Srgb).State);
+            fixture.Store.Resolve(conflicting, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb).State);
         Assert.Contains(
             fixture.Logs.Entries,
             entry => entry.Message.Contains("already registered", StringComparison.Ordinal));
@@ -627,22 +864,22 @@ public sealed class ShaderStoreTests
         ShaderRenderData first = fixture.Freeze(CreateCustomShader("materials/same-a"));
         ShaderRenderData second = fixture.Freeze(CreateCustomShader("materials/same-b"));
 
-        _ = fixture.Store.Resolve(first, Format.R8G8B8A8Srgb);
-        _ = fixture.Store.Resolve(second, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(first, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(second, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.CompleteSpirV("materials/same-a", content);
         fixture.Assets.CompleteSpirV("materials/same-b", content);
         fixture.Store.Pump();
 
         Assert.Equal(
             ShaderBindingState.Ready,
-            fixture.Store.Resolve(first, Format.R8G8B8A8Srgb).State);
+            fixture.Store.Resolve(first, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb).State);
         Assert.Equal(
             ShaderBindingState.Ready,
-            fixture.Store.Resolve(second, Format.R8G8B8A8Srgb).State);
-        Assert.Equal(2, fixture.Factory.CreateModuleCount);
+            fixture.Store.Resolve(second, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb).State);
+        Assert.Equal(3, fixture.Factory.CreateModuleCount);
         Assert.Single(fixture.Factory.CreatedPipelines);
 
-        _ = fixture.Store.Resolve(first, Format.B8G8R8A8Srgb);
+        _ = fixture.Store.Resolve(first, ShaderPipelineKind.Sprite, Format.B8G8R8A8Srgb);
         Assert.Equal(2, fixture.Factory.CreatedPipelines.Count);
         Assert.Contains(fixture.Factory.CreatedPipelines, key => key.Format == Format.B8G8R8A8Srgb);
     }
@@ -654,18 +891,18 @@ public sealed class ShaderStoreTests
         ShaderRenderData ready = fixture.Freeze(CreateCustomShader("materials/reload"));
         ShaderRenderData failed = fixture.Freeze(CreateCustomShader("materials/retry"));
 
-        _ = fixture.Store.Resolve(ready, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(ready, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.CompleteSpirV("materials/reload", CreateSpirV(seed: 1));
         fixture.Store.Pump();
-        ShaderBinding beforeReload = fixture.Store.Resolve(ready, Format.R8G8B8A8Srgb);
+        ShaderBinding beforeReload = fixture.Store.Resolve(ready, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         Assert.Equal(ShaderBindingState.Ready, beforeReload.State);
 
-        _ = fixture.Store.Resolve(failed, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(failed, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.CompleteSpirV("materials/retry", [9, 9, 9, 9]);
         fixture.Store.Pump();
         Assert.Equal(
             ShaderBindingState.Failed,
-            fixture.Store.Resolve(failed, Format.R8G8B8A8Srgb).State);
+            fixture.Store.Resolve(failed, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb).State);
 
         // A later mount retires both entries: the ready path reloads from the new winner and the
         // failed path is retried.
@@ -674,8 +911,8 @@ public sealed class ShaderStoreTests
         fixture.Assets.ResetSpirV("materials/retry");
         fixture.Store.Pump();
 
-        ShaderBinding reloading = fixture.Store.Resolve(ready, Format.R8G8B8A8Srgb);
-        ShaderBinding retrying = fixture.Store.Resolve(failed, Format.R8G8B8A8Srgb);
+        ShaderBinding reloading = fixture.Store.Resolve(ready, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
+        ShaderBinding retrying = fixture.Store.Resolve(failed, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         Assert.Equal(ShaderBindingState.Pending, reloading.State);
         Assert.Equal(ShaderBindingState.Pending, retrying.State);
         Assert.Equal(2, fixture.Assets.LoadedDataPaths.Count(path => path == "materials/reload"));
@@ -685,8 +922,8 @@ public sealed class ShaderStoreTests
         fixture.Assets.CompleteSpirV("materials/retry", CreateSpirV(seed: 3));
         fixture.Store.Pump();
 
-        ShaderBinding reloaded = fixture.Store.Resolve(ready, Format.R8G8B8A8Srgb);
-        ShaderBinding retried = fixture.Store.Resolve(failed, Format.R8G8B8A8Srgb);
+        ShaderBinding reloaded = fixture.Store.Resolve(ready, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
+        ShaderBinding retried = fixture.Store.Resolve(failed, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         Assert.Equal(ShaderBindingState.Ready, reloaded.State);
         Assert.Equal(ShaderBindingState.Ready, retried.State);
         Assert.NotEqual(beforeReload.EntryId, reloaded.EntryId);
@@ -698,13 +935,13 @@ public sealed class ShaderStoreTests
         using var fixture = new StoreFixture();
         ShaderRenderData metadata = fixture.Freeze(CreateCustomShader("materials/retired"));
 
-        _ = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.CompleteSpirV("materials/retired", CreateSpirV(seed: 4));
         fixture.Store.Pump();
         Assert.Equal(
             ShaderBindingState.Ready,
-            fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb).State);
-        Assert.Equal(2, fixture.Factory.CreateModuleCount);
+            fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb).State);
+        Assert.Equal(3, fixture.Factory.CreateModuleCount);
         Assert.Single(fixture.Factory.CreatedPipelines);
 
         fixture.Assets.CatalogVersion++;
@@ -744,14 +981,14 @@ public sealed class ShaderStoreTests
         Assert.Contains(ShaderStore.DefaultShaderPath, fixture.Assets.LoadedAssetPaths);
         Assert.Equal(
             ShaderBindingState.Ready,
-            fixture.Store.Resolve(null, Format.R8G8B8A8Srgb).State);
+            fixture.Store.Resolve(null, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb).State);
 
         fixture.Assets.CompleteSpirV(replacementPath, CreateSpirV(seed: 5));
         fixture.Store.Pump();
 
         Assert.Single(fixture.Store.DefaultEntry.Metadata.InstanceUniforms);
         Assert.Equal("uPulse", fixture.Store.DefaultEntry.Metadata.InstanceUniforms[0].Name);
-        Assert.Equal(2, fixture.Factory.CreateModuleCount);
+        Assert.Equal(3, fixture.Factory.CreateModuleCount);
 
         // The previous default module retires only after every frame that could use it completes.
         fixture.Store.Pump();
@@ -775,7 +1012,7 @@ public sealed class ShaderStoreTests
         Assert.Same(initial, fixture.Store.DefaultEntry.Metadata);
         Assert.Equal(
             ShaderBindingState.Ready,
-            fixture.Store.Resolve(null, Format.R8G8B8A8Srgb).State);
+            fixture.Store.Resolve(null, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb).State);
         Assert.Contains(
             fixture.Logs.Entries,
             entry => entry.Message.Contains("previous shader remains active", StringComparison.Ordinal));
@@ -814,6 +1051,7 @@ public sealed class ShaderStoreTests
                 ]),
         };
         assets.CompleteSpirV("shader/sprite-spv");
+        assets.CompleteSpirV("shader/line-spv");
         var factory = new FakeShaderModuleFactory();
         using ILoggerFactory loggerFactory = CreateLoggerFactory(out _);
 
@@ -833,13 +1071,13 @@ public sealed class ShaderStoreTests
         using var fixture = new StoreFixture();
         ShaderRenderData metadata = fixture.Freeze(asset);
 
-        ShaderBinding first = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
-        ShaderBinding second = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        ShaderBinding first = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
+        ShaderBinding second = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
 
         Assert.Equal(ShaderBindingState.Failed, first.State);
         Assert.Equal(ShaderBindingState.Failed, second.State);
         Assert.DoesNotContain(asset.SpirV.Path ?? string.Empty, fixture.Assets.LoadedDataPaths);
-        Assert.Equal(1, fixture.Factory.CreateModuleCount);
+        Assert.Equal(2, fixture.Factory.CreateModuleCount);
         Assert.Equal(
             1,
             fixture.Logs.Entries.Count(
@@ -848,10 +1086,10 @@ public sealed class ShaderStoreTests
 
     private static ShaderBinding MakeReady(StoreFixture fixture, ShaderRenderData metadata)
     {
-        _ = fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        _ = fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
         fixture.Assets.CompleteSpirV(metadata.SpirV.Path!);
         fixture.Store.Pump();
-        return fixture.Store.Resolve(metadata, Format.R8G8B8A8Srgb);
+        return fixture.Store.Resolve(metadata, ShaderPipelineKind.Sprite, Format.R8G8B8A8Srgb);
     }
 
     private static ILoggerFactory CreateLoggerFactory(out CapturingLoggerProvider provider)
@@ -910,6 +1148,9 @@ public sealed class ShaderStoreTests
             Assets.CompleteSpirV(
                 Assets.DefaultAsset!.SpirV.Path!,
                 CreateSpirV(seed: 100));
+            Assets.CompleteSpirV(
+                Assets.LineDefaultAsset!.SpirV.Path!,
+                CreateSpirV(seed: 101));
             Store = ShaderStore.Create(
                 Assets,
                 Factory,

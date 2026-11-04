@@ -4,17 +4,18 @@ Bork2d is a small 2D game engine for .NET. Gameplay runs on a tick thread and a 
 thread draws immutable frame snapshots with **Vulkan 1.3**. Windowing and input use **SDL2** through
 **Silk.NET**, assets ship in a baked `assets.pck`, and the runtime is **NativeAOT**-ready.
 
-The engine is in early development. The contract, host, Vulkan renderer, sprite renderer, asset
-pipeline, and the Pong example are implemented; there is no editor yet.
+The engine is in early development. The contract, host, Vulkan renderer, sprite and line renderers,
+asset pipeline, and the Pong example are implemented; there is no editor yet.
 
 ## What it gives you
 
-- A root-owned scene graph: transforms, cameras, sprite renderers, and `[Flags]` layer masks.
+- A root-owned scene graph: transforms, cameras, sprite and line renderers, and `[Flags]` layer masks.
 - Windowed, offscreen, and headless modes behind one builder.
 - Tick/render decoupling through a three-slot snapshot ring; no fixed tick rate in
   windowed/offscreen mode.
-- Instanced sprite draws with bindless texture pages and baked custom shaders: one draw per non-empty
-  camera on the default shader and one per contiguous shader run otherwise.
+- Instanced sprite draws and indexed line draws with bindless texture pages and baked custom shaders,
+  ordered together per camera by `ZIndex` then screen position: one run per camera on the default
+  shaders and one per contiguous kind/shader run otherwise.
 - Baked packs from TOML data, source processors, and sidecars, with an incremental `bake`.
 - MessagePack assets with generated shapes; no reflection or TOML at runtime.
 - Warnings-as-errors, style enforcement, AOT/trim analyzers, and a documentation link check in CI.
@@ -172,7 +173,7 @@ See [Bake](docs/bake.md) for processors, multiple packs, and MSBuild integration
 
 - [Architecture](docs/architecture.md) - projects, threads, frame handoff, and invariants.
 - [Engine](docs/engine.md) - the public contract, scene model, and asset service.
-- [Render](docs/render.md) - the Vulkan renderer and sprite pipeline.
+- [Render](docs/render.md) - the Vulkan renderer and the unified sprite/line 2D pipeline.
 - [Runtime](docs/runtime.md) - the builder, host loop, window, and input.
 - [Bake](docs/bake.md) - the build-time asset pipeline and CLI.
 - [Roadmap](docs/roadmap.md) - the 0.2 plan for shaders, KTX2, lines, SVG, and fonts.

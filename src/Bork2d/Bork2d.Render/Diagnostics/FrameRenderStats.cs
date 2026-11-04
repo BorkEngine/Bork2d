@@ -10,11 +10,11 @@ namespace Bork2d.Render.Diagnostics;
 /// <remarks>
 /// The mapping is pure and allocation-free so the renderer publishes it once per completed frame and
 /// deterministic tests can assert the relationships without a GPU:
-/// <c>NonEmptyCameras &lt;= DrawCalls</c>, because every shader run records one draw and a camera has
-/// at least one run when it draws; <c>Instances</c> is the aggregate total, and <c>SkippedSprites</c>
-/// counts null, invalid-layer, non-Quad, and pending shader/texture sprites (placeholder-drawn
-/// sprites are not skipped). Validation counters are cumulative for the run; every other value
-/// describes the frame that was just submitted/presented.
+/// <c>NonEmptyCameras &lt;= DrawCalls</c>, because every draw run records one draw and a camera has
+/// at least one run when it draws; <c>Instances</c> is the sprite total, <c>Lines</c> is the line
+/// record total, and <c>SkippedSprites</c>/<c>SkippedLines</c> count the skipped records
+/// (placeholder-drawn or default-shader-fallback records are not skipped). Validation counters are
+/// cumulative for the run; every other value describes the frame that was just submitted/presented.
 /// </remarks>
 internal static class FrameRenderStats
 {
@@ -56,6 +56,7 @@ internal static class FrameRenderStats
             FramebufferHeight: framebufferHeight,
             DrawCalls: stats.DrawCalls,
             Instances: stats.InstanceCount,
+            Lines: stats.LineCount,
             Cameras: stats.CameraCount,
             NonEmptyCameras: stats.NonEmptyCameras,
             TexturePages: texturePages,
@@ -63,6 +64,7 @@ internal static class FrameRenderStats
             TextureUploadsPending: textureUploadsPending,
             TextureUploadBytesPending: textureUploadBytesPending,
             SkippedSprites: stats.SkippedSprites,
+            SkippedLines: stats.SkippedLines,
             ValidationErrors: validationErrors,
             ValidationWarnings: validationWarnings);
     }

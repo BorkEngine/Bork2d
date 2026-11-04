@@ -1,4 +1,5 @@
 using Bork2d.Engine;
+using Bork2d.Render.TwoDimensional;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
 using Semaphore = Silk.NET.Vulkan.Semaphore;
@@ -89,7 +90,7 @@ internal sealed unsafe class WindowedFrame : IVulkanFrame
     /// <param name="frameIndex">The GPU frame index, used for debug names.</param>
     /// <param name="queueFamilyIndex">The graphics queue family.</param>
     /// <param name="extent">The swapchain extent the frame's scene image matches.</param>
-    /// <param name="pipeline">The sprite pipeline that owns the descriptor-set layout.</param>
+    /// <param name="pipeline">The 2D pipeline that owns the descriptor-set layout.</param>
     /// <param name="present">
     /// The present pipeline that owns the present descriptor-set layout and sampler.
     /// </param>
@@ -110,7 +111,7 @@ internal sealed unsafe class WindowedFrame : IVulkanFrame
         int frameIndex,
         uint queueFamilyIndex,
         Extent2D extent,
-        SpritePipeline pipeline,
+        TwoDimensionalPipeline pipeline,
         PresentPipeline present,
         int pageCapacity,
         uint maxStorageBufferRange,

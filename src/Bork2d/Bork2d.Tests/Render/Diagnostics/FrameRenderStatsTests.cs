@@ -22,8 +22,11 @@ public sealed class FrameRenderStatsTests
             DrawCalls = 2,
             NonEmptyCameras = 2,
             InstanceCount = 7,
+            LineCount = 5,
             SkippedSprites = 4,
+            SkippedLines = 6,
             CulledSprites = 5,
+            CulledLines = 8,
         };
 
         RenderStats stats = FrameRenderStats.Create(
@@ -43,6 +46,7 @@ public sealed class FrameRenderStatsTests
         Assert.Equal(720, stats.FramebufferHeight);
         Assert.Equal(2, stats.DrawCalls);
         Assert.Equal(7, stats.Instances);
+        Assert.Equal(5, stats.Lines);
         Assert.Equal(3, stats.Cameras);
         Assert.Equal(2, stats.NonEmptyCameras);
         Assert.Equal(3, stats.TexturePages);
@@ -50,6 +54,7 @@ public sealed class FrameRenderStatsTests
         Assert.Equal(2, stats.TextureUploadsPending);
         Assert.Equal(8192, stats.TextureUploadBytesPending);
         Assert.Equal(4, stats.SkippedSprites);
+        Assert.Equal(6, stats.SkippedLines);
         Assert.Equal(1, stats.ValidationErrors);
         Assert.Equal(2, stats.ValidationWarnings);
     }
@@ -86,5 +91,7 @@ public sealed class FrameRenderStatsTests
         Assert.True(stats.NonEmptyCameras <= stats.DrawCalls);
         Assert.True(stats.NonEmptyCameras <= stats.Cameras);
         Assert.Equal(9, stats.SkippedSprites);
+        Assert.Equal(0, stats.Lines);
+        Assert.Equal(0, stats.SkippedLines);
     }
 }

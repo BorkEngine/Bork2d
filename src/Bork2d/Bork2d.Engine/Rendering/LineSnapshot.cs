@@ -30,7 +30,7 @@ namespace Bork2d.Engine.Rendering;
 /// <param name="WorldMatrix">The line's local-to-world matrix, composed through the hierarchy.</param>
 /// <param name="Color">The linear RGBA line color.</param>
 /// <param name="Layer">The flattened layer bit; invalid values are preserved as-is.</param>
-/// <param name="ZIndex">The sort key within a layer; higher draws later.</param>
+/// <param name="ZIndex">The shared 2D draw order; higher draws later and it is not layer-scoped.</param>
 /// <param name="AntiAlias">Whether the renderer softens the line edges in the fragment stage.</param>
 internal readonly record struct LineSnapshot(
     LineGeometryData? Geometry,

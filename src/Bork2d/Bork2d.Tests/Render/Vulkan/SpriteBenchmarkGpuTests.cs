@@ -34,7 +34,7 @@ namespace Bork2d.Tests.Render.Vulkan;
 /// <para>
 /// Pass criterion (owner-approved, not adjustable here): median ≥165 FPS (p50 ≤ ~6.06 ms) on the M6
 /// machine. The test also asserts one draw, 50,000 instances, one non-empty camera, and validation
-/// 0/0. A warmed 50,000-sprite <c>SpriteFramePlanner.Plan</c> allocation test lives in the
+/// 0/0. A warmed 50,000-sprite <c>TwoDimensionalFramePlanner.Plan</c> allocation test lives in the
 /// deterministic suite; this test additionally asserts the measured producer/plan/build path
 /// allocates zero bytes on the benchmark thread and reports the process-wide allocation delta
 /// separately so any runtime/harness residual is visible. The test is skipped unless
@@ -184,10 +184,14 @@ public sealed class SpriteBenchmarkGpuTests
 
     private static void WarmUp(VulkanOffscreenRenderer renderer, Producer producer)
     {
+        // Exercise the handoff's backpressure path before the allocation baseline so its first
+        // blocking wait is part of warm-up rather than the measured steady-state window. The
+        // zero-allocation assertion itself is unchanged.
         var stopwatch = Stopwatch.StartNew();
         while (stopwatch.Elapsed < _warmupWindow
             || renderer.RenderStats.TexturePages < 2
-            || renderer.RenderStats.Instances != SpriteCount)
+            || renderer.RenderStats.Instances != SpriteCount
+            || renderer.SnapshotCounters.BackpressureWaits == 0)
         {
             if (renderer.FatalException is { } fatal)
             {

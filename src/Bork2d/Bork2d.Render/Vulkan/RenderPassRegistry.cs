@@ -1,5 +1,6 @@
 using Bork2d.Engine.Rendering;
 using Bork2d.Render.Sprites;
+using Bork2d.Render.TwoDimensional;
 using Silk.NET.Vulkan;
 
 namespace Bork2d.Render.Vulkan;
@@ -9,8 +10,8 @@ namespace Bork2d.Render.Vulkan;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Both target drivers create one registry during startup with the passes they support (the sprite
-/// pass followed by the present pass), then call <see cref="Plan"/> and <see cref="Record"/> from
+/// Both target drivers create one registry during startup with the passes they support (the unified
+/// 2D pass followed by the present pass), then call <see cref="Plan"/> and <see cref="Record"/> from
 /// their own frame loops. Planning resets the aggregate and each pass's per-frame state, then runs the
 /// passes in registration order; recording runs the same passes in the same order. Pass order is
 /// therefore deterministic, and adding a renderable kind registers a producer plus one pass instead of
@@ -53,7 +54,8 @@ internal sealed class RenderPassRegistry
     /// <param name="snapshot">The consumed snapshot; read-only and never mutated.</param>
     /// <param name="framebufferWidth">The scene/target width in pixels.</param>
     /// <param name="framebufferHeight">The scene/target height in pixels.</param>
-    /// <param name="instances">The frame's instance sink, after its fence has been observed.</param>
+    /// <param name="instances">The frame's sprite instance sink, after its fence has been observed.</param>
+    /// <param name="lines">The frame's line vertex/index sink, after its fence has been observed.</param>
     /// <param name="globals">The frame's global uniform sink.</param>
     /// <param name="sceneFormat">The linear scene color format for this frame.</param>
     /// <exception cref="Bork2d.Engine.Bork2dException">A pass's plan is malformed or cannot fit.</exception>
@@ -62,11 +64,13 @@ internal sealed class RenderPassRegistry
         int framebufferWidth,
         int framebufferHeight,
         IInstanceBuffer instances,
+        ILineBufferSink lines,
         IGlobalUniformBuffer globals,
         Format sceneFormat)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(instances);
+        ArgumentNullException.ThrowIfNull(lines);
         ArgumentNullException.ThrowIfNull(globals);
 
         _stats.Reset();
@@ -79,6 +83,7 @@ internal sealed class RenderPassRegistry
                 framebufferWidth,
                 framebufferHeight,
                 instances,
+                lines,
                 globals,
                 sceneFormat,
                 _stats);

@@ -2,34 +2,40 @@ using System.Numerics;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Mathematics;
 using Bork2d.Engine.Rendering;
+using Bork2d.Render.Sprites;
 
-namespace Bork2d.Render.Sprites;
+namespace Bork2d.Render.TwoDimensional;
 
 /// <summary>
-/// Pure, allocation-free sprite ordering, visibility, and skip classification (M8 §6.4/§6.8).
+/// Pure, allocation-free 2D culling, classification, and camera ordering shared by the planner and
+/// the deterministic tests.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Sorting runs once per snapshot on an index array so the snapshot itself is never copied or
-/// reordered: sprites ascend by <c>Layer</c>, then <c>ZIndex</c>; cameras ascend by <c>ZIndex</c>.
-/// Sprite ordering builds compact 12-byte <see cref="SpriteSortKey"/> values and sorts the key
-/// scratch buffer, then writes the resulting indices; a large frame therefore never compares full
-/// captured records or repeatedly reads their cache lines. Cameras keep the small generic heap
-/// sorter. Equal keys are unspecified and neither sort is stable, so callers must not rely on the
-/// order of equal keys; both paths reuse caller-owned scratch and allocate nothing warm.
+/// Cameras ascend by <c>ZIndex</c>; equal camera <c>ZIndex</c> values are unspecified. Draw order is
+/// per camera and is the planner's <see cref="TwoDimensionalSortKey"/>: <c>ZIndex</c> ascending, then
+/// projected screen Y, then screen X. <c>Layer</c> is only a culling bit.
 /// </para>
 /// <para>
-/// The per-camera filter is the shared <see cref="IsVisible"/> rule: <c>(CullingMask &amp; Layer)
-/// != 0</c> and non-empty world bounds that intersect the camera's world bounds. Null sprites,
-/// zero/multi-bit layers, known non-<c>Quad</c> topologies, and still-loading texture pages are
-/// skipped; an unknown topology or malformed field is fatal and never silently repaired.
+/// The shared visibility rule is <c>(CullingMask &amp; Layer) != 0</c> and non-empty record bounds
+/// that intersect the camera's world bounds. Empty bounds (unknown bounds from direct snapshot
+/// producers or absent data) and empty camera bounds (an overflowed or non-finite visible rectangle)
+/// never cull, which keeps the rule conservative. The production planner and the visibility tests
+/// share this method, so they cannot drift apart.
+/// </para>
+/// <para>
+/// Sprite classification: null, invalid layer, known non-<c>Quad</c> topology, and still-loading
+/// texture page are skipped; an unknown topology or malformed field is fatal and never silently
+/// repaired. Line classification: null geometry, invalid layer, and a still-loading custom shader are
+/// skipped; the engine already validates line input and captures a non-drawable line as null
+/// geometry.
 /// </para>
 /// </remarks>
-internal static class SpritePlanning
+internal static class TwoDimensionalPlanning
 {
-    /// <summary>Returns whether a camera's mask sees a sprite's single-bit layer.</summary>
+    /// <summary>Returns whether a camera's mask sees a record's single-bit layer.</summary>
     /// <param name="cullingMask">The camera culling mask.</param>
-    /// <param name="layer">The sprite's flattened layer bit.</param>
+    /// <param name="layer">The record's flattened layer bit.</param>
     /// <returns><see langword="true"/> when the bit is selected.</returns>
     internal static bool LayerMatches(uint cullingMask, uint layer)
         => (cullingMask & layer) != 0;
@@ -41,63 +47,39 @@ internal static class SpritePlanning
         => layer != 0 && (layer & (layer - 1)) == 0;
 
     /// <summary>
-    /// Returns whether a camera's culling mask and world bounds let it emit a sprite.
+    /// Returns whether a record's non-empty world bounds intersect a camera's non-empty world bounds.
     /// </summary>
     /// <remarks>
-    /// The layer test runs first: a sprite outside the camera's mask is never a visibility candidate,
-    /// so it is not counted as culled. Empty sprite bounds (unknown bounds from direct snapshot
-    /// producers or absent data) and empty camera bounds (an overflowed or non-finite visible
-    /// rectangle) never cull, which keeps the rule conservative. The production planner and the
-    /// deterministic visibility tests share this method, so they cannot drift apart.
+    /// This is the bounds-only half of <see cref="IsVisible"/> and exists so the planner can count a
+    /// record as culled exactly when its layer matches but its bounds reject it. Empty bounds on
+    /// either side mean "unknown" and never cull.
+    /// </remarks>
+    /// <param name="cameraBounds">The camera's world-space AABB.</param>
+    /// <param name="recordBounds">The record's world-space AABB.</param>
+    /// <returns><see langword="true"/> when the camera may emit the record.</returns>
+    internal static bool BoundsIntersect(in Bounds cameraBounds, in Bounds recordBounds)
+        => recordBounds.IsEmpty
+            || cameraBounds.IsEmpty
+            || recordBounds.Intersects(cameraBounds);
+
+    /// <summary>
+    /// Returns whether a camera's culling mask and world bounds let it emit a record.
+    /// </summary>
+    /// <remarks>
+    /// The layer test runs first: a record outside the camera's mask is never a visibility candidate,
+    /// so it is not counted as culled.
     /// </remarks>
     /// <param name="cullingMask">The camera culling mask.</param>
     /// <param name="cameraBounds">The camera's world-space AABB.</param>
-    /// <param name="sprite">The captured sprite.</param>
-    /// <returns><see langword="true"/> when the camera may emit the sprite.</returns>
-    internal static bool IsVisible(uint cullingMask, in Bounds cameraBounds, in SpriteSnapshot sprite)
-        => LayerMatches(cullingMask, sprite.Layer)
-            && (sprite.Bounds.IsEmpty
-                || cameraBounds.IsEmpty
-                || sprite.Bounds.Intersects(cameraBounds));
-
-    /// <summary>
-    /// Sorts sprite indices by <c>(Layer, ZIndex)</c> ascending without allocating or touching the
-    /// snapshot.
-    /// </summary>
-    /// <param name="sprites">The captured sprites in capture order.</param>
-    /// <param name="indices">
-    /// The output index buffer; at least <paramref name="sprites"/>'s length. The remaining entries
-    /// are left untouched.
-    /// </param>
-    /// <param name="keys">
-    /// The reusable key scratch buffer; at least <paramref name="sprites"/>'s length. The planner
-    /// grows it once and reuses it every frame.
-    /// </param>
-    /// <exception cref="ArgumentException">An output buffer is too small.</exception>
-    internal static void Sort(
-        ReadOnlySpan<SpriteSnapshot> sprites,
-        Span<int> indices,
-        Span<SpriteSortKey> keys)
-    {
-        if (indices.Length < sprites.Length || keys.Length < sprites.Length)
-        {
-            throw new ArgumentException(
-                $"The sort buffers must hold {sprites.Length} entries.");
-        }
-
-        for (var index = 0; index < sprites.Length; index++)
-        {
-            SpriteSnapshot sprite = sprites[index];
-            keys[index] = new SpriteSortKey(sprite.Layer, sprite.ZIndex, index);
-        }
-
-        Span<SpriteSortKey> ordered = keys[..sprites.Length];
-        ordered.Sort();
-        for (var index = 0; index < ordered.Length; index++)
-        {
-            indices[index] = ordered[index].Index;
-        }
-    }
+    /// <param name="layer">The record's flattened layer bit.</param>
+    /// <param name="recordBounds">The record's world-space AABB.</param>
+    /// <returns><see langword="true"/> when the camera may emit the record.</returns>
+    internal static bool IsVisible(
+        uint cullingMask,
+        in Bounds cameraBounds,
+        uint layer,
+        in Bounds recordBounds)
+        => LayerMatches(cullingMask, layer) && BoundsIntersect(cameraBounds, recordBounds);
 
     /// <summary>
     /// Sorts camera indices by <c>ZIndex</c> ascending without allocating or touching the snapshot.
@@ -120,10 +102,7 @@ internal static class SpritePlanning
     /// unknown topology (fatal), known non-<c>Quad</c> topology, pending page.
     /// </summary>
     /// <param name="sprite">The captured sprite values.</param>
-    /// <param name="texturePending">
-    /// Whether the sprite's resolved texture page is still loading. WP-3 supplies this; WP-2 only
-    /// implements the pure classification.
-    /// </param>
+    /// <param name="texturePending">Whether the sprite's resolved texture page is still loading.</param>
     /// <returns>The skip reason, or <see cref="SpriteSkipReason.None"/> when drawable.</returns>
     /// <exception cref="Bork2d.Engine.Bork2dException">
     /// The sprite's topology is an unknown enum value.
@@ -157,6 +136,33 @@ internal static class SpritePlanning
         }
 
         return texturePending ? SpriteSkipReason.Pending : SpriteSkipReason.None;
+    }
+
+    /// <summary>
+    /// Classifies one captured line for drawing, in the approved order: null geometry, invalid layer,
+    /// pending custom shader.
+    /// </summary>
+    /// <remarks>
+    /// Geometry validation happens in the engine at capture time: a non-drawable line arrives with
+    /// <see langword="null"/> geometry and empty bounds, so the renderer only has to skip it. A
+    /// still-loading custom shader is a normal pending skip and is not warned about.
+    /// </remarks>
+    /// <param name="line">The captured line values.</param>
+    /// <param name="shaderPending">Whether the line's custom shader is still loading.</param>
+    /// <returns>The skip reason, or <see cref="LineSkipReason.None"/> when drawable.</returns>
+    internal static LineSkipReason ClassifyLine(in LineSnapshot line, bool shaderPending)
+    {
+        if (line.Geometry is null)
+        {
+            return LineSkipReason.NullGeometry;
+        }
+
+        if (!IsValidLayer(line.Layer))
+        {
+            return LineSkipReason.InvalidLayer;
+        }
+
+        return shaderPending ? LineSkipReason.Pending : LineSkipReason.None;
     }
 
     private static void SortIndices<TSource, TOrder>(ReadOnlySpan<TSource> items, Span<int> indices)

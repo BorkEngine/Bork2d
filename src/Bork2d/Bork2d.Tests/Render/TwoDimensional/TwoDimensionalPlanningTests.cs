@@ -4,66 +4,42 @@ using Bork2d.Engine.Assets;
 using Bork2d.Engine.Mathematics;
 using Bork2d.Engine.Rendering;
 using Bork2d.Render.Sprites;
+using Bork2d.Render.TwoDimensional;
 using Xunit;
 
-namespace Bork2d.Tests.Render.Sprites;
+namespace Bork2d.Tests.Render.TwoDimensional;
 
 /// <summary>
-/// Deterministic tests for sprite sort/filter/classification, quad geometry/flips, and the fatal
-/// malformed-field policy (M8 §6.4/§6.8/§8.1).
+/// Deterministic tests for 2D camera ordering, the per-record sort key, layer/bounds visibility,
+/// sprite and line classification, and quad geometry/flips (M8 §6.4/§6.8/§8.1).
 /// </summary>
-public sealed class SpritePlanningTests
+public sealed class TwoDimensionalPlanningTests
 {
     [Fact]
-    public void SortOrdersByLayerThenZIndex()
+    public void SortKeyOrdersByZIndexThenScreenYThenScreenX()
     {
-        SpriteSnapshot[] sprites =
+        TwoDimensionalSortKey[] keys =
         [
-            Snapshot(layer: 4, zIndex: 0),
-            Snapshot(layer: 1, zIndex: 3),
-            Snapshot(layer: 1, zIndex: 1),
-            Snapshot(layer: 2, zIndex: 9),
+            new(zIndex: 2, screenY: 0f, screenX: 0f, DrawKind.Sprite, 0),
+            new(zIndex: 1, screenY: 50f, screenX: 0f, DrawKind.Sprite, 1),
+            new(zIndex: 1, screenY: 10f, screenX: 40f, DrawKind.Sprite, 2),
+            new(zIndex: 1, screenY: 10f, screenX: 20f, DrawKind.Line, 3),
         ];
-        var indices = new int[sprites.Length];
 
-        SpritePlanning.Sort(sprites, indices, new SpriteSortKey[sprites.Length]);
+        Array.Sort(keys);
 
-        Assert.Equal(new[] { 2, 1, 3, 0 }, indices);
+        Assert.Equal([3, 2, 1, 0], keys.Select(key => key.RecordIndex));
+        Assert.Equal(DrawKind.Line, keys[0].Kind);
     }
 
     [Fact]
-    public void SortDoesNotReorderTheSnapshot()
+    public void SortKeyTiesIgnoreKindAndRecordIndex()
     {
-        SpriteSnapshot[] sprites =
-        [
-            Snapshot(layer: 4, zIndex: 0),
-            Snapshot(layer: 1, zIndex: 1),
-        ];
-        SpriteSnapshot before = sprites[0];
-        var indices = new int[sprites.Length];
+        var first = new TwoDimensionalSortKey(3, 7f, 9f, DrawKind.Sprite, 1);
+        var second = new TwoDimensionalSortKey(3, 7f, 9f, DrawKind.Line, 0);
 
-        SpritePlanning.Sort(sprites, indices, new SpriteSortKey[sprites.Length]);
-
-        Assert.Equal(before, sprites[0]);
-        Assert.Equal(new[] { 1, 0 }, indices);
-    }
-
-    [Fact]
-    public void SortRejectsAShortIndexBuffer()
-    {
-        SpriteSnapshot[] sprites = [Snapshot(), Snapshot()];
-
-        Assert.Throws<ArgumentException>(
-            () => SpritePlanning.Sort(sprites, new int[1], new SpriteSortKey[sprites.Length]));
-    }
-
-    [Fact]
-    public void SortRejectsAShortKeyBuffer()
-    {
-        SpriteSnapshot[] sprites = [Snapshot(), Snapshot()];
-
-        Assert.Throws<ArgumentException>(
-            () => SpritePlanning.Sort(sprites, new int[sprites.Length], new SpriteSortKey[1]));
+        Assert.Equal(0, first.CompareTo(second));
+        Assert.Equal(0, second.CompareTo(first));
     }
 
     [Fact]
@@ -72,7 +48,7 @@ public sealed class SpritePlanningTests
         CameraSnapshot[] cameras = [Camera(zIndex: 5), Camera(zIndex: 1), Camera(zIndex: 3)];
         var indices = new int[cameras.Length];
 
-        SpritePlanning.SortCameras(cameras, indices);
+        TwoDimensionalPlanning.SortCameras(cameras, indices);
 
         Assert.Equal(new[] { 1, 2, 0 }, indices);
     }
@@ -82,38 +58,13 @@ public sealed class SpritePlanningTests
     {
         CameraSnapshot[] cameras = [Camera(zIndex: 0), Camera(zIndex: 1)];
 
-        Assert.Throws<ArgumentException>(() => SpritePlanning.SortCameras(cameras, new int[1]));
+        Assert.Throws<ArgumentException>(
+            () => TwoDimensionalPlanning.SortCameras(cameras, new int[1]));
     }
 
     [Fact]
-    public void SharedIndexSorterOrdersBothSnapshotTypesByKeyOnly()
+    public void SortCamerasOrdersEqualKeysAsACompletePermutation()
     {
-        // Equal keys are explicitly unspecified, so this asserts the key sequence and a complete
-        // permutation instead of relying on a stable tie order.
-        SpriteSnapshot[] sprites =
-        [
-            Snapshot(layer: 2, zIndex: 7),
-            Snapshot(layer: 1, zIndex: 0),
-            Snapshot(layer: 1, zIndex: 0),
-            Snapshot(layer: 2, zIndex: 7),
-        ];
-        var spriteIndices = new int[sprites.Length];
-        SpritePlanning.Sort(sprites, spriteIndices, new SpriteSortKey[sprites.Length]);
-
-        for (var position = 1; position < spriteIndices.Length; position++)
-        {
-            SpriteSnapshot previous = sprites[spriteIndices[position - 1]];
-            SpriteSnapshot current = sprites[spriteIndices[position]];
-            Assert.True(
-                previous.Layer < current.Layer
-                    || (previous.Layer == current.Layer && previous.ZIndex <= current.ZIndex),
-                "Sprite indices must ascend by (Layer, ZIndex).");
-        }
-
-        Assert.Equal(
-            Enumerable.Range(0, sprites.Length).Order(),
-            spriteIndices.Order());
-
         CameraSnapshot[] cameras =
         [
             Camera(zIndex: 2),
@@ -122,7 +73,8 @@ public sealed class SpritePlanningTests
             Camera(zIndex: 2),
         ];
         var cameraIndices = new int[cameras.Length];
-        SpritePlanning.SortCameras(cameras, cameraIndices);
+
+        TwoDimensionalPlanning.SortCameras(cameras, cameraIndices);
 
         for (var position = 1; position < cameraIndices.Length; position++)
         {
@@ -140,11 +92,11 @@ public sealed class SpritePlanningTests
     [Fact]
     public void LayerMatchUsesTheMaskBit()
     {
-        Assert.True(SpritePlanning.LayerMatches(0b0101, 0b0001));
-        Assert.True(SpritePlanning.LayerMatches(0b0101, 0b0100));
-        Assert.False(SpritePlanning.LayerMatches(0b0101, 0b0010));
-        Assert.False(SpritePlanning.LayerMatches(0, 1));
-        Assert.True(SpritePlanning.LayerMatches(0x8000_0000, 0x8000_0000));
+        Assert.True(TwoDimensionalPlanning.LayerMatches(0b0101, 0b0001));
+        Assert.True(TwoDimensionalPlanning.LayerMatches(0b0101, 0b0100));
+        Assert.False(TwoDimensionalPlanning.LayerMatches(0b0101, 0b0010));
+        Assert.False(TwoDimensionalPlanning.LayerMatches(0, 1));
+        Assert.True(TwoDimensionalPlanning.LayerMatches(0x8000_0000, 0x8000_0000));
     }
 
     [Theory]
@@ -156,82 +108,126 @@ public sealed class SpritePlanningTests
     [InlineData(0xC000_0000u, false)]
     public void LayerValidityRequiresExactlyOneBit(uint layer, bool valid)
     {
-        Assert.Equal(valid, SpritePlanning.IsValidLayer(layer));
+        Assert.Equal(valid, TwoDimensionalPlanning.IsValidLayer(layer));
     }
 
     [Fact]
-    public void ClassifyReturnsTheApprovedSkipReasons()
+    public void ClassifyReturnsTheApprovedSpriteSkipReasons()
     {
         Assert.Equal(
             SpriteSkipReason.Null,
-            SpritePlanning.Classify(NullSnapshot(), texturePending: false));
+            TwoDimensionalPlanning.Classify(NullSnapshot(), texturePending: false));
 
         Assert.Equal(
             SpriteSkipReason.InvalidLayer,
-            SpritePlanning.Classify(Snapshot(layer: 0), texturePending: false));
+            TwoDimensionalPlanning.Classify(Snapshot(layer: 0), texturePending: false));
         Assert.Equal(
             SpriteSkipReason.InvalidLayer,
-            SpritePlanning.Classify(Snapshot(layer: 3), texturePending: false));
+            TwoDimensionalPlanning.Classify(Snapshot(layer: 3), texturePending: false));
 
         SpriteAsset indexed = Asset();
         indexed.Topology = SpriteTopology.TriangleStrip;
         indexed.Indices = [0, 1, 2, 3];
         Assert.Equal(
             SpriteSkipReason.NonQuad,
-            SpritePlanning.Classify(
+            TwoDimensionalPlanning.Classify(
                 Snapshot(asset: indexed, layer: 1),
                 texturePending: false));
 
         Assert.Equal(
             SpriteSkipReason.Pending,
-            SpritePlanning.Classify(Snapshot(layer: 1), texturePending: true));
+            TwoDimensionalPlanning.Classify(Snapshot(layer: 1), texturePending: true));
 
         Assert.Equal(
             SpriteSkipReason.None,
-            SpritePlanning.Classify(Snapshot(layer: 1), texturePending: false));
+            TwoDimensionalPlanning.Classify(Snapshot(layer: 1), texturePending: false));
     }
 
     [Fact]
-    public void UnknownTopologyIsFatal()
+    public void UnknownSpriteTopologyIsFatal()
     {
         SpriteAsset asset = Asset();
         asset.Topology = (SpriteTopology)99;
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
-            () => SpritePlanning.Classify(Snapshot(asset: asset, layer: 1), false));
+            () => TwoDimensionalPlanning.Classify(Snapshot(asset: asset, layer: 1), false));
 
         Assert.Contains("Topology", exception.Message, StringComparison.Ordinal);
         Assert.Contains("textures/player", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
+    public void ClassifyLineSkipsNullGeometryInvalidLayerAndPendingShaders()
+    {
+        LineSnapshot drawable = LineForTest(geometry: BuildGeometry(), layer: 1u);
+
+        Assert.Equal(
+            LineSkipReason.NullGeometry,
+            TwoDimensionalPlanning.ClassifyLine(
+                LineForTest(geometry: null, layer: 1u),
+                shaderPending: false));
+        Assert.Equal(
+            LineSkipReason.InvalidLayer,
+            TwoDimensionalPlanning.ClassifyLine(
+                drawable with { Layer = 0 },
+                shaderPending: false));
+        Assert.Equal(
+            LineSkipReason.InvalidLayer,
+            TwoDimensionalPlanning.ClassifyLine(
+                drawable with { Layer = 3 },
+                shaderPending: false));
+        Assert.Equal(
+            LineSkipReason.Pending,
+            TwoDimensionalPlanning.ClassifyLine(drawable, shaderPending: true));
+        Assert.Equal(
+            LineSkipReason.None,
+            TwoDimensionalPlanning.ClassifyLine(drawable, shaderPending: false));
+    }
+
+    [Fact]
+    public void NullGeometryIsCheckedBeforeTheLayer()
+    {
+        Assert.Equal(
+            LineSkipReason.NullGeometry,
+            TwoDimensionalPlanning.ClassifyLine(
+                LineForTest(geometry: null, layer: 0u),
+                shaderPending: true));
+    }
+
+    [Fact]
     public void VisibilityRuleUsesTheLayerMaskAndNeverCullsUnknownBounds()
     {
-        SpriteSnapshot sprite = Snapshot(layer: 1);
         var cameraBounds = Bounds.FromMinMax(new Vector2(-10f, -10f), new Vector2(10f, 10f));
+        Bounds recordBounds = Bounds.FromMinMax(new Vector2(-1f, -1f), new Vector2(1f, 1f));
 
-        Assert.True(SpritePlanning.IsVisible(0b1, cameraBounds, sprite));
-        Assert.False(SpritePlanning.IsVisible(0b10, cameraBounds, sprite));
-        Assert.False(SpritePlanning.IsVisible(0, cameraBounds, sprite));
+        Assert.True(TwoDimensionalPlanning.IsVisible(0b1, cameraBounds, 0b1, recordBounds));
+        Assert.False(TwoDimensionalPlanning.IsVisible(0b10, cameraBounds, 0b1, recordBounds));
+        Assert.False(TwoDimensionalPlanning.IsVisible(0, cameraBounds, 0b1, recordBounds));
 
-        // Empty sprite bounds and empty camera bounds both mean "unknown" and never cull.
-        Assert.True(SpritePlanning.IsVisible(0b1, Bounds.Empty, sprite));
-        SpriteSnapshot outside = Bounded(
-            0b1,
-            Bounds.FromMinMax(new Vector2(100f, -1f), new Vector2(105f, 1f)));
-        Assert.True(SpritePlanning.IsVisible(0b1, Bounds.Empty, outside));
-        Assert.False(SpritePlanning.IsVisible(0b1, cameraBounds, outside));
+        // Empty record bounds and empty camera bounds both mean "unknown" and never cull.
+        Assert.True(TwoDimensionalPlanning.IsVisible(0b1, Bounds.Empty, 0b1, recordBounds));
+        Assert.True(TwoDimensionalPlanning.IsVisible(0b1, cameraBounds, 0b1, Bounds.Empty));
+
+        Bounds outside = Bounds.FromMinMax(new Vector2(100f, -1f), new Vector2(105f, 1f));
+        Assert.True(TwoDimensionalPlanning.IsVisible(0b1, Bounds.Empty, 0b1, outside));
+        Assert.False(TwoDimensionalPlanning.IsVisible(0b1, cameraBounds, 0b1, outside));
 
         // Bounds that only touch the camera edge still intersect.
-        SpriteSnapshot touching = Bounded(
-            0b1,
-            Bounds.FromMinMax(new Vector2(10f, -1f), new Vector2(15f, 1f)));
-        Assert.True(SpritePlanning.IsVisible(0b1, cameraBounds, touching));
+        Bounds touching = Bounds.FromMinMax(new Vector2(10f, -1f), new Vector2(15f, 1f));
+        Assert.True(TwoDimensionalPlanning.IsVisible(0b1, cameraBounds, 0b1, touching));
+    }
 
-        SpriteSnapshot overlapping = Bounded(
-            0b1,
-            Bounds.FromMinMax(new Vector2(5f, 5f), new Vector2(15f, 15f)));
-        Assert.True(SpritePlanning.IsVisible(0b1, cameraBounds, overlapping));
+    [Fact]
+    public void BoundsIntersectKeepsEachSideConservative()
+    {
+        Bounds cameraBounds = Bounds.FromMinMax(new Vector2(-10f, -10f), new Vector2(10f, 10f));
+
+        Assert.True(TwoDimensionalPlanning.BoundsIntersect(cameraBounds, Bounds.Empty));
+        Assert.True(TwoDimensionalPlanning.BoundsIntersect(Bounds.Empty, Bounds.Empty));
+        Assert.False(
+            TwoDimensionalPlanning.BoundsIntersect(
+                cameraBounds,
+                Bounds.FromMinMax(new Vector2(20f, 20f), new Vector2(30f, 30f))));
     }
 
     [Fact]
@@ -394,6 +390,24 @@ public sealed class SpritePlanningTests
         Assert.Contains("textures/player", exception.Message, StringComparison.Ordinal);
     }
 
+    private static LineGeometryData BuildGeometry()
+    {
+        LineGeometryData? geometry = LineGeometryBuilder.Build(
+            [new Vector2(0f, 0f), new Vector2(10f, 0f)],
+            closed: false,
+            width: 2f);
+        return Assert.IsType<LineGeometryData>(geometry);
+    }
+
+    private static LineSnapshot LineForTest(LineGeometryData? geometry, uint layer)
+        => new(
+            geometry,
+            Matrix3x2.Identity,
+            Color.White,
+            layer,
+            ZIndex: 0,
+            AntiAlias: true);
+
     private static SpriteAsset Asset(
         Vector2[]? uvs = null,
         Vector2? scale = null,
@@ -443,9 +457,6 @@ public sealed class SpritePlanningTests
             false,
             false);
     }
-
-    private static SpriteSnapshot Bounded(uint layer, in Bounds bounds, int zIndex = 0)
-        => Snapshot(layer: layer, zIndex: zIndex) with { Bounds = bounds };
 
     private static CameraSnapshot Camera(int zIndex)
         => new(

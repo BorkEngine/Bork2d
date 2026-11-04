@@ -21,10 +21,18 @@ internal sealed class FakeShaderAssets : IAssets, IAssetCatalogVersion
     private readonly List<string> _loadedAssetPaths = [];
     private readonly List<string> _loadedDataPaths = [];
 
-    /// <summary>Gets or sets the built-in default shader asset served at <c>shader/sprite</c>.</summary>
+    /// <summary>Gets or sets the built-in sprite default shader asset served at <c>shader/sprite</c>.</summary>
     internal ShaderAsset? DefaultAsset { get; set; } = new()
     {
         SpirV = "shader/sprite-spv",
+        LayoutVersion = ShaderLayout.CurrentVersion,
+        EntryPoint = "main",
+    };
+
+    /// <summary>Gets or sets the built-in line default shader asset served at <c>shader/line</c>.</summary>
+    internal ShaderAsset? LineDefaultAsset { get; set; } = new()
+    {
+        SpirV = "shader/line-spv",
         LayoutVersion = ShaderLayout.CurrentVersion,
         EntryPoint = "main",
     };
@@ -104,7 +112,7 @@ internal sealed class FakeShaderAssets : IAssets, IAssetCatalogVersion
             throw exception;
         }
 
-        if (typeof(T) != typeof(ShaderAsset) || DefaultAsset is null)
+        if (typeof(T) != typeof(ShaderAsset))
         {
             return Task.FromException<T>(
                 new AssetException(
@@ -113,7 +121,22 @@ internal sealed class FakeShaderAssets : IAssets, IAssetCatalogVersion
                     $"No shader asset at '{assetPath}'."));
         }
 
-        return Task.FromResult((T)(object)DefaultAsset);
+        ShaderAsset? asset = string.Equals(
+            assetPath,
+            Bork2d.Render.Shaders.ShaderStore.LineShaderPath,
+            StringComparison.Ordinal)
+            ? LineDefaultAsset
+            : DefaultAsset;
+        if (asset is null)
+        {
+            return Task.FromException<T>(
+                new AssetException(
+                    AssetErrorKind.NotFound,
+                    assetPath,
+                    $"No shader asset at '{assetPath}'."));
+        }
+
+        return Task.FromResult((T)(object)asset);
     }
 
     /// <inheritdoc/>

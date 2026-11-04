@@ -1,4 +1,8 @@
+using Bork2d.Engine.Rendering;
+using Bork2d.Render.Sprites;
+using Bork2d.Render.TwoDimensional;
 using Silk.NET.Vulkan;
+using Buffer = Silk.NET.Vulkan.Buffer;
 
 namespace Bork2d.Render.Vulkan;
 
@@ -8,11 +12,11 @@ namespace Bork2d.Render.Vulkan;
 /// <remarks>
 /// <para>
 /// A pass reads only the members it needs: the 2D pass records into the linear
-/// <paramref name="SceneView"/>/<paramref name="SceneImage"/> with the frame descriptor sets and the
-/// scene format; the present pass samples the scene image and records into the final
-/// <paramref name="TargetView"/>/<paramref name="TargetImage"/> with the per-frame present descriptor
-/// set and the target format. No member exposes another pass's plan or the aggregate statistics, so
-/// recording cannot mutate planning.
+/// <paramref name="SceneView"/>/<paramref name="SceneImage"/> with the frame descriptor sets, the frame
+/// line vertex/index buffers, and the scene format; the present pass samples the scene image and
+/// records into the final <paramref name="TargetView"/>/<paramref name="TargetImage"/> with the
+/// per-frame present descriptor set and the target format. No member exposes another pass's plan or
+/// the aggregate statistics, so recording cannot mutate planning.
 /// </para>
 /// <para>
 /// The context is a value with no ownership: the target driver owns every handle and keeps it alive
@@ -32,6 +36,8 @@ namespace Bork2d.Render.Vulkan;
 /// The frame's present descriptor set: the linear scene image view bound to the present pipeline's
 /// combined image sampler.
 /// </param>
+/// <param name="LineVertexBuffer">The frame's line vertex buffer.</param>
+/// <param name="LineIndexBuffer">The frame's line 32-bit index buffer.</param>
 /// <param name="SceneFormat">The linear scene color format the 2D pipelines were created for.</param>
 /// <param name="TargetFormat">The final UNORM target color format.</param>
 internal readonly record struct RenderPassRecordContext(
@@ -45,5 +51,7 @@ internal readonly record struct RenderPassRecordContext(
     DescriptorSet DescriptorSet,
     DescriptorSet GlobalDescriptorSet,
     DescriptorSet PresentDescriptorSet,
+    Buffer LineVertexBuffer,
+    Buffer LineIndexBuffer,
     Format SceneFormat,
     Format TargetFormat);

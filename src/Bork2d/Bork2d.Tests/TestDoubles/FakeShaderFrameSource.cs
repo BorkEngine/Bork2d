@@ -9,10 +9,12 @@ namespace Bork2d.Tests.TestDoubles;
 /// <see cref="ShaderRenderData"/> to a pending, ready, or failed binding without Vulkan or I/O.
 /// </summary>
 /// <remarks>
-/// The default entry always exists and is ready. Tests register custom entries with
-/// <see cref="Register"/> and can replace the default metadata to model a game pack that shadows
-/// <c>shader/sprite</c> with declarations. An unregistered custom shader resolves as pending by
-/// default, so a test must opt every custom asset into a state.
+/// Both default entries always exist and are ready: <c>shader/sprite</c> is entry <c>0</c> and
+/// <c>shader/line</c> is entry <c>1</c>. Tests register custom entries with <see cref="Register"/>
+/// and can replace either default's metadata to model a game pack that shadows the built-in shader
+/// with declarations. An unregistered custom shader resolves as pending by default, so a test must
+/// opt every custom asset into a state. A failed binding resolves to the requesting kind's default
+/// entry, matching the production catalog's fallback.
 /// </remarks>
 internal sealed class FakeShaderFrameSource : IShaderFrameSource
 {
@@ -21,7 +23,7 @@ internal sealed class FakeShaderFrameSource : IShaderFrameSource
     private readonly Dictionary<ShaderRenderData, int> _entryIds =
         new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<int, ShaderEntry> _entries = [];
-    private int _nextEntryId = 1;
+    private int _nextEntryId = ShaderStore.FirstCustomEntryId;
 
     /// <summary>Initializes a new instance of the <see cref="FakeShaderFrameSource"/> class.</summary>
     internal FakeShaderFrameSource()
@@ -32,6 +34,12 @@ internal sealed class FakeShaderFrameSource : IShaderFrameSource
             LayoutVersion = ShaderLayout.CurrentVersion,
             EntryPoint = "main",
         });
+        LineDefaultMetadata = ShaderRenderData.Freeze(new ShaderAsset
+        {
+            SpirV = ShaderStore.LineSpirVPath,
+            LayoutVersion = ShaderLayout.CurrentVersion,
+            EntryPoint = "main",
+        });
         _entries.Add(
             DefaultEntryId,
             new ShaderEntry(
@@ -39,15 +47,28 @@ internal sealed class FakeShaderFrameSource : IShaderFrameSource
                 ShaderStore.DefaultShaderPath,
                 DefaultMetadata,
                 isDefault: true));
+        _entries.Add(
+            LineDefaultEntryId,
+            new ShaderEntry(
+                LineDefaultEntryId,
+                ShaderStore.LineShaderPath,
+                LineDefaultMetadata,
+                isDefault: true));
     }
 
-    /// <inheritdoc/>
-    public int DefaultEntryId => ShaderStore.DefaultEntryId;
+    /// <summary>Gets the entry id of the built-in sprite default.</summary>
+    internal int DefaultEntryId => ShaderStore.DefaultEntryId;
 
-    /// <summary>Gets the current default entry metadata.</summary>
+    /// <summary>Gets the entry id of the built-in line default.</summary>
+    internal int LineDefaultEntryId => ShaderStore.LineDefaultEntryId;
+
+    /// <summary>Gets the current sprite default entry metadata.</summary>
     internal ShaderRenderData DefaultMetadata { get; private set; }
 
-    /// <summary>Replaces the default entry's declarations (a shadowed <c>shader/sprite</c>).</summary>
+    /// <summary>Gets the current line default entry metadata.</summary>
+    internal ShaderRenderData LineDefaultMetadata { get; private set; }
+
+    /// <summary>Replaces the sprite default entry's declarations (a shadowed <c>shader/sprite</c>).</summary>
     /// <param name="asset">The shader asset whose frozen declarations become the default entry's.</param>
     internal void SetDefaultMetadata(ShaderAsset asset)
     {
@@ -60,6 +81,19 @@ internal sealed class FakeShaderFrameSource : IShaderFrameSource
             isDefault: true);
     }
 
+    /// <summary>Replaces the line default entry's declarations (a shadowed <c>shader/line</c>).</summary>
+    /// <param name="asset">The shader asset whose frozen declarations become the default entry's.</param>
+    internal void SetLineDefaultMetadata(ShaderAsset asset)
+    {
+        ArgumentNullException.ThrowIfNull(asset);
+        LineDefaultMetadata = ShaderRenderData.Freeze(asset);
+        _entries[LineDefaultEntryId] = new ShaderEntry(
+            LineDefaultEntryId,
+            ShaderStore.LineShaderPath,
+            LineDefaultMetadata,
+            isDefault: true);
+    }
+
     /// <summary>
     /// Freezes a custom shader asset, registers its entry, and returns the metadata a snapshot
     /// carries.
@@ -67,7 +101,7 @@ internal sealed class FakeShaderFrameSource : IShaderFrameSource
     /// <param name="asset">The custom shader asset.</param>
     /// <param name="state">The binding state to resolve for that metadata.</param>
     /// <param name="entryId">The entry id; a new id is assigned when negative.</param>
-    /// <returns>The frozen metadata to assign to <see cref="Engine.Rendering.SpriteSnapshot.ShaderData"/>.</returns>
+    /// <returns>The frozen metadata to assign to a snapshot's shader field.</returns>
     internal ShaderRenderData Register(
         ShaderAsset asset,
         ShaderBindingState state,
@@ -92,18 +126,31 @@ internal sealed class FakeShaderFrameSource : IShaderFrameSource
             : throw new InvalidOperationException("The metadata was not registered with the fake.");
 
     /// <inheritdoc/>
-    public ShaderBinding Resolve(ShaderRenderData? shader, Format outputFormat)
+    public int GetDefaultEntryId(ShaderPipelineKind kind)
+        => kind == ShaderPipelineKind.Sprite ? DefaultEntryId : LineDefaultEntryId;
+
+    /// <inheritdoc/>
+    public ShaderBinding Resolve(
+        ShaderRenderData? shader,
+        ShaderPipelineKind kind,
+        Format outputFormat)
     {
+        int defaultEntryId = GetDefaultEntryId(kind);
         if (shader is null)
         {
-            return new ShaderBinding(DefaultEntryId, ShaderBindingState.Ready);
+            return new ShaderBinding(defaultEntryId, ShaderBindingState.Ready);
         }
 
         // An unregistered custom shader is modelled as still loading, the catalog's first-sighting
         // state; tests register every shader whose ready/failed behavior they exercise.
-        return _bindings.TryGetValue(shader, out ShaderBinding binding)
-            ? binding
-            : new ShaderBinding(DefaultEntryId, ShaderBindingState.Pending);
+        if (!_bindings.TryGetValue(shader, out ShaderBinding binding))
+        {
+            return new ShaderBinding(defaultEntryId, ShaderBindingState.Pending);
+        }
+
+        return binding.State == ShaderBindingState.Failed
+            ? new ShaderBinding(defaultEntryId, ShaderBindingState.Failed)
+            : binding;
     }
 
     /// <inheritdoc/>

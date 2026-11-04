@@ -87,6 +87,7 @@ public sealed class RendererHostTests
             FramebufferHeight: 720,
             DrawCalls: 1,
             Instances: 3,
+            Lines: 2,
             Cameras: 1,
             NonEmptyCameras: 1,
             TexturePages: 2,
@@ -94,6 +95,7 @@ public sealed class RendererHostTests
             TextureUploadsPending: 0,
             TextureUploadBytesPending: 0,
             SkippedSprites: 0,
+            SkippedLines: 1,
             ValidationErrors: 0,
             ValidationWarnings: 0);
         var renderer = new FakeRenderer { AutoReady = true, RenderStats = expected };
