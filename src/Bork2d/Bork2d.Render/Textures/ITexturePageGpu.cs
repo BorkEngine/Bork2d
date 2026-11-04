@@ -34,15 +34,22 @@ internal interface ITexturePageGpu
     void EnsureCapacity(int capacity);
 
     /// <summary>
-    /// Creates the page image/view, copies the payload through staging, and submits the
-    /// <c>TRANSFER_DST → SHADER_READ_ONLY_OPTIMAL</c> upload on the graphics queue with a fence.
+    /// Creates the page image/view in its concrete format and mip count, copies every KTX2 level
+    /// through staging, and submits the <c>TRANSFER_DST → SHADER_READ_ONLY_OPTIMAL</c> upload on the
+    /// graphics queue with a fence.
     /// </summary>
+    /// <remarks>
+    /// The payload is a validated narrow-profile KTX2 file whose format, base dimensions, and level
+    /// count match the descriptor. The implementation parses it again to obtain each level's offset
+    /// and extent, checks the device's sampled-format support before creating the image, and never
+    /// decodes, converts, or falls back to another format.
+    /// </remarks>
     /// <param name="pageIndex">
     /// The assigned bindless page index: <c>0</c> for the startup placeholder and the next real
     /// index for content pages.
     /// </param>
-    /// <param name="descriptor">The validated descriptor; its dimensions and sampler state apply.</param>
-    /// <param name="payload">The validated RGBA8 bytes, exactly <c>Width * Height * 4</c> long.</param>
+    /// <param name="descriptor">The validated descriptor; its format, dimensions, mip count, and sampler state apply.</param>
+    /// <param name="payload">The validated complete KTX2 payload.</param>
     void Upload(int pageIndex, TextureDescriptor descriptor, byte[] payload);
 
     /// <summary>Returns whether a submitted upload's fence has signaled, without waiting.</summary>

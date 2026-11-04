@@ -31,14 +31,14 @@ public static class BakeProjectFixture
     /// <summary>The canonical texture descriptor path (arbitrary <c>art/</c> location).</summary>
     internal const string TexturePath = "art/player";
 
-    /// <summary>The canonical raw texture payload path.</summary>
-    internal const string TexturePayloadPath = "art/player-raw";
+    /// <summary>The canonical KTX2 texture payload path.</summary>
+    internal const string TexturePayloadPath = "art/player-ktx2";
 
     /// <summary>The canonical path of the DLC custom data (the DLC pack's only entry).</summary>
     internal const string DlcGamePath = "data/dlc";
 
-    /// <summary>The exact RGBA8 payload the test-generated PNG decodes to.</summary>
-    internal static readonly byte[] ExpectedTexturePayload =
+    /// <summary>The exact straight-alpha RGBA8 pixels the test-generated PNG decodes to.</summary>
+    internal static readonly byte[] ExpectedSourcePixels =
     [
         255, 0, 0, 255,
         0, 255, 0, 128,

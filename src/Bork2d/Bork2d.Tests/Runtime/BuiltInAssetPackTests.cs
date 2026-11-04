@@ -26,9 +26,29 @@ public sealed class BuiltInAssetPackTests
 
     private static readonly string[] _builtInPaths =
     [
+        "present/fragment-spv",
+        "present/vertex-spv",
         "shader/sprite",
         "shader/sprite-spv",
         "shader/vertex-spv",
+        "textures/placeholder",
+        "textures/placeholder-ktx2",
+    ];
+
+    private static readonly byte[] _ktx2Identifier =
+    [
+        0xAB,
+        0x4B,
+        0x54,
+        0x58,
+        0x20,
+        0x32,
+        0x30,
+        0xBB,
+        0x0D,
+        0x0A,
+        0x1A,
+        0x0A,
     ];
 
     [Fact]
@@ -66,19 +86,55 @@ public sealed class BuiltInAssetPackTests
         byte[] vertexSpirV = await host.Service
             .LoadData("shader/vertex-spv")
             .WaitAsync(_loadTimeout);
+        byte[] presentVertexSpirV = await host.Service
+            .LoadData("present/vertex-spv")
+            .WaitAsync(_loadTimeout);
+        byte[] presentFragmentSpirV = await host.Service
+            .LoadData("present/fragment-spv")
+            .WaitAsync(_loadTimeout);
+        TextureDescriptor placeholder = await host.Service
+            .LoadAsset<TextureDescriptor>("textures/placeholder")
+            .WaitAsync(_loadTimeout);
+        byte[] placeholderPayload = await host.Service
+            .LoadData("textures/placeholder-ktx2")
+            .WaitAsync(_loadTimeout);
 
         Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(spriteSpirV));
         Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(vertexSpirV));
+        Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(presentVertexSpirV));
+        Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(presentFragmentSpirV));
+
+        // The placeholder is ordinary built-in pack content: an uncompressed RGBA8 KTX2 texture with
+        // a full mip chain, nearest filtering, and clamped wrapping.
+        Assert.Equal("textures/placeholder-ktx2", placeholder.Payload.Path);
+        Assert.Equal(8u, placeholder.Width);
+        Assert.Equal(8u, placeholder.Height);
+        Assert.Equal(TextureFormat.Rgba8, placeholder.Format);
+        Assert.Equal(TextureFilter.Nearest, placeholder.Filter);
+        Assert.Equal(TextureWrap.Clamp, placeholder.Wrap);
+        Assert.Equal(4u, placeholder.MipLevels);
+        Assert.NotEmpty(placeholderPayload);
+        Assert.True(
+            placeholderPayload.AsSpan(0, _ktx2Identifier.Length).SequenceEqual(_ktx2Identifier),
+            "The built-in placeholder payload must be a KTX2 file.");
 
         Assert.True(host.Service.Exists("shader/sprite"));
         Assert.True(host.Service.Exists("shader/sprite-spv"));
         Assert.True(host.Service.Exists("shader/vertex-spv"));
+        Assert.True(host.Service.Exists("present/vertex-spv"));
+        Assert.True(host.Service.Exists("present/fragment-spv"));
+        Assert.True(host.Service.Exists("textures/placeholder"));
+        Assert.True(host.Service.Exists("textures/placeholder-ktx2"));
         Assert.Equal(_builtInPaths, host.Service.Browse().Select(info => info.Path));
         Assert.All(
             host.Service.Browse(),
             info => Assert.Equal(AssetService.BuiltInPackDisplayPath, info.PackPath));
         Assert.True(Assert.Single(host.Service.Browse("shader/sprite-spv")).IsRaw);
         Assert.True(Assert.Single(host.Service.Browse("shader/vertex-spv")).IsRaw);
+        Assert.True(Assert.Single(host.Service.Browse("present/vertex-spv")).IsRaw);
+        Assert.True(Assert.Single(host.Service.Browse("present/fragment-spv")).IsRaw);
+        Assert.False(Assert.Single(host.Service.Browse("textures/placeholder")).IsRaw);
+        Assert.True(Assert.Single(host.Service.Browse("textures/placeholder-ktx2")).IsRaw);
 
         var catalog = Assert.IsAssignableFrom<IAssetCatalogVersion>(host.Service);
         Assert.Equal(1, catalog.CatalogVersion);
@@ -151,11 +207,17 @@ public sealed class BuiltInAssetPackTests
         IReadOnlyList<AssetInfo> browse = [];
         ShaderAsset? shader = null;
         byte[]? vertexSpirV = null;
+        TextureDescriptor? placeholder = null;
+        byte[]? placeholderPayload = null;
         game.OnSetup = engine =>
         {
             exists = engine.Assets.Exists("shader/sprite")
                 && engine.Assets.Exists("shader/sprite-spv")
-                && engine.Assets.Exists("shader/vertex-spv");
+                && engine.Assets.Exists("shader/vertex-spv")
+                && engine.Assets.Exists("present/vertex-spv")
+                && engine.Assets.Exists("present/fragment-spv")
+                && engine.Assets.Exists("textures/placeholder")
+                && engine.Assets.Exists("textures/placeholder-ktx2");
             browse = engine.Assets.Browse();
             shader = engine.Assets
                 .LoadAsset<ShaderAsset>("shader/sprite")
@@ -164,6 +226,16 @@ public sealed class BuiltInAssetPackTests
                 .GetResult();
             vertexSpirV = engine.Assets
                 .LoadData("shader/vertex-spv")
+                .WaitAsync(_loadTimeout)
+                .GetAwaiter()
+                .GetResult();
+            placeholder = engine.Assets
+                .LoadAsset<TextureDescriptor>("textures/placeholder")
+                .WaitAsync(_loadTimeout)
+                .GetAwaiter()
+                .GetResult();
+            placeholderPayload = engine.Assets
+                .LoadData("textures/placeholder-ktx2")
                 .WaitAsync(_loadTimeout)
                 .GetAwaiter()
                 .GetResult();
@@ -182,6 +254,12 @@ public sealed class BuiltInAssetPackTests
         Assert.NotNull(shader);
         Assert.Equal("main", shader!.EntryPoint);
         Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(vertexSpirV!));
+        Assert.NotNull(placeholder);
+        Assert.Equal(TextureFormat.Rgba8, placeholder!.Format);
+        Assert.Equal("textures/placeholder-ktx2", placeholder.Payload.Path);
+        Assert.True(
+            placeholderPayload!.AsSpan(0, _ktx2Identifier.Length).SequenceEqual(_ktx2Identifier),
+            "WithoutAssets must still serve the built-in placeholder KTX2 payload.");
         Assert.Equal(1, game.SetupCount);
     }
 

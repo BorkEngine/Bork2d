@@ -134,6 +134,8 @@ internal static class Program
             .WithPack(PackFileName, AssetsDirectoryName)
             .UseDefaultProcessors()
             .AddProcessor(new BuiltInVertexProcessor())
+            .AddProcessor(new BuiltInPresentProcessor())
+            .AddProcessor(new BuiltInPlaceholderProcessor())
             .Build();
 
         string[] arguments =

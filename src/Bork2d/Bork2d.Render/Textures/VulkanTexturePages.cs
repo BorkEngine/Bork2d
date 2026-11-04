@@ -14,10 +14,19 @@ namespace Bork2d.Render.Textures;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Images are <c>VK_FORMAT_R8G8B8A8_SRGB</c>, <c>SAMPLED | TRANSFER_DST</c>, optimal tiling, one
-/// mip/layer, created in <c>UNDEFINED</c> and moved to <c>SHADER_READ_ONLY_OPTIMAL</c> by the upload
-/// barrier chain. Samplers come from the shared <see cref="SpritePipeline"/> cache (no per-page
+/// Every page image uses the descriptor's concrete linear or BC Vulkan format and its full mip count,
+/// is <c>SAMPLED | TRANSFER_DST</c> with optimal tiling, and is created in <c>UNDEFINED</c> and moved
+/// to <c>SHADER_READ_ONLY_OPTIMAL</c> by one barrier range covering every mip. Each KTX2 level is
+/// copied from one staging buffer at its payload offset; compressed levels use a row length and image
+/// height rounded up to the 4x4 texel block (in texels), while uncompressed levels are tightly packed.
+/// Samplers come from the shared <see cref="SpritePipeline"/> cache (no per-page
 /// sampler). Uploads never block the render thread; only the startup placeholder waits its fence.
+/// </para>
+/// <para>
+/// The device's format properties are queried before each image is created: a format without
+/// <c>VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT</c> on optimal tiling is a fatal
+/// <see cref="Bork2dException"/> naming the format and the engine's desktop Vulkan 1.3
+/// <c>textureCompressionBC</c> requirement, never a placeholder or a different format.
 /// </para>
 /// <para>
 /// Capacity growth recreates the per-frame descriptor sets through <see cref="IBindlessPageWriter"/>
@@ -144,21 +153,41 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
                 $"The page index must be inside the current capacity of {_capacity} entries.");
         }
 
+        RenderTextureFormat format = RenderTextureFormat.Get(descriptor.Format);
+        FormatProperties formatProperties;
+        _device.Api.GetPhysicalDeviceFormatProperties(
+            _device.PhysicalDevice,
+            format.VulkanFormat,
+            out formatProperties);
+        if (!RenderTextureFormat.SupportsSampling(formatProperties))
+        {
+            throw RenderTextureFormat.CreateUnsupportedFormatException(format);
+        }
+
+        if (!Ktx2Reader.TryParse(payload, descriptor, out Ktx2Texture texture, out TexturePageFailure failure))
+        {
+            throw new Bork2dException(
+                $"Texture page {pageIndex} received a payload that is not a valid narrow-profile KTX2 "
+                    + $"file for {descriptor.Format} {descriptor.Width}x{descriptor.Height} "
+                    + $"({failure}). The page store validates content before upload; the startup "
+                    + "placeholder must be valid built-in pack content.");
+        }
+
         Vk vk = _device.Api;
         Device logicalDevice = _device.Device;
         var extent = new Extent3D
         {
-            Width = descriptor.Width,
-            Height = descriptor.Height,
+            Width = texture.Width,
+            Height = texture.Height,
             Depth = 1,
         };
         var imageInfo = new ImageCreateInfo
         {
             SType = StructureType.ImageCreateInfo,
             ImageType = ImageType.Type2D,
-            Format = Format.R8G8B8A8Srgb,
+            Format = format.VulkanFormat,
             Extent = extent,
-            MipLevels = 1,
+            MipLevels = (uint)texture.LevelCount,
             ArrayLayers = 1,
             Samples = SampleCountFlags.Count1Bit,
             Tiling = ImageTiling.Optimal,
@@ -171,7 +200,8 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
         {
             throw new Bork2dException(
                 $"vkCreateImage failed for texture page {pageIndex} with VkResult {result} "
-                    + $"({descriptor.Width}x{descriptor.Height}).");
+                    + $"({format.VulkanFormat}, {texture.Width}x{texture.Height}, "
+                    + $"{texture.LevelCount} mips).");
         }
 
         ImageView view = default;
@@ -198,7 +228,7 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
                 SType = StructureType.ImageViewCreateInfo,
                 Image = image,
                 ViewType = ImageViewType.Type2D,
-                Format = Format.R8G8B8A8Srgb,
+                Format = format.VulkanFormat,
                 Components = new ComponentMapping
                 {
                     R = ComponentSwizzle.Identity,
@@ -210,7 +240,7 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
                 {
                     AspectMask = ImageAspectFlags.ColorBit,
                     BaseMipLevel = 0,
-                    LevelCount = 1,
+                    LevelCount = (uint)texture.LevelCount,
                     BaseArrayLayer = 0,
                     LayerCount = 1,
                 },
@@ -232,7 +262,8 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
                 command.Buffer,
                 lease.Buffer,
                 image,
-                extent,
+                texture,
+                format,
                 pageIndex);
             SubmitUpload(command, pageIndex);
 
@@ -588,7 +619,8 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
         CommandBuffer commandBuffer,
         Buffer stagingBuffer,
         Image image,
-        Extent3D extent,
+        Ktx2Texture texture,
+        RenderTextureFormat format,
         int pageIndex)
     {
         Vk vk = _device.Api;
@@ -604,11 +636,13 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
                 $"vkBeginCommandBuffer failed for texture page {pageIndex} with VkResult {begin}.");
         }
 
+        // One barrier range covers every mip: the whole image moves to TRANSFER_DST before the copy
+        // loop and back to SHADER_READ_ONLY_OPTIMAL after it.
         ImageSubresourceRange range = new()
         {
             AspectMask = ImageAspectFlags.ColorBit,
             BaseMipLevel = 0,
-            LevelCount = 1,
+            LevelCount = (uint)texture.LevelCount,
             BaseArrayLayer = 0,
             LayerCount = 1,
         };
@@ -634,28 +668,39 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
         };
         vk.CmdPipelineBarrier2(commandBuffer, &toTransferDependency);
 
-        var region = new BufferImageCopy
+        for (var level = 0; level < texture.LevelCount; level++)
         {
-            BufferOffset = 0,
-            BufferRowLength = 0,
-            BufferImageHeight = 0,
-            ImageSubresource = new ImageSubresourceLayers
+            Ktx2Level levelData = texture.Levels[level];
+            int levelWidth = Ktx2Reader.LevelExtent(texture.Width, level);
+            int levelHeight = Ktx2Reader.LevelExtent(texture.Height, level);
+            var region = new BufferImageCopy
             {
-                AspectMask = ImageAspectFlags.ColorBit,
-                MipLevel = 0,
-                BaseArrayLayer = 0,
-                LayerCount = 1,
-            },
-            ImageOffset = new Offset3D(0, 0, 0),
-            ImageExtent = extent,
-        };
-        vk.CmdCopyBufferToImage(
-            commandBuffer,
-            stagingBuffer,
-            image,
-            ImageLayout.TransferDstOptimal,
-            1,
-            &region);
+                BufferOffset = levelData.ByteOffset,
+                BufferRowLength = format.IsBlockCompressed ? (uint)Align(levelWidth, 4) : 0u,
+                BufferImageHeight = format.IsBlockCompressed ? (uint)Align(levelHeight, 4) : 0u,
+                ImageSubresource = new ImageSubresourceLayers
+                {
+                    AspectMask = ImageAspectFlags.ColorBit,
+                    MipLevel = (uint)level,
+                    BaseArrayLayer = 0,
+                    LayerCount = 1,
+                },
+                ImageOffset = new Offset3D(0, 0, 0),
+                ImageExtent = new Extent3D
+                {
+                    Width = (uint)levelWidth,
+                    Height = (uint)levelHeight,
+                    Depth = 1,
+                },
+            };
+            vk.CmdCopyBufferToImage(
+                commandBuffer,
+                stagingBuffer,
+                image,
+                ImageLayout.TransferDstOptimal,
+                1,
+                &region);
+        }
 
         var toShaderRead = new ImageMemoryBarrier2
         {
@@ -686,6 +731,9 @@ internal sealed unsafe class VulkanTexturePages : ITexturePageGpu
                 $"vkEndCommandBuffer failed for texture page {pageIndex} with VkResult {end}.");
         }
     }
+
+    private static int Align(int value, int alignment)
+        => ((value + alignment - 1) / alignment) * alignment;
 
     private void SubmitUpload(CommandSlot command, int pageIndex)
     {

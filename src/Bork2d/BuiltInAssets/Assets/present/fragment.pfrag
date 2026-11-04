@@ -1,0 +1,29 @@
+#version 460
+
+// Bork2d built-in present fragment shader.
+//
+// The 2D passes render linear color into the scene image. This stage applies the standard sRGB
+// opto-electronic transfer function and writes the encoded color into the UNORM target, so the
+// presented image keeps the visual result of the prior sRGB attachment. Alpha is linear and is
+// passed through unchanged.
+//
+//   linear <= 0.0031308: 12.92 * linear
+//   otherwise:           1.055 * pow(linear, 1 / 2.4) - 0.055
+
+layout(set = 0, binding = 0) uniform sampler2D sceneColor;
+
+layout(location = 0) in vec2 vTargetUv;
+layout(location = 0) out vec4 outColor;
+
+vec3 LinearToSrgb(vec3 linear)
+{
+    vec3 low = linear * 12.92;
+    vec3 high = (1.055 * pow(max(linear, vec3(0.0)), vec3(1.0 / 2.4))) - 0.055;
+    return mix(high, low, lessThanEqual(linear, vec3(0.0031308)));
+}
+
+void main()
+{
+    vec4 color = texture(sceneColor, vTargetUv);
+    outColor = vec4(LinearToSrgb(color.rgb), color.a);
+}

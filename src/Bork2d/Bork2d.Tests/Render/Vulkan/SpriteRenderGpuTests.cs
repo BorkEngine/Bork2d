@@ -94,7 +94,7 @@ public sealed class SpriteRenderGpuTests
             RenderStats stats = renderer.RenderStats;
             Assert.Equal(2, stats.Cameras);
             Assert.Equal(2, stats.NonEmptyCameras);
-            Assert.Equal(2, stats.DrawCalls);
+            Assert.Equal(3, stats.DrawCalls);
             Assert.Equal(5, stats.Instances);
             Assert.Equal(3, stats.TexturePages);
             Assert.Equal(
@@ -135,7 +135,7 @@ public sealed class SpriteRenderGpuTests
             RenderStats zero = renderer.RenderStats;
             Assert.Equal(0, zero.Cameras);
             Assert.Equal(0, zero.NonEmptyCameras);
-            Assert.Equal(0, zero.DrawCalls);
+            Assert.Equal(1, zero.DrawCalls);
             Assert.Equal(0, zero.Instances);
             Assert.Equal(1, zero.TexturePages);
 
@@ -152,14 +152,14 @@ public sealed class SpriteRenderGpuTests
             RenderStats preserve = renderer.RenderStats;
             Assert.Equal(1, preserve.Cameras);
             Assert.Equal(0, preserve.NonEmptyCameras);
-            Assert.Equal(0, preserve.DrawCalls);
+            Assert.Equal(1, preserve.DrawCalls);
 
             PublishFrame(
                 renderer,
                 producer,
                 snapshot => AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Depth));
             RenderStats depth = renderer.RenderStats;
-            Assert.Equal(0, depth.DrawCalls);
+            Assert.Equal(1, depth.DrawCalls);
             Assert.Contains(
                 provider.Entries,
                 entry => entry.Message.Contains("ClearKind.Depth", StringComparison.Ordinal));
@@ -168,7 +168,7 @@ public sealed class SpriteRenderGpuTests
                 renderer,
                 producer,
                 snapshot => AddCamera(snapshot, zIndex: 0, mask: 1u, clear: ClearKind.Color));
-            Assert.Equal(0, renderer.RenderStats.DrawCalls);
+            Assert.Equal(1, renderer.RenderStats.DrawCalls);
 
             SpriteAsset placeholder = MakeSprite(texture: null, scale: 8f);
             PublishFrame(
@@ -180,7 +180,7 @@ public sealed class SpriteRenderGpuTests
                     AddSprite(snapshot, placeholder, layer: 1u);
                 });
             RenderStats drawn = renderer.RenderStats;
-            Assert.Equal(1, drawn.DrawCalls);
+            Assert.Equal(2, drawn.DrawCalls);
             Assert.Equal(1, drawn.NonEmptyCameras);
             Assert.Equal(0, drawn.SkippedSprites);
             Assert.Equal(0, drawn.ValidationErrors);
@@ -239,7 +239,7 @@ public sealed class SpriteRenderGpuTests
             AssertOpaqueBlackPixel(result, x: width - 1, y: height - 1, "the bottom-right pixel");
 
             Assert.Equal(1, renderer.RenderStats.Cameras);
-            Assert.Equal(0, renderer.RenderStats.DrawCalls);
+            Assert.Equal(1, renderer.RenderStats.DrawCalls);
             Assert.Null(renderer.FatalException);
             StopAndAssertClean(renderer);
         }
@@ -287,7 +287,7 @@ public sealed class SpriteRenderGpuTests
             FrameCaptureResult result = await capture.WaitAsync(_timeout);
 
             // The generated texture is opaque magenta, so the half-alpha white tint expands in
-            // linear space to (0.5, 0, 0.5) over the frame clear's opaque black and the sRGB target
+            // linear space to (0.5, 0, 0.5) over the frame clear's opaque black and the present pass
             // encodes it; the alpha channel is linear and blends to 0.75.
             byte blended = LinearToSrgbByte(tintAlpha);
             byte blendedAlpha = (byte)Math.Clamp(
@@ -308,7 +308,7 @@ public sealed class SpriteRenderGpuTests
             AssertOpaqueBlackPixel(result, x: width - 1, y: 0, "the uncovered top-right pixel");
             AssertOpaqueBlackPixel(result, x: 0, y: height - 1, "the uncovered bottom-left pixel");
 
-            Assert.Equal(1, renderer.RenderStats.DrawCalls);
+            Assert.Equal(2, renderer.RenderStats.DrawCalls);
             Assert.Equal(1, renderer.RenderStats.Instances);
             Assert.Null(renderer.FatalException);
             StopAndAssertClean(renderer);
@@ -355,7 +355,7 @@ public sealed class SpriteRenderGpuTests
             Assert.Equal(TexturePageStore.DefaultUploadBudgetBytes, pages.UploadBudgetBytes);
             Assert.Equal(TexturePageStore.DefaultResidencyBudgetBytes, pages.ResidencyBudgetBytes);
             RenderStats stats = renderer.RenderStats;
-            Assert.Equal(1, stats.DrawCalls);
+            Assert.Equal(2, stats.DrawCalls);
             Assert.Equal(1, stats.Instances);
             Assert.Equal(1, stats.TexturePages);
             Assert.Equal(0, stats.SkippedSprites);
@@ -453,7 +453,7 @@ public sealed class SpriteRenderGpuTests
 
             RenderStats stats = renderer.RenderStats;
             Assert.Equal(spriteCount, stats.Instances);
-            Assert.Equal(1, stats.DrawCalls);
+            Assert.Equal(2, stats.DrawCalls);
             Assert.Equal(0, stats.SkippedSprites);
             Assert.True(renderer.InstanceCapacityHighWater >= 2048);
             Assert.True(
@@ -525,7 +525,7 @@ public sealed class SpriteRenderGpuTests
             Assert.Equal(TexturePageStore.DefaultResidencyBudgetBytes, pages.ResidencyBudgetBytes);
             RenderStats stats = renderer.RenderStats;
             Assert.Equal(textureCount, stats.Instances);
-            Assert.Equal(1, stats.DrawCalls);
+            Assert.Equal(2, stats.DrawCalls);
             Assert.Equal(textureCount + 1, stats.TexturePages);
             Assert.Equal(512, stats.TexturePageCapacity);
             Assert.Equal(0, stats.ValidationErrors);
@@ -593,7 +593,7 @@ public sealed class SpriteRenderGpuTests
             Assert.Equal(startupCapacity, pages.TexturePageCapacityInEntries);
             RenderStats stats = renderer.RenderStats;
             Assert.Equal(textureCount, stats.Instances);
-            Assert.Equal(1, stats.DrawCalls);
+            Assert.Equal(2, stats.DrawCalls);
             Assert.Equal(textureCount + 1, stats.TexturePages);
             Assert.Equal(startupCapacity, stats.TexturePageCapacity);
             Assert.Equal(0, stats.ValidationErrors);
@@ -809,7 +809,7 @@ public sealed class SpriteRenderGpuTests
             RenderStats stats = renderer.RenderStats;
             Assert.Equal(1, stats.Cameras);
             Assert.Equal(1, stats.NonEmptyCameras);
-            Assert.Equal(1, stats.DrawCalls);
+            Assert.Equal(2, stats.DrawCalls);
             Assert.Equal(1, stats.Instances);
             Assert.Equal(0, stats.SkippedSprites);
             Assert.Equal(0, stats.ValidationErrors);
@@ -855,7 +855,15 @@ public sealed class SpriteRenderGpuTests
     public void ResidencyBudgetEvictsAndReloadsPagesWithoutValidationErrors()
     {
         const int textureCount = 8;
-        const int pageBytes = 4 * 4 * 4;
+        int pageBytes = Ktx2TextureFactory.BakeSolid(
+                TextureFormat.Rgba8,
+                4,
+                4,
+                255,
+                0,
+                255)
+            .Payload
+            .Length;
         using var assets = new TestRendererAssets();
         var sprites = new SpriteAsset[textureCount];
         for (var index = 0; index < textureCount; index++)
@@ -1224,10 +1232,11 @@ public sealed class SpriteRenderGpuTests
             || message.Contains("below the required 1.3.0", StringComparison.Ordinal)
             || message.Contains("requires Vulkan 1.3.0", StringComparison.Ordinal)
             || message.Contains("vkCreateInstance failed", StringComparison.Ordinal)
+            || message.Contains("textureCompressionBC", StringComparison.Ordinal)
             || message.Contains(
                 "maxPerStageDescriptorUpdateAfterBindSampledImages=0",
                 StringComparison.Ordinal)
-            || message.Contains("No sRGB offscreen color format", StringComparison.Ordinal);
+            || message.Contains("No UNORM offscreen color format", StringComparison.Ordinal);
     }
 
     private sealed class Producer

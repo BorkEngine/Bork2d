@@ -1,14 +1,14 @@
 namespace Bork2d.Bake.Textures;
 
 /// <summary>
-/// The stable <c>BK4xxx</c> diagnostic codes for texture decoding, dimensions, and payload emission.
+/// The stable <c>BK4xxx</c> texture decode/probe codes and <c>BK91xx</c> bake-side KTX2/BC codes.
 /// </summary>
 /// <remarks>
 /// <para>
-/// This file owns only the texture decode/probe range. Sidecar parsing was retired with the
-/// hand-written parser: sidecars are bound by the shared shape-driven TOML binder and report the
-/// <c>BK2xxx</c> codes. Texture-pipeline discovery codes were retired with
-/// <c>TexturePipeline</c>; discovery and output-path failures are the generic processor codes.
+/// This file owns the texture decode/probe range and the bake-side KTX2/BC sub-range. Sidecar parsing
+/// is owned by the shared shape-driven TOML binder and reports the <c>BK2xxx</c> codes; an invalid
+/// <c>type</c> or <c>compression</c> value is therefore a <c>BK2006</c> before either bake code can
+/// run. Discovery and output-path failures are the generic processor codes.
 /// </para>
 /// <para>
 /// Codes are stable once a range is released. The published table belongs to the documentation work
@@ -40,4 +40,13 @@ internal static class TextureDiagnosticCodes
     /// does not end with its end-of-image marker.
     /// </summary>
     internal const string TextureTruncated = "BK4015";
+
+    /// <summary>A texture could not be baked: block encoding or KTX2 container writing failed.</summary>
+    internal const string TextureBake = "BK9100";
+
+    /// <summary>
+    /// The sidecar's channel type and compression mode do not map to a texture format. The TOML
+    /// binder rejects an invalid enum value first, so this guards a programmatic sidecar.
+    /// </summary>
+    internal const string TextureFormatMapping = "BK9101";
 }

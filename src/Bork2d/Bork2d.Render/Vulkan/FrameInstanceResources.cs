@@ -9,7 +9,8 @@ namespace Bork2d.Render.Vulkan;
 
 /// <summary>
 /// One GPU frame's growable instance buffer (set 0 binding 0), bindless page array (set 0 binding 1),
-/// and growable global uniform buffer (set 1 binding 2) (M8 §6.5/§6.6, shader ABI v2).
+/// growable global uniform buffer (set 1 binding 2), and present scene-image sampler (the present
+/// pipeline's set 0 binding 0) (M8 §6.5/§6.6, shader ABI v2).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -38,7 +39,13 @@ namespace Bork2d.Render.Vulkan;
 /// <see cref="InitialGlobalBlockCapacity"/> blocks and grows by the same power-of-two, fence-gated
 /// rule as the instance buffer. The sprite planner writes exactly one 144-byte block per shader run
 /// and the sprite pass binds each run with that run's dynamic byte offset.
-/// <see cref="Destroy"/> is best-effort, idempotent, and never throws (D-M6-27).
+/// </para>
+/// <para>
+/// The present set holds the linear scene image view bound to the present pipeline's sampler; the
+/// owning frame calls <see cref="WritePresentView"/> after creating or recreating its scene image, and
+/// <see cref="RecreateBindless(int)"/> rewrites it from the last view. It is a dedicated descriptor
+/// set because the present pipeline has its own layout and must not reuse or change the sprite
+/// bindless set. <see cref="Destroy"/> is best-effort, idempotent, and never throws (D-M6-27).
 /// </para>
 /// </remarks>
 internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuffer, IGlobalUniformBuffer
@@ -55,6 +62,8 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     private readonly ILogger _logger;
     private readonly DescriptorSetLayout _layout;
     private readonly DescriptorSetLayout _globalLayout;
+    private readonly DescriptorSetLayout _presentLayout;
+    private readonly Sampler _presentSampler;
     private readonly ulong _maxStorageBufferRange;
     private readonly uint _maxUniformBufferRange;
     private readonly int _frameIndex;
@@ -74,6 +83,8 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     private DescriptorPool _pool;
     private DescriptorSet _descriptorSet;
     private DescriptorSet _globalSet;
+    private DescriptorSet _presentSet;
+    private ImageView _sceneView;
     private int _pageCapacity;
     private int _growthCount;
     private int _destroyed;
@@ -97,9 +108,12 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         int globalBlockStride,
         DescriptorSetLayout layout,
         DescriptorSetLayout globalLayout,
+        DescriptorSetLayout presentLayout,
+        Sampler presentSampler,
         DescriptorPool pool,
         DescriptorSet descriptorSet,
         DescriptorSet globalSet,
+        DescriptorSet presentSet,
         ulong maxStorageBufferRange,
         uint maxUniformBufferRange,
         int pageCapacity,
@@ -123,9 +137,12 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         _globalBlockStride = globalBlockStride;
         _layout = layout;
         _globalLayout = globalLayout;
+        _presentLayout = presentLayout;
+        _presentSampler = presentSampler;
         _pool = pool;
         _descriptorSet = descriptorSet;
         _globalSet = globalSet;
+        _presentSet = presentSet;
         _maxStorageBufferRange = maxStorageBufferRange;
         _maxUniformBufferRange = maxUniformBufferRange;
         _pageCapacity = pageCapacity;
@@ -185,6 +202,12 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     /// <summary>Gets the frame's global uniform descriptor set.</summary>
     internal DescriptorSet GlobalDescriptorSet => _globalSet;
 
+    /// <summary>
+    /// Gets the frame's present descriptor set: the linear scene image view bound to the present
+    /// pipeline's combined image sampler.
+    /// </summary>
+    internal DescriptorSet PresentDescriptorSet => _presentSet;
+
     /// <summary>Gets the current bindless page capacity (the set's variable descriptor count).</summary>
     internal int PageCapacity => _pageCapacity;
 
@@ -198,6 +221,9 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     /// <param name="frameIndex">The GPU frame index, used for debug names only.</param>
     /// <param name="pipeline">
     /// The sprite pipeline that owns the descriptor-set layout and validates the bindless limit.
+    /// </param>
+    /// <param name="present">
+    /// The present pipeline that owns the present descriptor-set layout and sampler.
     /// </param>
     /// <param name="pageCapacity">The initial bindless page capacity, including the placeholder.</param>
     /// <param name="maxStorageBufferRange">The device's <c>maxStorageBufferRange</c> limit.</param>
@@ -215,6 +241,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         PhysicalDevice physicalDevice,
         int frameIndex,
         SpritePipeline pipeline,
+        PresentPipeline present,
         int pageCapacity,
         uint maxStorageBufferRange,
         uint maxUniformBufferRange,
@@ -223,6 +250,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(pipeline);
+        ArgumentNullException.ThrowIfNull(present);
         ArgumentNullException.ThrowIfNull(logger);
         if (pageCapacity <= 0)
         {
@@ -260,6 +288,7 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         var pool = default(DescriptorPool);
         var descriptorSet = default(DescriptorSet);
         var globalDescriptorSet = default(DescriptorSet);
+        var presentDescriptorSet = default(DescriptorSet);
         var buffer = default(Buffer);
         var memory = default(DeviceMemory);
         var globalBuffer = default(Buffer);
@@ -302,11 +331,13 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
                 logicalDevice,
                 pipeline.DescriptorSetLayout,
                 pipeline.GlobalSetLayout,
+                present.DescriptorSetLayout,
                 pageCapacity,
                 frameIndex,
                 out pool,
                 out descriptorSet,
-                out globalDescriptorSet);
+                out globalDescriptorSet,
+                out presentDescriptorSet);
 
             var resources = new FrameInstanceResources(
                 vk,
@@ -327,9 +358,12 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
                 globalBlockStride,
                 pipeline.DescriptorSetLayout,
                 pipeline.GlobalSetLayout,
+                present.DescriptorSetLayout,
+                present.Sampler,
                 pool,
                 descriptorSet,
                 globalDescriptorSet,
+                presentDescriptorSet,
                 maxStorageBufferRange,
                 maxUniformBufferRange,
                 pageCapacity,
@@ -359,6 +393,11 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
                     ObjectType.DescriptorSet,
                     (nint)globalDescriptorSet.Handle,
                     $"Bork2d frame {frameIndex} global descriptor set");
+                instance.SetObjectName(
+                    logicalDevice.Handle,
+                    ObjectType.DescriptorSet,
+                    (nint)presentDescriptorSet.Handle,
+                    $"Bork2d frame {frameIndex} present descriptor set");
             }
 
             return resources;
@@ -588,7 +627,8 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
     /// <remarks>
     /// The caller must have waited every in-flight frame fence first (capacity growth happens
     /// between frames), and must rewrite every resident page descriptor afterwards because the new
-    /// set is empty. Bindings 0 and the global set are rewritten here from the live buffers.
+    /// set is empty. Bindings 0, the global set, and the present set are rewritten here from the live
+    /// buffers and the last scene view.
     /// </remarks>
     /// <param name="pageCapacity">The new bindless page capacity, including the placeholder.</param>
     /// <exception cref="Bork2dException">The pool or sets could not be created.</exception>
@@ -602,16 +642,19 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         var pool = default(DescriptorPool);
         var descriptorSet = default(DescriptorSet);
         var globalDescriptorSet = default(DescriptorSet);
+        var presentDescriptorSet = default(DescriptorSet);
         CreateDescriptorPoolAndSet(
             _vk,
             _device,
             _layout,
             _globalLayout,
+            _presentLayout,
             pageCapacity,
             _frameIndex,
             out pool,
             out descriptorSet,
-            out globalDescriptorSet);
+            out globalDescriptorSet,
+            out presentDescriptorSet);
 
         // The new pool/sets exist before the old set is destroyed, so a failure leaves the frame
         // usable with its previous capacity.
@@ -619,9 +662,58 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         _pool = pool;
         _descriptorSet = descriptorSet;
         _globalSet = globalDescriptorSet;
+        _presentSet = presentDescriptorSet;
         _pageCapacity = pageCapacity;
         WriteInstanceBuffer();
         WriteGlobalBuffer();
+        WritePresentBuffer();
+    }
+
+    /// <summary>
+    /// Writes the frame's linear scene image view into the present descriptor set.
+    /// </summary>
+    /// <remarks>
+    /// The owning frame calls this after it creates or recreates its scene image. It is safe only when
+    /// the frame is not in flight (startup, swapchain recreation after <c>vkDeviceWaitIdle</c>, or a
+    /// bindless recreation after every frame fence was observed).
+    /// </remarks>
+    /// <param name="sceneView">The scene image view, in <c>SHADER_READ_ONLY_OPTIMAL</c> when sampled.</param>
+    internal void WritePresentView(ImageView sceneView)
+    {
+        _sceneView = sceneView;
+        WritePresentBuffer();
+    }
+
+    /// <summary>Destroys the descriptor set/pool and both buffers; never throws.</summary>
+    internal void Destroy()
+    {
+        if (Interlocked.Exchange(ref _destroyed, 1) != 0)
+        {
+            return;
+        }
+
+        DestroyBestEffort(
+            _vk,
+            _device,
+            _logger,
+            _pool,
+            _buffer,
+            _memory,
+            _mapped,
+            _globalBuffer,
+            _globalMemory,
+            _globalMapped);
+        _pool = default;
+        _buffer = default;
+        _memory = default;
+        _mapped = null;
+        _globalBuffer = default;
+        _globalMemory = default;
+        _globalMapped = null;
+        _descriptorSet = default;
+        _globalSet = default;
+        _presentSet = default;
+        _sceneView = default;
     }
 
     /// <summary>
@@ -656,36 +748,6 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             PImageInfo = &imageInfo,
         };
         _vk.UpdateDescriptorSets(_device, 1, &write, 0, null);
-    }
-
-    /// <summary>Destroys the descriptor set/pool and both buffers; never throws.</summary>
-    internal void Destroy()
-    {
-        if (Interlocked.Exchange(ref _destroyed, 1) != 0)
-        {
-            return;
-        }
-
-        DestroyBestEffort(
-            _vk,
-            _device,
-            _logger,
-            _pool,
-            _buffer,
-            _memory,
-            _mapped,
-            _globalBuffer,
-            _globalMemory,
-            _globalMapped);
-        _pool = default;
-        _buffer = default;
-        _memory = default;
-        _mapped = null;
-        _globalBuffer = default;
-        _globalMemory = default;
-        _globalMapped = null;
-        _descriptorSet = default;
-        _globalSet = default;
     }
 
     private static int AlignBlockStride(ulong alignment, int frameIndex)
@@ -857,13 +919,15 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         Device device,
         DescriptorSetLayout layout,
         DescriptorSetLayout globalLayout,
+        DescriptorSetLayout presentLayout,
         int pageCapacity,
         int frameIndex,
         out DescriptorPool pool,
         out DescriptorSet descriptorSet,
-        out DescriptorSet globalDescriptorSet)
+        out DescriptorSet globalDescriptorSet,
+        out DescriptorSet presentDescriptorSet)
     {
-        DescriptorPoolSize* poolSizes = stackalloc DescriptorPoolSize[3];
+        DescriptorPoolSize* poolSizes = stackalloc DescriptorPoolSize[4];
         poolSizes[0] = new DescriptorPoolSize
         {
             Type = DescriptorType.StorageBuffer,
@@ -879,12 +943,20 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             Type = DescriptorType.UniformBufferDynamic,
             DescriptorCount = 1,
         };
+
+        // The present set samples the linear scene image with its own sampler; it is separate from
+        // the bindless page array so the present pipeline keeps a one-binding layout.
+        poolSizes[3] = new DescriptorPoolSize
+        {
+            Type = DescriptorType.CombinedImageSampler,
+            DescriptorCount = 1,
+        };
         var poolInfo = new DescriptorPoolCreateInfo
         {
             SType = StructureType.DescriptorPoolCreateInfo,
             Flags = DescriptorPoolCreateFlags.UpdateAfterBindBit,
-            MaxSets = 2,
-            PoolSizeCount = 3,
+            MaxSets = 3,
+            PoolSizeCount = 4,
             PPoolSizes = poolSizes,
         };
         Result result = vk.CreateDescriptorPool(device, in poolInfo, null, out pool);
@@ -944,6 +1016,27 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
         }
 
         globalDescriptorSet = allocatedGlobal;
+
+        DescriptorSetLayout* presentSetLayouts = &presentLayout;
+        var presentSetInfo = new DescriptorSetAllocateInfo
+        {
+            SType = StructureType.DescriptorSetAllocateInfo,
+            DescriptorPool = pool,
+            DescriptorSetCount = 1,
+            PSetLayouts = presentSetLayouts,
+        };
+        var allocatedPresent = default(DescriptorSet);
+        result = vk.AllocateDescriptorSets(device, in presentSetInfo, &allocatedPresent);
+        if (result != Result.Success)
+        {
+            vk.DestroyDescriptorPool(device, pool, null);
+            pool = default;
+            throw new Bork2dException(
+                $"vkAllocateDescriptorSets failed for frame {frameIndex}'s present set with "
+                    + $"VkResult {result}.");
+        }
+
+        presentDescriptorSet = allocatedPresent;
     }
 
     private void WriteInstanceBuffer()
@@ -984,6 +1077,32 @@ internal sealed unsafe class FrameInstanceResources : IDisposable, IInstanceBuff
             DescriptorCount = 1,
             DescriptorType = DescriptorType.UniformBufferDynamic,
             PBufferInfo = &bufferInfo,
+        };
+        _vk.UpdateDescriptorSets(_device, 1, &write, 0, null);
+    }
+
+    private void WritePresentBuffer()
+    {
+        if (_sceneView.Handle == 0)
+        {
+            return;
+        }
+
+        var imageInfo = new DescriptorImageInfo
+        {
+            Sampler = _presentSampler,
+            ImageView = _sceneView,
+            ImageLayout = ImageLayout.ShaderReadOnlyOptimal,
+        };
+        var write = new WriteDescriptorSet
+        {
+            SType = StructureType.WriteDescriptorSet,
+            DstSet = _presentSet,
+            DstBinding = PresentPipeline.SceneBinding,
+            DstArrayElement = 0,
+            DescriptorCount = 1,
+            DescriptorType = DescriptorType.CombinedImageSampler,
+            PImageInfo = &imageInfo,
         };
         _vk.UpdateDescriptorSets(_device, 1, &write, 0, null);
     }

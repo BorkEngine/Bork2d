@@ -109,6 +109,7 @@ public sealed class DeviceSelectionPolicyTests
     [InlineData("descriptorBindingSampledImageUpdateAfterBind")]
     [InlineData("descriptorBindingUpdateUnusedWhilePending")]
     [InlineData("descriptorBindingVariableDescriptorCount")]
+    [InlineData("textureCompressionBC")]
     public void EvaluateRejectsEachMissingRequiredFeature(string featureName)
     {
         VulkanFeatureSet features = new(
@@ -123,7 +124,8 @@ public sealed class DeviceSelectionPolicyTests
             DescriptorBindingUpdateUnusedWhilePending:
                 featureName != "descriptorBindingUpdateUnusedWhilePending",
             DescriptorBindingVariableDescriptorCount:
-                featureName != "descriptorBindingVariableDescriptorCount");
+                featureName != "descriptorBindingVariableDescriptorCount",
+            TextureCompressionBC: featureName != "textureCompressionBC");
 
         DeviceEvaluation evaluation = VulkanDevicePolicy.Evaluate(
             Candidate(features: features),
@@ -131,6 +133,19 @@ public sealed class DeviceSelectionPolicyTests
 
         Assert.False(evaluation.Accepted);
         Assert.Contains(featureName, evaluation.RejectionReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EvaluateRejectsADeviceWithoutTextureCompressionBCAndNamesTheDesktopRequirement()
+    {
+        DeviceCandidate candidate = Candidate(
+            features: VulkanFeatureSet.Required with { TextureCompressionBC = false });
+
+        DeviceEvaluation evaluation = VulkanDevicePolicy.Evaluate(candidate, requirePresent: false);
+
+        Assert.False(evaluation.Accepted);
+        Assert.Contains("textureCompressionBC", evaluation.RejectionReason, StringComparison.Ordinal);
+        Assert.Contains("desktop Vulkan 1.3", evaluation.RejectionReason, StringComparison.Ordinal);
     }
 
     [Fact]

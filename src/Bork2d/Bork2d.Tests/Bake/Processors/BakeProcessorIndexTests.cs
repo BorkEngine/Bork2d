@@ -60,8 +60,8 @@ public sealed class BakeProcessorIndexTests
         BakedAssetIndex index = BakedAssetIndex.Build(
             [],
             [
-                ProcessorData("art/player-raw"),
-                ProcessorData("art/player-raw"),
+                ProcessorData("art/player-ktx2"),
+                ProcessorData("art/player-ktx2"),
             ],
             diagnostics);
 
@@ -70,7 +70,7 @@ public sealed class BakeProcessorIndexTests
         Assert.Contains("ProcessorData", diagnostic.Message, StringComparison.Ordinal);
         Assert.Contains(
             index.Entries,
-            entry => entry.Path == "art/player-raw"
+            entry => entry.Path == "art/player-ktx2"
                 && entry.Kind == BakedAssetEntryKind.ProcessorData);
     }
 
@@ -82,7 +82,7 @@ public sealed class BakeProcessorIndexTests
             new ProcessorRefAsset
             {
                 Texture = "art/player",
-                Payload = "art/player-raw",
+                Payload = "art/player-ktx2",
             },
             out BakeProcessorOutput output,
             diagnostics);
@@ -111,7 +111,7 @@ public sealed class BakeProcessorIndexTests
     public void ProcessorAssetReferenceToARawPayloadIsBK3003()
     {
         BakeDiagnostic diagnostic = SingleProcessorReferenceError(
-            new ProcessorRefAsset { Texture = "art/player-raw" },
+            new ProcessorRefAsset { Texture = "art/player-ktx2" },
             BakeDiagnosticCodes.ReferenceWrongKind);
 
         Assert.Equal("Texture", diagnostic.MemberPath);
@@ -159,7 +159,7 @@ public sealed class BakeProcessorIndexTests
             [],
             [
                 ProcessorAsset("art/player", _textureType),
-                ProcessorData("art/player-raw"),
+                ProcessorData("art/player-ktx2"),
             ],
             diagnostics);
 
@@ -167,7 +167,7 @@ public sealed class BakeProcessorIndexTests
             new ProcessorRefAsset
             {
                 Texture = "art/player",
-                Payload = "art/player-raw",
+                Payload = "art/player-ktx2",
             },
             diagnostics);
 
@@ -229,7 +229,7 @@ public sealed class BakeProcessorIndexTests
             [
                 output,
                 ProcessorAsset("art/player", _textureType),
-                ProcessorData("art/player-raw"),
+                ProcessorData("art/player-ktx2"),
             ],
             diagnostics);
     }

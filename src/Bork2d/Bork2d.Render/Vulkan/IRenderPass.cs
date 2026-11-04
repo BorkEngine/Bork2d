@@ -10,8 +10,8 @@ namespace Bork2d.Render.Vulkan;
 /// <remarks>
 /// <para>
 /// Passes are registered in one ordered <see cref="RenderPassRegistry"/>. <see cref="Plan"/> runs in
-/// registration order and may only read the snapshot and the frame's target format, write its own
-/// plan and the per-run global uniform blocks, and add its counts to the shared
+/// registration order and may only read the snapshot and the scene color format, write its own plan
+/// and the per-run global uniform blocks, and add its counts to the shared
 /// <see cref="RenderPassStats"/>; <see cref="Record"/> runs in the same order, so the recorded draw
 /// order is deterministic. A new renderable kind adds an engine producer and one pass here; no
 /// central frame-loop plan/record switch changes.
@@ -31,13 +31,16 @@ internal interface IRenderPass
     /// Plans the snapshot data this pass consumes and adds its counts to the aggregate.
     /// </summary>
     /// <param name="snapshot">The consumed snapshot; read-only and never mutated.</param>
-    /// <param name="framebufferWidth">The target/framebuffer width in pixels.</param>
-    /// <param name="framebufferHeight">The target/framebuffer height in pixels.</param>
+    /// <param name="framebufferWidth">The scene/target width in pixels.</param>
+    /// <param name="framebufferHeight">The scene/target height in pixels.</param>
     /// <param name="instances">The frame's instance sink, after its fence has been observed.</param>
     /// <param name="globals">
     /// The frame's global uniform sink; the sprite pass writes the frame's single time block.
     /// </param>
-    /// <param name="targetFormat">The target's sRGB output color format for this frame.</param>
+    /// <param name="sceneFormat">
+    /// The linear scene color format the 2D pipelines are created for; it is independent of the final
+    /// target format.
+    /// </param>
     /// <param name="stats">The registry-owned aggregate this pass contributes to.</param>
     void Plan(
         FrameSnapshot snapshot,
@@ -45,7 +48,7 @@ internal interface IRenderPass
         int framebufferHeight,
         IInstanceBuffer instances,
         IGlobalUniformBuffer globals,
-        Format targetFormat,
+        Format sceneFormat,
         RenderPassStats stats);
 
     /// <summary>Records this pass's commands into the frame command buffer.</summary>

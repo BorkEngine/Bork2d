@@ -1,4 +1,5 @@
 using System.Numerics;
+using Bork2d.Bake;
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Mathematics;
@@ -8,6 +9,7 @@ using Bork2d.Render.Shaders;
 using Bork2d.Render.Sprites;
 using Bork2d.Render.Textures;
 using Bork2d.Tests.TestDoubles;
+using Bork2d.Tests.TestSupport;
 using Microsoft.Extensions.Logging;
 using Silk.NET.Vulkan;
 using Xunit;
@@ -1550,7 +1552,18 @@ public sealed class SpriteFramePlannerTests
             });
             ILogger logger = _loggerFactory.CreateLogger("Bork2d.Render");
             Store = new TexturePageStore(Assets, Gpu, TexturePageCapacity.Initial, 16384, logger);
-            Store.Start();
+            BakedTexture placeholder = Ktx2TextureFactory.BakeSolid(
+                TextureFormat.Rgba8,
+                TexturePlaceholder.Size,
+                TexturePlaceholder.Size);
+            Store.Start(
+                Ktx2TextureFactory.Descriptor(
+                    TexturePlaceholder.PayloadPath,
+                    placeholder,
+                    TexturePlaceholder.Size,
+                    TexturePlaceholder.Size,
+                    TextureFilter.Nearest),
+                placeholder.Payload.ToArray());
             Planner = new SpriteFramePlanner(Store, Shaders, logger);
         }
 
@@ -1581,17 +1594,18 @@ public sealed class SpriteFramePlannerTests
 
         internal void MakeReadyPage(string path, uint width, uint height)
         {
-            var descriptor = new TextureDescriptor
-            {
-                Width = width,
-                Height = height,
-                Format = TextureFormat.Rgba8,
-                Filter = TextureFilter.Nearest,
-                Wrap = TextureWrap.Clamp,
-                Payload = $"data/{path}",
-            };
+            BakedTexture baked = Ktx2TextureFactory.BakeSolid(
+                TextureFormat.Rgba8,
+                (int)width,
+                (int)height);
+            TextureDescriptor descriptor = Ktx2TextureFactory.Descriptor(
+                $"data/{path}",
+                baked,
+                width,
+                height,
+                TextureFilter.Nearest);
             Assets.CompleteDescriptor(path, descriptor);
-            Assets.CompletePayload($"data/{path}", new byte[width * height * 4]);
+            Assets.CompletePayload($"data/{path}", baked.Payload.ToArray());
             _ = Store.EnsurePage(path);
             Store.Pump();
         }

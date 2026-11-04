@@ -14,7 +14,7 @@ using Xunit.Sdk;
 namespace Bork2d.Tests.Render.Vulkan;
 
 /// <summary>
-/// Opt-in real-GPU proof for the offscreen renderer's M7 handoff: a fixed 320x240 sRGB target, a
+/// Opt-in real-GPU proof for the offscreen renderer's M7 handoff: a fixed 320x240 UNORM target, a
 /// test producer publishing snapshots one at a time, exactly one discarded frame per consumed
 /// snapshot, a stop with a frame in flight, zero validation errors/warnings, every slot Free after
 /// Join, and clean shutdown.
@@ -272,10 +272,11 @@ public sealed class OffscreenRendererGpuTests
             || message.Contains("below the required 1.3.0", StringComparison.Ordinal)
             || message.Contains("requires Vulkan 1.3.0", StringComparison.Ordinal)
             || message.Contains("vkCreateInstance failed", StringComparison.Ordinal)
+            || message.Contains("textureCompressionBC", StringComparison.Ordinal)
             || message.Contains(
                 "maxPerStageDescriptorUpdateAfterBindSampledImages=0",
                 StringComparison.Ordinal)
-            || message.Contains("No sRGB offscreen color format", StringComparison.Ordinal);
+            || message.Contains("No UNORM offscreen color format", StringComparison.Ordinal);
     }
 
     /// <summary>

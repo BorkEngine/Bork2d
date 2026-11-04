@@ -170,13 +170,14 @@ public sealed class WindowedAppGpuTests
             || message.Contains("below the required 1.3.0", StringComparison.Ordinal)
             || message.Contains("requires Vulkan 1.3.0", StringComparison.Ordinal)
             || message.Contains("vkCreateInstance failed", StringComparison.Ordinal)
+            || message.Contains("textureCompressionBC", StringComparison.Ordinal)
             || message.Contains(
                 "maxPerStageDescriptorUpdateAfterBindSampledImages=0",
                 StringComparison.Ordinal)
             || message.Contains("SDL_", StringComparison.Ordinal)
             || message.Contains("SDL ", StringComparison.Ordinal)
             || message.Contains("zero Vulkan surface", StringComparison.Ordinal)
-            || message.Contains("No sRGB", StringComparison.Ordinal);
+            || message.Contains("No UNORM", StringComparison.Ordinal);
     }
 
     private sealed class RecordingRendererFactory : IRendererFactory

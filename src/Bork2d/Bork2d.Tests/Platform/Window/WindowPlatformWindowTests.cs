@@ -198,6 +198,7 @@ public sealed class WindowPlatformWindowTests
             || message.Contains("requires Vulkan 1.3.0", StringComparison.Ordinal)
             || message.Contains("below the required 1.3.0", StringComparison.Ordinal)
             || message.Contains("vkCreateInstance failed", StringComparison.Ordinal)
+            || message.Contains("textureCompressionBC", StringComparison.Ordinal)
             || message.Contains("is not available", StringComparison.Ordinal);
     }
 }

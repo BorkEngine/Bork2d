@@ -5,7 +5,7 @@ using Silk.NET.Vulkan;
 namespace Bork2d.Render.Vulkan;
 
 /// <summary>
-/// Two permanent offscreen sRGB color targets with views and one device-local allocation per image
+/// Two permanent offscreen UNORM color targets with views and one device-local allocation per image
 /// (D-M6-03, D-M6-11, D-M6-26).
 /// </summary>
 /// <remarks>
@@ -54,7 +54,7 @@ internal sealed unsafe class OffscreenTarget : IDisposable
     /// <summary>Gets the fixed target extent.</summary>
     internal Extent2D Extent { get; }
 
-    /// <summary>Gets the selected sRGB color format.</summary>
+    /// <summary>Gets the selected UNORM color format.</summary>
     internal Format Format { get; }
 
     /// <summary>Gets the number of permanent color images (two, D-M6-11).</summary>
@@ -76,7 +76,7 @@ internal sealed unsafe class OffscreenTarget : IDisposable
     /// <summary>Creates the offscreen color targets for one fixed extent.</summary>
     /// <param name="device">The logical device and its physical device.</param>
     /// <param name="extent">The validated fixed extent in pixels.</param>
-    /// <param name="format">The selected sRGB color format.</param>
+    /// <param name="format">The selected UNORM color format.</param>
     /// <param name="imageCount">The number of permanent color images.</param>
     /// <param name="instance">The instance seam used for debug labels.</param>
     /// <param name="logger">The <c>Bork2d.Render</c> logger.</param>

@@ -13,10 +13,11 @@ namespace Bork2d.Render.Vulkan;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The copy is recorded after the last camera pass and before present/discard, so it includes every
-/// camera clear and draw and excludes OS/window chrome. The staging buffer is host-visible coherent,
-/// created lazily on the first capture, reused for the frame, and recreated only when the requested
-/// extent grows; that recreation happens between frames, never while the frame is in flight.
+/// The copy is recorded after the final present pass and before present/discard, so it includes every
+/// camera clear and draw plus the sRGB encoding the present pass wrote, and excludes OS/window chrome.
+/// The staging buffer is host-visible coherent, created lazily on the first capture, reused for the
+/// frame, and recreated only when the requested extent grows; that recreation happens between frames,
+/// never while the frame is in flight.
 /// </para>
 /// <para>
 /// Requests complete when the frame's fence is observed (the renderer's independent retirement pass,

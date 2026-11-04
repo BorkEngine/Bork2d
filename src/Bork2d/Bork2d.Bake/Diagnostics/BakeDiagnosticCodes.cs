@@ -224,6 +224,9 @@ internal static class BakeDiagnosticCodes
     /// <summary>A required sidecar was created next to its source.</summary>
     internal const string ProcessorSidecarCreated = "BK7009";
 
+    /// <summary>A processor source is readable but its content is not a valid value for that processor.</summary>
+    internal const string ProcessorSourceInvalid = "BK7010";
+
     /// <summary>
     /// A sprite's UV array is missing, does not have exactly four entries, or contains a non-finite
     /// coordinate.

@@ -69,11 +69,15 @@ public sealed class BakePipelineTests
         Assert.Equal(2u, texture.Width);
         Assert.Equal(2u, texture.Height);
         Assert.Equal(TextureFormat.Rgba8, texture.Format);
+        Assert.Equal(2u, texture.MipLevels);
         Assert.Equal(TextureFilter.Nearest, texture.Filter);
         Assert.Equal(TextureWrap.Repeat, texture.Wrap);
-        Assert.Equal(
-            BakeProjectFixture.ExpectedTexturePayload,
+        Ktx2TestDocument document = Ktx2TestDocument.Parse(
             await host.Service.LoadData(texture.Payload));
+        Assert.Equal(2u, document.Width);
+        Assert.Equal(2u, document.Height);
+        Assert.Equal(2u, document.LevelCount);
+        Assert.Equal(BakeProjectFixture.ExpectedSourcePixels, document.GetLevelBytes(0));
 
         SpriteAsset sprite = await host.Service.LoadAsset<SpriteAsset>(BakeProjectFixture.SpritePath);
         Assert.Equal(BakeProjectFixture.TexturePath, sprite.Texture.Path);
@@ -159,9 +163,10 @@ public sealed class BakePipelineTests
             await host.Service.LoadAsset<TextureDescriptor>(BakeProjectFixture.TexturePath);
         Assert.Equal(TextureFilter.Linear, descriptor.Filter);
         Assert.Equal(TextureWrap.Clamp, descriptor.Wrap);
-        Assert.Equal(
-            BakeProjectFixture.ExpectedTexturePayload,
+        Assert.Equal(2u, descriptor.MipLevels);
+        Ktx2TestDocument document = Ktx2TestDocument.Parse(
             await host.Service.LoadData(BakeProjectFixture.TexturePayloadPath));
+        Assert.Equal(BakeProjectFixture.ExpectedSourcePixels, document.GetLevelBytes(0));
     }
 
     [Theory]
@@ -230,7 +235,7 @@ public sealed class BakePipelineTests
                 && entry.TypeName == "Bork2d.Tests.Bake.Baking.StatsRoot");
         Assert.DoesNotContain(
             result.Entries,
-            entry => entry.Path == "textures/notes-raw");
+            entry => entry.Path == "textures/notes-ktx2");
     }
 
     [Fact]
@@ -264,13 +269,13 @@ public sealed class BakePipelineTests
     }
 
     [Fact]
-    public void DataAndRawPayloadPathCollisionIsBK3005AndPreventsThePack()
+    public void DataAndKtx2PayloadPathCollisionIsBK3005AndPreventsThePack()
     {
-        using var project = TestBakeProject.Create("collision-raw");
+        using var project = TestBakeProject.Create("collision-ktx2");
         project.WriteStandardAssets();
         project.WriteTexture();
         project.WriteAsset(
-            "art/player-raw.toml",
+            "art/player-ktx2.toml",
             """
             attack = 2
             defense = 4
@@ -288,7 +293,7 @@ public sealed class BakePipelineTests
         Assert.Contains(
             result.Diagnostics,
             diagnostic => diagnostic.Code == BakeDiagnosticCodes.AssetPathCollision
-                && diagnostic.AssetPath == "art/player-raw");
+                && diagnostic.AssetPath == "art/player-ktx2");
         Assert.False(File.Exists(packPath));
     }
 
@@ -365,7 +370,7 @@ public sealed class BakePipelineTests
             BakeDiagnosticCodes.ReferenceNotCanonical
         },
         {
-            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"art/player-raw\"\n" + TypeTable,
+            "name = \"x\"\nhealth = 1\nmust = \"m\"\ntexture = \"art/player-ktx2\"\n" + TypeTable,
             BakeDiagnosticCodes.ReferenceWrongKind
         },
         {

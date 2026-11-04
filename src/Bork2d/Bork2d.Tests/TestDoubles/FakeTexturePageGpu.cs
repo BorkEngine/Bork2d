@@ -51,6 +51,7 @@ internal sealed class FakeTexturePageGpu : ITexturePageGpu
                 pageIndex,
                 (int)descriptor.Width,
                 (int)descriptor.Height,
+                descriptor.MipLevels,
                 descriptor.Format,
                 descriptor.Filter,
                 descriptor.Wrap,
@@ -96,14 +97,16 @@ internal sealed class FakeTexturePageGpu : ITexturePageGpu
 /// <param name="Index">The assigned bindless page index.</param>
 /// <param name="Width">The descriptor width.</param>
 /// <param name="Height">The descriptor height.</param>
+/// <param name="MipLevels">The descriptor's mip count.</param>
 /// <param name="Format">The descriptor format.</param>
 /// <param name="Filter">The descriptor filter.</param>
 /// <param name="Wrap">The descriptor wrap.</param>
-/// <param name="PayloadLength">The validated payload length in bytes.</param>
+/// <param name="PayloadLength">The validated KTX2 payload length in bytes.</param>
 internal readonly record struct TexturePageUpload(
     int Index,
     int Width,
     int Height,
+    uint MipLevels,
     TextureFormat Format,
     TextureFilter Filter,
     TextureWrap Wrap,

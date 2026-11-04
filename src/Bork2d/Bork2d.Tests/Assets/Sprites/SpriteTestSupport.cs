@@ -1,13 +1,15 @@
 using System.Numerics;
+using Bork2d.Bake;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Assets.Pack;
 using Bork2d.Tests.Assets.Vfs;
+using Bork2d.Tests.TestSupport;
 
 namespace Bork2d.Tests.Assets.Sprites;
 
 /// <summary>
-/// Builds valid public texture-descriptor and sprite-asset values and temporary packs for the
-/// asset-reference tests. No binary fixture is committed.
+/// Builds valid public texture-descriptor, KTX2 payload, and sprite-asset values and temporary packs
+/// for the asset-reference tests. No binary fixture is committed.
 /// </summary>
 internal static class SpriteTestSupport
 {
@@ -15,16 +17,18 @@ internal static class SpriteTestSupport
     internal const string TexturePath = "textures/player";
     internal const string PayloadPath = "textures/raw/player";
 
-    /// <summary>Creates a valid 2 × 2 RGBA8 descriptor.</summary>
-    internal static TextureDescriptor Descriptor() => new()
+    /// <summary>Creates a valid 2 × 2 Rgba8 KTX2 descriptor.</summary>
+    internal static TextureDescriptor Descriptor()
     {
-        Payload = PayloadPath,
-        Width = 2,
-        Height = 2,
-        Format = TextureFormat.Rgba8,
-        Filter = TextureFilter.Linear,
-        Wrap = TextureWrap.Clamp,
-    };
+        BakedTexture baked = Ktx2TextureFactory.BakeSolid(
+            TextureFormat.Rgba8,
+            2,
+            2,
+            255,
+            0,
+            255);
+        return Ktx2TextureFactory.Descriptor(PayloadPath, baked, 2, 2, TextureFilter.Linear);
+    }
 
     /// <summary>Creates a valid Quad sprite over the standard texture path.</summary>
     internal static SpriteAsset Quad() => new()
@@ -61,9 +65,20 @@ internal static class SpriteTestSupport
         return sprite;
     }
 
-    /// <summary>Creates a raw RGBA8 payload of the descriptor's declared size.</summary>
+    /// <summary>Creates the KTX2 payload of the descriptor's declared format and dimensions.</summary>
     internal static byte[] Payload(TextureDescriptor descriptor)
-        => new byte[checked((int)((ulong)descriptor.Width * descriptor.Height * 4))];
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        return Ktx2TextureFactory.BakeSolid(
+                descriptor.Format,
+                (int)descriptor.Width,
+                (int)descriptor.Height,
+                255,
+                0,
+                255)
+            .Payload
+            .ToArray();
+    }
 
     /// <summary>
     /// Writes a debug pack containing a texture descriptor, its raw payload, and a sprite asset.

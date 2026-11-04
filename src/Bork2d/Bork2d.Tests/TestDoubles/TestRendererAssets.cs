@@ -1,5 +1,6 @@
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Assets.Loading;
+using Bork2d.Render.Textures;
 using Bork2d.Runtime.Hosting;
 using Microsoft.Extensions.Logging;
 using PolyType;
@@ -7,15 +8,16 @@ using PolyType;
 namespace Bork2d.Tests.TestDoubles;
 
 /// <summary>
-/// The <see cref="IAssets"/> seam for real-GPU renderer tests: generated RGBA8 textures complete
-/// immediately, while the built-in shader assets resolve through a started <see cref="AssetService"/>
-/// that mounts the embedded built-in pack.
+/// The <see cref="IAssets"/> seam for real-GPU renderer tests: generated KTX2 textures complete
+/// immediately, while the engine-owned built-in assets resolve through a started
+/// <see cref="AssetService"/> that mounts the embedded built-in pack.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The renderer loads its default shader from the asset service at startup, so a real renderer cannot
-/// start against <see cref="FakeAssets"/>. This seam keeps the deterministic generated texture path
-/// while serving <c>shader/*</c> entries from <see cref="BuiltInAssets.PackBytes"/>. It also serves
+/// The renderer loads its default and present shaders and the bindless placeholder from the asset
+/// service at startup, so a real renderer cannot start against <see cref="FakeAssets"/>. This seam
+/// keeps the deterministic generated texture path while serving the <c>shader/*</c>, <c>present/*</c>,
+/// and <c>textures/placeholder</c> entries from <see cref="BuiltInAssets.PackBytes"/>. It also serves
 /// test-authored custom <see cref="ShaderAsset"/> metadata and raw SPIR-V payloads, including a
 /// controllable pending payload, and implements the internal catalog-version seam so a remount can be
 /// modelled. Dispose it after the renderer has joined: it stops the asset service and its loader
@@ -28,7 +30,13 @@ namespace Bork2d.Tests.TestDoubles;
 /// </remarks>
 internal sealed class TestRendererAssets : IAssets, IAssetCatalogVersion, IDisposable
 {
-    private const string ShaderPathPrefix = "shader/";
+    private static readonly string[] _builtInPathPrefixes = ["shader/", "present/"];
+
+    private static readonly string[] _builtInPaths =
+    [
+        TexturePlaceholder.DescriptorPath,
+        TexturePlaceholder.PayloadPath,
+    ];
 
     private readonly GeneratedTextureAssets _textures = new();
     private readonly AssetService _service;
@@ -99,6 +107,44 @@ internal sealed class TestRendererAssets : IAssets, IAssetCatalogVersion, IDispo
         uint width = 4,
         uint height = 4)
         => _textures.AddSolidTexture(path, r, g, b, a, width, height);
+
+    /// <summary>Registers a ready solid-color texture in a concrete format for a path.</summary>
+    /// <param name="path">The canonical descriptor path.</param>
+    /// <param name="format">The concrete KTX2 format the baker must produce.</param>
+    /// <param name="r">The linear red byte.</param>
+    /// <param name="g">The linear green byte.</param>
+    /// <param name="b">The linear blue byte.</param>
+    /// <param name="a">The alpha byte.</param>
+    /// <param name="width">The texture width in pixels.</param>
+    /// <param name="height">The texture height in pixels.</param>
+    /// <returns>The same path, for convenient call sites.</returns>
+    internal string AddTexture(
+        string path,
+        TextureFormat format,
+        byte r,
+        byte g,
+        byte b,
+        byte a = 255,
+        uint width = 4,
+        uint height = 4)
+        => _textures.AddTexture(path, format, r, g, b, a, width, height);
+
+    /// <summary>Registers a baked KTX2 payload and its descriptor verbatim.</summary>
+    /// <param name="path">The canonical descriptor path.</param>
+    /// <param name="baked">The baked KTX2 payload and descriptor values.</param>
+    /// <param name="width">The base width in pixels.</param>
+    /// <param name="height">The base height in pixels.</param>
+    /// <param name="filter">The sampler filter.</param>
+    /// <param name="wrap">The sampler wrap.</param>
+    /// <returns>The same path, for convenient call sites.</returns>
+    internal string AddBakedTexture(
+        string path,
+        Bork2d.Bake.BakedTexture baked,
+        uint width,
+        uint height,
+        TextureFilter filter = TextureFilter.Nearest,
+        TextureWrap wrap = TextureWrap.Clamp)
+        => _textures.AddBakedTexture(path, baked, width, height, filter, wrap);
 
     /// <summary>Registers a descriptor that has valid dimensions but no payload (a failed page).</summary>
     /// <param name="path">The canonical descriptor path.</param>
@@ -191,7 +237,9 @@ internal sealed class TestRendererAssets : IAssets, IAssetCatalogVersion, IDispo
             return _service.LoadAsset<T>(assetPath);
         }
 
-        return _textures.LoadAsset<T>(assetPath);
+        return IsBuiltInAssetPath(assetPath)
+            ? _service.LoadAsset<T>(assetPath)
+            : _textures.LoadAsset<T>(assetPath);
     }
 
     /// <inheritdoc/>
@@ -212,7 +260,7 @@ internal sealed class TestRendererAssets : IAssets, IAssetCatalogVersion, IDispo
             }
         }
 
-        return IsShaderPath(assetPath)
+        return IsBuiltInAssetPath(assetPath)
             ? _service.LoadData(assetPath)
             : _textures.LoadData(assetPath);
     }
@@ -240,7 +288,7 @@ internal sealed class TestRendererAssets : IAssets, IAssetCatalogVersion, IDispo
             }
         }
 
-        return IsShaderPath(assetPath) && _service.Exists(assetPath);
+        return IsBuiltInAssetPath(assetPath) && _service.Exists(assetPath);
     }
 
     /// <inheritdoc/>
@@ -255,6 +303,24 @@ internal sealed class TestRendererAssets : IAssets, IAssetCatalogVersion, IDispo
         _loggerFactory.Dispose();
     }
 
-    private static bool IsShaderPath(string assetPath)
-        => assetPath.StartsWith(ShaderPathPrefix, StringComparison.Ordinal);
+    private static bool IsBuiltInAssetPath(string assetPath)
+    {
+        foreach (string prefix in _builtInPathPrefixes)
+        {
+            if (assetPath.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        foreach (string path in _builtInPaths)
+        {
+            if (string.Equals(assetPath, path, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

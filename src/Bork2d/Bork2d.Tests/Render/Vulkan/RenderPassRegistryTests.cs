@@ -28,7 +28,7 @@ public sealed class RenderPassRegistryTests
             240,
             new FakeInstanceBuffer(),
             new FakeGlobalUniformBuffer(),
-            Format.B8G8R8A8Srgb);
+            SceneTarget.ColorFormat);
 
         Assert.Equal(
             new[] { "Sprite", "Custom" },
@@ -37,7 +37,7 @@ public sealed class RenderPassRegistryTests
     }
 
     [Fact]
-    public void PlanForwardsTheTargetFormatAndGlobalBufferToEveryPass()
+    public void PlanForwardsTheSceneFormatAndGlobalBufferToEveryPass()
     {
         var globals = new FakeGlobalUniformBuffer();
         var first = new RecordingPass("Sprite", []);
@@ -50,10 +50,10 @@ public sealed class RenderPassRegistryTests
             240,
             new FakeInstanceBuffer(),
             globals,
-            Format.R8G8B8A8Srgb);
+            SceneTarget.ColorFormat);
 
-        Assert.Equal(Format.R8G8B8A8Srgb, first.TargetFormat);
-        Assert.Equal(Format.R8G8B8A8Srgb, second.TargetFormat);
+        Assert.Equal(SceneTarget.ColorFormat, first.SceneFormat);
+        Assert.Equal(SceneTarget.ColorFormat, second.SceneFormat);
         Assert.Same(globals, first.Globals);
         Assert.Same(globals, second.Globals);
     }
@@ -89,7 +89,7 @@ public sealed class RenderPassRegistryTests
             240,
             new FakeInstanceBuffer(),
             new FakeGlobalUniformBuffer(),
-            Format.B8G8R8A8Srgb);
+            SceneTarget.ColorFormat);
 
         RenderPassStats stats = registry.Stats;
         Assert.Equal(3, stats.CameraCount);
@@ -135,8 +135,8 @@ public sealed class RenderPassRegistryTests
         var instances = new FakeInstanceBuffer();
         var globals = new FakeGlobalUniformBuffer();
 
-        registry.Plan(snapshot, 320, 240, instances, globals, Format.B8G8R8A8Srgb);
-        registry.Plan(snapshot, 320, 240, instances, globals, Format.B8G8R8A8Srgb);
+        registry.Plan(snapshot, 320, 240, instances, globals, SceneTarget.ColorFormat);
+        registry.Plan(snapshot, 320, 240, instances, globals, SceneTarget.ColorFormat);
 
         Assert.Equal(2, pass.ResetCount);
         Assert.Equal(2, pass.PlanCount);
@@ -195,7 +195,7 @@ public sealed class RenderPassRegistryTests
 
         internal int RecordCount { get; private set; }
 
-        internal Format TargetFormat { get; private set; }
+        internal Format SceneFormat { get; private set; }
 
         internal IGlobalUniformBuffer? Globals { get; private set; }
 
@@ -205,11 +205,11 @@ public sealed class RenderPassRegistryTests
             int framebufferHeight,
             IInstanceBuffer instances,
             IGlobalUniformBuffer globals,
-            Format targetFormat,
+            Format sceneFormat,
             RenderPassStats stats)
         {
             PlanCount++;
-            TargetFormat = targetFormat;
+            SceneFormat = sceneFormat;
             Globals = globals;
             _events.Add($"plan:{Name}");
             stats.CameraCount += _cameras;

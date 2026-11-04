@@ -11,25 +11,27 @@ namespace Bork2d.Render.Vulkan;
 
 /// <summary>
 /// The production offscreen Vulkan renderer: one render thread owns the instance (when the host did
-/// not supply one), the device, two permanent sRGB targets, the snapshot ring, and the
-/// dynamic-rendering clear, and records exactly one discarded frame per consumed snapshot until the
-/// host stops it (Q7=G1, D-M6-07, D-M6-11).
+/// not supply one), the device, two permanent UNORM targets, two linear scene images, the snapshot
+/// ring, and the final present pass, and records exactly one discarded frame per consumed snapshot
+/// until the host stops it (Q7=G1, D-M6-07, D-M6-11).
 /// </summary>
 /// <remarks>
 /// <para>
 /// <see cref="Start"/> creates one background thread and returns immediately (D-M6-06). The thread
-/// creates or adopts the instance, selects a device without surface/present requirements, chooses an
-/// sRGB format, allocates two color images, transitions them once, creates two frames in flight, and
-/// marks the renderer ready. The host observes readiness, status, counters, and the one-shot fatal
-/// error through <see cref="IRenderer"/>; it drives the snapshot handoff through the slot API in
-/// M7 WP-4.
+/// creates or adopts the instance, selects a device without surface/present requirements, chooses a
+/// UNORM format, allocates two color images, transitions them once, creates two frames in flight
+/// (each with its own linear scene image), creates the sprite and present pipelines, and marks the
+/// renderer ready. The host observes readiness, status, counters, and the one-shot fatal error
+/// through <see cref="IRenderer"/>; it drives the snapshot handoff through the slot API in M7 WP-4.
 /// </para>
 /// <para>
-/// The renderer keeps only the fixed-target driver: instance ownership, the permanent sRGB target,
+/// The renderer keeps only the fixed-target driver: instance ownership, the permanent UNORM target,
 /// its one-time layout transition, and the discard path. Thread lifecycle, readiness, counters,
 /// snapshot handoff, captures, and texture setup/teardown come from the shared
 /// <see cref="RendererLifecycle"/>, <see cref="RendererCaptureService"/>, and
-/// <see cref="RendererTextures"/> compositions.
+/// <see cref="RendererTextures"/> compositions. The 2D passes render linear color into the scene
+/// image and the registered present pass applies the sRGB encoding into the UNORM target; capture
+/// reads that final encoded target.
 /// </para>
 /// <para>
 /// With no <c>Ready</c> snapshot the render thread blocks on the combined snapshot/control wait and
@@ -59,6 +61,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
     private readonly RendererLifecycle _lifecycle;
 
     private RendererTextures? _textures;
+    private PresentPipeline? _present;
     private OffscreenTarget? _target;
     private RenderPassRegistry? _passes;
     private VulkanDevice? _device;
@@ -285,7 +288,9 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             _startInfo.AssetCatalogVersion,
             _startInfo.TextureUploadBudgetBytes,
             _startInfo.TextureResidencyBudgetBytes);
-        _textures.EnsurePipeline(format);
+        _present = PresentPipeline.Load(_device, instance, _startInfo.Assets, _logger);
+        _present.EnsurePipeline(format);
+        _textures.EnsurePipeline(SceneTarget.ColorFormat);
         if (_lifecycle.Control.IsStopRequested)
         {
             return false;
@@ -301,7 +306,8 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 _textures.Pipeline!,
                 _textures.Shaders!,
                 _textures.Pages!,
-                _logger));
+                _logger),
+            new PresentRenderPass(_present));
         TransitionTargets();
         _passLabel = instance.CreateDebugLabel(PassLabelText);
         _lifecycle.UpdateValidationCounters(instance);
@@ -396,7 +402,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 (int)target.Extent.Height,
                 frame.InstanceResources,
                 frame.InstanceResources,
-                target.Format);
+                SceneTarget.ColorFormat);
             RecordFrame(frame, _frameIndex);
             Submit(frame);
             frame.InstanceResources.MarkSubmitted();
@@ -439,12 +445,13 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             commandBuffer.Handle,
             _passLabel);
 
-        // A camera may load instead of clearing, so one full-target opaque-black clear defines
-        // every pixel before any camera pass runs.
+        // The scene image starts undefined every frame and a camera may load instead of clearing, so
+        // one full-target opaque-black clear defines every linear scene pixel before any camera pass.
+        frame.Scene.RecordToColorAttachment(commandBuffer);
         SpritePassRecorder.RecordFrameClear(
             device.Api,
             commandBuffer,
-            target.GetView(imageIndex),
+            frame.Scene.View,
             target.Extent);
 
         bool capture = _captures.BeginRecord(
@@ -456,10 +463,15 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             new RenderPassRecordContext(
                 device.Api,
                 commandBuffer,
+                frame.Scene.View,
+                frame.Scene.Image,
                 target.GetView(imageIndex),
                 target.GetImage(imageIndex),
+                target.Extent,
                 frame.InstanceResources.DescriptorSet,
                 frame.InstanceResources.GlobalDescriptorSet,
+                frame.InstanceResources.PresentDescriptorSet,
+                SceneTarget.ColorFormat,
                 target.Format));
 
         if (capture)
@@ -516,6 +528,10 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
         SpritePipeline pipeline = _textures?.Pipeline
             ?? throw new Bork2dException(
                 "The offscreen renderer cannot create frames without the sprite pipeline.");
+        PresentPipeline present = _present
+            ?? throw new Bork2dException(
+                "The offscreen renderer cannot create frames without the present pipeline.");
+        OffscreenTarget target = _target!;
         var frames = new OffscreenFrame?[FramesInFlight];
 
         // Attach before creating: a mid-loop failure must leave the already-created frames visible
@@ -529,7 +545,9 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
                 device.PhysicalDevice,
                 index,
                 device.QueueFamilyIndex,
+                target.Extent,
                 pipeline,
+                present,
                 pageCapacity,
                 device.Limits.MaxStorageBufferRange,
                 device.Limits.MaxUniformBufferRange,
@@ -614,7 +632,7 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
 
     private Format SelectFormat(VulkanDevice device)
     {
-        Format[] candidates = [Format.R8G8B8A8Srgb, Format.B8G8R8A8Srgb];
+        Format[] candidates = [Format.R8G8B8A8Unorm, Format.B8G8R8A8Unorm];
         var available = new OffscreenFormatSupport[candidates.Length];
         for (var index = 0; index < candidates.Length; index++)
         {
@@ -696,8 +714,11 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
         _target = null;
 
         // Frame descriptor sets/pools are destroyed before the page images/views they reference,
-        // and the pages before the pipeline that owns their samplers and the device itself.
+        // and the pages before the pipeline that owns their samplers and the device itself. The
+        // present pipeline is destroyed after the frame sets that use its layout.
         _frames.DisposeFrames();
+        _present?.Destroy();
+        _present = null;
         _textures?.Destroy();
 
         _device?.Destroy();
@@ -721,8 +742,15 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
 
         TexturePageStore? pages = _textures?.Pages;
         RendererCounters counters = _lifecycle.Counters;
+        ulong sceneBytes = 0;
+        for (var index = 0; index < _frames.Count; index++)
+        {
+            sceneBytes += _frames[index]?.Scene.MemoryBytes ?? 0;
+        }
+
         _logger.LogInformation(
             "Vulkan renderer started: mode={Mode}, extent={Width}x{Height}, format={Format}, "
+                + "sceneFormat={SceneFormat}, sceneBytes={SceneBytes}, "
                 + "images={ImageCount}, framesInFlight={FramesInFlight}, memoryBytes={MemoryBytes}, "
                 + "handoff={Handoff}, ringDepth={RingDepth}, "
                 + "oneFramePerSnapshot={OneFramePerSnapshot}, instanceResources={InstanceResources}, "
@@ -737,6 +765,8 @@ internal sealed unsafe class VulkanOffscreenRenderer : IRenderer
             target.Extent.Width,
             target.Extent.Height,
             target.Format,
+            SceneTarget.ColorFormat,
+            sceneBytes,
             target.ImageCount,
             FramesInFlight,
             target.MemoryBytes,

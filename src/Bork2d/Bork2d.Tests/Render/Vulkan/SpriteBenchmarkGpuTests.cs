@@ -102,7 +102,7 @@ public sealed class SpriteBenchmarkGpuTests
             RenderStats stats = renderer.RenderStats;
             Assert.Equal(1, stats.Cameras);
             Assert.Equal(1, stats.NonEmptyCameras);
-            Assert.Equal(1, stats.DrawCalls);
+            Assert.Equal(2, stats.DrawCalls);
             Assert.Equal(SpriteCount, stats.Instances);
             Assert.Equal(2, stats.TexturePages);
             Assert.Equal(0, stats.SkippedSprites);
@@ -348,10 +348,11 @@ public sealed class SpriteBenchmarkGpuTests
             || message.Contains("below the required 1.3.0", StringComparison.Ordinal)
             || message.Contains("requires Vulkan 1.3.0", StringComparison.Ordinal)
             || message.Contains("vkCreateInstance failed", StringComparison.Ordinal)
+            || message.Contains("textureCompressionBC", StringComparison.Ordinal)
             || message.Contains(
                 "maxPerStageDescriptorUpdateAfterBindSampledImages=0",
                 StringComparison.Ordinal)
-            || message.Contains("No sRGB offscreen color format", StringComparison.Ordinal);
+            || message.Contains("No UNORM offscreen color format", StringComparison.Ordinal);
     }
 
     private sealed class BenchmarkScene

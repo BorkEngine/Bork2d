@@ -46,6 +46,13 @@ internal static class VulkanDevicePolicy
         if (missingFeatures.Count > 0)
         {
             reasons.Add($"missing required device features: {string.Join(", ", missingFeatures)}");
+            if (Contains(missingFeatures, "textureCompressionBC"))
+            {
+                reasons.Add(
+                    "textureCompressionBC is required by Bork2d's desktop Vulkan 1.3 renderer for "
+                        + "KTX2 block-compressed textures; there is no RGBA fallback or runtime "
+                        + "transcoder");
+            }
         }
 
         return reasons.Count == 0 && queueFamily is not null
@@ -138,6 +145,19 @@ internal static class VulkanDevicePolicy
         for (var index = 0; index < extensions.Count; index++)
         {
             if (string.Equals(extensions[index], name, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool Contains(IReadOnlyList<string> names, string name)
+    {
+        for (var index = 0; index < names.Count; index++)
+        {
+            if (string.Equals(names[index], name, StringComparison.Ordinal))
             {
                 return true;
             }
