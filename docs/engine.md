@@ -63,8 +63,10 @@ reinterpreted. The frame time always occupies the block's `time.x`.
 
 ### Frame capture
 
-`CaptureFrameAsync` returns a `FrameCaptureResult`: row-major RGBA8 pixels with a top-left origin,
-the captured frame's actual `Width`, `Height`, and `Format` (`TextureFormat.Rgba8`). `Pixels` is
+`CaptureFrameAsync` returns a `FrameCaptureResult`: row-major, top-left-origin RGBA8 pixels with
+sRGB-encoded color channels, the captured frame's actual `Width`, `Height`, and `Format`
+(`TextureFormat.Rgba8`). The copy is recorded from the final UNORM target after the present pass, so
+the bytes match the presented image. `Pixels` is
 exactly `Width * Height * 4` bytes and the result is a shared immutable capture result — every
 request served by the same GPU frame observes the same memory, so callers must not mutate it. One
 array is allocated per captured frame, not per request.

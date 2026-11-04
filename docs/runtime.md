@@ -13,7 +13,7 @@ instance/surface, renderer composition, the three host loops, and logging. It ex
 | `WithAssetsPack(string)` | Base pack path (default `assets.pck`). Opened by `Run`, not `Build`; mounted above the built-in pack. |
 | `WithoutAssets()` | No game base pack. The embedded built-in shader pack is still mounted; overlays may still be added later. |
 | `WithHeadless(int ticksPerSecond = 60)` | Selects the no-window, no-GPU mode. |
-| `WithOffscreen(int width, int height)` | Selects offscreen rendering to a fixed sRGB target. |
+| `WithOffscreen(int width, int height)` | Selects offscreen rendering to a fixed UNORM target with the final sRGB present pass. |
 | `WithTitle`, `WithSize`, `WithResizable`, `WithFullscreen`, `WithVSync` | Windowed-only options. |
 | `WithMaxDeltaTime(double)` | Gameplay delta clamp for windowed/offscreen ticks (default `0.25` s). |
 | `WithValidation(bool)` | Requests Vulkan validation layers. Default is on in `DEBUG`, off otherwise. |
@@ -84,7 +84,8 @@ minimized, tick starts are capped at 30 per second; no cap applies once the loop
 
 The same handoff loop without SDL, input, or presentation, driven by the same rendered-run
 lifecycle and therefore the same `Setup`/readiness/`Teardown` ordering and error precedence. It
-renders against a fixed sRGB target and discards each frame. `IEngine.Window` is a functional
+renders linear color into its scene target, runs the final sRGB present pass into a fixed UNORM
+target, and discards each frame. `IEngine.Window` is a functional
 facade reporting the fixed target extent; its title, fullscreen, and cursor setters store inert
 state and no member throws. It stops on `Exit` or a renderer fatal and has no platform close path.
 

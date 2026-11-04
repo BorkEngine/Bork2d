@@ -6,10 +6,11 @@ internal `IRenderer` contract and `RendererStartInfo`. Its only project referenc
 
 ## Threading and lifecycle
 
-One render thread owns the Vulkan device, swapchain or offscreen target, pipelines, texture pages,
-and the snapshot ring. `Start()` creates the thread and returns immediately. The thread selects a
-device, creates resources, and marks itself ready; the host waits for readiness before the first
-tick. `RequestStop()` is a request, and `Join()` guarantees no renderer thread survives.
+One render thread owns the Vulkan device, swapchain or offscreen target, the per-frame linear scene
+images, pipelines, texture pages, and the snapshot ring. `Start()` creates the thread and returns
+immediately. The thread selects a device, creates resources, and marks itself ready; the host waits
+for readiness before the first tick. `RequestStop()` is a request, and `Join()` guarantees no
+renderer thread survives.
 
 - Two frames are in flight; each completes from its fence.
 - With no `Ready` snapshot the thread blocks on the combined snapshot/control wait and never repeats
@@ -29,8 +30,9 @@ Windowed and offscreen compose the same internal services instead of duplicating
   board, and the post-join ring drain.
 - `RendererCaptureService` owns the bounded capture queue, per-frame capture retirement from the
   frame fence, and the stop/fatal close path.
-- `RendererTextures` owns the sprite pipeline per output format, the `VulkanTexturePages` GPU seam,
-  the `TexturePageStore`, and bindless page writes/growth across the frames.
+- `RendererTextures` owns the sprite pipeline for the linear scene format, the
+  `VulkanTexturePages` GPU seam, the `TexturePageStore`, and bindless page writes/growth across the
+  frames.
 - `RenderPassRegistry` owns the ordered render passes and the aggregate frame statistics; both
   target drivers create one during startup and call it from their own frame loop, so a pass is added
   by registration rather than by editing a central plan/record switch.
@@ -38,8 +40,10 @@ Windowed and offscreen compose the same internal services instead of duplicating
   both frame types without moving target-specific recording into them.
 
 The two target drivers stay separate: `VulkanRenderer` owns swapchain acquire/present, resize,
-recovery, and the minimized drain; `VulkanOffscreenRenderer` owns the fixed sRGB target, its
-one-time layout transition, and the discard path. There is no renderer inheritance hierarchy.
+recovery, and the minimized drain; `VulkanOffscreenRenderer` owns the fixed UNORM target, its
+one-time layout transition, and the discard path. Each driver creates its frames' linear scene
+images, the sprite pipeline for the scene format, and the present pipeline for the target format.
+There is no renderer inheritance hierarchy.
 
 Useful files: [IRenderer.cs](../src/Bork2d/Bork2d.Render/IRenderer.cs),
 [SnapshotRing.cs](../src/Bork2d/Bork2d.Render/Handoff/SnapshotRing.cs),
@@ -48,6 +52,9 @@ Useful files: [IRenderer.cs](../src/Bork2d/Bork2d.Render/IRenderer.cs),
 [RendererTextures.cs](../src/Bork2d/Bork2d.Render/Vulkan/RendererTextures.cs),
 [RenderPassRegistry.cs](../src/Bork2d/Bork2d.Render/Vulkan/RenderPassRegistry.cs),
 [SpriteRenderPass.cs](../src/Bork2d/Bork2d.Render/Sprites/SpriteRenderPass.cs),
+[PresentRenderPass.cs](../src/Bork2d/Bork2d.Render/Vulkan/PresentRenderPass.cs),
+[PresentPipeline.cs](../src/Bork2d/Bork2d.Render/Vulkan/PresentPipeline.cs),
+[SceneTarget.cs](../src/Bork2d/Bork2d.Render/Vulkan/SceneTarget.cs),
 [SpriteInstance.cs](../src/Bork2d/Bork2d.Render/Sprites/SpriteInstance.cs),
 [GlobalUniformBlock.cs](../src/Bork2d/Bork2d.Render/Sprites/GlobalUniformBlock.cs),
 [ShaderStore.cs](../src/Bork2d/Bork2d.Render/Shaders/ShaderStore.cs),
@@ -66,9 +73,12 @@ a smaller value is a device-selection failure with a clear message. The device's
 additionally requires a graphics queue family that presents to the surface. Discrete GPUs are
 preferred over integrated, then other types.
 
-Windowed output uses an sRGB surface format (`B8G8R8A8_SRGB`, then `R8G8B8A8_SRGB`) with
-`SRGB_NONLINEAR`; offscreen uses an sRGB color-attachment format (`R8G8B8A8_SRGB`, then
-`B8G8R8A8_SRGB`). There is no UNORM fallback. Present mode is `FIFO` when vsync is requested;
+Windowed output uses a UNORM surface format (`B8G8R8A8_UNORM`, then `R8G8B8A8_UNORM`) with
+`SRGB_NONLINEAR`; offscreen uses a UNORM color-attachment format (`R8G8B8A8_UNORM`, then
+`B8G8R8A8_UNORM`). There is no sRGB target fallback: the color pipeline is linear end to end, every
+2D pass writes linear color into the scene image, and the final present pass applies the sRGB
+opto-electronic transfer function when it writes the UNORM target. Targeting an sRGB image instead
+would encode twice and is not offered. Present mode is `FIFO` when vsync is requested;
 otherwise `MAILBOX`, then `IMMEDIATE`, then `FIFO`. The swapchain asks for `minImageCount + 1`
 images, clamped to the surface maximum, and is recreated on extent/format changes and
 out-of-date results. One surface-recovery attempt is available per run.
@@ -78,8 +88,10 @@ out-of-date results. One surface-recovery attempt is available per run.
 The render thread consumes one snapshot and plans it through the registered render-pass list.
 `RenderPassRegistry.Plan` resets the aggregate statistics and each pass's per-frame state, then runs
 every pass in registration order; recording runs the same passes in the same order, so pass order is
-deterministic. The sprite pass is the only registered pass today; a new renderable kind adds a typed
-engine producer and one pass, not a central plan/record switch.
+deterministic. Both target drivers register the sprite pass followed by the present pass. The sprite
+pass renders linear color into the frame's scene image; the present pass samples that image and
+writes the sRGB-encoded result into the UNORM swapchain or offscreen target. A new renderable kind
+adds a typed engine producer and one pass, not a central plan/record switch.
 
 The sprite pass plans its data in one allocation-free pass:
 
@@ -122,23 +134,30 @@ A captured sprite carries the immutable `SpriteRenderData` frozen when its asset
 the live `SpriteAsset`, so mutating an asset after assignment cannot change a plan or a published
 snapshot. Each camera gets one dynamic-rendering pass. It records exactly one
 `vkCmdDraw(4, run.InstanceCount, 0, run.FirstInstance)` per contiguous shader run, so a camera whose
-sprites all share `shader/sprite` is exactly one run and one draw, while a camera that alternates
-custom and default shaders records one draw per contiguous group and never reorders sprites. A quad
+sprites all share `shader/sprite` is exactly one run and one draw (plus the frame's present draw),
+while a camera that alternates custom and default shaders records one draw per contiguous group and
+never reorders sprites. A quad
 is a four-vertex triangle strip with no vertex buffer: `gl_VertexIndex` selects the corner, and the
 vertex shader builds the world position from the instance matrix, pivot, size, and UVs. The quad is
 `(maxU - minU) * Scale.X` by `(maxV - minV) * Scale.Y` world units; texture pixel dimensions are
 never used.
 
-Every recorded frame starts with one full-target opaque-black clear after the target's initial
-layout transition and before any camera pass: linear `(0, 0, 0, 1)`, `LoadOp = Clear`,
-`StoreOp = Store`, one dynamic-rendering color attachment, and no depth/stencil. The clear covers the
-whole target (the swapchain image extent for windowed, the offscreen target extent for offscreen),
-so every pixel has a defined current-frame value. Camera clear semantics are layered on top:
-`Clear.Color` clears the camera's pixel rect to `ClearColor`; `Clear.None` and `Clear.Depth` load the
-existing content, which the frame clear has already defined. The frame clear is not a camera, not a
-draw call, and not a registered pass: the target driver records it before the registry records the
-passes, so `RenderStats` and draw-call/instance accounting are unchanged. There is no depth
-attachment.
+Every recorded frame starts with one full-target opaque-black clear into the frame's linear scene
+image after the scene image's initial layout transition and before any camera pass: linear
+`(0, 0, 0, 1)`, `LoadOp = Clear`, `StoreOp = Store`, one dynamic-rendering color attachment, and no
+depth/stencil. The scene image is one device-local `R8G8B8A8_UNORM` image per GPU frame in flight with
+`COLOR_ATTACHMENT | SAMPLED` usage; its transition discards the previous frame's contents, so the
+clear defines every scene pixel. `Clear.Color` clears the camera's pixel rect to `ClearColor` in the
+scene image; `Clear.None` and `Clear.Depth` load the existing scene content, which the frame clear has
+already defined. The frame clear is not a camera, not a draw call, and not a registered pass: the
+target driver records it before the registry records the passes, so the frame clear never changes
+`RenderStats` draw-call/instance accounting. There is no depth attachment.
+
+Recording order per frame is: transition the scene image and the final target to
+`COLOR_ATTACHMENT_OPTIMAL`; record the full-target scene clear; record the 2D passes into the scene
+image; the present pass barriers the scene image to `SHADER_READ_ONLY_OPTIMAL` and records its
+fullscreen draw into the final UNORM target; the optional capture copy reads the final target; the
+target then transitions to `PRESENT_SRC_KHR` (windowed) or stays a color attachment (offscreen).
 
 ## Textures
 
@@ -218,11 +237,12 @@ per-run global block:
 Set `0` keeps the variable/UAB bindless array as its highest binding, and the dynamic global buffer
 is in its own set because Vulkan forbids a dynamic uniform buffer in a set that contains an
 update-after-bind binding. The pipeline layout carries descriptor sets `0` and `1` and one 64-byte
-view-projection push constant. The graphics pipeline uses sRGB color attachments, dynamic
-viewport/scissor, triangle strip, no vertex input, no depth test or write, culling disabled, and
-straight-alpha blending. One graphics pipeline exists per `(shader content hash, output format)`:
-identical shader content shares its module and its pipelines, a swapchain format change lazily
-creates that format's pipeline, and samplers are cached per `(Filter, Wrap)`.
+view-projection push constant. The graphics pipeline uses the linear `R8G8B8A8_UNORM` scene color
+attachment, dynamic viewport/scissor, triangle strip, no vertex input, no depth test or write, culling
+disabled, and straight-alpha blending. One graphics pipeline exists per `(shader content hash)`: the
+scene format is fixed for the whole run, identical shader content shares its module and its pipeline,
+a swapchain format change never creates a new sprite pipeline variant, and samplers are cached per
+`(Filter, Wrap)`.
 
 The instance record is 176 bytes and eleven `vec4` values with no padding: `transform0`
 (M11, M12, M21, M22), `transform1` (M31, M32, signed sizeX, signed sizeY), `uv0` (top-left,
@@ -243,16 +263,18 @@ sees matched inputs and outputs without changing any frame's pixels.
 
 The default sprite shader is asset content, not a compiled-in array. The built-in pack, mounted
 below every game pack, serves `shader/sprite` as a `ShaderAsset`, `shader/sprite-spv` as its raw
-fragment module, and `shader/vertex-spv` as the engine-owned vertex module. At renderer startup
+fragment module, `shader/vertex-spv` as the engine-owned vertex module, and `present/vertex-spv` plus
+`present/fragment-spv` as the engine-owned present modules. At renderer startup
 `RendererTextures.EnsurePipeline` loads the vertex module through `IAssets`; `ShaderStore` then
 loads the fragment shader asset, validates a non-null `SpirV` reference, `LayoutVersion` 2, the
 `main` entry point, the full declaration set, and a non-empty module whose first little-endian word
-is `0x07230203`, freezes the shader declarations, and creates the fragment module. The load is
+is `0x07230203`, freezes the shader declarations, and creates the fragment module. The present
+pipeline loads its two raw modules the same way and validates their SPIR-V magic. The load is
 synchronous on the render thread before the renderer becomes ready. A missing built-in pack or
 shader, a malformed asset, or a module without the SPIR-V magic is a fatal startup
 `Bork2dException` naming the asset path and reason; there is no fallback shader. The shader catalog
 owns every fragment module and the pipeline owns the vertex module and every
-`(content hash, format)` pipeline.
+`(content hash, scene format)` pipeline.
 
 There is no build-time C# shader generator and no generated SPIR-V array. The retired
 `Bork2d.ShaderCompiler` tool, its targets import, and the checked-in renderer GLSL sources were
@@ -260,6 +282,33 @@ removed; the built-in shader sources live only under
 [src/Bork2d/BuiltInAssets/Assets](../src/Bork2d/BuiltInAssets/Assets) and are baked into the
 embedded pack by the ordinary bake tooling. The runtime does no shader compilation or source I/O; it
 only loads the baked SPIR-V from the asset packs.
+
+### Present pipeline
+
+The final present pass has its own minimal pipeline, layout, and sampler; it never reuses or changes
+the sprite bindless set:
+
+| Set | Binding | Descriptor | Stage | Contents |
+| --- | --- | --- | --- | --- |
+| `0` | `0` | combined image sampler | fragment | the frame's linear scene color image |
+
+The pipeline layout carries that one set and no push constant. The graphics pipeline targets the
+UNORM swapchain or offscreen format, uses no vertex input, triangle-list topology, dynamic
+viewport/scissor, no depth test or write, culling disabled, and no blending; it records one
+`vkCmdDraw(3, 1, 0, 0)` for a fullscreen triangle. Its sampler is nearest with clamped edges, which
+samples the scene image exactly one texel per target pixel. The fragment stage applies the standard
+sRGB opto-electronic transfer function to RGB
+(`linear <= 0.0031308 ? 12.92 * c : 1.055 * pow(c, 1/2.4) - 0.055`) and passes alpha through, so the
+UNORM target receives sRGB-encoded bytes.
+
+The present vertex and fragment stages are engine-owned sources baked into the built-in pack as raw
+SPIR-V (`present/vertex-spv`, `present/fragment-spv`) by the build-time built-in-assets tool; they are
+not user `.frag` assets. The runtime loads both modules from the built-in pack at startup and creates
+the pipeline owner. Pipelines are cached per final target format, so a windowed swapchain format
+change creates only that format's present pipeline. Each GPU frame owns a dedicated present
+descriptor set (in its frame instance resources) that binds the scene image view with the present
+sampler; the frame rewrites it when it creates or recreates its scene image. Steady-state recording
+allocates nothing and creates no Vulkan object.
 
 ### Custom shader catalog
 
@@ -285,7 +334,7 @@ claimed while any owner is live, and a later shader that declares it with a diff
 rejected. A failed load, invalid
 metadata, module creation failure, or pipeline creation failure draws with `shader/sprite` and logs
 one warning per shader path; a failure of the default shader itself is a fatal startup error.
-Modules are cached by shader content hash and pipelines by `(content hash, output format)`, so
+Modules are cached by shader content hash and pipelines by `(content hash, scene format)`, so
 identical content shares both. A failed path is not retried until the catalog changes.
 
 ### Global block and user values
@@ -330,20 +379,22 @@ only the target driver differs.
 
 | | Windowed | Offscreen |
 | --- | --- | --- |
-| Target | Swapchain image | Two permanent sRGB images |
+| Target | UNORM swapchain image | Two permanent UNORM images |
 | Presentation | Acquire, render, present | Render, discard |
 | Input/surface | SDL surface handles supplied by the host | None |
 | Minimized behavior | Snapshots drained without GPU work; tick cap in the host | Not applicable |
-| Frame capture | Before present | Before restoring the attachment layout |
+| Frame capture | After the present pass, before present | After the present pass, before restoring the attachment layout |
 
 ## Diagnostics and capture
 
 The renderer publishes an immutable `RenderStats` for the last completed frame: sequence,
 framebuffer size, draw calls, instances, cameras, non-empty cameras, texture pages/capacity, texture
 uploads pending (count and declared bytes), skipped sprites, and cumulative validation
-errors/warnings. `DrawCalls` counts the frame's shader runs, one `vkCmdDraw` each, so a default-only
-frame records one draw per non-empty camera while a camera with contiguous custom/default groups
-records one per run; `NonEmptyCameras` counts the cameras with at least one run.
+errors/warnings. `DrawCalls` counts the frame's shader runs plus the final fullscreen present draw,
+one `vkCmdDraw` each, so a default-only frame records one draw per non-empty camera plus the present,
+a camera with contiguous custom/default groups records one per run plus the present, and a frame with
+no camera runs still records the present draw; `NonEmptyCameras` counts the cameras with at least one
+run.
 `TextureUploadsPending` counts content-ready pages the frame's pump left queued by
 the upload budget, and `TextureUploadBytesPending` is their declared payload total. `TexturePages` is
 the resident page count (the placeholder plus ready pages in the current catalog); an evicted page
@@ -355,10 +406,12 @@ an ignored fifth additional reference is not skipped. Bounds-culled sprites are 
 only reduce `Instances`.
 
 `CaptureFrameAsync` queues a one-shot request through the shared `RendererCaptureService`. The copy
-is recorded after the last camera pass and before present/discard, so it includes the frame clear and
-every camera and excludes window chrome.
-The result is a `FrameCaptureResult` whose pixels are row-major, top-left-origin RGBA8, whose
+is recorded after the present pass and before present/discard, so it captures the final UNORM target:
+the sRGB-encoded result of the frame clear, every camera, and the present pass, and never window
+chrome. The result is a `FrameCaptureResult` whose pixels are row-major, top-left-origin RGBA8, whose
 dimensions are the captured frame's actual extent, and whose format is always `TextureFormat.Rgba8`.
+Because the captured bytes come from the final UNORM target, they are sRGB-encoded RGBA8, the same
+visual result as the prior sRGB attachment.
 The render thread swizzles/copies the staging bytes into one `byte[]` per captured frame, and every
 request served by that frame shares the same immutable memory; staging memory itself is pooled per
 GPU frame.
