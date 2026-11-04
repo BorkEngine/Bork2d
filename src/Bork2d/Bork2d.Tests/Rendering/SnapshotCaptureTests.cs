@@ -62,7 +62,7 @@ public sealed class SnapshotCaptureTests
         var sprite = engine.CreateSpriteRender(engine.Root);
         sprite.Sprite = asset;
         sprite.Layer = GameLayer.Player;
-        sprite.Tint = Color.Yellow;
+        sprite.Color = Color.Yellow;
         sprite.ZIndex = -4;
         sprite.FlipX = true;
         sprite.FlipY = false;

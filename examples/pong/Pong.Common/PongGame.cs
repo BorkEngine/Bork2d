@@ -76,7 +76,7 @@ public sealed class PongGame : IGame<GameLayer>
         Ball.Sprite = ballSprite;
         Ball.Layer = GameLayer.Ball;
         Ball.ZIndex = BallZIndex;
-        Ball.Tint = Color.White;
+        Ball.Color = Color.White;
         Ball.Shader = ballShader;
         Ball.SetUniform("lastHit", (float)engine.Time.Time);
 
@@ -181,7 +181,7 @@ public sealed class PongGame : IGame<GameLayer>
         paddle.Sprite = sprite;
         paddle.Layer = layer;
         paddle.ZIndex = PaddleZIndex;
-        paddle.Tint = tint;
+        paddle.Color = tint;
         return paddle;
     }
 

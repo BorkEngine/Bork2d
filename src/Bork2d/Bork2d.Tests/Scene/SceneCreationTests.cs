@@ -52,7 +52,7 @@ public sealed class SceneCreationTests
 
         Assert.Null(sprite.Sprite);
         Assert.Equal(GameLayer.None, sprite.Layer);
-        Assert.Equal(Color.White, sprite.Tint);
+        Assert.Equal(Color.White, sprite.Color);
         Assert.Equal(0, sprite.ZIndex);
         Assert.Same(engine.Root, sprite.Parent);
     }

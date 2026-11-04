@@ -1,13 +1,12 @@
 using System.Reflection;
-using Bork2d.Engine.Assets;
 using Bork2d.Engine.Scene;
 using Xunit;
 
 namespace Bork2d.Tests.Architecture;
 
 /// <summary>
-/// Pins the public <c>ILineRender&lt;TLayer&gt;</c> surface: exactly the approved members, deriving
-/// from the shared <see cref="IRenderable"/> contract.
+/// Pins the public <c>ILineRender&lt;TLayer&gt;</c> surface: exactly the line-specific members,
+/// deriving from the shared <see cref="IRenderable{TLayer}"/> contract.
 /// </summary>
 public sealed class LineRenderPublicSurfaceTests
 {
@@ -19,7 +18,8 @@ public sealed class LineRenderPublicSurfaceTests
         Assert.True(type.IsInterface);
         Assert.True(type.IsPublic);
         Assert.Equal("Bork2d.Engine.Scene", type.Namespace);
-        Assert.True(typeof(IRenderable).IsAssignableFrom(type));
+        Assert.True(InheritsGenericInterface(type, typeof(IRenderable<>)));
+        Assert.True(typeof(IBoundedTransform).IsAssignableFrom(type));
     }
 
     [Fact]
@@ -46,41 +46,26 @@ public sealed class LineRenderPublicSurfaceTests
             {
                 "Boolean AntiAlias",
                 "Boolean Closed",
-                "Color Color",
                 "IReadOnlyList`1 Points",
-                "Int32 ZIndex",
-                "ShaderAsset Shader",
                 "Single Width",
-                "TLayer Layer",
             },
             properties);
-        Assert.Equal(
-            new[]
-            {
-                "ResetUniforms()",
-                "SetUniform(String,Color)",
-                "SetUniform(String,Single)",
-                "SetUniform(String,Vector2)",
-                "SetUniform(String,Vector3)",
-                "SetUniform(String,Vector4)",
-            },
-            methods);
+        Assert.Empty(methods);
     }
 
     [Fact]
-    public void PointsAreReadWriteAndShaderIsNullable()
+    public void PointsAreReadWrite()
     {
         PropertyInfo points = Assert.IsAssignableFrom<PropertyInfo>(
             typeof(ILineRender<>).GetProperty("Points"));
         Assert.True(points.CanRead);
         Assert.True(points.CanWrite);
         Assert.Equal(typeof(IReadOnlyList<>), points.PropertyType.GetGenericTypeDefinition());
-
-        PropertyInfo shader = Assert.IsAssignableFrom<PropertyInfo>(
-            typeof(ILineRender<>).GetProperty("Shader"));
-        Assert.Equal(typeof(ShaderAsset), shader.PropertyType);
-        Assert.True(shader.CanWrite);
     }
+
+    private static bool InheritsGenericInterface(Type type, Type definition)
+        => type.GetInterfaces().Any(candidate => candidate.IsGenericType
+            && candidate.GetGenericTypeDefinition() == definition);
 
     private static string Describe(MethodInfo method)
     {

@@ -8,7 +8,7 @@ namespace Bork2d.Engine.Assets;
 /// </summary>
 /// <param name="Name">
 /// The shader-declared uniform name. Names are matched ordinally and are the keys accepted by
-/// <see cref="Scene.ISpriteRender{TLayer}.SetUniform(string, float)"/> and
+/// <see cref="Scene.IRenderable{TLayer}.SetUniform(string, float)"/> and
 /// <see cref="IEngine{TLayer}.SetGlobalUniform(string, float)"/>.
 /// </param>
 /// <param name="Type">

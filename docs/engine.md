@@ -9,7 +9,7 @@ provider package.
 | Namespace | Key public types |
 | --- | --- |
 | `Bork2d.Engine` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
-| `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `IRenderable`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `ILineRender<TLayer>` |
+| `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `IBoundedTransform`, `IRenderable<TLayer>`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `ILineRender<TLayer>` |
 | `Bork2d.Engine.Rendering` | `Color` (immutable linear RGBA), `RenderStats`, `ClearKind`, `FrameCaptureResult` |
 | `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `ShaderAsset`, `ShaderUniform`, `ShaderTextureSlot`, `ShaderUniformType`, `TextureDescriptor`, `TextureFormat`, `AssetRef<T>`, `DataRef`, enums |
 | `Bork2d.Engine.Assets.Pack` | `PackBuilder`, `PackCompressionMode` (tooling only) |
@@ -17,10 +17,11 @@ provider package.
 | `Bork2d.Engine.Mathematics` | `Bounds`, `Ray2D`, `Vector2Extensions`, `Vector2ApproximatelyExtensions` |
 | `Bork2d.Engine.Platform` | `IWindow`, `ITime` |
 
-`GameEngine`, `Transform`, `Camera`, `SpriteRender`, `AssetService`, `FrameSnapshot`,
-`ShaderRenderData`, the typed render-data buffers/producers/definitions, `RenderableRegistry`, and
-the projection and sprite-bounds math are internal. `Bork2d.Engine.Assets.Pack` exposes only the pack
-writer and its compression enum; everything else there is implementation.
+`GameEngine`, `Transform`, `Renderable2D`, `Camera`, `SpriteRender`, `LineRender`, `AssetService`,
+`FrameSnapshot`, `ShaderRenderData`, the typed render-data buffers/producers/definitions,
+`RenderableRegistry`, and the projection and sprite-bounds math are internal.
+`Bork2d.Engine.Assets.Pack` exposes only the pack writer and its compression enum; everything else
+there is implementation.
 
 ## Game and engine
 
@@ -103,7 +104,12 @@ framebuffer, so the helpers throw `InvalidOperationException`. A camera's world 
 (within `1e-4`), and its matrix must be invertible; otherwise the camera is skipped. Camera defaults
 are a full viewport, size `10`, all layers, color clear to black, and `ZIndex` `0`.
 
-Sprite renderables are transforms plus `Sprite`, one-bit `Layer`, linear `Tint`, `ZIndex`, and
+Sprites and lines implement `IRenderable<TLayer>`, the shared 2D renderable contract. It adds the
+linear RGBA `Color`, the optional custom fragment `Shader`, the one-bit `Layer`, the shared
+`ZIndex`, and the instance uniform members (`SetUniform` overloads and `ResetUniforms`) on top of
+`IBoundedTransform`. A camera is only an `IBoundedTransform`; it is not drawn.
+
+Sprite renderables are transforms plus `Sprite`, the shared `IRenderable<TLayer>` draw state, and
 `FlipX`/`FlipY`. `SpriteAsset` is a MessagePack quad description: a `Texture` reference, four
 normalized UVs (top-left, top-right, bottom-right, bottom-left), a per-axis `Vector2` world `Scale`,
 a normalized pivot, a topology, and optional indices. The renderer derives the quad; there is no
@@ -142,15 +148,15 @@ path. A sprite with no custom shader has a zero instance-uniform block in the sn
 seeds it from the default entry's declared default block, so a game pack that shadows
 `shader/sprite` with instance-uniform declarations behaves correctly without per-sprite overrides.
 
-Line renderables are transforms plus an ordered local-space polyline: `Points`, `Closed`, `Width`,
-`Color`, `AntiAlias`, an optional custom fragment `Shader`, one-bit `Layer`, and `ZIndex`. Defaults
-are empty points, an open line, width `1`, white, anti-aliasing on, no shader, layer `0`, and
-z-index `0`. `ZIndex` is the shared 2D draw order described for sprites: higher draws later, it is
-not layer-scoped, and equal values fall back to per-camera screen-space Y then X. `Layer` is only a
-camera culling bit. The `Points` setter copies the supplied list and stores `null` as empty; the
-getter returns a cached read-only view of that copy, so mutating the caller's array cannot change a
-renderable or a published snapshot and reading it allocates nothing. A line with `Layer` `0` or a
-combined mask is captured as-is and skipped later, exactly like a sprite.
+Line renderables are transforms plus an ordered local-space polyline — `Points`, `Closed`, `Width`,
+and `AntiAlias` — and the shared `IRenderable<TLayer>` draw state. Defaults are empty points, an
+open line, width `1`, white, anti-aliasing on, no shader, layer `0`, and z-index `0`. `ZIndex` is
+the shared 2D draw order described for sprites: higher draws later, it is not layer-scoped, and
+equal values fall back to per-camera screen-space Y then X. `Layer` is only a camera culling bit.
+The `Points` setter copies the supplied list and stores `null` as empty; the getter returns a cached
+read-only view of that copy, so mutating the caller's array cannot change a renderable or a
+published snapshot and reading it allocates nothing. A line with `Layer` `0` or a combined mask is
+captured as-is and skipped later, exactly like a sprite.
 
 The engine expands a line on the CPU into immutable local-space triangles with per-vertex line UVs
 and `uint32` indices, and caches the result per renderable. Points, width, and closed state rebuild
@@ -175,13 +181,14 @@ and capture applies only values whose name and type still match. A line without 
 a zero instance-uniform block in the snapshot; the renderer seeds it from `shader/line`'s declared
 default block, so a pack that shadows the line default with declarations behaves correctly.
 
-Cameras, sprites, and lines are `IRenderable`s and expose a read-only world-space `Bounds` AABB for
-conservative renderer culling. A camera's bounds contain its transformed visible rectangle; a
-sprite's bounds contain the drawn quad, derived from the frozen render data, pivot, flips, and
-composed world matrix; a line's bounds contain its expanded geometry, including half the width and
-every miter or bevel extent. All return `Bounds.Empty` for an invalid renderable, a headless or
-shut-down app, or a renderable with no drawable content, and reading them never throws for those
-cases. Empty bounds mean "unknown": the renderer must not treat them as "outside".
+Cameras, sprites, and lines are `IBoundedTransform`s and expose a read-only world-space `Bounds`
+AABB for conservative renderer culling. Sprites and lines are also `IRenderable<TLayer>`s; a camera
+is not drawn. A camera's bounds contain its transformed visible rectangle; a sprite's bounds contain
+the drawn quad, derived from the frozen render data, pivot, flips, and composed world matrix; a
+line's bounds contain its expanded geometry, including half the width and every miter or bevel
+extent. All return `Bounds.Empty` for an invalid renderable, a headless or shut-down app, or a
+renderable with no drawable content, and reading them never throws for those cases. Empty bounds
+mean "unknown": the renderer must not treat them as "outside".
 
 `SpriteAsset` is a mutable authoring and loading DTO, but rendering reads only an immutable frozen
 copy of its draw fields. Assigning an asset to a renderable freezes it once; mutating the asset
@@ -266,7 +273,8 @@ world-space axis-aligned box stored as a center and half extents (two `Vector2` 
 `Encapsulate`, `Expand`, and `SetMinMax` helpers plus `ClosestPoint`, `Contains`, `Intersects`,
 `SqrDistance`, and `IntersectRay`. Construct it from a center and a full size with
 `new Bounds(center, size)`, or from two corners with `Bounds.FromMinMax(min, max)`. The type lives in
-the mathematics namespace; `IRenderable.Bounds` and the renderer's culling bounds use it from there.
+the mathematics namespace; `IBoundedTransform.Bounds` and the renderer's culling bounds use it from
+there.
 
 `Bounds.Empty` is the default value and means "no bounds" or "unknown bounds". A box without
 positive area is empty: the default value, a zero-area box, an inverted box (a minimum beyond the

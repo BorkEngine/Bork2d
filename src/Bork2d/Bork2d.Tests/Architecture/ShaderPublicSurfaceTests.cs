@@ -12,7 +12,7 @@ namespace Bork2d.Tests.Architecture;
 
 /// <summary>
 /// Pins the custom-shader public contract: the new asset types and declarations, the engine's
-/// layout version, and the shader members added to <see cref="ISpriteRender{TLayer}"/>.
+/// layout version, and the shader members shared through <see cref="IRenderable{TLayer}"/>.
 /// </summary>
 public sealed class ShaderPublicSurfaceTests
 {
@@ -128,12 +128,15 @@ public sealed class ShaderPublicSurfaceTests
     }
 
     [Fact]
-    public void SpriteRenderDeclaresTheShaderContractMembers()
+    public void SharedRenderableDeclaresTheShaderContractMembers()
     {
+        Type shared = typeof(IRenderable<>);
         Type sprite = typeof(ISpriteRender<>);
 
+        Assert.True(typeof(IBoundedTransform).IsAssignableFrom(shared));
+
         PropertyInfo shader = Assert.IsAssignableFrom<PropertyInfo>(
-            sprite.GetProperty(nameof(ISpriteRender<GameLayer>.Shader)));
+            shared.GetProperty(nameof(IRenderable<GameLayer>.Shader)));
         Assert.Equal(typeof(ShaderAsset), shader.PropertyType);
         Assert.True(shader.CanRead);
         Assert.True(shader.CanWrite);
@@ -146,11 +149,11 @@ public sealed class ShaderPublicSurfaceTests
 
         const BindingFlags flags = BindingFlags.Public | BindingFlags.Instance
             | BindingFlags.DeclaredOnly;
-        string[] uniformMethods = sprite
+        string[] uniformMethods = shared
             .GetMethods(flags)
             .Where(method => !method.IsSpecialName)
-            .Where(method => method.Name is nameof(ISpriteRender<GameLayer>.SetUniform)
-                or nameof(ISpriteRender<GameLayer>.ResetUniforms))
+            .Where(method => method.Name is nameof(IRenderable<GameLayer>.SetUniform)
+                or nameof(IRenderable<GameLayer>.ResetUniforms))
             .Select(Describe)
             .OrderBy(signature => signature, StringComparer.Ordinal)
             .ToArray();
@@ -166,6 +169,13 @@ public sealed class ShaderPublicSurfaceTests
                 "SetUniform(String,Vector4)",
             },
             uniformMethods);
+
+        Assert.Null(sprite.GetProperty(
+            nameof(IRenderable<GameLayer>.Shader),
+            BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly));
+        Assert.Null(shared.GetProperty(
+            nameof(ISpriteRender<GameLayer>.AdditionalTextures),
+            BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly));
     }
 
     [Fact]

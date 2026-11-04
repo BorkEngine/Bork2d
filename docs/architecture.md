@@ -119,6 +119,9 @@ Assets are built ahead of time, not loaded from loose files at runtime:
   and the detached node keeps its world transform; re-attach the same object later.
 - **Coordinates.** World space is +X right, +Y up, in absolute world units. `Camera.Size` is the
   half visible height; viewports are normalized with a top-left origin.
+- **2D renderables.** Sprites and lines implement the shared `IRenderable<TLayer>` contract over
+  `IBoundedTransform`: custom shader, linear RGBA color, one-bit layer, shared z-index, and instance
+  uniforms. Cameras implement only `IBoundedTransform` because they are not drawn.
 - **Layers and culling.** A layer type is an `int`-backed `[Flags]` enum with 1-32 named single-bit
   values (`None = 0` allowed). A sprite or line uses exactly one bit; a camera culls with a mask.
   `Layer` is only a camera culling bit and never participates in draw order. After the mask, culling
