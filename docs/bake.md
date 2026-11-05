@@ -2,8 +2,13 @@
 
 `Bork2d.Bake` is the build-time asset pipeline. It is a JIT library used by game-owned assets
 executables; it references `Bork2d.Engine` and the pack writer, but no runtime project references
-it. The bake tooling, TOML parser, image decoder, KTX2 writer, block encoder, shader compiler, and
-processors never enter a game's compile or publish graph.
+it. The bake tooling, TOML parser, image decoder, KTX2 writer, block encoder, shader compiler, SVG
+parser, MSDF generator, and processors never enter a game's compile or publish graph.
+
+The built-in processors bake textures, fragment shaders, and SVG sources. An SVG source becomes a
+normal `SpriteAsset` and a linear multi-channel signed distance field (MSDF) texture. SeasonMSDF is
+a build-only dependency of `Bork2d.Bake`; it never reaches a runtime project or an AOT publish
+graph.
 
 A game owns an assets executable (for example
 [Pong.Assets](../examples/pong/Pong.Assets)) whose `Program` configures `BakeApplicationBuilder`
@@ -40,8 +45,8 @@ return await new BakeApplicationBuilder()
 - `RegisterAsset<T>(validator)` registers the type when it is not registered yet and appends a
   semantic validator. It never reports the duplicate-type diagnostic; multiple validators for one type
   run in registration order, and a null validator throws.
-- `UseDefaultProcessors()` registers the built-in texture processor and the built-in fragment shader
-  processor.
+- `UseDefaultProcessors()` registers the built-in texture, fragment shader, and SVG processors, in
+  that order.
 - `WithTextureDefaults` supplies sampler state for textures without a sidecar.
 - `AddProcessor` adds a custom processor; later registrations override earlier ones for the same
   extension and report an informational diagnostic.
@@ -56,8 +61,8 @@ Each pack root is walked recursively in ordinal path order. Reparse points are s
 classified as follows:
 
 - **Processor source.** A non-TOML file whose longest registered compound extension matches a
-  processor (for example `.png`, `.frag`, or `.circle`). Its asset base path is the pack-relative
-  path with the extension removed and lowercased.
+  processor (for example `.png`, `.frag`, `.svg`, or `.circle`). Its asset base path is the
+  pack-relative path with the extension removed and lowercased.
 - **Data TOML.** A `.toml` file with a root `[bork2d]` table whose `type` is a registered CLR type.
   The asset path is the file path without `.toml`, lowercased. Constructor parameters/properties
   bind by name; a data TOML filename must not contain a dot.
@@ -205,6 +210,90 @@ A missing sidecar is created empty and reported as an informational diagnostic, 
 declares no uniforms and no extra slots. An existing empty sidecar has the same meaning. Shader
 compilation uses shaderc 2.23.0 in the bake tooling; no runtime project references it.
 
+### SVG and MSDF
+
+`Assets/art/wordmark.svg` is handled by the built-in SVG processor. An SVG source is a silhouette:
+the processor parses shape geometry, bakes it into a linear multi-channel signed distance field
+(MSDF) texture, and emits ordinary assets:
+
+- A `SpriteAsset` at `art/wordmark` that references the `art/wordmark-sdf` texture with full UVs
+  (top-left, top-right, bottom-right, bottom-left), a center pivot, and the scale from the bake
+  result. It is a normal sprite asset; a game may assign an SDF fragment shader to it, and the bake
+  does not choose a shader.
+- A `TextureDescriptor` at `art/wordmark-sdf` with the base dimensions, the linear `Rgb8` (or
+  explicit BC7) format, the full mip chain, `Filter = linear`, and `Wrap = clamp`.
+- The raw KTX2 payload at `art/wordmark-sdf-ktx2`.
+
+The required sidecar `wordmark.svg.toml` carries the bake settings:
+
+```toml
+resolution = 512      # maximum output texture dimension in pixels, 1..8192
+range = 8             # distance spread in pixels, greater than zero
+padding = 2           # extra pixels beyond the range margin, at least zero
+compression = "none"  # none | bc7
+```
+
+Every key is optional. An absent key inherits the default (`resolution = 512`, `range = 8`,
+`padding = 2`, `compression = "none"`). A missing sidecar is created with all four explicit keys and
+reported as an informational diagnostic. Invalid TOML, an unknown key, or an unknown enum value uses
+the shared `BK2xxx` binder diagnostics; a value that binds but cannot form a bake is `BK9204`.
+
+#### Supported subset
+
+The root `svg` element, `g`, `path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, and `polygon`
+are supported, with `viewBox`, `width`/`height`, `transform`, `fill`, and `fill-rule`. Elements are
+matched by local name, so a prefixed SVG namespace still parses. Paint, stroke, opacity, color,
+gradients, filters, masks, clip paths, text, images, CSS, `defs`, and `use` are ignored; `defs` and
+`use` are not expanded. An unsupported element and its subtree are skipped with one informational
+diagnostic and the rest of the document still bakes, while a stroke-only shape, `fill="none"`, or any
+other document without drawable fill geometry is `BK9205`. A malformed path, transform, length, fill
+rule, or geometry attribute is `BK9202`.
+
+#### Artboard and sizing
+
+The artboard is the root `viewBox` rectangle, else the root `width`/`height`, else the geometry
+bounds. The bake reserves `range + padding` pixels on every side of the artboard. `resolution` is the
+maximum output dimension in pixels: the longer artboard axis fills `resolution - 2 * (range +
+padding)`, the shorter axis keeps the artboard aspect, and each texture dimension is the content
+extent plus both margins rounded up. The long axis is exactly `resolution`; a layout that leaves no
+usable artboard is `BK9204`.
+
+The sprite's `Scale` makes the visible artboard exactly one world unit high while preserving the
+source aspect: with texture width `W`, texture height `H`, and content height `C` in pixels,
+`Scale = (W / C, H / C)`. The field margin is part of the texture and the full UVs, so the sprite
+quad covers the margin and the visible artboard (not the padded texture) is one unit high. For a
+`200x100` viewBox with `resolution = 128`, `range = 8`, and `padding = 2`, the texture is `128x74`,
+the content is `108x54`, and the scale is `(128/54, 74/54)`.
+
+#### Compression
+
+`compression = "none"` stores the field as uncompressed linear `Rgb8` (logical RGB in RGBA8 with
+alpha forced to `255`) and is the default. `compression = "bc7"` is an explicit opt-in that stores
+the field as BC7 `CompRgba8`; the bake rejects a level whose decoded field loses the accepted
+fidelity or flips the sign as `BK9207` and never falls back to uncompressed output. MSDF data is
+distance data, not color data, so the generic texture sidecar's `type = "rgb"` with
+`compression = "auto"` (opaque BC1) is never used for it; BC7 is available only through this
+sidecar's explicit `compression` key.
+
+Every MSDF payload is a complete KTX2 2.0 file with one 2D image, one array layer, one face, no
+supercompression, and a full distance-preserving mip chain down to 1x1. MSDF generation uses
+SeasonMSDF 0.2.0 in the bake tooling; no runtime project references it.
+
+#### Diagnostics
+
+| Code | Meaning |
+| --- | --- |
+| `BK9201` | The source could not be read as strict UTF-8, is not well-formed XML, or does not have an `svg` root element. |
+| `BK9202` | Invalid supported SVG content: a bad `viewBox`, `width`, `height`, length, transform, fill rule, path data, or geometry attribute, a non-finite number, or a rounded rectangle. |
+| `BK9203` | An unsupported element or feature was skipped; the parse continues and the bake emits outputs. |
+| `BK9204` | An SDF bake option is invalid: `resolution` outside `1..8192`, `range` not positive, `padding` negative, or margins that leave no usable artboard. |
+| `BK9205` | The document has no drawable fill geometry. |
+| `BK9206` | The field cannot represent the shape, or the bake failed while generating or encoding it. |
+| `BK9207` | Opt-in BC7 encoding changed the field beyond the accepted fidelity or flipped the decoded sign; no fallback is emitted. |
+
+Parse and bake diagnostics carry the source location when they have one (for example
+`line 2, column 5`). A source with an error emits no sprite, descriptor, or payload.
+
 ## Asset validators
 
 A registered data type can carry semantic validators. `RegisterAsset<T>(validator)` registers the type
@@ -269,6 +358,7 @@ not validate processor outputs, sidecars, or runtime-loaded assets.
 | --- | --- | --- | --- |
 | `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tga` | `texture` | `TextureDescriptor` at the base path, KTX2 payload at `<base>-ktx2`. | Required; created with `type`/`compression` and the `WithTextureDefaults` sampler values when missing. |
 | `.frag` | `shader` | `ShaderAsset` at the base path, raw SPIR-V at `<base>-spv`. | Required; created empty when missing. |
+| `.svg` | `svg` | `SpriteAsset` at the base path, `TextureDescriptor` at `<base>-sdf`, KTX2 payload at `<base>-sdf-ktx2`. | Required; created with `resolution`, `range`, `padding`, and `compression` when missing. |
 
 Implement `IAssetProcessor` for a sidecar-free source, or derive from `AssetProcessor<TSidecar>` for
 a required-sidecar source. A processor declares a stable `Name`, its extension list, and its
@@ -277,7 +367,8 @@ sidecar policy. Its `Process` method reads the source and emits outputs through 
 
 - `Outputs.AddAsset<T>(path, value)` emits a typed MessagePack asset; the engine serializes it.
 - `Outputs.AddData(path, bytes)` emits an opaque raw payload.
-- `Diagnostics.Error(code, message)` reports a `BK7xxx` failure; the source's outputs are discarded.
+- `Diagnostics.Error(code, message)` reports a failure using a `BK7xxx` code or the processor's
+  specific range (the shader and SVG processors use `BK9xxx`); the source's outputs are discarded.
   `Warning` and `Info` report without discarding.
 
 `IAssetProcessor`, `AssetProcessorContext`, `IAssetOutputSink`, `IAssetProcessorDiagnostics`, and
@@ -417,20 +508,23 @@ Codes are stable once a range is released. A diagnostic renders as
 | `BK6xxx` | MSBuild/build integration. |
 | `BK7xxx` | Processor registration and processing. |
 | `BK8xxx` | Registered semantic asset validators, including the built-in sprite validator. |
-| `BK9xxx` | Fragment shader sources and metadata: unreadable or forbidden source (`BK9001`), shaderc compilation failure (`BK9002`), invalid sidecar name/type/default/slots (`BK9003`), and instance/global uniform block overflow (`BK9004`). Also bake-side texture failures: KTX2/BC encoding or container writing (`BK9100`) and an impossible sidecar channel-type/compression mapping (`BK9101`). |
+| `BK9xxx` | Fragment shader sources and metadata: unreadable or forbidden source (`BK9001`), shaderc compilation failure (`BK9002`), invalid sidecar name/type/default/slots (`BK9003`), and instance/global uniform block overflow (`BK9004`). Also bake-side texture failures: KTX2/BC encoding or container writing (`BK9100`) and an impossible sidecar channel-type/compression mapping (`BK9101`). SVG sources and MSDF baking use `BK9200`-`BK9299`: malformed or unreadable source (`BK9201`), invalid supported content (`BK9202`), ignored features (`BK9203`), invalid SDF options (`BK9204`), no drawable geometry (`BK9205`), SDF representation/encoding failure (`BK9206`), and rejected BC7 fidelity/sign (`BK9207`). |
 
 ## Incremental builds
 
 `bake` records a schema-3 manifest at `<project root>/obj/bork2d/bake/manifest.json`. It tracks the
 tool version, configuration hash, registered type/processor assembly closure, mode, every input
-path/hash, and every output path/hash. The configuration hash includes the shader tool marker
-`shaderc-2.23.0/layout-3/prologue-4/packer-1` and the texture tool marker
-`ktx2-1/bcn-2.3.0/mips-1`, so upgrading shaderc or BCnEncoder.Net, changing the fragment layout,
-prologue, uniform packer, KTX2 writer, or mip filter invalidates a manifest written by the earlier
-tool. When all match, the bake prints an up-to-date summary and writes nothing. Any changed source,
-registration, processor, pack path, mode, or output triggers a full bake; `--force` bypasses the
-check, and `--check`/`validate` always run the pipeline and its validators. `clean` removes the
-manifest with the packs.
+path/hash, and every output path/hash. The configuration hash shape is
+`bork2d.bake.configuration.v4`; the manifest schema version is unchanged. The hash includes the
+shader tool marker `shaderc-2.23.0/layout-3/prologue-4/packer-1`, the texture tool marker
+`ktx2-1/bcn-2.3.0/mips-1`, and the SVG tool marker `svg-1/seasonmsdf-0.2.0/sdfmips-1`, so upgrading
+shaderc or BCnEncoder.Net, changing the fragment layout, prologue, uniform packer, KTX2 writer, mip
+filter, SVG parser, MSDF generator, or SDF mip handling invalidates a manifest written by the
+earlier tool. When all match, the bake prints an up-to-date summary and writes nothing. Any changed
+source, registration, processor, pack path, mode, or output triggers a full bake; `--force` bypasses
+the check, and `--check`/`validate` always run the pipeline and its validators. A missing required
+sidecar that the bake creates is re-collected as a tracked input, so the next bake can be up to date.
+`clean` removes the manifest with the packs.
 
 ## MSBuild integration
 

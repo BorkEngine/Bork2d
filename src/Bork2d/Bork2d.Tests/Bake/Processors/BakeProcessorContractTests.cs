@@ -53,9 +53,9 @@ public sealed class BakeProcessorContractTests
         project.WriteAsset("data/shared.req.toml", "value = 7\n");
 
         // The registry keeps the public processors: both registrations execute the same contract. The
-        // two default processors (texture, shader) precede the custom registrations.
-        Assert.Same(none, project.Project.Processors[2].Processor);
-        Assert.Same(required, project.Project.Processors[3].Processor);
+        // three default processors (texture, shader, svg) precede the custom registrations.
+        Assert.Same(none, project.Project.Processors[3].Processor);
+        Assert.Same(required, project.Project.Processors[4].Processor);
 
         var diagnostics = new BakeDiagnostics();
         IReadOnlyList<BakeProcessorOutput> outputs = Run(project, diagnostics);
