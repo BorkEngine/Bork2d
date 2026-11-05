@@ -372,9 +372,10 @@ an existing texture never becomes lossy without an explicit authoring choice; `a
 An `.svg` source is baked to ordinary assets rather than a new runtime type: a `SpriteAsset` at the
 source's base path and a linear multi-channel signed distance field (MSDF) `TextureDescriptor` at
 `<base>-sdf` with its KTX2 payload at `<base>-sdf-ktx2`. The sprite has full UVs and a center pivot,
-and its texture is linear MSDF data in `Rgb8` by default (or explicit BC7), so a game can assign an
-SDF fragment shader to it like any other custom shader. The sprite itself stays a normal
-`SpriteAsset`; there is no SVG renderable or other new public engine type.
+and its texture is linear MSDF data in `Rgb8` by default (or explicit BC7), so a game can load the
+built-in `shader/sdf` fragment shader and assign it to the sprite like any other custom shader. The
+sprite itself stays a normal `SpriteAsset`; there is no SVG renderable or other new public engine
+type.
 
 ### Pack format
 

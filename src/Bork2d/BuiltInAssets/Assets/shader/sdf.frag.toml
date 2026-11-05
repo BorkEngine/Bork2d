@@ -1,0 +1,3 @@
+[uniforms]
+uSoftness = { type = "float", default = 1.0 }
+uThreshold = { type = "float", default = 0.5 }

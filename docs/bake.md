@@ -218,8 +218,9 @@ the processor parses shape geometry, bakes it into a linear multi-channel signed
 
 - A `SpriteAsset` at `art/wordmark` that references the `art/wordmark-sdf` texture with full UVs
   (top-left, top-right, bottom-right, bottom-left), a center pivot, and the scale from the bake
-  result. It is a normal sprite asset; a game may assign an SDF fragment shader to it, and the bake
-  does not choose a shader.
+  result. It is a normal sprite asset and the built-in `shader/sdf` is the intended fragment shader
+  for it; the asset remains shader-agnostic because the bake does not choose a shader and a game
+  assigns it.
 - A `TextureDescriptor` at `art/wordmark-sdf` with the base dimensions, the linear `Rgb8` (or
   explicit BC7) format, the full mip chain, `Filter = linear`, and `Wrap = clamp`.
 - The raw KTX2 payload at `art/wordmark-sdf-ktx2`.
@@ -438,13 +439,15 @@ The source tree uses the same processors as game content. `shader/sprite.frag` a
 empty `shader/sprite.frag.toml` sidecar produce the `shader/sprite` `ShaderAsset` and the
 `shader/sprite-spv` payload, exactly like a game shader, and `shader/line.frag` with its empty
 `shader/line.frag.toml` sidecar produces the built-in line fragment `shader/line` and its
-`shader/line-spv` payload; the sidecars are committed so a clean build never creates or mutates a
-source file. The tool-only `builtin-vertex` processor owns `.vert`: it reads each source as strict
-UTF-8, compiles it through the shared `GlslCompiler`, and emits `<base>-spv`, so the sprite stage
-yields `shader/vertex-spv` and the new line stage yields `shader/line-vertex-spv`. `.vert` is not
-registered by `UseDefaultProcessors()`, so it is not a user-facing source type. `builtin-present`
-does the same for the engine-owned `.pvert`/`.pfrag` present stages and emits `present/vertex-spv` and
-`present/fragment-spv`.
+`shader/line-spv` payload. `shader/sdf.frag` with its checked-in `shader/sdf.frag.toml` sidecar
+produces the built-in SDF fragment `shader/sdf` and its `shader/sdf-spv` payload; that sidecar
+declares the `uSoftness` and `uThreshold` instance uniforms. The sidecars are committed so a clean
+build never creates or mutates a source file. The tool-only `builtin-vertex` processor owns `.vert`:
+it reads each source as strict UTF-8, compiles it through the shared `GlslCompiler`, and emits
+`<base>-spv`, so the sprite stage yields `shader/vertex-spv` and the new line stage yields
+`shader/line-vertex-spv`. `.vert` is not registered by `UseDefaultProcessors()`, so it is not a
+user-facing source type. `builtin-present` does the same for the engine-owned `.pvert`/`.pfrag`
+present stages and emits `present/vertex-spv` and `present/fragment-spv`.
 
 `textures/placeholder.checker` is a UTF-8 text source containing one integer resolution (8). The
 tool-only `builtin-placeholder` processor validates it against a small range, generates a magenta and

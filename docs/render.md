@@ -343,20 +343,23 @@ indices; when a frame needs more, each grows independently to
 against the device's buffer limit, logs the growth, and never truncates. A normal frame does not
 grow.
 
-The default sprite shader, the built-in line shader, and the bindless placeholder are asset content,
-not compiled-in arrays. The built-in pack, mounted below every game pack, serves `shader/sprite` and
-`shader/line` as `ShaderAsset`s, `shader/sprite-spv` and `shader/line-spv` as their raw fragment
-modules, `shader/vertex-spv` and `shader/line-vertex-spv` as the engine-owned sprite and line vertex
-modules, `present/vertex-spv` plus `present/fragment-spv` as the engine-owned present modules, and
-`textures/placeholder` plus `textures/placeholder-ktx2` as the bindless placeholder descriptor and
-KTX2 payload. At renderer startup `RendererTextures.EnsurePipeline` loads both vertex modules through
-`IAssets` and creates the pipeline owner; `ShaderStore` then loads both fragment shader assets,
-validates each non-null `SpirV` reference, `LayoutVersion` 3, the `main` entry point, the full
-declaration set, and a non-empty module whose first little-endian word is `0x07230203`, freezes the
-declarations, and creates both fragment modules. The built-in sprite default is entry `0` and the
-line default entry `1`; custom entries start at `2`. `EnsureDefaultPipelines` creates both default
-pipelines for the scene format. The present pipeline loads its two raw modules the same way and
-validates their SPIR-V magic. The placeholder descriptor and payload are loaded synchronously and
+The default sprite shader, the built-in line shader, the built-in SDF shader, and the bindless
+placeholder are asset content, not compiled-in arrays. The built-in pack, mounted below every game
+pack, serves `shader/sprite`, `shader/line`, and `shader/sdf` as `ShaderAsset`s, `shader/sprite-spv`,
+`shader/line-spv`, and `shader/sdf-spv` as their raw fragment modules, `shader/vertex-spv` and
+`shader/line-vertex-spv` as the engine-owned sprite and line vertex modules, `present/vertex-spv`
+plus `present/fragment-spv` as the engine-owned present modules, and `textures/placeholder` plus
+`textures/placeholder-ktx2` as the bindless placeholder descriptor and KTX2 payload. At renderer
+startup `RendererTextures.EnsurePipeline` loads both vertex modules through `IAssets` and creates the
+pipeline owner; `ShaderStore` then loads the two default fragment shader assets (`shader/sprite` and
+`shader/line`), validates each non-null `SpirV` reference, `LayoutVersion` 3, the `main` entry point,
+the full declaration set, and a non-empty module whose first little-endian word is `0x07230203`,
+freezes the declarations, and creates both default fragment modules. The built-in sprite default is
+entry `0` and the line default entry `1`; custom entries start at `2`. `shader/sdf` is not a startup
+default: it is ordinary custom shader content that the catalog loads on first sighting when a sprite
+assigns it, with no renderer special case and no extra pass. `EnsureDefaultPipelines` creates both
+default pipelines for the scene format. The present pipeline loads its two raw modules the same way
+and validates their SPIR-V magic. The placeholder descriptor and payload are loaded synchronously and
 validated before the renderer becomes ready. A missing built-in pack, shader, vertex module, or
 placeholder, a malformed asset, a module without the SPIR-V magic, or an invalid placeholder payload
 is a fatal startup `Bork2dException` naming the asset path and reason; there is no fallback shader.
@@ -461,6 +464,23 @@ bindless placeholder index `0`; paths beyond the declared slot count are never l
 carries more than four references logs one warning per renderer and the extra references are ignored.
 The resolved indices reach the shader through `vExtraTextureIndices` / the `BORK2D_TEXTURE0` through
 `BORK2D_TEXTURE3` macros.
+
+### SDF shader
+
+`shader/sdf` is an ordinary built-in custom fragment shader for signed distance fields. It samples the
+sprite's main texture `.rgb` — the SVG bake's linear `Rgb8`, or its opt-in BC7 `CompRgba8` —
+reconstructs the median of the three MSDF channels, derives a screen-space anti-aliasing width from
+`fwidth`, and writes `vTint.rgb` with `vTint.a` multiplied by the coverage. It declares two instance
+uniforms, `uThreshold` (default `0.5`) and `uSoftness` (default `1.0`), which a sprite may override
+with `SetUniform`; it declares no global uniforms and no additional texture slots. It uses the normal
+custom-shader catalog, pipeline, mips, and bindless pages, so it is loaded on first sighting exactly
+like a game shader; startup still loads only the two default entries `shader/sprite` and
+`shader/line`.
+
+The SVG processor emits a normal `SpriteAsset` that references its `-sdf` texture with full UVs and a
+sprite `Scale` that makes the visible artboard one world unit high. The asset carries no shader
+choice, so a game loads `shader/sdf` and assigns it to that sprite; there is no SVG renderable and no
+extra pass.
 
 ## Windowed versus offscreen
 

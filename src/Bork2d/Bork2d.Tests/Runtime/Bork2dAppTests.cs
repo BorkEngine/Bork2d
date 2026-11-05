@@ -288,6 +288,8 @@ public sealed class Bork2dAppTests
                 "shader/line",
                 "shader/line-spv",
                 "shader/line-vertex-spv",
+                "shader/sdf",
+                "shader/sdf-spv",
                 "shader/sprite",
                 "shader/sprite-spv",
                 "shader/vertex-spv",

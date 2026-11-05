@@ -86,6 +86,7 @@ signatures are finalized in the implementation tasks.
 | Fonts | TTF/OTF with MSDF, ASCII plus explicit `U+` ranges and single glyphs, left-to-right layout, and basic kerning. `resolution` is the atlas's maximum dimension; glyph em size is derived to fit. |
 | MSDF generation | A managed C# MSDF library, build-time only, rather than a native P/Invoke dependency. |
 | SDF settings | `resolution` is the output texture's maximum dimension in pixels, `range` is the distance spread in pixels, and `padding` adds pixels around the artboard or glyph. |
+| SDF compression | The SVG sidecar's `compression` is `none` (default, linear `Rgb8`) or an explicit `bc7` opt-in; the generic texture sidecar's `type = "rgb"` with `compression = "auto"` (opaque BC1) is never used for SDF data. |
 | Built-in shaders | `shader/sprite`, `shader/line`, and `shader/sdf` are ordinary assets in an embedded built-in pack mounted below game packs. |
 | API shape | `ShaderAsset` plus `IRenderable<TLayer>.Shader` and per-renderable uniform state; no separate material asset in 0.2. |
 | Compatibility | 0.2 is a breaking release. Additive APIs are preferred where they do not compromise the design, but shader, texture, and renderable contracts may change. |
@@ -565,8 +566,8 @@ Unsupported elements are skipped with an informational diagnostic; a malformed p
 
 An SVG source at `Assets/art/wordmark.svg` with sidecar `wordmark.svg.toml` produces:
 
-- A `TextureDescriptor` at `art/wordmark-sdf`, using `type = "rgb"`, `compression = "none"`, and a
-  full mip chain.
+- A `TextureDescriptor` at `art/wordmark-sdf` with linear `Rgb8` (alpha forced to `255`) by default,
+  explicit BC7 `CompRgba8` with `compression = "bc7"`, and a full mip chain.
 - A `SpriteAsset` at `art/wordmark` that references that texture with full UVs, a center pivot, and
   a scale that makes the visible artboard one unit high while the SDF margin extends outside it.
 - The SDF texture reserves the field margin around the artboard; the sprite's UVs and scale include
@@ -578,9 +579,10 @@ ordinary asset.
 
 ```toml
 # Assets/art/wordmark.svg.toml
-resolution = 512   # maximum output texture dimension in pixels
-range = 8          # distance spread in pixels
-padding = 2        # pixels around the artboard
+resolution = 512      # maximum output texture dimension in pixels
+range = 8             # distance spread in pixels
+padding = 2           # pixels around the artboard
+compression = "none"  # none | bc7
 ```
 
 `resolution` is the maximum of the output texture's width and height; the other axis follows the
@@ -593,8 +595,8 @@ extends and therefore how soft a glow can be. `padding` may be 0.
 
 `shader/sdf` is an ordinary built-in fragment shader. It reconstructs a signed distance from the
 three MSDF channels, applies a screen-space antialiasing width, and multiplies by the sprite color.
-It samples the main texture only. The built-in defaults use threshold `0.5` and a soft edge; a
-sprite may override the exposed threshold and softness uniforms through `SetUniform`.
+It samples the main texture `.rgb` only. Its instance uniforms are `uThreshold` (default `0.5`) and
+`uSoftness` (default `1.0`); a sprite may override either through `SetUniform`.
 
 ```csharp
 SpriteAsset wordmark = engine.Assets.LoadAsset<SpriteAsset>("art/wordmark").GetAwaiter().GetResult();
@@ -610,8 +612,11 @@ logo.Color = new Color(1f, 1f, 1f, 0.15f);
 The MSDF is generated from flattened contours at the requested resolution. The bake validates the
 output's signed-distance range, rejects empty or all-inside fields, and checks a small set of
 sample points for silhouette correctness. Mips use the distance-preserving path from the KTX2
-workstream. The Pong wordmark is the visual acceptance check: its corners must remain sharp at the
-default camera size and at a reduced window size.
+workstream. The sidecar's `compression` is `none` by default and stores linear `Rgb8`;
+`compression = "bc7"` is an explicit opt-in that must keep the base level within the accepted median
+fidelity and preserve the decoded sign on every validated mip, and the bake rejects an encoding that
+fails rather than falling back to uncompressed output. The Pong wordmark is the visual acceptance
+check: its corners must remain sharp at the default camera size and at a reduced window size.
 
 ### 5. Fonts and FontRender
 
@@ -655,7 +660,8 @@ atlas is packed with a deterministic shelf algorithm, sorted by glyph height and
 incremental bakes are stable.
 
 The atlas texture uses `type = "rgb"`, `compression = "none"`, and a full mip chain. MSDF distance
-data is not color data; it must never be BC7-compressed by the generic color path.
+data is not color data, so the generic color path's `type = "rgb"` with `compression = "auto"`
+(opaque BC1) is never used for an MSDF atlas.
 
 #### `FontAsset`
 
@@ -854,7 +860,7 @@ examples/pong/Pong.Assets/Assets/
   art/paddle.png
   art/paddle.png.toml          # type = "rgba", compression = "auto"
   art/wordmark.svg
-  art/wordmark.svg.toml        # resolution = 512, range = 8, padding = 2
+  art/wordmark.svg.toml        # resolution = 512, range = 8, padding = 2, compression = "none"
   fonts/score.ttf
   fonts/score.ttf.toml         # resolution = 2048, ASCII digits + colon, range = 8
   shader/court.frag
@@ -927,12 +933,13 @@ relative to sprites; a line can use a custom shader; malformed points are skippe
 
 ### M4 - SVG and SDF
 
-Deliver the SVG parser for the supported subset, the MSDF generator integration, the SVG sidecar,
-SDF texture and sprite outputs, linear texture handling, the built-in `shader/sdf`, and the Pong
-wordmark.
+Deliver the SVG parser for the supported subset, the MSDF generator integration, the SVG sidecar
+with optional `none`/`bc7` compression, SDF texture and sprite outputs, linear texture handling, the
+built-in `shader/sdf`, and the Pong wordmark.
 
-Exit: a shape-only SVG bakes to a linear MSDF texture, draws through `shader/sdf`, preserves its
-aspect and padding, and remains sharp at multiple sizes; unsupported SVG features are diagnosed.
+Exit: a shape-only SVG bakes to a linear MSDF `Rgb8` (or explicit BC7) texture, draws through
+`shader/sdf` with the default `uThreshold`/`uSoftness`, preserves its aspect and padding, and remains
+sharp at multiple sizes; unsupported SVG features are diagnosed.
 
 ### M5 - Fonts and FontRender
 
