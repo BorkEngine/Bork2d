@@ -142,8 +142,8 @@ Assets are built ahead of time, not loaded from loose files at runtime:
   shader compiler, SVG parser, MSDF generator, and the built-in pack generator never enter a runtime
   project's output or publish graph. SeasonMSDF is build-only and is referenced by `Bork2d.Bake`
   only. The built-in pack itself is different: it is generated at build time and embedded in
-  `Bork2d.Runtime` as C#, so the runtime carries its default and SDF shader and placeholder texture
-  assets without a loose pack file or tooling dependency.
+  `Bork2d.Runtime` as C#, so the runtime carries its default shaders, SDF shader, and placeholder
+  texture assets without a loose pack file or tooling dependency.
 
 ## Quality gates
 
