@@ -298,6 +298,50 @@ public sealed class SvgSdfBakerTests
         Assert.Equal(0.6, result.PixelsPerUnit, 10);
     }
 
+    [Fact]
+    public void TinyArtboardReportsBK9204WithoutThrowing()
+    {
+        SvgDiagnostics diagnostics = SvgSdfTestSupport.BakeFailure(
+            "<rect x=\"0\" y=\"0\" width=\"1e307\" height=\"1e307\" />",
+            SvgSdfTestSupport.Options(),
+            "0 0 1e-307 1e-307");
+
+        SvgDiagnostic error = SvgTestSupport.SingleError(diagnostics);
+        Assert.Equal(SvgDiagnosticCodes.SdfOptionsInvalid, error.Code);
+        Assert.Contains("artboard content", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExtremeAspectArtboardReportsBK9204WithoutThrowing()
+    {
+        SvgDiagnostics diagnostics = SvgSdfTestSupport.BakeFailure(
+            "<rect x=\"0\" y=\"0\" width=\"1e307\" height=\"1\" />",
+            SvgSdfTestSupport.Options(),
+            "0 0 1e307 1");
+
+        SvgDiagnostic error = SvgTestSupport.SingleError(diagnostics);
+        Assert.Equal(SvgDiagnosticCodes.SdfOptionsInvalid, error.Code);
+        Assert.Contains("1-unit-high sprite", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NonFinitePixelPointReportsBK9206()
+    {
+        SvgArtwork artwork = SvgSdfTestSupport.Parse(
+            "<rect x=\"1e307\" y=\"1e307\" width=\"1e307\" height=\"1e307\" />",
+            "0 0 1 1");
+        Assert.True(artwork.HasGeometry);
+
+        SvgDiagnostics diagnostics = SvgSdfTestSupport.BakeFailure(
+            artwork,
+            SvgSdfTestSupport.Options());
+
+        SvgDiagnostic error = SvgTestSupport.SingleError(diagnostics);
+        Assert.Equal(SvgDiagnosticCodes.SdfBakeFailed, error.Code);
+        Assert.Contains("non-finite point", error.Message, StringComparison.Ordinal);
+        Assert.Contains("contour 0", error.Message, StringComparison.Ordinal);
+    }
+
     private static IEnumerable<byte> AlphaValues(byte[] rgba)
     {
         for (int offset = 3; offset < rgba.Length; offset += 4)

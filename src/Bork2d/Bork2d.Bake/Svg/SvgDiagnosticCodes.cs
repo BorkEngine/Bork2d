@@ -32,9 +32,9 @@ internal static class SvgDiagnosticCodes
 
     /// <summary>
     /// The signed distance field cannot represent the shape: the shape failed SeasonMSDF validation,
-    /// the generated field contains a non-finite value, the field is inside or outside at every
-    /// texel, the silhouette disagrees with the exact distance, or a distance-preserving mip level
-    /// does not preserve the sign.
+    /// a pixel-mapped geometry point is not finite, the generated field contains a non-finite value,
+    /// the field is inside or outside at every texel, the silhouette disagrees with the exact
+    /// distance, or a distance-preserving mip level does not preserve the sign.
     /// </summary>
     internal const string SdfBakeFailed = "BK9206";
 

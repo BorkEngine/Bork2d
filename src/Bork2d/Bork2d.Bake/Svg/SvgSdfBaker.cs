@@ -95,6 +95,18 @@ internal static class SvgSdfBaker
         double scale = (double)usable / Math.Max(artwork.Width, artwork.Height);
         double contentWidth = artwork.Width * scale;
         double contentHeight = artwork.Height * scale;
+        if (!IsFinitePositive(scale)
+            || !IsFinitePositive(contentWidth)
+            || !IsFinitePositive(contentHeight))
+        {
+            diagnostics.Error(
+                SvgDiagnosticCodes.SdfOptionsInvalid,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"The artboard content cannot be represented at resolution {options.Resolution}: the pixel scale ({scale:G6}) and content extent ({contentWidth:G6}x{contentHeight:G6}) must be finite and positive."));
+            return null;
+        }
+
         int textureWidth = TextureExtent(contentWidth, insetPixels, options.Resolution);
         int textureHeight = TextureExtent(contentHeight, insetPixels, options.Resolution);
 
@@ -108,6 +120,24 @@ internal static class SvgSdfBaker
         if (artwork.Height >= artwork.Width)
         {
             textureHeight = options.Resolution;
+        }
+
+        // The result stores SpriteAsset.Scale as a Vector2, so the ratio must survive the float cast.
+        double spriteScaleX = (double)textureWidth / contentHeight;
+        double spriteScaleY = (double)textureHeight / contentHeight;
+        float spriteScaleX32 = (float)spriteScaleX;
+        float spriteScaleY32 = (float)spriteScaleY;
+        if (!IsFinitePositive(spriteScaleX)
+            || !IsFinitePositive(spriteScaleY)
+            || !IsFinitePositive(spriteScaleX32)
+            || !IsFinitePositive(spriteScaleY32))
+        {
+            diagnostics.Error(
+                SvgDiagnosticCodes.SdfOptionsInvalid,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"The artboard cannot be represented as a 1-unit-high sprite at resolution {options.Resolution}: the sprite scale ({spriteScaleX:G6}, {spriteScaleY:G6}) must be finite and positive as a float."));
+            return null;
         }
 
         MsdfField? field = MsdfField.Create(
@@ -164,9 +194,6 @@ internal static class SvgSdfBaker
         }
 
         byte[] payload = Ktx2Writer.Write(formatInfo, textureWidth, textureHeight, storedLevels);
-        var spriteScale = new Vector2(
-            (float)((double)textureWidth / contentHeight),
-            (float)((double)textureHeight / contentHeight));
         return new SvgSdfBakeResult(
             new BakedTexture(payload, format, (uint)levels.Length),
             textureWidth,
@@ -174,8 +201,12 @@ internal static class SvgSdfBaker
             contentWidth,
             contentHeight,
             scale,
-            spriteScale);
+            new Vector2(spriteScaleX32, spriteScaleY32));
     }
+
+    private static bool IsFinitePositive(double value) => double.IsFinite(value) && value > 0;
+
+    private static bool IsFinitePositive(float value) => float.IsFinite(value) && value > 0;
 
     private static int TextureExtent(double content, int inset, int resolution)
     {

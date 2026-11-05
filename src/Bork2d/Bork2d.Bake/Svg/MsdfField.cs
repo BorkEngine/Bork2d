@@ -71,7 +71,7 @@ internal sealed class MsdfField
     /// <param name="diagnostics">The diagnostic bag to report a content failure to.</param>
     /// <returns>
     /// The generated field, or <see langword="null"/> after reporting <c>BK9206</c> when the shape is
-    /// invalid or the generated values are not finite.
+    /// invalid, a pixel-mapped point is not finite, or the generated values are not finite.
     /// </returns>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A layout value is out of range.</exception>
@@ -121,11 +121,22 @@ internal sealed class MsdfField
         }
 
         var shape = new MsdfShape();
-        foreach (SvgShape svgShape in artwork.Shapes)
+        for (int shapeIndex = 0; shapeIndex < artwork.Shapes.Count; shapeIndex++)
         {
-            foreach (SvgContour contour in svgShape.Contours)
+            SvgShape svgShape = artwork.Shapes[shapeIndex];
+            for (int contourIndex = 0; contourIndex < svgShape.Contours.Count; contourIndex++)
             {
-                AddContour(shape, contour, scale, inset);
+                if (!TryAddContour(
+                    shape,
+                    svgShape.Contours[contourIndex],
+                    scale,
+                    inset,
+                    shapeIndex,
+                    contourIndex,
+                    diagnostics))
+                {
+                    return null;
+                }
             }
         }
 
@@ -388,7 +399,14 @@ internal sealed class MsdfField
         return true;
     }
 
-    private static void AddContour(MsdfShape shape, SvgContour contour, double scale, int inset)
+    private static bool TryAddContour(
+        MsdfShape shape,
+        SvgContour contour,
+        double scale,
+        int inset,
+        int shapeIndex,
+        int contourIndex,
+        SvgDiagnostics diagnostics)
     {
         MsdfContour target = shape.AddContour();
         foreach (SvgSegment segment in contour.Reverse().Segments)
@@ -396,26 +414,44 @@ internal sealed class MsdfField
             switch (segment)
             {
                 case SvgLineSegment line:
-                    target.AddEdge(new EdgeHolder(
-                        ToPixel(line.Start, scale, inset),
-                        ToPixel(line.End, scale, inset),
-                        EdgeColor.WHITE));
+                    if (!TryToPixel(line.Start, scale, inset, out MsdfVector2 lineStart)
+                        || !TryToPixel(line.End, scale, inset, out MsdfVector2 lineEnd))
+                    {
+                        return ReportNonFinitePoint(diagnostics, shapeIndex, contourIndex);
+                    }
+
+                    target.AddEdge(new EdgeHolder(lineStart, lineEnd, EdgeColor.WHITE));
                     break;
 
                 case SvgQuadraticSegment quadratic:
+                    if (!TryToPixel(quadratic.Start, scale, inset, out MsdfVector2 quadraticStart)
+                        || !TryToPixel(quadratic.Control, scale, inset, out MsdfVector2 quadraticControl)
+                        || !TryToPixel(quadratic.End, scale, inset, out MsdfVector2 quadraticEnd))
+                    {
+                        return ReportNonFinitePoint(diagnostics, shapeIndex, contourIndex);
+                    }
+
                     target.AddEdge(new EdgeHolder(
-                        ToPixel(quadratic.Start, scale, inset),
-                        ToPixel(quadratic.Control, scale, inset),
-                        ToPixel(quadratic.End, scale, inset),
+                        quadraticStart,
+                        quadraticControl,
+                        quadraticEnd,
                         EdgeColor.WHITE));
                     break;
 
                 case SvgCubicSegment cubic:
+                    if (!TryToPixel(cubic.Start, scale, inset, out MsdfVector2 cubicStart)
+                        || !TryToPixel(cubic.Control1, scale, inset, out MsdfVector2 cubicControl1)
+                        || !TryToPixel(cubic.Control2, scale, inset, out MsdfVector2 cubicControl2)
+                        || !TryToPixel(cubic.End, scale, inset, out MsdfVector2 cubicEnd))
+                    {
+                        return ReportNonFinitePoint(diagnostics, shapeIndex, contourIndex);
+                    }
+
                     target.AddEdge(new EdgeHolder(
-                        ToPixel(cubic.Start, scale, inset),
-                        ToPixel(cubic.Control1, scale, inset),
-                        ToPixel(cubic.Control2, scale, inset),
-                        ToPixel(cubic.End, scale, inset),
+                        cubicStart,
+                        cubicControl1,
+                        cubicControl2,
+                        cubicEnd,
                         EdgeColor.WHITE));
                     break;
 
@@ -424,10 +460,38 @@ internal sealed class MsdfField
                         $"The segment type '{segment.GetType().Name}' is not supported.");
             }
         }
+
+        return true;
     }
 
-    private static MsdfVector2 ToPixel(SvgPoint point, double scale, int inset)
-        => new(inset + (point.X * scale), inset + (point.Y * scale));
+    private static bool ReportNonFinitePoint(
+        SvgDiagnostics diagnostics,
+        int shapeIndex,
+        int contourIndex)
+    {
+        diagnostics.Error(
+            SvgDiagnosticCodes.SdfBakeFailed,
+            $"The pixel mapping of artwork shape {shapeIndex} contour {contourIndex} produced a non-finite point; the shape cannot be represented at this resolution and margin.");
+        return false;
+    }
+
+    private static bool TryToPixel(
+        SvgPoint point,
+        double scale,
+        int inset,
+        out MsdfVector2 pixel)
+    {
+        double x = inset + (point.X * scale);
+        double y = inset + (point.Y * scale);
+        if (!double.IsFinite(x) || !double.IsFinite(y))
+        {
+            pixel = default;
+            return false;
+        }
+
+        pixel = new MsdfVector2(x, y);
+        return true;
+    }
 
     private static int SampleIndex(int gridIndex, int size)
         => Math.Min((int)(((gridIndex + 0.5) * size) / SilhouetteSampleGrid), size - 1);
