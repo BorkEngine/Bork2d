@@ -16,6 +16,8 @@ asset pipeline, and the Pong example are implemented; there is no editor yet.
 - Instanced sprite draws and indexed line draws with bindless texture pages and baked custom shaders,
   ordered together per camera by `ZIndex` then screen position: one run per camera on the default
   shaders and one per contiguous kind/shader run otherwise.
+- Shape-only SVG sources baked to linear MSDF textures and drawn with the built-in `shader/sdf`
+  fragment.
 - Baked packs from TOML data, source processors, and sidecars, with an incremental `bake`.
 - MessagePack assets with generated shapes; no reflection or TOML at runtime.
 - Warnings-as-errors, style enforcement, AOT/trim analyzers, and a documentation link check in CI.

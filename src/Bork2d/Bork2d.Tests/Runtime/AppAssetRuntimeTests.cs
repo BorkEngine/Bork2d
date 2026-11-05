@@ -196,6 +196,8 @@ public sealed class AppAssetRuntimeTests
                 "shader/line",
                 "shader/line-spv",
                 "shader/line-vertex-spv",
+                "shader/sdf",
+                "shader/sdf-spv",
                 "shader/sprite",
                 "shader/sprite-spv",
                 "shader/vertex-spv",
@@ -285,6 +287,8 @@ public sealed class AppAssetRuntimeTests
                 "shader/line",
                 "shader/line-spv",
                 "shader/line-vertex-spv",
+                "shader/sdf",
+                "shader/sdf-spv",
                 "shader/sprite",
                 "shader/sprite-spv",
                 "shader/vertex-spv",
@@ -391,7 +395,7 @@ public sealed class AppAssetRuntimeTests
         Assert.Contains(browse!, info => info.Path == "shader/line-vertex-spv");
         Assert.Contains(browse!, info => info.Path == "present/vertex-spv");
         Assert.Contains(browse!, info => info.Path == "present/fragment-spv");
-        Assert.Equal(15, browse!.Count);
+        Assert.Equal(17, browse!.Count);
         Assert.Equal(overlayPath, sharedPackPath);
         Assert.Equal(new byte[] { 2, 3 }, sharedBytes);
         Assert.Equal("overlay", config!.Name);

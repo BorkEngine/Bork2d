@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using Bork2d.Engine;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Assets.Loading;
@@ -31,6 +32,8 @@ public sealed class BuiltInAssetPackTests
         "shader/line",
         "shader/line-spv",
         "shader/line-vertex-spv",
+        "shader/sdf",
+        "shader/sdf-spv",
         "shader/sprite",
         "shader/sprite-spv",
         "shader/vertex-spv",
@@ -66,7 +69,7 @@ public sealed class BuiltInAssetPackTests
     }
 
     [Fact]
-    public async Task BuiltInPackServesTheSpriteAndLineShadersAndTheirSpirVPayloads()
+    public async Task BuiltInPackServesTheSpriteLineAndSdfShadersAndTheirSpirVPayloads()
     {
         using var host = new AssetServiceHost(builtInPack: BuiltInAssets.PackBytes);
         host.Start();
@@ -95,11 +98,41 @@ public sealed class BuiltInAssetPackTests
         Assert.Empty(lineShader.GlobalUniforms);
         Assert.Empty(lineShader.TextureSlots);
 
+        ShaderAsset sdfShader = await host.Service
+            .LoadAsset<ShaderAsset>("shader/sdf")
+            .WaitAsync(_loadTimeout);
+
+        Assert.Equal("shader/sdf-spv", sdfShader.SpirV.Path);
+        Assert.Equal(ShaderLayout.CurrentVersion, sdfShader.LayoutVersion);
+        Assert.Equal(3u, sdfShader.LayoutVersion);
+        Assert.Equal("main", sdfShader.EntryPoint);
+        Assert.Collection(
+            sdfShader.InstanceUniforms,
+            uniform =>
+            {
+                Assert.Equal("uSoftness", uniform.Name);
+                Assert.Equal(ShaderUniformType.Float, uniform.Type);
+                Assert.Equal(0, uniform.Offset);
+                Assert.Equal(Vector4.UnitX, uniform.Default);
+            },
+            uniform =>
+            {
+                Assert.Equal("uThreshold", uniform.Name);
+                Assert.Equal(ShaderUniformType.Float, uniform.Type);
+                Assert.Equal(1, uniform.Offset);
+                Assert.Equal(new Vector4(0.5f, 0.0f, 0.0f, 0.0f), uniform.Default);
+            });
+        Assert.Empty(sdfShader.GlobalUniforms);
+        Assert.Empty(sdfShader.TextureSlots);
+
         byte[] spriteSpirV = await host.Service
             .LoadData("shader/sprite-spv")
             .WaitAsync(_loadTimeout);
         byte[] lineSpirV = await host.Service
             .LoadData("shader/line-spv")
+            .WaitAsync(_loadTimeout);
+        byte[] sdfSpirV = await host.Service
+            .LoadData("shader/sdf-spv")
             .WaitAsync(_loadTimeout);
         byte[] lineVertexSpirV = await host.Service
             .LoadData("shader/line-vertex-spv")
@@ -122,6 +155,7 @@ public sealed class BuiltInAssetPackTests
 
         Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(spriteSpirV));
         Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(lineSpirV));
+        Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(sdfSpirV));
         Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(lineVertexSpirV));
         Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(vertexSpirV));
         Assert.Equal(SpirVMagic, BinaryPrimitives.ReadUInt32LittleEndian(presentVertexSpirV));
@@ -147,6 +181,8 @@ public sealed class BuiltInAssetPackTests
         Assert.True(host.Service.Exists("shader/line"));
         Assert.True(host.Service.Exists("shader/line-spv"));
         Assert.True(host.Service.Exists("shader/line-vertex-spv"));
+        Assert.True(host.Service.Exists("shader/sdf"));
+        Assert.True(host.Service.Exists("shader/sdf-spv"));
         Assert.True(host.Service.Exists("present/vertex-spv"));
         Assert.True(host.Service.Exists("present/fragment-spv"));
         Assert.True(host.Service.Exists("textures/placeholder"));
@@ -160,6 +196,8 @@ public sealed class BuiltInAssetPackTests
         Assert.True(Assert.Single(host.Service.Browse("shader/line-spv")).IsRaw);
         Assert.True(Assert.Single(host.Service.Browse("shader/line-vertex-spv")).IsRaw);
         Assert.False(Assert.Single(host.Service.Browse("shader/line")).IsRaw);
+        Assert.False(Assert.Single(host.Service.Browse("shader/sdf")).IsRaw);
+        Assert.True(Assert.Single(host.Service.Browse("shader/sdf-spv")).IsRaw);
         Assert.True(Assert.Single(host.Service.Browse("present/vertex-spv")).IsRaw);
         Assert.True(Assert.Single(host.Service.Browse("present/fragment-spv")).IsRaw);
         Assert.False(Assert.Single(host.Service.Browse("textures/placeholder")).IsRaw);
@@ -246,6 +284,8 @@ public sealed class BuiltInAssetPackTests
                 && engine.Assets.Exists("shader/line")
                 && engine.Assets.Exists("shader/line-spv")
                 && engine.Assets.Exists("shader/line-vertex-spv")
+                && engine.Assets.Exists("shader/sdf")
+                && engine.Assets.Exists("shader/sdf-spv")
                 && engine.Assets.Exists("present/vertex-spv")
                 && engine.Assets.Exists("present/fragment-spv")
                 && engine.Assets.Exists("textures/placeholder")
