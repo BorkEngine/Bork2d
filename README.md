@@ -67,6 +67,10 @@ dotnet build examples/pong/Pong.slnx -c Debug
 dotnet run --project examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Debug
 ```
 
+The scene draws the court border and center line as `LineRender` geometry, the paddles as BC7 KTX2
+textures, the ball as a generated circle texture, and the PONG wordmark baked from `art/wordmark.svg`
+through the built-in `shader/sdf` behind the court lines.
+
 Controls: **W/S** move the left paddle, **Space** pauses, **R** resets, **Esc** or the close button
 exits. A desktop session and a Vulkan 1.3 device are required.
 

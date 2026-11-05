@@ -16,14 +16,25 @@ public sealed class PongGame : IGame<GameLayer>
     private const int PaddleZIndex = 10;
     private const int BallZIndex = 20;
 
+    // The wordmark sits behind every gameplay element; the center line draws over it.
+    private const int WordmarkZIndex = 1;
+
+    // The baked artboard is one world unit high, so the wordmark is about 3.9 units of visible
+    // letters inside the 32x18 court.
+    private const float WordmarkScale = 5.5f;
+
     // A fixed phase keeps the ball's time-driven pulse legible from the first frame instead of
     // starting at the dimmest point of its cycle.
     private const float BallPulsePhase = 0.75f;
 
     private const string SettingsPath = "game_settings";
 
+    /// <summary>The canonical path of the built-in SDF fragment shader the wordmark uses.</summary>
+    private const string SdfShaderPath = "shader/sdf";
+
     private static readonly Color _clearColor = new(0.04f, 0.04f, 0.06f, 1f);
     private static readonly Color _courtColor = new(0.7f, 0.82f, 1f, 1f);
+    private static readonly Color _wordmarkColor = new(0.65f, 0.78f, 1f, 0.15f);
     private IEngine<GameLayer>? _engine;
     private ICamera<GameLayer>? _camera;
     private ILineRender<GameLayer>? _courtBorder;
@@ -44,6 +55,9 @@ public sealed class PongGame : IGame<GameLayer>
     /// <summary>Gets the ball renderable, or <see langword="null"/> before <c>Setup</c>.</summary>
     private ISpriteRender<GameLayer>? Ball { get; set; }
 
+    /// <summary>Gets the wordmark renderable, or <see langword="null"/> before <c>Setup</c>.</summary>
+    private ISpriteRender<GameLayer>? Wordmark { get; set; }
+
     /// <inheritdoc/>
     public void Setup(IEngine<GameLayer> engine)
     {
@@ -57,6 +71,12 @@ public sealed class PongGame : IGame<GameLayer>
         SpriteAsset ballSprite = engine.Assets.LoadAsset(settings.Ball).GetAwaiter().GetResult();
         ShaderAsset ballShader = engine.Assets.LoadAsset(settings.BallShader).GetAwaiter().GetResult();
         ShaderAsset courtShader = engine.Assets.LoadAsset(settings.CourtShader).GetAwaiter().GetResult();
+        SpriteAsset wordmarkSprite = engine.Assets.LoadAsset(settings.Wordmark).GetAwaiter().GetResult();
+
+        // The built-in pack is mounted below the game packs, so the SDF shader is loaded by its
+        // canonical path instead of being referenced from game_settings.toml: the game pack does not
+        // bake shader/sdf, and a settings reference to it would fail bake reference validation.
+        ShaderAsset sdfShader = engine.Assets.LoadAsset<ShaderAsset>(SdfShaderPath).GetAwaiter().GetResult();
 
         ICamera<GameLayer> camera = engine.CreateCamera(engine.Root);
         _camera = camera;
@@ -78,6 +98,15 @@ public sealed class PongGame : IGame<GameLayer>
         Ball.SetUniform("lastHit", (float)engine.Time.Time);
 
         CreateCourtLines(courtShader);
+
+        Wordmark = engine.CreateSpriteRender(engine.Root);
+        Wordmark.Sprite = wordmarkSprite;
+        Wordmark.Shader = sdfShader;
+        Wordmark.Layer = GameLayer.Court;
+        Wordmark.ZIndex = WordmarkZIndex;
+        Wordmark.LocalPosition = Vector2.Zero;
+        Wordmark.LocalScale = new Vector2(WordmarkScale, WordmarkScale);
+        Wordmark.Color = _wordmarkColor;
 
         Simulation = new PongSimulation(settings);
         Simulation.OnBallBounce += () => Ball.SetUniform("lastHit", (float)engine.Time.Time);

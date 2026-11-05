@@ -609,9 +609,9 @@ logo.Color = new Color(1f, 1f, 1f, 0.15f);
 
 #### Quality and mipmaps
 
-The MSDF is generated from flattened contours at the requested resolution. The bake validates the
-output's signed-distance range, rejects empty or all-inside fields, and checks a small set of
-sample points for silhouette correctness. Mips use the distance-preserving path from the KTX2
+The MSDF is generated from the normalized SVG contours at the requested resolution. The bake
+validates the output's signed-distance range, rejects empty or all-inside fields, and checks a small
+set of sample points for silhouette correctness. Mips use the distance-preserving path from the KTX2
 workstream. The sidecar's `compression` is `none` by default and stores linear `Rgb8`;
 `compression = "bc7"` is an explicit opt-in that must keep the base level within the accepted median
 fidelity and preserve the decoded sign on every validated mip, and the bake rejects an encoding that
@@ -885,9 +885,15 @@ through the KTX2 texture helper.
   fill the extra axis.
 - **Paddles.** The existing paddle sprite uses a BC7 KTX2 texture. The ball remains a generated
   circle texture; it may use uncompressed KTX2 with mips, but it is not required to be compressed.
-- **Wordmark.** The SDF sprite is centered behind the play field at low alpha, so it does not
-  compete with the score or the ball. It exercises the full SVG, MSDF, linear texture, mip, and
-  `shader/sdf` path.
+- **Wordmark.** `art/wordmark.svg` bakes to the `art/wordmark` sprite plus the linear
+  `art/wordmark-sdf` MSDF texture and its KTX2 payload; `art/wordmark.svg.toml` sets
+  `resolution = 512`, `range = 8`, `padding = 2`, and `compression = "none"`, so the field stays
+  uncompressed `Rgb8`. The sprite is a normal `SpriteAsset` drawn through the built-in `shader/sdf`
+  on the `Court` layer at `ZIndex` 1, centered on the origin, scaled 5.5 times the bake's
+  one-unit-high artboard scale, and tinted `(0.65, 0.78, 1, 0.15)`. It therefore sits behind the
+  court lines at `ZIndex` 5, the paddles at 10, and the ball at 20, and the center line draws over
+  it. It exercises the full SVG, MSDF, linear texture, mip, and `shader/sdf` path without affecting
+  the simulation, controls, or camera fitting.
 - **Score.** Two `FontRender`s show the left and right scores near the top center, right- and
   left-aligned respectively. Text changes only when `LeftScore` or `RightScore` changes.
 - **Ordering.** Court lines, ball, paddles, wordmark, and score all use the shared `ZIndex` and
