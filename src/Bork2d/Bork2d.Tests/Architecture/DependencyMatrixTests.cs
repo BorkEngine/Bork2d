@@ -24,6 +24,7 @@ public sealed class DependencyMatrixTests
     private const string ShadercNative = "Silk.NET.Shaderc.Native";
     private const string BcnEncoder = "BCnEncoder";
     private const string BcnEncoderPackage = "BCnEncoder.Net";
+    private const string SeasonMsdf = "SeasonMSDF";
     private const string MetadataLoadContext = "System.Reflection.MetadataLoadContext";
 
     private static readonly string[] _forbiddenEngineReferencePrefixes =
@@ -305,13 +306,14 @@ public sealed class DependencyMatrixTests
         Assert.Contains(Hashing, references);
         Assert.Contains(Shaderc, references);
         Assert.Contains(BcnEncoder, references);
+        Assert.Contains(SeasonMsdf, references);
         Assert.DoesNotContain(MetadataLoadContext, references);
         Assert.DoesNotContain("Bork2d.Runtime", references);
         Assert.DoesNotContain("Bork2d.Render", references);
     }
 
     [Fact]
-    public void BakeProjectPinsTheShadercToolingPackagesAndEnablesUnsafe()
+    public void BakeProjectPinsTheToolingPackagesAndEnablesUnsafe()
     {
         string projectPath = Path.Combine(
             RepositoryPaths.Root,
@@ -331,6 +333,7 @@ public sealed class DependencyMatrixTests
         Assert.Equal("2.23.0", packages[Shaderc]);
         Assert.Equal("2.23.0", packages[ShadercNative]);
         Assert.Equal("2.3.0", packages[BcnEncoderPackage]);
+        Assert.Equal("0.2.0", packages[SeasonMsdf]);
 
         Dictionary<string, string> properties = project
             .Descendants("PropertyGroup")
@@ -521,6 +524,7 @@ public sealed class DependencyMatrixTests
                 Assert.NotEqual(Tomlyn, name);
                 Assert.NotEqual(StbImageSharp, name);
                 Assert.NotEqual(BcnEncoder, name);
+                Assert.NotEqual(SeasonMsdf, name);
             }
         }
     }
