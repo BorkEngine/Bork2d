@@ -360,7 +360,7 @@ default: it is ordinary custom shader content that the catalog loads on first si
 assigns it, with no renderer special case and no extra pass. `EnsureDefaultPipelines` creates both
 default pipelines for the scene format. The present pipeline loads its two raw modules the same way
 and validates their SPIR-V magic. The placeholder descriptor and payload are loaded synchronously and
-validated before the renderer becomes ready. A missing built-in pack, shader, vertex module, or
+validated before the renderer becomes ready. A missing built-in pack, default shader, vertex module, or
 placeholder, a malformed asset, a module without the SPIR-V magic, or an invalid placeholder payload
 is a fatal startup `Bork2dException` naming the asset path and reason; there is no fallback shader.
 The shader catalog owns every fragment module and the pipeline owns both vertex modules and every
