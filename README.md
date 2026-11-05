@@ -16,6 +16,8 @@ asset pipeline, and the Pong example are implemented; there is no editor yet.
 - Instanced sprite draws and indexed line draws with bindless texture pages and baked custom shaders,
   ordered together per camera by `ZIndex` then screen position: one run per camera on the default
   shaders and one per contiguous kind/shader run otherwise.
+- Shape-only SVG sources baked to linear MSDF textures and drawn with the built-in `shader/sdf`
+  fragment.
 - Baked packs from TOML data, source processors, and sidecars, with an incremental `bake`.
 - MessagePack assets with generated shapes; no reflection or TOML at runtime.
 - Warnings-as-errors, style enforcement, AOT/trim analyzers, and a documentation link check in CI.
@@ -64,6 +66,10 @@ Building the example bakes its assets and copies the pack next to the app:
 dotnet build examples/pong/Pong.slnx -c Debug
 dotnet run --project examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Debug
 ```
+
+The scene draws the court border and center line as `LineRender` geometry, the paddles as BC7 KTX2
+textures, the ball as a generated circle texture, and the PONG wordmark baked from `art/wordmark.svg`
+through the built-in `shader/sdf` behind the court lines.
 
 Controls: **W/S** move the left paddle, **Space** pauses, **R** resets, **Esc** or the close button
 exits. A desktop session and a Vulkan 1.3 device are required.

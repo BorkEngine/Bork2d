@@ -14,14 +14,16 @@
 
     <ItemGroup>
         <!-- Tomlyn parses source/sidecar TOML, StbImageSharp decodes texture sources, BCnEncoder.Net
-             encodes BC1/BC4/BC5/BC7 texture levels, System.IO.Hashing supplies the deterministic
-             hash primitive WP5 reuses, PolyType supplies the compiled shape metadata the explicit
-             registrations bind through, and Silk.NET.Shaderc is the build-tooling-only GLSL
-             compiler. There is no MetadataLoadContext: the generated host and its metadata type
-             resolution were removed in WP1 (D-038). The shaderc and block-encoder packages must
-             never reach a runtime project or an AOT publish graph. -->
+             encodes BC1/BC4/BC5/BC7 texture levels, SeasonMSDF generates the SVG signed distance
+             field, System.IO.Hashing supplies the deterministic hash primitive WP5 reuses, PolyType
+             supplies the compiled shape metadata the explicit registrations bind through, and
+             Silk.NET.Shaderc is the build-tooling-only GLSL compiler. There is no
+             MetadataLoadContext: the generated host and its metadata type resolution were removed in
+             WP1 (D-038). The shader compiler, block encoder, and MSDF generator packages are
+             build-only: they must never reach a runtime project or an AOT publish graph. -->
         <PackageReference Include="BCnEncoder.Net" Version="2.3.0" />
         <PackageReference Include="PolyType" Version="1.4.1" />
+        <PackageReference Include="SeasonMSDF" Version="0.2.0" />
         <PackageReference Include="Silk.NET.Shaderc" Version="2.23.0" />
         <PackageReference Include="Silk.NET.Shaderc.Native" Version="2.23.0" />
         <PackageReference Include="StbImageSharp" Version="2.30.16" />

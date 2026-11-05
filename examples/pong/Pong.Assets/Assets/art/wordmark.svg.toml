@@ -1,0 +1,4 @@
+resolution = 128
+range = 8
+padding = 2
+compression = "none"

@@ -367,6 +367,16 @@ The bake selects a format from the texture sidecar's semantic `type` (`rgba`, `r
 an existing texture never becomes lossy without an explicit authoring choice; `auto` maps to BC7 for
 `rgba`, opaque BC1 for `rgb`, BC5 for `rg`, and BC4 for `r`.
 
+### SVG sources
+
+An `.svg` source is baked to ordinary assets rather than a new runtime type: a `SpriteAsset` at the
+source's base path and a linear multi-channel signed distance field (MSDF) `TextureDescriptor` at
+`<base>-sdf` with its KTX2 payload at `<base>-sdf-ktx2`. The sprite has full UVs and a center pivot,
+and its texture is linear MSDF data in `Rgb8` by default (or explicit BC7), so a game can load the
+built-in `shader/sdf` fragment shader and assign it to the sprite like any other custom shader. The
+sprite itself stays a normal `SpriteAsset`; there is no SVG renderable or other new public engine
+type.
+
 ### Pack format
 
 A pack is a v1 `BORK2DPK` file: a 28-byte prefix, a maximum-quality Zstd-compressed MessagePack
