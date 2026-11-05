@@ -112,15 +112,15 @@ public sealed class BakeApplicationBuilder
     }
 
     /// <summary>
-    /// Registers the built-in texture processor for png/jpg/jpeg/bmp/tga and the fragment shader
-    /// processor for frag; idempotent.
+    /// Registers the built-in texture processor for png/jpg/jpeg/bmp/tga, the fragment shader
+    /// processor for frag, and the SVG processor for svg; idempotent.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The processors are added at this call position, so a later
-    /// <see cref="AddProcessor(IAssetProcessor)"/> registration overrides one of them for a shared
-    /// extension (with an informational diagnostic), and the defaults stay first when this call
-    /// precedes the custom registrations.
+    /// The processors are added at this call position in the order <c>texture</c>, <c>shader</c>,
+    /// <c>svg</c>, so a later <see cref="AddProcessor(IAssetProcessor)"/> registration overrides one of
+    /// them for a shared extension (with an informational diagnostic), and the defaults stay first
+    /// when this call precedes the custom registrations.
     /// </para>
     /// <para>
     /// The texture processor emits a <c>TextureDescriptor</c> and its KTX2 payload;
@@ -136,6 +136,13 @@ public sealed class BakeApplicationBuilder
     /// processor, so a source under any canonical asset path is baked; a missing required sidecar is
     /// created empty and reports the framework's informational diagnostic.
     /// </para>
+    /// <para>
+    /// The SVG processor bakes a shape-only SVG document into a linear multi-channel signed distance
+    /// field texture. It emits a <c>SpriteAsset</c> at the base path, a <c>TextureDescriptor</c> at
+    /// <c>&lt;base&gt;-sdf</c>, and the raw KTX2 payload at <c>&lt;base&gt;-sdf-ktx2</c>; a missing
+    /// required sidecar is created with the default resolution, range, padding, and uncompressed
+    /// format.
+    /// </para>
     /// </remarks>
     /// <returns>This builder.</returns>
     public BakeApplicationBuilder UseDefaultProcessors()
@@ -145,6 +152,7 @@ public sealed class BakeApplicationBuilder
             _definition.RequestDefaultProcessors();
             _definition.AddProcessor(new TextureProcessor(_definition.TextureDefaults));
             _definition.AddProcessor(new ShaderProcessor());
+            _definition.AddProcessor(new SvgProcessor());
         }
 
         return this;
