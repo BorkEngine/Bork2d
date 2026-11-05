@@ -269,11 +269,13 @@ the content is `108x54`, and the scale is `(128/54, 74/54)`.
 
 `compression = "none"` stores the field as uncompressed linear `Rgb8` (logical RGB in RGBA8 with
 alpha forced to `255`) and is the default. `compression = "bc7"` is an explicit opt-in that stores
-the field as BC7 `CompRgba8`; the bake rejects a level whose decoded field loses the accepted
-fidelity or flips the sign as `BK9207` and never falls back to uncompressed output. MSDF data is
-distance data, not color data, so the generic texture sidecar's `type = "rgb"` with
-`compression = "auto"` (opaque BC1) is never used for it; BC7 is available only through this
-sidecar's explicit `compression` key.
+the field as BC7 `CompRgba8`. Encoding is validated: the base level must stay within the accepted
+median fidelity (maximum error 1.25 level pixels, RMS 0.10 level pixels), and every mip level whose
+long axis is at least four pixels must preserve the decoded sign; smaller levels are skipped. The
+bake reports `BK9207` for a base level that exceeds the accepted median fidelity or a validated mip
+whose decoded sign flips, and never falls back to uncompressed output. MSDF data is distance data,
+not color data, so the generic texture sidecar's `type = "rgb"` with `compression = "auto"` (opaque
+BC1) is never used for it; BC7 is available only through this sidecar's explicit `compression` key.
 
 Every MSDF payload is a complete KTX2 2.0 file with one 2D image, one array layer, one face, no
 supercompression, and a full distance-preserving mip chain down to 1x1. MSDF generation uses

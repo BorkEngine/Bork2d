@@ -16,9 +16,10 @@ namespace Bork2d.Bake.Processors;
 /// <para>
 /// The property names are the canonical camelCase keys <c>resolution</c>, <c>range</c>,
 /// <c>padding</c>, and <c>compression</c>; the compression enum binds and is written as
-/// <c>none</c>/<c>bc7</c>. <c>resolution</c> is the maximum output texture dimension in pixels and is
-/// clamped by the baker to <c>1..8192</c>; <c>range</c> is the distance spread in pixels and must be
-/// positive; <c>padding</c> is the extra margin in pixels beyond the range and must not be negative.
+/// <c>none</c>/<c>bc7</c>. <c>resolution</c> is the maximum output texture dimension in pixels and
+/// must be in <c>1..8192</c>; the baker reports <c>BK9204</c> otherwise. <c>range</c> is the distance
+/// spread in pixels and must be positive; <c>padding</c> is the extra margin in pixels beyond the
+/// range and must not be negative.
 /// An absent key stays <see langword="null"/> and falls back to its default; a key present in the file
 /// always overrides it. There is no generic texture channel/compression key: SDF data is always
 /// encoded through this processor's own format choice.
