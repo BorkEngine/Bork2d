@@ -43,6 +43,13 @@ internal sealed class SvgCubicSegment : SvgSegment
     internal override SvgSegment Reverse() => new SvgCubicSegment(End, Control2, Control1, Start);
 
     /// <inheritdoc/>
+    internal override bool IsFinite()
+        => IsFinitePoint(Start)
+            && IsFinitePoint(Control1)
+            && IsFinitePoint(Control2)
+            && IsFinitePoint(End);
+
+    /// <inheritdoc/>
     internal override SvgSegment Transform(SvgAffine transform)
         => new SvgCubicSegment(
             transform.Transform(Start),

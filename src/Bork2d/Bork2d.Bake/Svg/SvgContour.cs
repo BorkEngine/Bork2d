@@ -56,6 +56,21 @@ internal sealed class SvgContour
     /// <summary>Gets the segments in drawing order.</summary>
     internal IReadOnlyList<SvgSegment> Segments => _segments;
 
+    /// <summary>Gets a value indicating whether every segment's defining points are finite.</summary>
+    /// <returns><see langword="true"/> when the contour has no non-finite coordinate.</returns>
+    internal bool IsFinite()
+    {
+        foreach (SvgSegment segment in _segments)
+        {
+            if (!segment.IsFinite())
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>
     /// Flattens the contour into a polyline whose vertices are the flattened segment endpoints.
     /// </summary>

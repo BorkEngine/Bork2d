@@ -6,9 +6,11 @@ namespace Bork2d.Bake.Svg;
 /// <remarks>
 /// <para>
 /// The contours are already cleaned (no zero-length segments and no degenerate contours) and
-/// normalized to the nonzero representation: an even depth contour has a positive signed area and an
-/// odd depth contour has a negative one. Subtask 2 can therefore feed them to a nonzero-fill MSDF
-/// generator without further orientation work.
+/// normalized so a nonzero-fill MSDF generator can consume them directly. A nonzero shape is
+/// normalized per containment root component: every root contour has a positive signed area while the
+/// authored relative winding inside the component is preserved, so a nested hole keeps the opposite
+/// sign and does not disappear. An even-odd shape is oriented by nesting depth: even depths are
+/// positive and odd depths are negative.
 /// </para>
 /// <para>
 /// Only holes formed by nested subpaths are guaranteed. Self-intersecting or overlapping subpaths

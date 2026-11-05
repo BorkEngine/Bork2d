@@ -6,10 +6,18 @@ namespace Bork2d.Bake.Svg;
 /// <remarks>
 /// <para>
 /// Every contour is flattened once at the caller's tolerance and its signed area is computed in the
-/// artboard-local Y-up space, where a positive area is the desired outer orientation. A nonzero shape
-/// keeps the authored relative winding and is globally reversed when its largest-absolute-area
-/// contour is negative. An even-odd shape has every contour oriented by its nesting depth: even
-/// depths become positive and odd depths negative.
+/// artboard-local Y-up space, where a positive area is the desired outer orientation.
+/// </para>
+/// <para>
+/// A nonzero shape is normalized per containment root component. The parent of a contour is the
+/// smallest-absolute-area contour whose interior point contains it; a contour without such a parent
+/// is a root. A negative root reverses together with its whole subtree, so every root becomes positive
+/// while the authored relative winding inside the component survives (a negative root with a positive
+/// hole becomes a positive root with a negative hole). A positive root keeps its subtree as authored.
+/// </para>
+/// <para>
+/// An even-odd shape has every contour oriented by its nesting depth: even depths become positive and
+/// odd depths negative.
 /// </para>
 /// <para>
 /// The subset limitation is deliberate: self-intersecting or overlapping subpaths keep whatever
@@ -56,35 +64,120 @@ internal static class SvgShapeNormalizer
 
         return fillRule == SvgFillRule.EvenOdd
             ? NormalizeEvenOdd(contours, polygons, areas)
-            : NormalizeNonZero(contours, areas);
+            : NormalizeNonZero(contours, polygons, areas);
     }
 
+    /// <summary>
+    /// Makes every containment root positive while preserving the authored winding inside each root's
+    /// subtree.
+    /// </summary>
+    /// <remarks>
+    /// A nonzero fill keeps an isolated contour with negative winding filled, so each disconnected
+    /// component needs its own orientation fix rather than one global reversal. The containment tree
+    /// uses the interior point of each contour and picks the smallest-absolute-area containing contour
+    /// as its parent; a contour with no interior point is treated as a root. Reversing a whole subtree
+    /// flips every sign in that component, so only the component's outer orientation changes.
+    /// </remarks>
     private static IReadOnlyList<SvgContour> NormalizeNonZero(
         IReadOnlyList<SvgContour> contours,
+        List<SvgPoint>[] polygons,
         double[] areas)
     {
-        int largest = 0;
-        for (int index = 1; index < areas.Length; index++)
+        int[] parents = BuildParentMap(polygons, areas);
+        var children = new List<int>[contours.Count];
+        for (int index = 0; index < contours.Count; index++)
         {
-            if (Math.Abs(areas[index]) > Math.Abs(areas[largest]))
+            children[index] = [];
+        }
+
+        for (int index = 0; index < contours.Count; index++)
+        {
+            if (parents[index] >= 0)
             {
-                largest = index;
+                children[parents[index]].Add(index);
             }
         }
 
-        if (areas[largest] >= 0)
-        {
-            return [.. contours];
-        }
-
-        // Reversing every contour flips every sign, so the authored hole relationship is preserved.
-        var reversed = new SvgContour[contours.Count];
+        var reversed = new bool[contours.Count];
+        var pending = new Stack<int>();
         for (int index = 0; index < contours.Count; index++)
         {
-            reversed[index] = contours[index].Reverse();
+            bool isNegativeRoot = parents[index] < 0 && areas[index] < 0;
+            if (!isNegativeRoot)
+            {
+                continue;
+            }
+
+            pending.Push(index);
+            while (pending.Count > 0)
+            {
+                int node = pending.Pop();
+                if (reversed[node])
+                {
+                    continue;
+                }
+
+                reversed[node] = true;
+                foreach (int child in children[node])
+                {
+                    pending.Push(child);
+                }
+            }
         }
 
-        return reversed;
+        var normalized = new SvgContour[contours.Count];
+        for (int index = 0; index < contours.Count; index++)
+        {
+            normalized[index] = reversed[index] ? contours[index].Reverse() : contours[index];
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
+    /// Maps each contour to the smallest-absolute-area contour that contains it, or to
+    /// <c>-1</c> when it is a root.
+    /// </summary>
+    /// <remarks>
+    /// A parent must have a strictly larger absolute area, so two coincident contours cannot parent
+    /// each other and the relation stays acyclic. A contour whose interior point cannot be found is a
+    /// root.
+    /// </remarks>
+    private static int[] BuildParentMap(List<SvgPoint>[] polygons, double[] areas)
+    {
+        var parents = new int[polygons.Length];
+        for (int index = 0; index < polygons.Length; index++)
+        {
+            parents[index] = -1;
+            if (!SvgPolygon.TryFindInteriorPoint(polygons[index], out SvgPoint point))
+            {
+                continue;
+            }
+
+            double ownArea = Math.Abs(areas[index]);
+            double smallestParentArea = double.PositiveInfinity;
+            for (int candidate = 0; candidate < polygons.Length; candidate++)
+            {
+                if (candidate == index)
+                {
+                    continue;
+                }
+
+                double candidateArea = Math.Abs(areas[candidate]);
+                if (candidateArea <= ownArea || candidateArea >= smallestParentArea)
+                {
+                    continue;
+                }
+
+                if (SvgPolygon.Contains(polygons[candidate], point))
+                {
+                    parents[index] = candidate;
+                    smallestParentArea = candidateArea;
+                }
+            }
+        }
+
+        return parents;
     }
 
     private static IReadOnlyList<SvgContour> NormalizeEvenOdd(

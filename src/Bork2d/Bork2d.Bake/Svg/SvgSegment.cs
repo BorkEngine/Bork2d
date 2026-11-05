@@ -43,6 +43,15 @@ internal abstract class SvgSegment
     /// <returns>The transformed segment.</returns>
     internal abstract SvgSegment Transform(SvgAffine transform);
 
+    /// <summary>Gets a value indicating whether every defining point is finite.</summary>
+    /// <returns><see langword="true"/> when the segment has no non-finite coordinate.</returns>
+    /// <remarks>
+    /// A transform, a relative coordinate addition, or the artboard mapping can overflow to an
+    /// infinity or a NaN even when the authored numbers are finite. The parser checks this before it
+    /// cleans or normalizes a contour, so a non-finite point never reaches the consumer.
+    /// </remarks>
+    internal abstract bool IsFinite();
+
     /// <summary>
     /// Appends the segment's flattened interior points and its end point, in that order, to a
     /// contour polyline. The segment's start point is not appended because the caller already added
@@ -55,6 +64,12 @@ internal abstract class SvgSegment
     /// <summary>Grows the bounds so they contain the segment's exact extent.</summary>
     /// <param name="bounds">The bounds to grow.</param>
     internal abstract void IncludeBounds(ref SvgBounds bounds);
+
+    /// <summary>Tests one point for finite coordinates.</summary>
+    /// <param name="point">The point to test.</param>
+    /// <returns><see langword="true"/> when both coordinates are finite.</returns>
+    protected static bool IsFinitePoint(SvgPoint point)
+        => double.IsFinite(point.X) && double.IsFinite(point.Y);
 
     /// <summary>Computes how many flattened pieces a curve needs for the requested tolerance.</summary>
     /// <param name="deviation">The curve's maximum deviation from its chord.</param>

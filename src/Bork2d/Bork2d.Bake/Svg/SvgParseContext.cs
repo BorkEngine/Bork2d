@@ -78,6 +78,17 @@ internal sealed class SvgParseContext
         }
 
         Artboard board = resolved.Value;
+        if (!double.IsFinite(board.Width)
+            || !double.IsFinite(board.Height)
+            || board.Width <= 0
+            || board.Height <= 0)
+        {
+            ReportError(
+                root,
+                "has geometry that is not representable; its artboard extent is not finite");
+            return null;
+        }
+
         double tolerance = Math.Max(1e-6, Math.Max(board.Width, board.Height) * 1e-4);
         var shapes = new List<SvgShape>(_shapes.Count);
         foreach (ShapeDraft draft in _shapes)
@@ -85,7 +96,17 @@ internal sealed class SvgParseContext
             var mapped = new List<SvgContour>(draft.Contours.Count);
             foreach (SvgContour contour in draft.Contours)
             {
-                mapped.Add(contour.Transform(board.Mapping));
+                SvgContour mappedContour = contour.Transform(board.Mapping);
+                if (!mappedContour.IsFinite())
+                {
+                    ReportError(
+                        root,
+                        "has geometry that is not representable in the artboard; the artboard "
+                            + "mapping produced a non-finite coordinate");
+                    return null;
+                }
+
+                mapped.Add(mappedContour);
             }
 
             IReadOnlyList<SvgContour> normalized =
@@ -167,7 +188,17 @@ internal sealed class SvgParseContext
         var cleaned = new List<SvgContour>(contours.Count);
         foreach (SvgContour contour in contours)
         {
-            SvgContour? candidate = SvgContourCleaner.Clean(contour.Transform(combined));
+            SvgContour transformed = contour.Transform(combined);
+            if (!transformed.IsFinite())
+            {
+                ReportError(
+                    element,
+                    "has geometry that is not representable; the element transform or the path "
+                        + "data produced a non-finite coordinate");
+                return;
+            }
+
+            SvgContour? candidate = SvgContourCleaner.Clean(transformed);
             if (candidate is not null)
             {
                 cleaned.Add(candidate);

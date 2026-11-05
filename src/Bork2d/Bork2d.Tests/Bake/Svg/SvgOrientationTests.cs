@@ -4,7 +4,7 @@ using Xunit;
 namespace Bork2d.Tests.Bake.Svg;
 
 /// <summary>
-/// Orientation normalization: nonzero global reversal, even-odd nesting depth, holes, multiple
+/// Orientation normalization: nonzero per-component fixing, even-odd nesting depth, holes, multiple
 /// subpaths, and the documented overlap limitation.
 /// </summary>
 public sealed class SvgOrientationTests
@@ -44,6 +44,50 @@ public sealed class SvgOrientationTests
         Assert.Equal(2, shape.Contours.Count);
         SvgTestSupport.AssertNear(10000, SvgTestSupport.SignedArea(shape.Contours[0]));
         SvgTestSupport.AssertNear(-2500, SvgTestSupport.SignedArea(shape.Contours[1]));
+    }
+
+    [Fact]
+    public void NonZeroMakesAnIsolatedNegativeContourPositive()
+    {
+        // The second subpath is disjoint from the first and winds clockwise on screen, so the Y-up
+        // flip leaves it negative. Nonzero fill still fills it, so it must become a positive root.
+        SvgShape shape = SvgTestSupport.SingleShape(SvgTestSupport.ParseDocument(
+            "<path d=\"M 0 0 L 0 100 L 100 100 L 100 0 Z "
+                + "M 150 0 L 170 0 L 170 20 L 150 20 Z\" />"));
+
+        Assert.Equal(SvgFillRule.NonZero, shape.FillRule);
+        Assert.Equal(2, shape.Contours.Count);
+        SvgTestSupport.AssertNear(10000, SvgTestSupport.SignedArea(shape.Contours[0]));
+        SvgTestSupport.AssertNear(400, SvgTestSupport.SignedArea(shape.Contours[1]));
+    }
+
+    [Fact]
+    public void NonZeroFlipsANegativeRootAndItsPositiveHole()
+    {
+        // The outer winds clockwise on screen (negative after the Y-up flip) and the hole winds
+        // counter-clockwise (positive after the flip). Reversing the whole component must keep the
+        // hole opposite to the outer instead of losing it.
+        SvgShape shape = SvgTestSupport.SingleShape(SvgTestSupport.ParseDocument(
+            "<path d=\"M 0 0 L 100 0 L 100 100 L 0 100 Z "
+                + "M 30 30 L 30 70 L 70 70 L 70 30 Z\" />"));
+
+        Assert.Equal(2, shape.Contours.Count);
+        SvgTestSupport.AssertNear(10000, SvgTestSupport.SignedArea(shape.Contours[0]));
+        SvgTestSupport.AssertNear(-1600, SvgTestSupport.SignedArea(shape.Contours[1]));
+    }
+
+    [Fact]
+    public void NonZeroFlipsANegativeRootAndEveryDescendant()
+    {
+        SvgShape shape = SvgTestSupport.SingleShape(SvgTestSupport.ParseDocument(
+            "<path d=\"M 0 0 L 100 0 L 100 100 L 0 100 Z "
+                + "M 20 20 L 20 80 L 80 80 L 80 20 Z "
+                + "M 40 40 L 60 40 L 60 60 L 40 60 Z\" />"));
+
+        Assert.Equal(3, shape.Contours.Count);
+        SvgTestSupport.AssertNear(10000, SvgTestSupport.SignedArea(shape.Contours[0]));
+        SvgTestSupport.AssertNear(-3600, SvgTestSupport.SignedArea(shape.Contours[1]));
+        SvgTestSupport.AssertNear(400, SvgTestSupport.SignedArea(shape.Contours[2]));
     }
 
     [Fact]

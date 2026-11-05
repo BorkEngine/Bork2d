@@ -35,6 +35,10 @@ internal sealed class SvgQuadraticSegment : SvgSegment
     internal override SvgSegment Reverse() => new SvgQuadraticSegment(End, Control, Start);
 
     /// <inheritdoc/>
+    internal override bool IsFinite()
+        => IsFinitePoint(Start) && IsFinitePoint(Control) && IsFinitePoint(End);
+
+    /// <inheritdoc/>
     internal override SvgSegment Transform(SvgAffine transform)
         => new SvgQuadraticSegment(
             transform.Transform(Start),

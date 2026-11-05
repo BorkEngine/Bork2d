@@ -28,6 +28,9 @@ internal sealed class SvgLineSegment : SvgSegment
     internal override void AppendPolylinePoints(List<SvgPoint> points, double tolerance) => points.Add(End);
 
     /// <inheritdoc/>
+    internal override bool IsFinite() => IsFinitePoint(Start) && IsFinitePoint(End);
+
+    /// <inheritdoc/>
     internal override void IncludeBounds(ref SvgBounds bounds)
     {
         bounds.Include(Start);

@@ -50,9 +50,11 @@ internal static class SvgContourCleaner
         }
 
         // Flatten finely relative to the contour's own size, so a scaled-down shape is judged the
-        // same way as its unscaled source.
+        // same way as its unscaled source. A finite contour can still span enough to overflow its
+        // bounds to an infinity; the area comparison is then meaningless, so flatten at the finest
+        // fixed tolerance and let the artboard representability check reject the shape.
         double size = Math.Max(bounds.Width, bounds.Height);
-        double tolerance = Math.Max(1e-9, size * 1e-6);
+        double tolerance = double.IsFinite(size) ? Math.Max(1e-9, size * 1e-6) : 1e-9;
         IReadOnlyList<SvgPoint> polygon = cleaned.ToPolyline(tolerance);
         if (polygon.Count < 3)
         {

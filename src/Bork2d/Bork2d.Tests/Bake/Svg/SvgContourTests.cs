@@ -105,6 +105,20 @@ public sealed class SvgContourTests
     }
 
     [Fact]
+    public void IsFiniteChecksEverySegmentPoint()
+    {
+        Assert.True(Triangle().IsFinite());
+
+        var nonFinite = new SvgContour(
+        [
+            new SvgLineSegment(new SvgPoint(0, 0), new SvgPoint(double.PositiveInfinity, 0)),
+            new SvgLineSegment(new SvgPoint(double.PositiveInfinity, 0), new SvgPoint(0, 0)),
+        ]);
+
+        Assert.False(nonFinite.IsFinite());
+    }
+
+    [Fact]
     public void ConstructorRejectsAnOpenChain()
     {
         Assert.Throws<ArgumentException>(

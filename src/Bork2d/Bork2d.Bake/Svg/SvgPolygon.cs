@@ -148,7 +148,9 @@ internal static class SvgPolygon
     /// </returns>
     /// <remarks>
     /// The threshold is relative to the contour's own size, so a contour that is small only because
-    /// of its transform is not dropped, while a collinear or backtracking contour is.
+    /// of its transform is not dropped, while a collinear or backtracking contour is. When the
+    /// bounding box itself overflows to a non-finite area the comparison cannot be judged, so the
+    /// contour is kept and the artboard representability check decides.
     /// </remarks>
     internal static bool IsNegligibleArea(double area, IReadOnlyList<SvgPoint> points)
     {
@@ -161,6 +163,11 @@ internal static class SvgPolygon
         }
 
         double boxArea = bounds.IsEmpty ? 0 : bounds.Width * bounds.Height;
+        if (!double.IsFinite(boxArea))
+        {
+            return false;
+        }
+
         double threshold = Math.Max(1e-12, Math.Abs(boxArea) * 1e-9);
         return Math.Abs(area) <= threshold;
     }
