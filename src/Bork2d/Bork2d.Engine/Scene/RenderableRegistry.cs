@@ -9,10 +9,10 @@ namespace Bork2d.Engine.Scene;
 /// <remarks>
 /// <para>
 /// Definitions are registered in declaration order. The first <c>reservedSlots</c> definitions fill
-/// the snapshot's reserved render-data slots (<c>0</c> camera, <c>1</c> sprite, <c>2</c> line) in
-/// that order; any later definition gets the next contiguous slot starting at the reserved count.
-/// The engine registers the camera, sprite, and line definitions first and passes the resulting
-/// <see cref="IRenderDataProducer"/> list to <see cref="SnapshotCapture"/>.
+/// the snapshot's reserved render-data slots (<c>0</c> camera, <c>1</c> sprite, <c>2</c> line,
+/// <c>3</c> font) in that order; any later definition gets the next contiguous slot starting at the
+/// reserved count. The engine registers the camera, sprite, line, and font definitions first and
+/// passes the resulting <see cref="IRenderDataProducer"/> list to <see cref="SnapshotCapture"/>.
 /// </para>
 /// <para>
 /// A custom renderable kind is added by registering one definition; creation and capture then run

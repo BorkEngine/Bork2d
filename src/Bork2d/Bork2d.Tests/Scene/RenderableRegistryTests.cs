@@ -3,6 +3,7 @@ using Bork2d.Engine;
 using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
 using Bork2d.Tests.TestDoubles;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Bork2d.Tests.Scene;
@@ -23,21 +24,32 @@ public sealed class RenderableRegistryTests
             new FakeWindow());
         var spriteDefinition = new SpriteRenderableDefinition<GameLayer>(structuralLock);
         var lineDefinition = new LineRenderableDefinition<GameLayer>(structuralLock);
+        var fontDefinition = new FontRenderableDefinition<GameLayer>(
+            structuralLock,
+            NullLogger.Instance);
 
         var registry = new RenderableRegistry(
             FrameSnapshot.ReservedSlotCount,
             cameraDefinition,
             spriteDefinition,
-            lineDefinition);
+            lineDefinition,
+            fontDefinition);
 
         Assert.Equal(FrameSnapshot.ReservedSlotCount, registry.ReservedSlots);
         Assert.Equal(
-            new[] { FrameSnapshot.CameraSlot, FrameSnapshot.SpriteSlot, FrameSnapshot.LineSlot },
+            new[]
+            {
+                FrameSnapshot.CameraSlot,
+                FrameSnapshot.SpriteSlot,
+                FrameSnapshot.LineSlot,
+                FrameSnapshot.FontSlot,
+            },
             Slots(registry));
-        Assert.Equal(new[] { "Camera", "Sprite", "Line" }, Names(registry));
+        Assert.Equal(new[] { "Camera", "Sprite", "Line", "Font" }, Names(registry));
         Assert.Same(cameraDefinition.Producer, registry.Producers[0]);
         Assert.Same(spriteDefinition.Producer, registry.Producers[1]);
         Assert.Same(lineDefinition.Producer, registry.Producers[2]);
+        Assert.Same(fontDefinition.Producer, registry.Producers[3]);
     }
 
     [Fact]
@@ -51,6 +63,7 @@ public sealed class RenderableRegistryTests
             new CameraRenderableDefinition<GameLayer>(structuralLock, new FakeWindow()),
             new SpriteRenderableDefinition<GameLayer>(structuralLock),
             new LineRenderableDefinition<GameLayer>(structuralLock),
+            new FontRenderableDefinition<GameLayer>(structuralLock, NullLogger.Instance),
             customDefinition);
 
         Assert.Equal(
@@ -59,6 +72,7 @@ public sealed class RenderableRegistryTests
                 FrameSnapshot.CameraSlot,
                 FrameSnapshot.SpriteSlot,
                 FrameSnapshot.LineSlot,
+                FrameSnapshot.FontSlot,
                 FrameSnapshot.ReservedSlotCount,
             },
             Slots(registry));
@@ -74,7 +88,8 @@ public sealed class RenderableRegistryTests
             FrameSnapshot.ReservedSlotCount,
             new CameraRenderableDefinition<GameLayer>(structuralLock, new FakeWindow()),
             new SpriteRenderableDefinition<GameLayer>(structuralLock),
-            new LineRenderableDefinition<GameLayer>(structuralLock));
+            new LineRenderableDefinition<GameLayer>(structuralLock),
+            new FontRenderableDefinition<GameLayer>(structuralLock, NullLogger.Instance));
 
         var camera = Assert.IsType<Camera<GameLayer>>(
             registry.Create(typeof(Camera<GameLayer>), root));
@@ -82,11 +97,14 @@ public sealed class RenderableRegistryTests
             registry.Create(typeof(SpriteRender<GameLayer>), root));
         var line = Assert.IsType<LineRender<GameLayer>>(
             registry.Create(typeof(LineRender<GameLayer>), root));
+        var font = Assert.IsType<FontRender<GameLayer>>(
+            registry.Create(typeof(FontRender<GameLayer>), root));
 
         Assert.Same(root, camera.Parent);
         Assert.Same(root, sprite.Parent);
         Assert.Same(root, line.Parent);
-        Assert.Equal(3, ((ISceneNode)root).ChildCountCore);
+        Assert.Same(root, font.Parent);
+        Assert.Equal(4, ((ISceneNode)root).ChildCountCore);
     }
 
     [Fact]
@@ -100,6 +118,7 @@ public sealed class RenderableRegistryTests
             new CameraRenderableDefinition<GameLayer>(structuralLock, new FakeWindow()),
             new SpriteRenderableDefinition<GameLayer>(structuralLock),
             new LineRenderableDefinition<GameLayer>(structuralLock),
+            new FontRenderableDefinition<GameLayer>(structuralLock, NullLogger.Instance),
             customDefinition);
         var capture = new SnapshotCapture(structuralLock, root, registry.Producers);
 
@@ -123,6 +142,7 @@ public sealed class RenderableRegistryTests
         Assert.Equal(1, snapshot.CameraCount);
         Assert.Equal(1, snapshot.SpriteCount);
         Assert.Equal(0, snapshot.LineCount);
+        Assert.Equal(0, snapshot.FontCount);
         Assert.Same(parent, custom.Parent);
     }
 
@@ -134,7 +154,8 @@ public sealed class RenderableRegistryTests
             FrameSnapshot.ReservedSlotCount,
             new CameraRenderableDefinition<GameLayer>(structuralLock, new FakeWindow()),
             new SpriteRenderableDefinition<GameLayer>(structuralLock),
-            new LineRenderableDefinition<GameLayer>(structuralLock));
+            new LineRenderableDefinition<GameLayer>(structuralLock),
+            new FontRenderableDefinition<GameLayer>(structuralLock, NullLogger.Instance));
 
         Bork2dException exception = Assert.Throws<Bork2dException>(
             () => registry.Create(typeof(TestRenderable), new SceneRoot(structuralLock)));
@@ -152,6 +173,7 @@ public sealed class RenderableRegistryTests
                 FrameSnapshot.ReservedSlotCount,
                 new CameraRenderableDefinition<GameLayer>(structuralLock, new FakeWindow()),
                 new SpriteRenderableDefinition<GameLayer>(structuralLock),
+                new LineRenderableDefinition<GameLayer>(structuralLock),
                 new CameraRenderableDefinition<GameLayer>(structuralLock, new FakeWindow())));
 
         Assert.Contains(typeof(Camera<GameLayer>).FullName!, exception.Message, StringComparison.Ordinal);

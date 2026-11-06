@@ -83,7 +83,7 @@ signatures are finalized in the implementation tasks.
 | Line geometry | CPU-expanded triangles with miter joins and butt caps; anti-aliasing in the fragment shader. |
 | 2D ordering | Sprites, lines, and text share one `ZIndex` draw order (then per-camera screen-space Y and X) and one 2D render pass; `Layer` is only a camera culling bit. |
 | SVG | Shapes, paths, groups, and transforms with fill only; paint, stroke, text, images, CSS, and filters are ignored. Output is an SDF texture plus a ready sprite. |
-| Fonts | TTF/OTF with MSDF, ASCII plus explicit `U+` ranges and single glyphs, left-to-right layout, and basic kerning. `resolution` is the atlas's maximum dimension; glyph em size is derived to fit. |
+| Fonts | TTF/OTF with MSDF, ASCII plus explicit `U+` ranges and single glyphs, left-to-right layout, and basic kerning. `resolution` is the atlas's fixed square side length; glyph em size is derived to fit. |
 | MSDF generation | A managed C# MSDF library, build-time only, rather than a native P/Invoke dependency. |
 | SDF settings | `resolution` is the output texture's maximum dimension in pixels, `range` is the distance spread in pixels, and `padding` adds pixels around the artboard or glyph. |
 | SDF compression | The SVG sidecar's `compression` is `none` (default, linear `Rgb8`) or an explicit `bc7` opt-in; the generic texture sidecar's `type = "rgb"` with `compression = "auto"` (opaque BC1) is never used for SDF data. |
@@ -632,7 +632,7 @@ check: its corners must remain sharp at the default camera size and at a reduced
 
 ```toml
 # Assets/fonts/score.ttf.toml
-resolution = 2048                  # atlas maximum dimension in pixels
+resolution = 2048                  # fixed square atlas side length in pixels
 range = 8                          # distance spread in pixels
 padding = 2                        # extra pixels around the field margin
 ranges = ["U+0020-U+007E"]         # explicit Unicode ranges
@@ -645,7 +645,7 @@ notation. An empty selection is an error.
 
 #### Atlas and derived glyph size
 
-`resolution` is the atlas's maximum width or height. The bake derives the glyph em size:
+`resolution` is the atlas's fixed square side length in pixels. The bake derives the glyph em size:
 
 1. Rasterize the selected glyphs at a candidate em size.
 2. Pack their MSDF cells plus the `range` field margin and `padding` into a
@@ -680,6 +680,12 @@ Only selected glyphs are present. If a codepoint is not in the selected set, `Fo
 `?` when that glyph is selected; otherwise it skips the codepoint with a one-time warning. This keeps
 the atlas closed over the declared selection and makes missing content visible in development.
 
+`FontAsset.MeasureText(ReadOnlySpan<char>, float)` returns the layout box: X is the widest line's
+advance width including kerning and spaces, and Y is the line count times the default line height.
+It ignores alignment, always uses a line-spacing multiplier of `1`, applies the same `?`/skip
+missing-glyph rule without logging, and reads the asset's current fields without freezing it. Empty
+or invalid input returns `Vector2.Zero`. The result is the layout box, not the tight glyph AABB.
+
 #### `FontRender`
 
 ```csharp
@@ -692,19 +698,28 @@ public interface IFontRender<TLayer> : IRenderable<TLayer> where TLayer : struct
     float LineSpacing { get; set; }
 }
 
-IEngine<TLayer>.CreateFontRender(ISceneNode parent);
+IEngine<TLayer>.CreateFontRender(ITransform parent);
 ```
 
-`FontRender` lays text out into glyph quads using the font metrics, the derived em size, and
-kerning. Layout is cached and rebuilt only when `Font`, `Text`, `Size`, `Alignment`, or
-`LineSpacing` changes, so a static score allocates nothing per frame. Assigning a `FontAsset`
-freezes its atlas reference and metrics; mutating the loaded asset afterwards cannot change a
-published frame. Each glyph is drawn with the built-in `shader/sdf` fragment and the font atlas;
-`FontRender` always uses that fragment, and the shared `Shader` member of `IRenderable<TLayer>` has
-no effect on it in 0.2.
+`FontRender` lays text out into local-space glyph quads using the font metrics, the derived em size,
+and kerning. The local origin is the first line's baseline at `y = 0`; lines advance downward by
+`(Ascent - Descent + LineGap) * Size * LineSpacing`, where `LineSpacing` is a multiplier of the
+default line height, not extra world units. `\n` (including `\r\n` and a lone `\r`) starts a new
+line, and a trailing break contributes a final empty line. Layout is cached and rebuilt only when
+`Font`, `Text`, `Size`, `Alignment`, or `LineSpacing` changes, so a static score allocates nothing
+per frame. A missing codepoint uses `?` when that glyph exists and is otherwise skipped with a
+one-time warning. A non-finite or non-positive `Size` or `LineSpacing` produces an empty layout and
+one warning; bounds and capture never throw. Assigning a `FontAsset` freezes its atlas reference,
+metrics, glyphs, and kerning; mutating the loaded asset afterwards cannot change a published frame.
+
+A `FontRender` with `Shader == null` draws with the built-in `shader/sdf` fragment and the font
+atlas. A custom fragment shader may be assigned and is drawn with the font glyph instance ABI; a
+failed custom shader falls back to `shader/sdf` with a one-time warning. The shared instance-uniform
+rules and freeze behavior are the same as for sprites and lines.
 
 Text joins the unified 2D order as a third record type. A contiguous run of glyphs from the same
-font is merged into one draw. `FontRender.Bounds` is the AABB of the laid-out quads.
+font is merged into one draw. `FontRender.Bounds` is the world-space AABB of the laid-out glyph
+quads, not the layout box.
 
 Pong uses two `FontRender`s: the left score right-aligned and the right score left-aligned, both
 near the top center of the court. The text changes only when a point is scored, and the window
@@ -840,9 +855,14 @@ New or changed public members in 0.2:
   `IRenderable.Color` replaces it.
 - `IEngine.SetGlobalUniform`, `IEngine.ResetGlobalUniforms`.
 - `ILineRender<TLayer>`, `IEngine.CreateLineRender`.
-- `IFontRender<TLayer>`, `IEngine.CreateFontRender`, `FontAsset`, `FontGlyph`, `TextAlignment`.
+- `IFontRender<TLayer>`, `IEngine.CreateFontRender`, `FontAsset`, `FontGlyph`, `TextAlignment`,
+  `FontAsset.MeasureText`.
 - `TextureFormat` expanded to the linear UNORM and BC values; `TextureDescriptor.MipLevels`.
 - `RenderStats` line and glyph counters.
+
+`FontRender` uses the built-in `shader/sdf` when no custom `Shader` is assigned and may select a
+custom fragment shader for the font glyph instance ABI; a failed custom shader falls back to
+`shader/sdf`.
 
 The exact overload sets, nullability, and defaults are settled in the implementation tasks and
 recorded in [engine.md](engine.md) and [render.md](render.md). A breaking-change note calls out the
@@ -1057,7 +1077,8 @@ Release GPU measurements cover:
 - Material assets or shared per-material uniform sets.
 - SVG paint, strokes, text, images, CSS, filters, masks, clip paths, `use`, or full SVG.
 - Complex text shaping, bidi, RTL, ligatures, font fallback, rich text, or word wrapping.
-- A dedicated `SdfRender` or `FontRender` custom shader path; both use the built-in SDF fragment.
+- A dedicated `SdfRender`. `FontRender` defaults to `shader/sdf` and may select a custom fragment
+  shader for the font glyph path.
 - Round line caps/joins, dashed line styles as a geometry feature, or textured lines.
 - Editor, 3D, depth, MSAA, render graph, texture streaming, cubemaps, or texture arrays.
 - Non-desktop platform guarantees. The BC requirement is a desktop Vulkan 1.3 decision.

@@ -276,19 +276,42 @@ public sealed class RenderableBoundsTests
     }
 
     [Fact]
+    public void FontBoundsCoverTheLaidOutGlyphQuadsAndAreEmptyWithoutContent()
+    {
+        GameEngine<GameLayer> engine = CreateEngine(new FakeWindow());
+        IFontRender<GameLayer> font = engine.CreateFontRender(engine.Root);
+
+        Assert.Equal(Bounds.Empty, font.Bounds);
+
+        font.Font = FontTestSupport.CreateFont();
+        font.Text = "A";
+        AssertBounds(font.Bounds, new Vector2(0.05f, 0f), new Vector2(0.55f, 0.6f));
+
+        font.Text = " ";
+        Assert.Equal(Bounds.Empty, font.Bounds);
+
+        font.Text = "A";
+        font.LocalScale = new Vector2(float.NaN, 1f);
+        Assert.Equal(Bounds.Empty, font.Bounds);
+    }
+
+    [Fact]
     public void RenderablesAreAssignableToTheSharedContracts()
     {
         Assert.True(typeof(IBoundedTransform).IsAssignableFrom(typeof(ICamera<GameLayer>)));
         Assert.True(typeof(IBoundedTransform).IsAssignableFrom(typeof(ISpriteRender<GameLayer>)));
         Assert.True(typeof(IBoundedTransform).IsAssignableFrom(typeof(ILineRender<GameLayer>)));
+        Assert.True(typeof(IBoundedTransform).IsAssignableFrom(typeof(IFontRender<GameLayer>)));
         Assert.True(typeof(ITransform).IsAssignableFrom(typeof(IBoundedTransform)));
         Assert.True(typeof(IRenderable<GameLayer>).IsAssignableFrom(typeof(ISpriteRender<GameLayer>)));
         Assert.True(typeof(IRenderable<GameLayer>).IsAssignableFrom(typeof(ILineRender<GameLayer>)));
+        Assert.True(typeof(IRenderable<GameLayer>).IsAssignableFrom(typeof(IFontRender<GameLayer>)));
 
         GameEngine<GameLayer> engine = CreateEngine(new FakeWindow());
         Assert.IsAssignableFrom<IBoundedTransform>(engine.CreateCamera(engine.Root));
         Assert.IsAssignableFrom<IRenderable<GameLayer>>(engine.CreateSpriteRender(engine.Root));
         Assert.IsAssignableFrom<IRenderable<GameLayer>>(engine.CreateLineRender(engine.Root));
+        Assert.IsAssignableFrom<IRenderable<GameLayer>>(engine.CreateFontRender(engine.Root));
     }
 
     public static TheoryData<SpriteAsset> MalformedAssets()

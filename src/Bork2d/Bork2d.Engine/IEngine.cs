@@ -174,6 +174,23 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     ILineRender<TLayer> CreateLineRender(ITransform parent);
 
     /// <summary>
+    /// Creates a font renderable attached under <paramref name="parent"/>.
+    /// </summary>
+    /// <param name="parent">
+    /// The non-null engine-owned parent; use <see cref="Root"/> for a scene-level renderable.
+    /// </param>
+    /// <returns>The created font renderable with no font, empty text, and the documented defaults.</returns>
+    /// <remarks>
+    /// The new font has no <see cref="IFontRender{TLayer}.Font"/>, so it draws nothing until one is
+    /// assigned. Creation validates the parent before looking up the renderable definition.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="parent"/> is <see langword="null"/>.</exception>
+    /// <exception cref="Bork2dException">
+    /// <paramref name="parent"/> is not an engine-owned scene node.
+    /// </exception>
+    IFontRender<TLayer> CreateFontRender(ITransform parent);
+
+    /// <summary>
     /// Sets a user global shader uniform of type <see cref="ShaderUniformType.Float"/>.
     /// </summary>
     /// <param name="name">The engine-wide uniform name, matched ordinally.</param>

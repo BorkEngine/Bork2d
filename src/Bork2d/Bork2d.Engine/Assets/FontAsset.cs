@@ -1,3 +1,6 @@
+using System.Numerics;
+using Bork2d.Engine.Rendering;
+using Bork2d.Engine.Scene;
 using PolyType;
 
 namespace Bork2d.Engine.Assets;
@@ -17,7 +20,8 @@ namespace Bork2d.Engine.Assets;
 /// <see cref="Ascent"/>, <see cref="Descent"/>, and <see cref="LineGap"/> are the font's vertical
 /// metrics divided by its units per em, so ascent is positive and descent is negative.
 /// <see cref="DistanceRange"/> is the MSDF distance spread in atlas pixels. The font DTO carries no
-/// renderable or layout state; consuming it is the caller's concern.
+/// renderable or cached layout state; <see cref="MeasureText(ReadOnlySpan{char}, float)"/> is a
+/// stateless helper and assigning the asset to a renderable is otherwise the caller's concern.
 /// </para>
 /// <para>
 /// <see cref="Glyphs"/> is sorted by <see cref="FontGlyph.Codepoint"/> and contains only the selected
@@ -73,4 +77,46 @@ public sealed partial class FontAsset
 
     /// <summary>Gets or sets the MSDF distance spread in atlas pixels.</summary>
     public float DistanceRange { get; set; }
+
+    /// <summary>
+    /// Measures the layout box of <paramref name="text"/> at <paramref name="size"/> using this
+    /// asset's current fields.
+    /// </summary>
+    /// <param name="text">The UTF-16 text to measure; empty text measures as zero.</param>
+    /// <param name="size">The world units per em; a non-finite or non-positive size measures as zero.</param>
+    /// <returns>
+    /// <see cref="Vector2.X"/> is the widest line's advance width and <see cref="Vector2.Y"/> is the
+    /// line count times the default line height, or <see cref="Vector2.Zero"/> for empty or invalid
+    /// input.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// This is the layout box, not the tight AABB of the drawable glyph quads. It includes spaces,
+    /// kerning, and explicit line breaks, ignores alignment, and uses a line-spacing multiplier of
+    /// <c>1</c>. A trailing line break contributes a final empty line to the height.
+    /// </para>
+    /// <para>
+    /// Missing codepoints substitute <c>?</c> when that glyph is present; otherwise they are skipped
+    /// exactly as a font renderable would skip them, but without logging. The method reads the
+    /// asset's current fields, does not freeze or mutate the asset, and tolerates null glyph or
+    /// kerning arrays and malformed values without throwing.
+    /// </para>
+    /// </remarks>
+    public Vector2 MeasureText(ReadOnlySpan<char> text, float size)
+    {
+        FontLayoutData layout = FontLayoutBuilder.Build(
+            Glyphs,
+            Kerning,
+            Ascent,
+            Descent,
+            LineGap,
+            text,
+            size,
+            TextAlignment.Left,
+            lineSpacing: 1f,
+            missingGlyph: null);
+        return float.IsFinite(layout.Width) && float.IsFinite(layout.Height)
+            ? new Vector2(layout.Width, layout.Height)
+            : Vector2.Zero;
+    }
 }

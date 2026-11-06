@@ -4,6 +4,7 @@ using Bork2d.Engine.Rendering;
 using Bork2d.Engine.Scene;
 using Bork2d.Render.Handoff;
 using Bork2d.Tests.TestDoubles;
+using Bork2d.Tests.TestSupport;
 using Xunit;
 
 namespace Bork2d.Tests.Rendering;
@@ -182,6 +183,70 @@ public sealed class SnapshotAllocationTests
 
         Assert.Equal(0, allocated);
         Assert.Equal(8, snapshot.LineCount);
+    }
+
+    [Fact]
+    public void WarmCaptureOfFontsAllocatesNothing()
+    {
+        var engine = new GameEngine<GameLayer>(new FakeTime(), new FakeWindow(), new FakeAssets());
+        FontAsset asset = FontTestSupport.CreateFont();
+        for (var index = 0; index < 8; index++)
+        {
+            IFontRender<GameLayer> font = engine.CreateFontRender(engine.Root);
+            font.Font = asset;
+            font.Text = "AB\nV";
+            font.Size = 1f + (index * 0.1f);
+            font.Layer = GameLayer.World;
+            font.ZIndex = index;
+        }
+
+        var snapshot = new FrameSnapshot();
+        for (var iteration = 0; iteration < WarmupIterations; iteration++)
+        {
+            engine.CaptureSnapshot(snapshot, sequence: iteration + 1);
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var iteration = 0; iteration < MeasuredIterations; iteration++)
+        {
+            engine.CaptureSnapshot(snapshot, sequence: iteration + 1);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
+        Assert.Equal(8, snapshot.FontCount);
+    }
+
+    [Fact]
+    public void WarmFontBoundsReadsAllocateNothing()
+    {
+        var engine = new GameEngine<GameLayer>(new FakeTime(), new FakeWindow(), new FakeAssets());
+        FontAsset asset = FontTestSupport.CreateFont();
+        var fonts = new IFontRender<GameLayer>[8];
+        for (var index = 0; index < fonts.Length; index++)
+        {
+            fonts[index] = engine.CreateFontRender(engine.Root);
+            fonts[index].Font = asset;
+            fonts[index].Text = "AB\nV";
+            fonts[index].Size = 1f + (index * 0.1f);
+            fonts[index].LocalPosition = new Vector2(index, -index);
+        }
+
+        for (var iteration = 0; iteration < WarmupIterations; iteration++)
+        {
+            _ = fonts[iteration % fonts.Length].Bounds;
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var iteration = 0; iteration < MeasuredIterations; iteration++)
+        {
+            _ = fonts[iteration % fonts.Length].Bounds;
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
     }
 
     private static GameEngine<GameLayer> CreateFixedScene()
