@@ -149,22 +149,23 @@ diagnostics back to the source; the `#define main` line is part of the prefix an
 offset.
 
 The fixed interface is versioned by the shader layout version `3`. Version `3` is the first version
-shared by sprite and line renderables: every fragment shader declares the same interface, and both
-engine-owned vertex stages write all of it. Each renderable kind writes neutral values for the other
-kind's inputs, so one shader asset may be assigned to either kind.
+shared by sprite, line, and font renderables: every fragment shader declares the same interface. The
+engine-owned sprite and line vertex stages write all of it, and the font pipeline reuses the sprite
+vertex stage. Each renderable kind writes neutral values for the other kinds' inputs, so one shader
+asset may be assigned to any kind.
 
 | Input | Meaning |
 | --- | --- |
-| `vUv` | Interpolated sprite UV; on a line, the line's `vLineUv`. |
-| `vTint` | Sprite linear RGBA tint; on a line, the line's linear color. |
+| `vUv` | Interpolated sprite UV; on a line, the line's `vLineUv`; on a font, the glyph's atlas UV. |
+| `vTint` | Sprite or font linear RGBA tint; on a line, the line's linear color. |
 | `vWorldPosition` | Fragment world position. |
-| `vLocalPosition` | Fragment position in the sprite's local quad space; on a line, the line's `vLineUv`. |
-| `vTextureIndex` | Bindless index of the sprite's main texture; `0` (the placeholder) on a line. |
-| `vExtraTextureIndices[4]` | Bindless indices of up to four additional textures; all zero on a line. |
+| `vLocalPosition` | Fragment position in the sprite's local quad space; on a line, the line's `vLineUv`; on a font, the glyph's local quad space. |
+| `vTextureIndex` | Bindless index of the sprite's main texture or the font's atlas page; `0` (the placeholder) on a line. |
+| `vExtraTextureIndices[4]` | Bindless indices of up to four additional textures; all zero on a line or a font. |
 | `vInstanceParams[4]` | The packed per-renderable uniform block. |
-| `vLineUv` | Line stroke coordinate: `x` across the width (`0` at one edge, `1` at the other), `y` the distance along the line in world units. Zero on a sprite. |
-| `vColor` | The line's linear RGBA color. Zero on a sprite. |
-| `vLineFlags` | Flat line flags: bit `0` (value above `0.5`) means anti-aliasing is enabled; the other bits are reserved zero. Zero on a sprite. |
+| `vLineUv` | Line stroke coordinate: `x` across the width (`0` at one edge, `1` at the other), `y` the distance along the line in world units. Zero on a sprite or font. |
+| `vColor` | The line's linear RGBA color. Zero on a sprite or font. |
+| `vLineFlags` | Flat line flags: bit `0` (value above `0.5`) means anti-aliasing is enabled; the other bits are reserved zero. Zero on a sprite or font. |
 | `outColor` | The linear RGBA output. |
 
 The prologue places the bindless sampler array at set `0`, binding `1` and the global block
