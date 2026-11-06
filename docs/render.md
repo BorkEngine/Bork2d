@@ -118,8 +118,10 @@ The 2D pass plans sprites, lines, and fonts together in one allocation-free pass
    its frozen declarations. Additional textures resolve positionally against a sprite entry's
    declared slots: a pending extra page skips the whole sprite, a failed or absent page uses the
    bindless placeholder index `0`, references beyond four are ignored with a once-per-renderer
-   warning, and paths beyond the declared slot count are never loaded. Lines and fonts have no main
-   or additional textures, so a font's extra texture indices stay zero. Each sprite's
+   warning, and paths beyond the declared slot count are never loaded. Lines have no main or
+   additional textures. A font uses its atlas page as its main texture (the instance `misc.z`
+   bindless index) and has no additional textures, so its four extra texture indices stay zero. Each
+   sprite's
    camera-independent 176-byte instance record is built once here, each font expands into one
    176-byte record per drawable glyph quad (through the same sprite vertex stage and instance
    buffer), and each line keeps its immutable local-space geometry plus its seeded 16-float

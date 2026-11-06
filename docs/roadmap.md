@@ -601,7 +601,8 @@ reconstructs a signed distance from the three MSDF channels, applies a screen-sp
 width, and multiplies by the sprite or font color. It samples the main texture `.rgb` only. Its
 instance uniforms are `uThreshold` (default `0.5`) and `uSoftness` (default `1.0`); a sprite or font
 may override either through `SetUniform`. A sprite may still assign `shader/sdf` as ordinary custom
-content, which shares the SDF asset and font pipeline kind.
+content: it shares the SDF fragment asset and module but resolves with the sprite pipeline kind,
+while a font assigned the same shader uses the font pipeline kind.
 
 ```csharp
 SpriteAsset wordmark = engine.Assets.LoadAsset<SpriteAsset>("art/wordmark").GetAwaiter().GetResult();
