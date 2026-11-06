@@ -34,7 +34,7 @@ Nerdbank.MessagePack, Microsoft.Extensions.Logging.Abstractions, System.IO.Hashi
 
 | Thread | Owns | Notes |
 | --- | --- | --- |
-| Tick (game) thread | `IGame` callbacks, scene mutation | The caller's thread. `Run` and all engine members may run on any thread. |
+| Tick (game) thread | `IGame` callbacks, scene mutation | The caller's thread. `Setup` is invoked here and may await; its continuations may resume on another thread, but no other callback runs until its task completes, so the callbacks are never concurrent. `Run` and all engine members may run on any thread. |
 | Render thread | Vulkan device, swapchain/target, linear scene images, pipelines, texture pages, snapshot consumption | One thread per renderer; started by the host and joined before `Run` returns. |
 | Window thread | SDL video, the window, the event pump, the Vulkan instance/surface | Window commands are queued and coalesced; getters read the last confirmed state. |
 | Asset loader thread | Pack reads, decompression, MessagePack deserialization | One thread per app; load tasks complete asynchronously. |
@@ -87,11 +87,11 @@ snapshot; it only runs the paced game loop.
 | Headless | None; `IEngine.Window` is a throwing stub | None, no GPU or SDL | Absolute-deadline paced loop with a synthesized clock; stops on `Exit`. |
 
 Windowed and offscreen run through one internal rendered-run lifecycle: assets, platform startup,
-renderer startup and attachment, the `Setup`/readiness boundary, the backpressured tick loop,
-`Teardown`, renderer stop/join, platform shutdown, asset stop, proxy detach, and the mode-specific
-failure precedence. The mode hosts contribute only the SDL platform/proxies/input/minimized cap
-(windowed) or the fixed target (offscreen). Headless uses its own paced lifecycle with no renderer,
-platform, or snapshot ring.
+renderer startup and attachment, the blocked `Setup` task before the readiness boundary, the
+backpressured tick loop, `Teardown`, renderer stop/join, platform shutdown, asset stop, proxy detach,
+and the mode-specific failure precedence. The mode hosts contribute only the SDL
+platform/proxies/input/minimized cap (windowed) or the fixed target (offscreen). Headless uses its own
+paced lifecycle with no renderer, platform, or snapshot ring.
 
 ## Assets and tooling
 

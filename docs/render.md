@@ -576,9 +576,10 @@ cancelled. Cancellation is checked before that limit, a cancelled token faults t
 fatal faults all pending requests.
 
 A capture needs a GPU frame, and a GPU frame needs a published snapshot. Waiting for the task
-synchronously inside `Setup` or `Tick` before the snapshot that serves the request is published can
-block the only producer that can publish it, so request the capture there and await it from a worker
-or a later callback.
+synchronously inside `Tick`, or awaiting it inside `Setup`, before the snapshot that serves the
+request is published can block the only producer that can publish it: a `Setup` that awaits a
+capture never completes, so the first tick and its snapshot never start. Request the capture there
+and await it from a worker or a later callback.
 
 Renderer failures are one-shot: the host observes `FatalException` at a tick boundary, no further
 tick starts, and cleanup is best-effort, idempotent, and non-throwing.

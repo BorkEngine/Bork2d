@@ -306,8 +306,8 @@ public interface IEngine<TLayer> where TLayer : struct, Enum
     /// <paramref name="cancellationToken"/> faults the returned task with
     /// <see cref="OperationCanceledException"/> (checked before the outstanding-request limit); a
     /// renderer stop or fatal faults pending requests. Waiting for the task synchronously inside
-    /// <c>Setup</c> or <c>Tick</c> before the snapshot that serves the request is published can
-    /// block the producer needed to generate that frame.
+    /// <c>Tick</c>, or awaiting it inside <c>Setup</c>, before the snapshot that serves the request
+    /// is published can block the producer needed to generate that frame.
     /// </para>
     /// <para>
     /// Throws <see cref="InvalidOperationException"/> before <c>Run()</c> (the host has not installed a
