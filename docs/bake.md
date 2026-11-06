@@ -315,10 +315,10 @@ a `FontAsset` at its base path and a linear MSDF atlas:
 The required sidecar `score.ttf.toml` carries the bake settings:
 
 ```toml
-resolution = 2048                     # fixed square atlas side in pixels, 1..8192
+resolution = 512                      # fixed square atlas side in pixels, 1..8192
 range = 8                             # distance spread in pixels, greater than zero
 padding = 2                           # extra pixels beyond the range margin, at least zero
-ranges = ["U+0030-U+0039", "U+003A"]  # inclusive codepoint ranges
+ranges = ["U+0020-U+007E"]            # inclusive codepoint ranges (printable ASCII for the Pong HUD)
 glyphs = []                           # extra single codepoints
 ```
 

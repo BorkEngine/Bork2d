@@ -71,8 +71,9 @@ dotnet run --project examples/pong/Pong.Desktop/Pong.Desktop.csproj -c Debug
 
 The scene draws the court border and center line as `LineRender` geometry, the paddles as BC7 KTX2
 textures, the ball as a generated circle texture, the PONG wordmark baked from `art/wordmark.svg`
-through the built-in `shader/sdf` behind the court lines, and the two scores in the baked
-`fonts/score.ttf` font above the court.
+through the built-in `shader/sdf` behind the court lines, and the two scores plus the in-scene
+match-state and control text in the baked `fonts/score.ttf` HUD font above the court. The window
+title is the static `Pong` title set by the host; the game never changes it.
 
 Controls: **W/S** move the left paddle, **Space** pauses, **R** resets, **Esc** or the close button
 exits. A desktop session and a Vulkan 1.3 device are required.
