@@ -36,7 +36,7 @@ internal readonly record struct FontBakeOptions(
     internal const int MaxResolution = 8192;
 
     /// <summary>The smallest em size the baker tries before reporting that nothing fits.</summary>
-    internal const int MinPixelsPerEm = 8;
+    internal const int MinPixelsPerEm = 4;
 
     /// <summary>The default selection: printable ASCII, space through tilde.</summary>
     internal const string DefaultRangeSelection = "U+0020-U+007E";

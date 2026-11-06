@@ -332,7 +332,7 @@ public sealed class FontProcessorTests
         using var host = new AssetServiceHost(project.PackPath);
         host.Start();
         FontAsset font = await host.Service.LoadAsset<FontAsset>("fonts/score");
-        Assert.Equal(8u, font.PixelsPerEm);
+        Assert.Equal(4u, font.PixelsPerEm);
         FontGlyph glyph = Assert.Single(font.Glyphs);
         Assert.Equal(0x20, glyph.Codepoint);
         Assert.True(glyph.Advance > 0f);

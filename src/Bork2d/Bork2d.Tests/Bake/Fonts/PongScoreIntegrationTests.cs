@@ -25,9 +25,9 @@ public sealed class PongScoreIntegrationTests
     private const string FontRelativePath = "examples/pong/Pong.Assets/Assets/fonts/score.ttf";
     private const string SidecarRelativePath = "examples/pong/Pong.Assets/Assets/fonts/score.ttf.toml";
     private const string AtlasPath = "fonts/score-atlas";
-    private const int AtlasResolution = 384;
-    private const int Range = 8;
-    private const int Padding = 2;
+    private const int AtlasResolution = 256;
+    private const int Range = 6;
+    private const int Padding = 1;
     private const string PrintableAsciiRange = "U+0020-U+007E";
     private const int FirstPrintableAscii = 0x20;
     private const int PrintableAsciiCount = 95;
@@ -70,7 +70,7 @@ public sealed class PongScoreIntegrationTests
         Assert.Equal(AtlasPath, result.Font.Atlas.Path);
 
         FontAsset font = result.Font;
-        Assert.InRange(font.PixelsPerEm, 8u, (uint)AtlasResolution);
+        Assert.InRange(font.PixelsPerEm, 4u, (uint)AtlasResolution);
         Assert.Equal(Range, font.DistanceRange);
         Assert.True(font.Ascent > 0f, "The ascent should be positive.");
         Assert.True(font.Descent < 0f, "The descent should be negative.");
