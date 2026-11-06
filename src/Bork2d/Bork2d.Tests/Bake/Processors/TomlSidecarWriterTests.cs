@@ -104,6 +104,49 @@ public sealed class TomlSidecarWriterTests
     }
 
     [Fact]
+    public void WritesEmptyAndNonEmptyStringArrays()
+    {
+        var sidecar = new StringArraySidecar
+        {
+            Ranges = ["U+0020-U+007E"],
+            Glyphs = [],
+            Count = 2,
+        };
+
+        Assert.True(
+            TomlSidecarWriter.TryWrite(
+                ShapeOf<StringArraySidecar>(),
+                sidecar,
+                out string text,
+                out string? reason),
+            reason);
+
+        Assert.Equal(
+            "ranges = [\"U+0020-U+007E\"]\nglyphs = []\ncount = 2\n",
+            text);
+    }
+
+    [Fact]
+    public void StringArrayElementsUseTheScalarStringEscaping()
+    {
+        var sidecar = new StringArraySidecar
+        {
+            Ranges = ["U+0022", "a\\b"],
+            Glyphs = null,
+        };
+
+        Assert.True(
+            TomlSidecarWriter.TryWrite(
+                ShapeOf<StringArraySidecar>(),
+                sidecar,
+                out string text,
+                out string? reason),
+            reason);
+
+        Assert.Equal("ranges = [\"U+0022\", \"a\\\\b\"]\n", text);
+    }
+
+    [Fact]
     public void UnsupportedMemberTypesFail()
     {
         var sidecar = new UnsupportedSidecar { Values = [1, 2] };

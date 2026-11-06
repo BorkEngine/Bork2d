@@ -99,6 +99,53 @@ public sealed class MessagePackShapeTests
     }
 
     [Fact]
+    public void FontAssetRoundTripsItsMetricsGlyphsAndKerning()
+    {
+        var original = new FontAsset
+        {
+            Atlas = "fonts/score-atlas",
+            PixelsPerEm = 42,
+            Ascent = 1.02f,
+            Descent = -0.3f,
+            LineGap = 0f,
+            DistanceRange = 8f,
+            Glyphs =
+            [
+                new FontGlyph(
+                    0x30,
+                    0.6f,
+                    new Vector2(0.1f, -0.05f),
+                    new Vector4(0.1f, -0.05f, 0.5f, 0.7f),
+                    new Vector4(0f, 0f, 0.1f, 0.2f)),
+                new FontGlyph(
+                    0x3A,
+                    0.6f,
+                    new Vector2(0.2f, 0f),
+                    new Vector4(0.2f, 0f, 0.3f, 0.1f),
+                    new Vector4(0.1f, 0.2f, 0.2f, 0.3f)),
+            ],
+            Kerning =
+            [
+                new FontKerning(0x41, 0x56, -0.05f),
+                new FontKerning(0x56, 0x41, 0.025f),
+            ],
+        };
+
+        byte[] payload = _serializer.Serialize(original);
+        FontAsset? roundTripped = _serializer.Deserialize<FontAsset>(payload);
+
+        Assert.NotNull(roundTripped);
+        Assert.Equal("fonts/score-atlas", roundTripped.Atlas.Path);
+        Assert.Equal(42u, roundTripped.PixelsPerEm);
+        Assert.Equal(1.02f, roundTripped.Ascent);
+        Assert.Equal(-0.3f, roundTripped.Descent);
+        Assert.Equal(0f, roundTripped.LineGap);
+        Assert.Equal(8f, roundTripped.DistanceRange);
+        Assert.Equal(original.Glyphs, roundTripped.Glyphs);
+        Assert.Equal(original.Kerning, roundTripped.Kerning);
+    }
+
+    [Fact]
     public void SerializedPayloadIsANonEmptyMessagePackValue()
     {
         byte[] payload = _serializer.Serialize(

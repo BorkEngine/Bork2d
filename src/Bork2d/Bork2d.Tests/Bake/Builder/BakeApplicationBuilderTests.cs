@@ -47,12 +47,14 @@ public sealed class BakeApplicationBuilderTests
         Assert.Equal(BakeTextureFilter.Linear, project.TextureFilter);
         Assert.Equal(BakeTextureWrap.Repeat, project.TextureWrap);
         Assert.True(project.UseDefaultProcessors);
-        Assert.Equal(4, project.Processors.Count);
+        Assert.Equal(5, project.Processors.Count);
         Assert.Equal("texture", project.Processors[0].Name);
         Assert.Equal("shader", project.Processors[1].Name);
         Assert.Equal("svg", project.Processors[2].Name);
-        Assert.Equal("fake", project.Processors[3].Name);
+        Assert.Equal("font", project.Processors[3].Name);
+        Assert.Equal("fake", project.Processors[4].Name);
         Assert.Contains("Bork2d.Engine.Assets.SpriteAsset", project.AssetTypes.Keys);
+        Assert.Contains("Bork2d.Engine.Assets.FontAsset", project.AssetTypes.Keys);
         Assert.Contains("Bork2d.Tests.Bake.Baking.GameConfig", project.AssetTypes.Keys);
         Assert.Contains("Bork2d.Tests.Bake.Baking.StatsRoot", project.AssetTypes.Keys);
     }
@@ -207,7 +209,7 @@ public sealed class BakeApplicationBuilderTests
         Assert.Empty(diagnostics.GetSorted());
         Assert.True(project.UseDefaultProcessors);
         Assert.Equal(
-            ["texture", "shader", "svg"],
+            ["texture", "shader", "svg", "font"],
             project.Processors.Select(processor => processor.Name));
 
         Bork2d.Bake.Processors.BakeProcessorRegistration texture = project.Processors[0];
@@ -227,6 +229,12 @@ public sealed class BakeApplicationBuilderTests
         Assert.Equal(SidecarPolicy.Required, svg.Policy);
         Assert.NotNull(svg.SidecarShape);
         Assert.Equal(typeof(Bork2d.Bake.Processors.SvgSidecar), svg.SidecarShape!.Type);
+
+        Bork2d.Bake.Processors.BakeProcessorRegistration font = project.Processors[3];
+        Assert.Equal(["ttf", "otf"], font.Extensions);
+        Assert.Equal(SidecarPolicy.Required, font.Policy);
+        Assert.NotNull(font.SidecarShape);
+        Assert.Equal(typeof(Bork2d.Bake.Processors.FontSidecar), font.SidecarShape!.Type);
     }
 
     [Fact]
