@@ -136,6 +136,13 @@ with a timestamp/level/category prefix. Minimum level is `Debug` in `DEBUG` buil
 `Information` otherwise. Categories are `Bork2d.Runtime`, `Bork2d.Engine`,
 `Bork2d.Engine.Assets`, and `Bork2d.Render`.
 
+The level is compiled into the `Bork2d.Runtime` assembly that creates the factory, not into the
+application's entry assembly. A Release build therefore needs the Release-built runtime: if a
+Release output still prints `Debug` entries, its `Bork2d.Runtime.dll` is a stale Debug copy (for
+example after switching configurations without rebuilding the runtime). Clean or rebuild the
+Release output so the runtime assembly is rebuilt; a correct Release output starts at
+`Information`.
+
 ## NativeAOT
 
 The runtime, renderer, and engine are AOT- and trim-analyzer clean. The Pong desktop app sets
