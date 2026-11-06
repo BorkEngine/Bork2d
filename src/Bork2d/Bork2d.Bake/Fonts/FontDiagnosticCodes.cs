@@ -29,8 +29,9 @@ internal static class FontDiagnosticCodes
 
     /// <summary>
     /// A glyph's outline or MSDF field cannot be generated or validated: an empty or all-inside/
-    /// all-outside field, a non-finite channel, an invalid outline, or a sign mismatch against the
-    /// exact shape distance.
+    /// all-outside field, a NaN channel (infinities are intentionally saturated to a clamped
+    /// distance, not rejected), an invalid outline, or a sign mismatch against the exact shape
+    /// distance.
     /// </summary>
     internal const string FieldInvalid = "BK9304";
 

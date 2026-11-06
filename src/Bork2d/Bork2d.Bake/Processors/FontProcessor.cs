@@ -95,9 +95,10 @@ internal sealed class FontProcessor : AssetProcessor<FontSidecar>
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // The baker classifies authored and outline failures itself; an exception it did not
-            // classify is a font-content failure, never a generic processor failure.
+            // classify is a font-content failure, never a generic processor failure or an unreadable
+            // source (the source bytes were read successfully before the bake).
             context.Diagnostics.Error(
-                FontDiagnosticCodes.SourceUnreadable,
+                FontDiagnosticCodes.FieldInvalid,
                 $"The font source '{context.RelativePath}' could not be baked: {exception.Message}");
             return;
         }
