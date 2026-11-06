@@ -77,7 +77,7 @@ public sealed class PongScoreGpuTests
     private const float PromptSize = 0.65f;
     private const float PromptBaselineY = -8.0f;
 
-    private const int AtlasResolution = 512;
+    private const int AtlasResolution = 384;
     private const string PrintableAsciiRange = "U+0020-U+007E";
     private const string ScoreFontPath = "examples/pong/Pong.Assets/Assets/fonts/score.ttf";
     private const string WordmarkPath = "examples/pong/Pong.Assets/Assets/art/wordmark.svg";

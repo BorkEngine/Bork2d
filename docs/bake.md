@@ -315,7 +315,7 @@ a `FontAsset` at its base path and a linear MSDF atlas:
 The required sidecar `score.ttf.toml` carries the bake settings:
 
 ```toml
-resolution = 512                      # fixed square atlas side in pixels, 1..8192
+resolution = 384                      # fixed square atlas side in pixels, 1..8192
 range = 8                             # distance spread in pixels, greater than zero
 padding = 2                           # extra pixels beyond the range margin, at least zero
 ranges = ["U+0020-U+007E"]            # inclusive codepoint ranges (printable ASCII for the Pong HUD)
@@ -350,9 +350,13 @@ pixels and is never cropped. The bake derives the em size:
 4. Re-run the packer at the final `E` to get the cell positions.
 
 The shelf packer sorts unique glyph cells by height descending, then first codepoint ascending, then
-glyph index ascending, and fills shelves left to right and top to bottom. No spacing is added because
-each cell already reserves the field margin on every side. The result is independent of source order,
-so the same selection always produces the same layout. If even the 8-pixel em size does not fit, the
+glyph index ascending, and fills shelves left to right and top to bottom. No inter-cell spacing is
+added: each cell reserves the field margin on every side, and the bake clears the `padding` border
+(or at least one pixel when `padding` is `0`) to black in every channel. This guard prevents linear
+filtering from blending two adjacent cells' differently saturated MSDF channels at a shared edge,
+which would otherwise draw straight lines at glyph-cell boundaries. The result is independent of
+source order, so the same selection always produces the same layout. If even the 8-pixel em size does
+not fit, the
 bake fails with `BK9305`, naming the glyph count and the atlas size. A selection whose codepoints all
 map to whitespace glyphs is valid: it bakes an all-outside atlas at the deterministic em size `8`, and
 the glyph entries keep their advances with zero plane and atlas rectangles.
@@ -374,8 +378,10 @@ Each non-empty glyph is rasterized into its own cell at the final em size and va
 contain both inside and outside texels, must not contain a NaN channel, and a deterministic 16x16
 sample grid must agree with SeasonMSDF's exact signed distance. A failure is `BK9304`. An infinite
 channel is not an error: edge coloring intentionally saturates the unused channels of a smooth
-contour, and the shader median recovers the finite distance, so infinity clamps to `0` or `1`. Mip
-sign quality is covered by the renderer GPU test, not by the bake.
+contour, and the shader median recovers the finite distance, so infinity clamps to `0` or `1`. The
+cell's guard border is then cleared to black in every channel so adjacent cells cannot leak saturated
+channels into each other under linear or mip filtering. Mip sign quality is covered by the renderer
+GPU test, not by the bake.
 
 The atlas is written as one complete KTX2 2.0 file with a full mip chain down to 1x1; a KTX2 or
 payload-write failure is `BK9306`. MSDF generation uses SeasonMSDF 0.2.0 and TrueType/CFF outline
