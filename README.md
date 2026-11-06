@@ -96,7 +96,7 @@ public sealed class MyGame : IGame<Layer>
 {
     private IEngine<Layer>? _engine;
 
-    public void Setup(IEngine<Layer> engine)
+    public async Task Setup(IEngine<Layer> engine)
     {
         _engine = engine;
 
@@ -105,8 +105,7 @@ public sealed class MyGame : IGame<Layer>
         camera.CullingMask = Layer.World;
         camera.Clear = ClearKind.Color;
 
-        SpriteAsset sprite = engine.Assets
-            .LoadAsset<SpriteAsset>("sprites/hero").GetAwaiter().GetResult();
+        SpriteAsset sprite = await engine.Assets.LoadAsset<SpriteAsset>("sprites/hero");
 
         ISpriteRender<Layer> renderable = engine.CreateSpriteRender(engine.Root);
         renderable.Sprite = sprite;
@@ -127,7 +126,8 @@ using var app = new Bork2dAppBuilder<Layer>()
 app.Run();
 ```
 
-`Setup` may block on asset loads; `Tick` must return, joining any game workers first. Engine members
+`Setup` may await asset loads; it returns a `Task` that the host waits for before renderer
+readiness and the first tick. `Tick` must return, joining any game workers first. Engine members
 may be called from any thread during the game callbacks.
 
 ## Author assets

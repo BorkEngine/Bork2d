@@ -96,25 +96,25 @@ public sealed class PongGame : IGame<GameLayer>
     private IFontRender<GameLayer>? PromptText { get; set; }
 
     /// <inheritdoc/>
-    public void Setup(IEngine<GameLayer> engine)
+    public async Task Setup(IEngine<GameLayer> engine)
     {
         ArgumentNullException.ThrowIfNull(engine);
         _engine = engine;
 
-        // Setup blocks on the baked asset chain on purpose: the scene must be complete before the
-        // first tick, and the engine API guide explicitly allows blocking startup loads.
-        GameSettings settings = engine.Assets.LoadAsset<GameSettings>(SettingsPath).GetAwaiter().GetResult();
-        SpriteAsset paddleSprite = engine.Assets.LoadAsset(settings.Paddle).GetAwaiter().GetResult();
-        SpriteAsset ballSprite = engine.Assets.LoadAsset(settings.Ball).GetAwaiter().GetResult();
-        ShaderAsset ballShader = engine.Assets.LoadAsset(settings.BallShader).GetAwaiter().GetResult();
-        ShaderAsset courtShader = engine.Assets.LoadAsset(settings.CourtShader).GetAwaiter().GetResult();
-        SpriteAsset wordmarkSprite = engine.Assets.LoadAsset(settings.Wordmark).GetAwaiter().GetResult();
-        FontAsset hudFont = engine.Assets.LoadAsset(settings.ScoreFont).GetAwaiter().GetResult();
+        // Await the baked asset chain in order: the scene must be complete before the first tick,
+        // and the host blocks on this task before renderer readiness and the first tick.
+        GameSettings settings = await engine.Assets.LoadAsset<GameSettings>(SettingsPath);
+        SpriteAsset paddleSprite = await engine.Assets.LoadAsset(settings.Paddle);
+        SpriteAsset ballSprite = await engine.Assets.LoadAsset(settings.Ball);
+        ShaderAsset ballShader = await engine.Assets.LoadAsset(settings.BallShader);
+        ShaderAsset courtShader = await engine.Assets.LoadAsset(settings.CourtShader);
+        SpriteAsset wordmarkSprite = await engine.Assets.LoadAsset(settings.Wordmark);
+        FontAsset hudFont = await engine.Assets.LoadAsset(settings.ScoreFont);
 
         // The built-in pack is mounted below the game packs, so the SDF shader is loaded by its
         // canonical path instead of being referenced from game_settings.toml: the game pack does not
         // bake shader/sdf, and a settings reference to it would fail bake reference validation.
-        ShaderAsset sdfShader = engine.Assets.LoadAsset<ShaderAsset>(SdfShaderPath).GetAwaiter().GetResult();
+        ShaderAsset sdfShader = await engine.Assets.LoadAsset<ShaderAsset>(SdfShaderPath);
 
         ICamera<GameLayer> camera = engine.CreateCamera(engine.Root);
         _camera = camera;

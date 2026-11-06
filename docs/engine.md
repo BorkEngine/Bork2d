@@ -28,8 +28,11 @@ there is implementation.
 ## Game and engine
 
 The game is a caller-constructed `IGame<TLayer>`: `Setup` runs once before the first tick, `Tick`
-once per tick, and `Teardown` once before shutdown. All three run on the tick thread and are never
-concurrent. Exceptions propagate to `Bork2dApp.Run` after cleanup.
+once per tick, and `Teardown` once before shutdown. `Setup` returns a `Task` that the host blocks on
+before renderer readiness and the first tick. The host invokes the callbacks on the tick thread and
+they are never concurrent: no `Tick` or `Teardown` starts while `Setup` runs, although a continuation
+after an `await` inside `Setup` may resume on another thread. Exceptions, including a faulted setup
+task, propagate to `Bork2dApp.Run` after cleanup; a `Setup` failure runs no `Tick` and no `Teardown`.
 
 `IEngine<TLayer>` provides `Time`, `Window`, `Input`, `Assets`, `LoggerFactory`, `Root`,
 `RenderStats`, `CreateTransform`, `CreateCamera`, `CreateSpriteRender`, `CreateLineRender`,
@@ -81,8 +84,9 @@ requests may be outstanding at once, including requests already taken by an in-f
 request beyond the limit faults with `Bork2dException` instead of blocking the caller or being
 dropped, and a slot returns only when its request completes, faults, or is cancelled. Cancellation is
 checked first and faults the task with `OperationCanceledException`; a renderer stop or fatal faults
-pending requests. Waiting for the task synchronously inside `Setup` or `Tick` before the snapshot that
-serves the request is published can block the producer needed to generate that frame.
+pending requests. Waiting for the task synchronously inside `Tick`, or awaiting it inside `Setup`,
+before the snapshot that serves the request is published can block the producer needed to generate
+that frame.
 
 ## Scene model
 

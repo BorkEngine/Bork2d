@@ -294,6 +294,96 @@ public sealed class HeadlessLoopTests
     }
 
     [Fact]
+    public void AsyncSetupCompletesBeforeTheFirstTick()
+    {
+        var sequence = new List<string>();
+        var clock = new FakeSchedulerClock();
+        var game = new ScriptedGame<GameLayer>
+        {
+            ExitAfterFirstTick = true,
+            OnSetupAsync = async _ =>
+            {
+                sequence.Add("setup-start");
+                await Task.Yield();
+                sequence.Add("setup-end");
+            },
+        };
+        game.OnTick = () => sequence.Add("tick");
+
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .WithoutAssets()
+            .WithSchedulerClock(clock)
+            .Build();
+        AppTestSupport.RunToCompletion(app);
+
+        Assert.Equal(["setup-start", "setup-end", "tick"], sequence);
+        Assert.Equal(1, game.SetupCount);
+        Assert.Equal(1, game.TickCount);
+        Assert.Equal(1, game.TeardownCount);
+    }
+
+    [Fact]
+    public void ExitDuringAnAsyncSetupLetsSetupFinishThenRunsZeroTicksAndTearsDownOnce()
+    {
+        var sequence = new List<string>();
+        var clock = new FakeSchedulerClock();
+        var game = new ScriptedGame<GameLayer>
+        {
+            OnSetupAsync = async engine =>
+            {
+                engine.Exit();
+                sequence.Add("setup-start");
+                await Task.Yield();
+                sequence.Add("setup-end");
+            },
+        };
+
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .WithoutAssets()
+            .WithSchedulerClock(clock)
+            .Build();
+        AppTestSupport.RunToCompletion(app);
+
+        Assert.Equal(["setup-start", "setup-end"], sequence);
+        Assert.Equal(1, game.SetupCount);
+        Assert.Equal(0, game.TickCount);
+        Assert.Equal(1, game.TeardownCount);
+        Assert.Equal(0, clock.SleepCount);
+    }
+
+    [Fact]
+    public void AsyncSetupFailureAfterAnAwaitRunsNoTickAndNoTeardown()
+    {
+        var error = new InvalidOperationException("async setup failed after an await");
+        var clock = new FakeSchedulerClock();
+        var game = new ScriptedGame<GameLayer>
+        {
+            OnSetupAsync = async _ =>
+            {
+                await Task.Yield();
+                throw error;
+            },
+        };
+
+        using var app = new Bork2dAppBuilder<GameLayer>()
+            .WithGame(game)
+            .WithHeadless()
+            .WithoutAssets()
+            .WithSchedulerClock(clock)
+            .Build();
+        var failure = AppTestSupport.RunCaptured(app);
+
+        Assert.Same(error, failure);
+        Assert.Equal(1, game.SetupCount);
+        Assert.Equal(0, game.TickCount);
+        Assert.Equal(0, game.TeardownCount);
+    }
+
+    [Fact]
     public void TickFailureTearsDownAndRethrowsTheOriginal()
     {
         var error = new InvalidOperationException("tick failed");

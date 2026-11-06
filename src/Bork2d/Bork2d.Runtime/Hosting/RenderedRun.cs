@@ -18,10 +18,10 @@ namespace Bork2d.Runtime.Hosting;
 /// failure stops assets, detaches proxies, and rethrows before <c>Setup</c>); create and start the
 /// renderer and install the exit wake callback (a synchronous factory/start failure is recorded but
 /// never prevents <c>Setup</c>); attach the renderer and proxies; run <c>Setup</c> unless an
-/// exit/close is already pending; wait once for renderer readiness after a successful
-/// <c>Setup</c>; run the backpressured tick loop; run <c>Teardown</c> once when <c>Setup</c>
-/// succeeded; stop and join the renderer before the platform shuts down; stop assets; detach
-/// proxies; then log the stop and throw the mode-specific failures.
+/// exit/close is already pending and block on the returned task; wait once for renderer readiness
+/// after a successful <c>Setup</c>; run the backpressured tick loop; run <c>Teardown</c> once when
+/// <c>Setup</c> succeeded; stop and join the renderer before the platform shuts down; stop assets;
+/// detach proxies; then log the stop and throw the mode-specific failures.
 /// </para>
 /// <para>
 /// The readiness wait sits in the same error boundary for both modes: the loop failure boundary,
@@ -122,7 +122,10 @@ internal static class RenderedRun
                 {
                     try
                     {
-                        game.Setup(engine);
+                        // The host blocks on the setup task: an async Setup may resume its
+                        // continuation on another thread, but no readiness wait, tick, or Teardown
+                        // starts before it completes. GetResult preserves the original exception.
+                        game.Setup(engine).GetAwaiter().GetResult();
                         setupSucceeded = true;
                     }
                     catch (Exception exception)
@@ -133,6 +136,8 @@ internal static class RenderedRun
 
                 // D-M6-06: the first Tick waits for readiness; Exit/close during Setup skips the
                 // wait. Setup is never interrupted by, and never skipped because of, renderer state.
+                // An Exit/close requested while an async Setup is in flight lets that Setup finish
+                // and then runs zero ticks.
                 if (setupFailure is null
                     && setupSucceeded
                     && rendererFailure is null
