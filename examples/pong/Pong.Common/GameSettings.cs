@@ -6,7 +6,7 @@ namespace Pong.Common;
 
 /// <summary>
 /// The baked game settings: the three sprite references, the ball's and court's custom fragment
-/// shaders, the movement speeds, the winning score, and the per-player paddle tints.
+/// shaders, the HUD font, the movement speeds, the winning score, and the per-player paddle tints.
 /// </summary>
 /// <param name="Paddle">The paddle sprite reference baked from <c>game_settings.toml</c>.</param>
 /// <param name="Ball">The ball sprite reference baked from <c>game_settings.toml</c>.</param>
@@ -20,6 +20,11 @@ namespace Pong.Common;
 /// <param name="Wordmark">
 /// The sprite reference baked from <c>art/wordmark.svg</c>; the game draws it with the built-in
 /// <c>shader/sdf</c> fragment shader.
+/// </param>
+/// <param name="ScoreFont">
+/// The HUD font reference baked from <c>fonts/score.ttf</c>; it feeds all HUD text — the two scores,
+/// the match state, and the control prompt — drawn with the built-in <c>shader/sdf</c> fragment
+/// shader. The field keeps its original name and TOML key.
 /// </param>
 /// <remarks>
 /// The type is a positional record struct with a compiled <c>[GenerateShape]</c>, so the bake
@@ -39,4 +44,5 @@ public readonly partial record struct GameSettings(
     Color RightPaddleTint,
     AssetRef<ShaderAsset> BallShader,
     AssetRef<ShaderAsset> CourtShader,
-    AssetRef<SpriteAsset> Wordmark);
+    AssetRef<SpriteAsset> Wordmark,
+    AssetRef<FontAsset> ScoreFont);

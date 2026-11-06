@@ -25,6 +25,7 @@ public sealed class DependencyMatrixTests
     private const string BcnEncoder = "BCnEncoder";
     private const string BcnEncoderPackage = "BCnEncoder.Net";
     private const string SeasonMsdf = "SeasonMSDF";
+    private const string StbTrueType = "StbTrueTypeSharp";
     private const string MetadataLoadContext = "System.Reflection.MetadataLoadContext";
 
     private static readonly string[] _forbiddenEngineReferencePrefixes =
@@ -307,6 +308,7 @@ public sealed class DependencyMatrixTests
         Assert.Contains(Shaderc, references);
         Assert.Contains(BcnEncoder, references);
         Assert.Contains(SeasonMsdf, references);
+        Assert.Contains(StbTrueType, references);
         Assert.DoesNotContain(MetadataLoadContext, references);
         Assert.DoesNotContain("Bork2d.Runtime", references);
         Assert.DoesNotContain("Bork2d.Render", references);
@@ -334,6 +336,7 @@ public sealed class DependencyMatrixTests
         Assert.Equal("2.23.0", packages[ShadercNative]);
         Assert.Equal("2.3.0", packages[BcnEncoderPackage]);
         Assert.Equal("0.2.0", packages[SeasonMsdf]);
+        Assert.Equal("1.26.13", packages[StbTrueType]);
 
         Dictionary<string, string> properties = project
             .Descendants("PropertyGroup")
@@ -504,6 +507,27 @@ public sealed class DependencyMatrixTests
     }
 
     [Fact]
+    public void RuntimeAssembliesDoNotReferenceTheFontOutlineReader()
+    {
+        Assembly[] runtimeAssemblies =
+        [
+            typeof(IAssets).Assembly,
+            typeof(Bork2d.Render.AssemblyReferenceAnchor).Assembly,
+            typeof(Bork2d.Runtime.Bork2dApp).Assembly,
+        ];
+
+        foreach (Assembly assembly in runtimeAssemblies)
+        {
+            string[] references = assembly
+                .GetReferencedAssemblies()
+                .Select(reference => reference.Name ?? string.Empty)
+                .ToArray();
+
+            Assert.DoesNotContain(StbTrueType, references);
+        }
+    }
+
+    [Fact]
     public void RuntimeAssembliesDoNotReferenceTheBakeTooling()
     {
         Assembly[] runtimeAssemblies =
@@ -525,6 +549,7 @@ public sealed class DependencyMatrixTests
                 Assert.NotEqual(StbImageSharp, name);
                 Assert.NotEqual(BcnEncoder, name);
                 Assert.NotEqual(SeasonMsdf, name);
+                Assert.NotEqual(StbTrueType, name);
             }
         }
     }

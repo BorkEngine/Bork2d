@@ -4,7 +4,16 @@
         <OutputType>Exe</OutputType>
         <IsPackable>false</IsPackable>
         <PublishAot>true</PublishAot>
+        <PublishTrimmed>true</PublishTrimmed>
+        <OptimizationPreference>Speed</OptimizationPreference>
+        <TrimMode>full</TrimMode>
+
+        <!-- Removes globalization data (uses invariant mode) if your app doesn't need region-specific formatting -->
         <InvariantGlobalization>true</InvariantGlobalization>
+
+        <!-- Disables detailed exception stack traces if they aren't critical for your production logging -->
+        <StackTraceSupport>false</StackTraceSupport>
+        <IlcDisableReflection>true</IlcDisableReflection>
         <!--
             Narrow AOT-publisher suppression. Silk.NET.Core.Loader.DefaultPathResolver (reached via
             Sdl.GetApi() and the Vulkan Vk.GetApi()/instance entry points) probes

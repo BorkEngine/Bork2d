@@ -18,16 +18,17 @@ namespace Bork2d.Runtime.Hosting;
 /// <para>
 /// Windowed and offscreen runs share one rendered-run lifecycle (<see cref="RenderedRun"/>):
 /// start assets; start the mode platform; create and start the renderer without waiting; install the
-/// exit wake callback; attach the renderer and proxies; run <c>Setup</c>; wait for readiness before
-/// the first tick; run a backpressured <c>Tick</c> loop until <see cref="IEngine{TLayer}.Exit"/>, a
-/// window close/<c>SDL_QUIT</c>, a renderer fatal error, or a fatal platform error; run
-/// <c>Teardown</c>; stop and join the renderer before platform shutdown; stop assets; and detach the
-/// proxies. Each tick acquires a snapshot slot, freezes input, advances time, dispatches text, runs
-/// <c>IGame.Tick</c>, captures the engine snapshot, and publishes it (M7 WP-4). The windowed and
-/// offscreen hosts supply only the mode hooks: the SDL window/platform/proxies and the minimized cap
-/// for windowed, and the fixed target without a platform for offscreen. Headless runs a separate
-/// paced loop until <see cref="IEngine{TLayer}.Exit"/> with a fully synthesized clock and never
-/// constructs a renderer or platform and never loads Vulkan (Q11=K1, Q12=L2).
+/// exit wake callback; attach the renderer and proxies; run <c>Setup</c> and block on its task; wait
+/// for readiness before the first tick; run a backpressured <c>Tick</c> loop until
+/// <see cref="IEngine{TLayer}.Exit"/>, a window close/<c>SDL_QUIT</c>, a renderer fatal error, or a
+/// fatal platform error; run <c>Teardown</c>; stop and join the renderer before platform shutdown;
+/// stop assets; and detach the proxies. Each tick acquires a snapshot slot, freezes input, advances
+/// time, dispatches text, runs <c>IGame.Tick</c>, captures the engine snapshot, and publishes it
+/// (M7 WP-4). The windowed and offscreen hosts supply only the mode hooks: the SDL
+/// window/platform/proxies and the minimized cap for windowed, and the fixed target without a
+/// platform for offscreen. Headless runs a separate paced loop until
+/// <see cref="IEngine{TLayer}.Exit"/> with a fully synthesized clock and never constructs a renderer
+/// or platform and never loads Vulkan (Q11=K1, Q12=L2).
 /// </para>
 /// <para>
 /// Error precedence follows the M2/M6 rules: a platform start failure happens before <c>Setup</c>;
@@ -213,8 +214,8 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
     }
 
     /// <summary>
-    /// The headless driver (Q11=K1, Q12=L2, Q13=M4/F1): start assets, <c>Setup</c>, a paced
-    /// <c>Tick</c> loop until <c>Exit</c>, <c>Teardown</c> once, stop assets, with no platform,
+    /// The headless driver (Q11=K1, Q12=L2, Q13=M4/F1): start assets, <c>Setup</c> to completion, a
+    /// paced <c>Tick</c> loop until <c>Exit</c>, <c>Teardown</c> once, stop assets, with no platform,
     /// renderer, ring, capture, SDL, or Vulkan loader.
     /// </summary>
     /// <remarks>
@@ -250,7 +251,10 @@ internal sealed class AppRuntime<TLayer> : IAppRuntime where TLayer : struct, En
             {
                 try
                 {
-                    _game.Setup(_engine);
+                    // Block on the setup task; an async Setup may resume on another thread, but no
+                    // tick or Teardown starts before it completes. GetResult preserves the original
+                    // exception.
+                    _game.Setup(_engine).GetAwaiter().GetResult();
                     setupSucceeded = true;
                 }
                 catch (Exception exception)

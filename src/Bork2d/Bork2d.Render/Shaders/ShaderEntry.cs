@@ -11,8 +11,9 @@ namespace Bork2d.Render.Shaders;
 /// already carries the frozen <see cref="ShaderRenderData"/>; the renderer never reloads the
 /// <see cref="ShaderAsset"/> per draw. The first frozen metadata seen for a path supplies the entry's
 /// declarations, so the path is the shader identity and its declaration set is fixed for that
-/// catalog. Each kind's built-in default entry has a fixed id: <c>shader/sprite</c> is <c>0</c> and
-/// <c>shader/line</c> is <c>1</c>.
+/// catalog. Each kind's built-in default entry has a fixed id: <c>shader/sprite</c> is <c>0</c>,
+/// <c>shader/line</c> is <c>1</c>, and the font SDF default <c>shader/sdf</c> is <c>2</c>; custom
+/// entries start at <c>3</c>.
 /// </remarks>
 internal sealed class ShaderEntry
 {

@@ -57,19 +57,31 @@ holds for `WithoutAssets()` too: the app has no game base pack, but `IAssets.Bro
 Windowed and offscreen runs execute one shared rendered-run lifecycle; only narrow mode hooks
 differ. The lifecycle starts assets, starts the mode platform (windowed only), creates and starts
 the renderer without waiting and installs the exit wake callback, attaches the renderer and
-proxies, runs `Setup` unless an exit/close is already pending, waits once for renderer readiness
-after a successful `Setup`, runs the backpressured tick loop, runs `Teardown` once when `Setup`
-succeeded, stops and joins the renderer before platform shutdown, stops assets, and detaches the
-proxies. The windowed hooks own SDL/platform startup and shutdown, the window/input proxies, the
-input freeze/text handoff, and the minimized tick cap; the offscreen hooks own only the fixed
-target. Headless remains a separate paced lifecycle.
+proxies, runs `Setup` unless an exit/close is already pending and blocks on the returned task, waits
+once for renderer readiness after a successful `Setup`, runs the backpressured tick loop, runs
+`Teardown` once when `Setup` succeeded, stops and joins the renderer before platform shutdown, stops
+assets, and detaches the proxies. The windowed hooks own SDL/platform startup and shutdown, the
+window/input proxies, the input freeze/text handoff, and the minimized tick cap; the offscreen hooks
+own only the fixed target. Headless remains a separate paced lifecycle.
+
+`Setup` is invoked once on the tick thread. It may await, and its continuation after an `await` may
+resume on another thread; no `Tick` or `Teardown` starts until the returned task completes, and the
+callbacks are never concurrent. `Setup` is not interrupted by `Exit` or a window close: a request
+made while an async `Setup` is in flight lets it finish, then runs zero ticks, and `Teardown` runs
+once because `Setup` succeeded.
+
+The host stays synchronous: `Run` blocks on the setup task with `GetAwaiter().GetResult()` so a
+synchronous throw and a faulted task both surface as the original exception, never an
+`AggregateException`. A caller-provided `SynchronizationContext` that requires the blocked run thread
+to pump its queue deadlocks when `Setup` awaits; the host installs no context of its own.
 
 ### Windowed
 
 1. Open the base pack, start the asset loader, then create the SDL window, Vulkan instance, and
    surface on the OS thread.
 2. Start the renderer thread without waiting, install the exit wake callback, attach the renderer
-   and the window/input proxies, and call `Setup` immediately unless an exit/close is pending.
+   and the window/input proxies, and call `Setup` immediately unless an exit/close is pending; the
+   host blocks on the setup task before the readiness wait.
 3. Wait for renderer readiness before the first tick.
 4. Repeat: acquire a snapshot slot, freeze input, advance the clock, dispatch text, call `Tick`,
    capture the scene, publish. The acquire blocks while all three slots are occupied.
@@ -91,7 +103,7 @@ state and no member throws. It stops on `Exit` or a renderer fatal and has no pl
 
 ### Headless
 
-Assets start, `Setup` runs, then a paced loop runs until `Exit`. Tick `N` is due at
+Assets start, `Setup` runs to completion, then a paced loop runs until `Exit`. Tick `N` is due at
 `start + N / ticksPerSecond`; waiting is a plain sleep, and a late loop catches up without a tick
 cap. The clock is fully synthesized and `MaxDeltaTime` does not clamp it. No window, SDL, Vulkan
 loader, renderer, snapshot ring, or capture is created.
@@ -121,12 +133,12 @@ extent through `IEngine.Window` instead of an SDL window.
   `ObjectDisposedException`; so does every window member of a windowed app. The offscreen window
   facade stays functional. `IEngine.RenderStats` stays readable and may keep the last values.
 - A platform start failure precedes `Setup`. A renderer factory/start/readiness failure still lets
-  `Setup` finish, runs zero ticks, attempts `Teardown`, joins the renderer, and rethrows.
-  Windowed and offscreen share the readiness boundary: the wait happens once, after a successful
-  `Setup` and before the first tick, and a readiness fatal is recorded as a renderer failure.
-- A `Setup` failure wins over a renderer failure and runs no `Teardown`. Tick/capture/text/`Teardown`
-  failures propagate with the documented precedence; renderer cleanup failures during normal
-  shutdown are logged and do not change the run's outcome.
+  `Setup` complete, runs zero ticks, attempts `Teardown`, joins the renderer, and rethrows.
+  Windowed and offscreen share the readiness boundary: the wait happens once, after the setup task
+  completed and before the first tick, and a readiness fatal is recorded as a renderer failure.
+- A `Setup` failure — a synchronous throw or a faulted task — wins over a renderer failure and runs
+  no `Teardown`. Tick/capture/text/`Teardown` failures propagate with the documented precedence;
+  renderer cleanup failures during normal shutdown are logged and do not change the run's outcome.
 
 ## Logging
 
@@ -135,6 +147,13 @@ The builder creates an app-owned `Microsoft.Extensions.Logging` factory exposed 
 with a timestamp/level/category prefix. Minimum level is `Debug` in `DEBUG` builds and
 `Information` otherwise. Categories are `Bork2d.Runtime`, `Bork2d.Engine`,
 `Bork2d.Engine.Assets`, and `Bork2d.Render`.
+
+The level is compiled into the `Bork2d.Runtime` assembly that creates the factory, not into the
+application's entry assembly. A Release build therefore needs the Release-built runtime. The Pong
+solution includes the engine, renderer, and runtime projects so its Release configuration selects
+Release for all of them; if a Release output still prints `Debug` entries, its
+`Bork2d.Runtime.dll` is a stale Debug copy. Clean or rebuild the Release output so the runtime
+assembly is rebuilt; a correct Release output starts at `Information`.
 
 ## NativeAOT
 

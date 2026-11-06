@@ -5,7 +5,7 @@ five user-visible features: custom fragment shaders, KTX2 compressed textures, t
 geometry, SVG-to-MSDF assets, and TTF/OTF fonts with `FontRender`. Each feature lands with its bake
 processor, runtime asset and API, renderer path, tests, owning documentation, and a use in the Pong
 example. Pong is the integration gate: it must show a line-drawn court, compressed paddles, an SDF
-title, and a font-rendered score in one playable frame.
+wordmark, and font-rendered HUD text in one playable frame.
 
 The release is deliberately vertical rather than a set of isolated demos. A feature is done only
 when an author can produce the asset, a game can consume it through the documented API, the
@@ -23,15 +23,15 @@ owning documents; when a workstream lands, its behavior is documented as-built i
 | KTX2 textures | Semantic texture types, native BC compression, full mip chains, and a sidecar-driven bake. | Paddles are BC7 KTX2 textures. |
 | Line rendering | Open and closed polylines with world-space width, miter joins, butt caps, custom shaders, and normal 2D ordering. | The court border and center line are `LineRender`. |
 | SVG support | A shape-only SVG subset baked to a multi-channel signed distance field and drawn through `shader/sdf`. | The Pong wordmark is a baked SVG. |
-| Font support | TTF/OTF glyph selection baked to an MSDF atlas and drawn with `FontRender`. | The score uses the shipped font. |
+| Font support | TTF/OTF glyph selection baked to an MSDF atlas and drawn with `FontRender`. | The score and HUD text use the shipped font. |
 
 ## Release gates
 
 The version is complete only when all of the following are true:
 
 1. All five features are usable through documented public APIs, not only through example code.
-2. Pong runs windowed with the court, compressed paddles, SDF wordmark, and score, and remains
-   playable with the existing controls.
+2. Pong runs windowed with the court, compressed paddles, SDF wordmark, and font-rendered HUD text,
+   and remains playable with the existing controls.
 3. The example builds in Debug and Release, passes its format gate, and publishes with NativeAOT
    with zero AOT or trim warnings.
 4. The standard engine gates pass: Debug and Release builds, tests, format verification, docs link
@@ -83,7 +83,7 @@ signatures are finalized in the implementation tasks.
 | Line geometry | CPU-expanded triangles with miter joins and butt caps; anti-aliasing in the fragment shader. |
 | 2D ordering | Sprites, lines, and text share one `ZIndex` draw order (then per-camera screen-space Y and X) and one 2D render pass; `Layer` is only a camera culling bit. |
 | SVG | Shapes, paths, groups, and transforms with fill only; paint, stroke, text, images, CSS, and filters are ignored. Output is an SDF texture plus a ready sprite. |
-| Fonts | TTF/OTF with MSDF, ASCII plus explicit `U+` ranges and single glyphs, left-to-right layout, and basic kerning. `resolution` is the atlas's maximum dimension; glyph em size is derived to fit. |
+| Fonts | TTF/OTF with MSDF, ASCII plus explicit `U+` ranges and single glyphs, left-to-right layout, and basic kerning. `resolution` is the atlas's fixed square side length; glyph em size is derived to fit. |
 | MSDF generation | A managed C# MSDF library, build-time only, rather than a native P/Invoke dependency. |
 | SDF settings | `resolution` is the output texture's maximum dimension in pixels, `range` is the distance spread in pixels, and `padding` adds pixels around the artboard or glyph. |
 | SDF compression | The SVG sidecar's `compression` is `none` (default, linear `Rgb8`) or an explicit `bc7` opt-in; the generic texture sidecar's `type = "rgb"` with `compression = "auto"` (opaque BC1) is never used for SDF data. |
@@ -245,11 +245,11 @@ Every sprite shader shares one pipeline layout and one descriptor-set layout:
 Only the fragment shader module differs per shader; the vertex module is shared. Pipelines are
 cached by `(pipeline kind, shader content hash, output color format)`. A shader module is keyed by
 content hash and its pipelines by kind, content hash, and format, so identical fragment content
-shares its module while the sprite and line pipelines stay distinct. A catalog remount that changes a
-shader creates a new entry and retires the old one after the frames that reference it complete. A
-shader that fails to load or create a pipeline falls back to its kind's default (`shader/sprite` or
-`shader/line`) with a one-time warning; a failure of either default itself is fatal at renderer
-startup.
+shares its module while the sprite, line, and font pipelines stay distinct. A catalog remount that
+changes a shader creates a new entry and retires the old one after the frames that reference it
+complete. A shader that fails to load or create a pipeline falls back to its kind's default
+(`shader/sprite`, `shader/line`, or `shader/sdf`) with a one-time warning; a failure of any default
+itself is fatal at renderer startup.
 
 The instance record grows from 96 to 176 bytes: the current six `vec4` values, one `vec4` holding
 the four additional texture indices, and four `vec4` values holding the packed instance uniforms.
@@ -274,12 +274,14 @@ wrong shader; the built-in default is ready at startup.
 
 The build produces an embedded `bork2d-builtin.pck` containing `shader/sprite`, `shader/line`, and
 `shader/sdf`. It also contains any metadata those shaders need. The runtime mounts this pack below
-the game's packs, including when `WithoutAssets()` is used.
+the game's packs, including when `WithoutAssets()` is used. All three are renderer startup defaults
+with fixed entry ids: sprite `0`, line `1`, and the font SDF default `2`; custom entries start at
+`3`. The SDF default is required startup content even when a game has no text.
 
 Consequences:
 
 - Built-ins are ordinary assets and can be shadowed by a game pack at the same path.
-- `WithoutAssets()` still has a working default sprite shader.
+- `WithoutAssets()` still has working default sprite, line, and font shaders.
 - The renderer no longer contains generated sprite SPIR-V arrays; it loads shader modules from the
   asset service like any other content.
 - The pack builder is build-time code and never enters the publish graph.
@@ -449,7 +451,7 @@ distance-preserving downsample rather than a naive color average:
 - The base level keeps the MSDF channels; mips are generated from the same field so text and vector
   art remain stable at distance and during camera zoom.
 
-MSDF mip quality is a release gate for the Pong title and score. If the filter cannot meet the
+MSDF mip quality is a release gate for the Pong wordmark and HUD text. If the filter cannot meet the
 quality bar, the fallback is to generate MSDF mips from a higher-range field, not to disable mips
 for only some assets.
 
@@ -536,13 +538,14 @@ the same depth without making the order depend on which kind happened to be capt
 The existing sprite planner becomes the 2D planner:
 
 1. Build each camera's visible candidate list and sort it by `(ZIndex, screen Y, screen X)`.
-2. Build sprite instance records, line triangles, and font glyph quads.
-3. Compact contiguous runs with the same draw kind and shader.
+2. Build sprite instance records, line triangles, and one instance record per font glyph quad.
+3. Compact contiguous runs with the same draw kind, shader, and font asset.
 4. Record each run in order, binding the pipeline appropriate to the run.
 5. Apply the camera's layer mask and conservative world-AABB culling to every record.
 
 A line's bounds are the AABB of its outer geometry including half the width and miter extents. A
-font's bounds are the AABB of its glyph quads. Empty bounds mean unknown and never cull.
+font's bounds are the AABB of its glyph quads and are tested once per font record. Empty bounds mean
+unknown and never cull.
 
 ### 4. SVG and MSDF
 
@@ -593,10 +596,13 @@ extends and therefore how soft a glow can be. `padding` may be 0.
 
 #### `shader/sdf`
 
-`shader/sdf` is an ordinary built-in fragment shader. It reconstructs a signed distance from the
-three MSDF channels, applies a screen-space antialiasing width, and multiplies by the sprite color.
-It samples the main texture `.rgb` only. Its instance uniforms are `uThreshold` (default `0.5`) and
-`uSoftness` (default `1.0`); a sprite may override either through `SetUniform`.
+`shader/sdf` is the built-in font SDF fragment shader and the third renderer startup default. It
+reconstructs a signed distance from the three MSDF channels, applies a screen-space antialiasing
+width, and multiplies by the sprite or font color. It samples the main texture `.rgb` only. Its
+instance uniforms are `uThreshold` (default `0.5`) and `uSoftness` (default `1.0`); a sprite or font
+may override either through `SetUniform`. A sprite may still assign `shader/sdf` as ordinary custom
+content: it shares the SDF fragment asset and module but resolves with the sprite pipeline kind,
+while a font assigned the same shader uses the font pipeline kind.
 
 ```csharp
 SpriteAsset wordmark = engine.Assets.LoadAsset<SpriteAsset>("art/wordmark").GetAwaiter().GetResult();
@@ -632,20 +638,20 @@ check: its corners must remain sharp at the default camera size and at a reduced
 
 ```toml
 # Assets/fonts/score.ttf.toml
-resolution = 2048                  # atlas maximum dimension in pixels
-range = 8                          # distance spread in pixels
-padding = 2                        # extra pixels around the field margin
+resolution = 256                   # fixed square atlas side length in pixels
+range = 6                          # distance spread in pixels
+padding = 1                        # extra pixels around the field margin
 ranges = ["U+0020-U+007E"]         # explicit Unicode ranges
-glyphs = ["U+2605"]                # optional single glyphs
+glyphs = []                        # optional single glyphs; none in the Pong sidecar
 ```
 
-If the sidecar is absent, the bake creates one with ASCII and the defaults above. A missing font
-source or an unreadable outline is a bake error. Ranges are inclusive and use `U+` hexadecimal
-notation. An empty selection is an error.
+If the sidecar is absent, the bake creates one with printable ASCII, `resolution = 2048`,
+`range = 8`, `padding = 2`, and no extra glyphs. A missing font source or an unreadable outline is a
+bake error. Ranges are inclusive and use `U+` hexadecimal notation. An empty selection is an error.
 
 #### Atlas and derived glyph size
 
-`resolution` is the atlas's maximum width or height. The bake derives the glyph em size:
+`resolution` is the atlas's fixed square side length in pixels. The bake derives the glyph em size:
 
 1. Rasterize the selected glyphs at a candidate em size.
 2. Pack their MSDF cells plus the `range` field margin and `padding` into a
@@ -654,10 +660,10 @@ notation. An empty selection is an error.
 4. If even 8 pixels cannot fit every selected glyph, fail the asset with a diagnostic naming the
    glyph count and atlas size.
 
-The derived em size is stored in the `FontAsset`. This makes quality predictable for small
-character sets such as Pong's digits while still failing clearly for an oversized selection. The
-atlas is packed with a deterministic shelf algorithm, sorted by glyph height and codepoint, so
-incremental bakes are stable.
+The derived em size is stored in the `FontAsset`. This makes quality predictable for a bounded
+selection such as the Pong HUD's printable ASCII while still failing clearly for an oversized
+selection. The atlas is packed with a deterministic shelf algorithm, sorted by glyph height and
+codepoint, so incremental bakes are stable.
 
 The atlas texture uses `type = "rgb"`, `compression = "none"`, and a full mip chain. MSDF distance
 data is not color data, so the generic color path's `type = "rgb"` with `compression = "auto"`
@@ -680,6 +686,12 @@ Only selected glyphs are present. If a codepoint is not in the selected set, `Fo
 `?` when that glyph is selected; otherwise it skips the codepoint with a one-time warning. This keeps
 the atlas closed over the declared selection and makes missing content visible in development.
 
+`FontAsset.MeasureText(ReadOnlySpan<char>, float)` returns the layout box: X is the widest line's
+advance width including kerning and spaces, and Y is the line count times the default line height.
+It ignores alignment, always uses a line-spacing multiplier of `1`, applies the same `?`/skip
+missing-glyph rule without logging, and reads the asset's current fields without freezing it. Empty
+or invalid input returns `Vector2.Zero`. The result is the layout box, not the tight glyph AABB.
+
 #### `FontRender`
 
 ```csharp
@@ -692,23 +704,35 @@ public interface IFontRender<TLayer> : IRenderable<TLayer> where TLayer : struct
     float LineSpacing { get; set; }
 }
 
-IEngine<TLayer>.CreateFontRender(ISceneNode parent);
+IEngine<TLayer>.CreateFontRender(ITransform parent);
 ```
 
-`FontRender` lays text out into glyph quads using the font metrics, the derived em size, and
-kerning. Layout is cached and rebuilt only when `Font`, `Text`, `Size`, `Alignment`, or
-`LineSpacing` changes, so a static score allocates nothing per frame. Assigning a `FontAsset`
-freezes its atlas reference and metrics; mutating the loaded asset afterwards cannot change a
-published frame. Each glyph is drawn with the built-in `shader/sdf` fragment and the font atlas;
-`FontRender` always uses that fragment, and the shared `Shader` member of `IRenderable<TLayer>` has
-no effect on it in 0.2.
+`FontRender` lays text out into local-space glyph quads using the font metrics, the derived em size,
+and kerning. The local origin is the first line's baseline at `y = 0`; lines advance downward by
+`(Ascent - Descent + LineGap) * Size * LineSpacing`, where `LineSpacing` is a multiplier of the
+default line height, not extra world units. `\n` (including `\r\n` and a lone `\r`) starts a new
+line, and a trailing break contributes a final empty line. Layout is cached and rebuilt only when
+`Font`, `Text`, `Size`, `Alignment`, or `LineSpacing` changes, so a static score allocates nothing
+per frame. A missing codepoint uses `?` when that glyph exists and is otherwise skipped with a
+one-time warning. A non-finite or non-positive `Size` or `LineSpacing` produces an empty layout and
+one warning; bounds and capture never throw. Assigning a `FontAsset` freezes its atlas reference,
+metrics, glyphs, and kerning; mutating the loaded asset afterwards cannot change a published frame.
+
+A `FontRender` with `Shader == null` draws with the built-in `shader/sdf` fragment and the font
+atlas. A custom fragment shader may be assigned and is drawn with the font glyph instance ABI; a
+failed custom shader falls back to `shader/sdf` with a one-time warning. The shared instance-uniform
+rules and freeze behavior are the same as for sprites and lines.
 
 Text joins the unified 2D order as a third record type. A contiguous run of glyphs from the same
-font is merged into one draw. `FontRender.Bounds` is the AABB of the laid-out quads.
+font is merged into one draw. `FontRender.Bounds` is the world-space AABB of the laid-out glyph
+quads, not the layout box.
 
-Pong uses two `FontRender`s: the left score right-aligned and the right score left-aligned, both
-near the top center of the court. The text changes only when a point is scored, and the window
-title continues to use the existing `PongTitle` formatter.
+Pong draws every player-visible text surface with `FontRender`s: the left score right-aligned and
+the right score left-aligned near the top center of the court, a centered match-state line below
+them, and a centered control prompt above the bottom court line. The score text changes only when a
+point is scored and the state and prompt text only when the match state changes. All previously
+title-only text (the match state and the prompt) is drawn in-scene with `FontRender`s; the window
+title stays the host's static `Pong` title.
 
 ## Renderer integration
 
@@ -734,26 +758,32 @@ The sprite pass becomes the 2D pass. For each camera it:
 
 1. Sorts each camera's visible records by `(ZIndex, screen Y, screen X)`; ties are unspecified.
 2. Applies the camera's culling mask and conservative world-AABB test.
-3. Builds sprite instance ranges, line triangle ranges, and font glyph ranges.
-4. Uploads the frame's instance, line vertex/index, and glyph buffers.
-5. Records contiguous runs in order, one pipeline bind per run.
+3. Builds sprite instance ranges, line triangle ranges, and one glyph instance record per drawable
+   font glyph quad, all in draw order.
+4. Uploads the frame's shared instance buffer and line vertex/index buffers.
+5. Records contiguous runs in order, one pipeline bind per run: a run changes on kind, shader entry,
+   or font asset.
 
 The built-in shader path stays one instanced draw per camera. The line and font paths add draw
-runs only when their pipeline or shader changes. `RenderStats` gains line and glyph counts and
-keeps its existing sprite, camera, and draw-call accounting. Frame capture records after the 2D
-pass, so it includes all three kinds.
+runs only when their pipeline, shader, or font asset changes; glyphs share the sprite instance
+buffer and the sprite vertex stage, so no dedicated glyph buffer exists. `RenderStats` gains
+`Glyphs` and `SkippedFonts` (and keeps the sprite, line, camera, and draw-call accounting); glyph
+counts are separate from the sprite-only `Instances`. Fonts that are still loading skip with a
+counter, an empty layout adds no run and is not skipped, and bounds-culled fonts are not skipped.
+Frame capture records after the 2D pass, so it includes all three kinds.
 
 ### Resource ownership
 
 - One shared pipeline layout and descriptor-set layout for sprite, line, and font pipelines.
-- One per-frame instance storage buffer for sprite instances.
+- One per-frame instance storage buffer holding both sprite and font glyph instance records.
 - One per-frame line vertex/index buffer pair.
-- One per-frame glyph instance buffer.
+- A font pipeline kind that reuses the sprite vertex stage's SPIR-V and instance ABI; a separate
+  Vulkan module handle is owned alongside the sprite and line modules.
 - A pipeline cache keyed by pipeline kind, shader content hash, and output color format.
 - A shader module cache keyed by canonical shader path and content hash.
-- Texture pages remain the single bindless texture owner; the built-in line vertex stage writes the
-  placeholder texture index `0` and zero extra indices, and a shared custom shader may sample the
-  bindless array from a line.
+- Texture pages remain the single bindless texture owner; fonts sample their atlas page through the
+  same bindless array, the built-in line vertex stage writes the placeholder texture index `0` and
+  zero extra indices, and a shared custom shader may sample the bindless array from a line.
 
 All resources are render-thread-owned. Frame buffers are fenced like the existing instance buffer;
 steady-state frames allocate nothing.
@@ -840,9 +870,15 @@ New or changed public members in 0.2:
   `IRenderable.Color` replaces it.
 - `IEngine.SetGlobalUniform`, `IEngine.ResetGlobalUniforms`.
 - `ILineRender<TLayer>`, `IEngine.CreateLineRender`.
-- `IFontRender<TLayer>`, `IEngine.CreateFontRender`, `FontAsset`, `FontGlyph`, `TextAlignment`.
+- `IFontRender<TLayer>`, `IEngine.CreateFontRender`, `FontAsset`, `FontGlyph`, `TextAlignment`,
+  `FontAsset.MeasureText`.
 - `TextureFormat` expanded to the linear UNORM and BC values; `TextureDescriptor.MipLevels`.
-- `RenderStats` line and glyph counters.
+- `RenderStats` gains `Glyphs` and `SkippedFonts` alongside the sprite and line counters
+  (`Instances` stays sprite-only, and draw calls include font runs).
+
+`FontRender` uses the built-in `shader/sdf` when no custom `Shader` is assigned and may select a
+custom fragment shader for the font glyph instance ABI; a failed custom shader falls back to
+`shader/sdf`.
 
 The exact overload sets, nullability, and defaults are settled in the implementation tasks and
 recorded in [engine.md](engine.md) and [render.md](render.md). A breaking-change note calls out the
@@ -853,7 +889,8 @@ payload contract, the new reserved snapshot slots, and the shader asset contract
 
 ### Scene and assets
 
-Pong keeps the existing simulation, controls, camera, and window title. Its asset tree grows:
+Pong keeps the existing simulation, controls, and camera; the window title stays the host's static
+`Pong`, and the score, match state, and control prompt are all drawn in-scene. Its asset tree grows:
 
 ```text
 examples/pong/Pong.Assets/Assets/
@@ -862,18 +899,20 @@ examples/pong/Pong.Assets/Assets/
   art/wordmark.svg
   art/wordmark.svg.toml        # resolution = 512, range = 8, padding = 2, compression = "none"
   fonts/score.ttf
-  fonts/score.ttf.toml         # resolution = 2048, ASCII digits + colon, range = 8
+  fonts/score.ttf.toml         # resolution = 256, printable ASCII, range = 6, padding = 1
   shader/court.frag
   shader/court.frag.toml       # time-driven glow; border and center line use different uniforms
 ```
 
 The font is JetBrains Mono Regular (OFL 1.1), committed under `Pong.Assets` with its license file and
-attribution. It is a monospaced face with clear digits; no system font is required.
+attribution. It is a monospaced face with clear digits and punctuation, so the one HUD font covers
+the score, the match state, and the prompt; no system font is required.
 
-`GameSettings` gains references for the wordmark sprite, score font, and court shader. `GameLayer`
-gains `Hud = 8` for the score, and the camera culling mask includes it; the existing Court, Paddles,
-and Ball bits keep their values. The Pong `CircleProcessor` is updated to emit its generated ball
-through the KTX2 texture helper.
+`GameSettings` gains references for the wordmark sprite, the HUD font, and the court shader;
+`ScoreFont` keeps its field name and TOML key but now feeds all HUD text (score, state, and prompt).
+`GameLayer` gains `Hud = 8` for all HUD text, and the camera culling mask includes it; the existing
+Court, Paddles, and Ball bits keep their values. The Pong `CircleProcessor` is updated to emit its
+generated ball through the KTX2 texture helper.
 
 ### Rendering
 
@@ -894,9 +933,21 @@ through the KTX2 texture helper.
   court lines at `ZIndex` 5, the paddles at 10, and the ball at 20, and the center line draws over
   it. It exercises the full SVG, MSDF, linear texture, mip, and `shader/sdf` path without affecting
   the simulation, controls, or camera fitting.
-- **Score.** Two `FontRender`s show the left and right scores near the top center, right- and
-  left-aligned respectively. Text changes only when `LeftScore` or `RightScore` changes.
-- **Ordering.** Court lines, ball, paddles, wordmark, and score all use the shared `ZIndex` and
+- **HUD text.** Four `FontRender`s draw every player-visible text surface on the `Hud` layer at
+  `ZIndex` 30, above every gameplay element. The two scores sit near the top center, right- and
+  left-aligned respectively; each uses the baked `fonts/score` font at 1.5 world units per em, the
+  built-in `shader/sdf`, and the paddle tints (`settings.LeftPaddleTint` for the left score,
+  `settings.RightPaddleTint` for the right). The first line's baseline sits at `y = 7.2`, and the
+  left score's right alignment edge and the right score's left alignment edge stay at `x = -0.4` and
+  `x = +0.4`, so the pair stays centered and a two-digit score grows away from the center while
+  staying inside the court. The centered state line uses `Size = 1.0` with its baseline at `y = 6.0`
+  in the court color, and the centered prompt uses `Size = 0.65` with its baseline at `y = -8.0` in
+  the court color at 65% alpha; both stay clear of the score and the border lines and inside the
+  32x18 court. All four texts share the font asset, shader, layer, and z-index, so they stay
+  contiguous in the 2D order and merge into one font run. The score text changes only when
+  `LeftScore` or `RightScore` changes, and the state and prompt text only when the match state
+  changes. The window title is the host's static `Pong` title and is never written by the game.
+- **Ordering.** Court lines, ball, paddles, wordmark, and HUD text all use the shared `ZIndex` and
   per-camera screen-space 2D order in the unified 2D pass; `Layer` only selects cameras. No
   feature-specific pass is added.
 
@@ -906,7 +957,7 @@ through the KTX2 texture helper.
 - The whole court stays visible and correctly aligned at multiple window sizes.
 - Paddles show the compressed texture without visible block artifacts at their on-screen size.
 - The wordmark is sharp at 1280x720 and at a reduced window size.
-- The score updates on points and is legible.
+- The score, state, and prompt update and are legible.
 - Render stats show a small, stable draw-call count and no steady-state allocations.
 - The example builds, formats, and publishes with zero AOT/trim warnings.
 
@@ -951,10 +1002,10 @@ sharp at multiple sizes; unsupported SVG features are diagnosed.
 
 Deliver TTF/OTF outline reading, glyph range parsing, atlas packing and derived em size, the font
 sidecar, `FontAsset`, `FontRender`, font layout and kerning, the SDF font pipeline, and the Pong
-score.
+HUD.
 
-Exit: the shipped font bakes with digits and a colon, the score renders and updates, missing glyphs
-and oversized selections have defined behavior, and the atlas fits within `resolution`.
+Exit: the shipped font bakes with printable ASCII, the score and HUD text render and update, missing
+glyphs and oversized selections have defined behavior, and the atlas fits within `resolution`.
 
 ### M6 - Pong integration and hardening
 
@@ -1016,7 +1067,7 @@ The release-specific coverage:
 - **SVG.** Path commands, transforms, holes and fill rules, unsupported-element diagnostics,
   resolution/padding, linear sampling, and mip quality.
 - **Fonts.** Glyph range parsing, atlas derivation, metrics, kerning, line breaks, alignment,
-  missing glyphs, layout cache behavior, and score rendering.
+  missing glyphs, layout cache behavior, and HUD text rendering.
 - **2D pass.** Per-camera sort key, run grouping, camera culling, draw-run accounting, and stats.
 
 Bake tests build assets in a temporary directory; no binary fixture, generated pack, or generated
@@ -1029,8 +1080,8 @@ Release GPU measurements cover:
 - The built-in sprite path still produces one draw per camera and no steady-state allocations.
 - A custom shader adds only boundary draws; a Pong frame stays under a small draw-call budget
   (target: 10 or fewer).
-- Instance record growth and line/font buffer traffic are measured against the existing sprite
-  path.
+- Instance record growth and shared sprite/glyph instance-buffer traffic are measured against the
+  existing sprite path.
 - KTX2 compressed pages reduce declared upload/residency bytes compared with RGBA8.
 - MSDF mips and the font atlas stay within the texture residency budget.
 
@@ -1040,8 +1091,8 @@ Release GPU measurements cover:
 | --- | --- | --- |
 | KTX2 container or DFD details are wrong. | Textures fail to upload or render incorrectly. | Keep the profile narrow, validate against the KTX2 specification and an independent tool where available, and add GPU round-trip tests. |
 | BC support is absent on a device. | Startup fails for that device. | Treat `textureCompressionBC` as a documented requirement, query every requested format, and fail with a clear message; no silent fallback. |
-| MSDF mip filtering degrades text or vector edges. | Blurry or broken glyphs. | Use a distance-preserving downsample, test at 0.5x/0.25x, and make Pong's wordmark and score release checks. |
-| Font atlas cannot fit the selected glyphs. | Bake fails or quality drops. | Derive em size by binary search, fail with the glyph count and atlas size, and keep Pong's set small. |
+| MSDF mip filtering degrades text or vector edges. | Blurry or broken glyphs. | Use a distance-preserving downsample, test at 0.5x/0.25x, and make Pong's wordmark and HUD text release checks. |
+| Font atlas cannot fit the selected glyphs. | Bake fails or quality drops. | Derive em size by binary search, fail with the glyph count and atlas size, and keep Pong's selection a bounded printable-ASCII set. |
 | SVG arcs, transforms, or even-odd holes are mishandled. | Wrong silhouettes. | Limit the subset, add focused path/transform/hole tests, and reject rather than approximate silently. |
 | Shader varying or uniform limits are exceeded. | Pipeline creation fails. | Bake-side size checks, a versioned fixed interface, and a GPU test that creates every built-in pipeline. |
 | The unified 2D pass is more complex than the current sprite pass. | Schedule or performance regression. | Keep the built-in shader path on the existing instance/run model, benchmark each milestone, and preserve the one-draw-per-camera default. |
@@ -1057,7 +1108,8 @@ Release GPU measurements cover:
 - Material assets or shared per-material uniform sets.
 - SVG paint, strokes, text, images, CSS, filters, masks, clip paths, `use`, or full SVG.
 - Complex text shaping, bidi, RTL, ligatures, font fallback, rich text, or word wrapping.
-- A dedicated `SdfRender` or `FontRender` custom shader path; both use the built-in SDF fragment.
+- A dedicated `SdfRender`. `FontRender` defaults to `shader/sdf` and may select a custom fragment
+  shader for the font glyph path.
 - Round line caps/joins, dashed line styles as a geometry feature, or textured lines.
 - Editor, 3D, depth, MSAA, render graph, texture streaming, cubemaps, or texture arrays.
 - Non-desktop platform guarantees. The BC requirement is a desktop Vulkan 1.3 decision.

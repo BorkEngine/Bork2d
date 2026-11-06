@@ -34,8 +34,8 @@ internal enum ShaderBindingState
 /// the run is recorded.
 /// </remarks>
 /// <param name="EntryId">
-/// The shader entry identity used for run grouping. The sprite default entry is always id <c>0</c>
-/// and the line default entry id <c>1</c>.
+/// The shader entry identity used for run grouping. The sprite default entry is always id <c>0</c>,
+/// the line default entry id <c>1</c>, and the font SDF default entry id <c>2</c>.
 /// </param>
 /// <param name="State">Whether the record waits, draws the entry, or falls back to a default.</param>
 internal readonly record struct ShaderBinding(int EntryId, ShaderBindingState State);

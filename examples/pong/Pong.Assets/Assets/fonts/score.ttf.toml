@@ -1,0 +1,5 @@
+resolution = 256
+range = 6
+padding = 1
+ranges = ["U+0020-U+007E"]
+glyphs = []

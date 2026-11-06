@@ -654,7 +654,7 @@ public sealed class TextureProcessorTests
         Assert.Empty(diagnostics.GetSorted());
         Assert.True(project.UseDefaultProcessors);
         Assert.Equal(
-            ["texture", "shader", "svg"],
+            ["texture", "shader", "svg", "font"],
             project.Processors.Select(processor => processor.Name));
 
         BakeProcessorRegistration texture = project.Processors[0];
@@ -677,6 +677,13 @@ public sealed class TextureProcessorTests
         Assert.Equal(SidecarPolicy.Required, svg.Policy);
         Assert.NotNull(svg.SidecarShape);
         Assert.Equal(typeof(Bork2d.Bake.Processors.SvgSidecar), svg.SidecarShape!.Type);
+
+        BakeProcessorRegistration font = project.Processors[3];
+        Assert.Equal("font", font.Name);
+        Assert.Equal(["ttf", "otf"], font.Extensions);
+        Assert.Equal(SidecarPolicy.Required, font.Policy);
+        Assert.NotNull(font.SidecarShape);
+        Assert.Equal(typeof(Bork2d.Bake.Processors.FontSidecar), font.SidecarShape!.Type);
     }
 
     [Fact]

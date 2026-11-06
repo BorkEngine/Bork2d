@@ -9,30 +9,35 @@ provider package.
 | Namespace | Key public types |
 | --- | --- |
 | `Bork2d.Engine` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
-| `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `IBoundedTransform`, `IRenderable<TLayer>`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `ILineRender<TLayer>` |
+| `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `IBoundedTransform`, `IRenderable<TLayer>`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `ILineRender<TLayer>`, `IFontRender<TLayer>`, `TextAlignment` |
 | `Bork2d.Engine.Rendering` | `Color` (immutable linear RGBA), `RenderStats`, `ClearKind`, `FrameCaptureResult` |
-| `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `ShaderAsset`, `ShaderUniform`, `ShaderTextureSlot`, `ShaderUniformType`, `TextureDescriptor`, `TextureFormat`, `AssetRef<T>`, `DataRef`, enums |
+| `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `ShaderAsset`, `ShaderUniform`, `ShaderTextureSlot`, `ShaderUniformType`, `TextureDescriptor`, `TextureFormat`, `FontAsset`, `FontGlyph`, `FontKerning`, `AssetRef<T>`, `DataRef`, enums |
 | `Bork2d.Engine.Assets.Pack` | `PackBuilder`, `PackCompressionMode` (tooling only) |
 | `Bork2d.Engine.Input` | `IInput`, `KeyCode`, `MouseButton` |
 | `Bork2d.Engine.Mathematics` | `Bounds`, `Ray2D`, `Vector2Extensions`, `Vector2ApproximatelyExtensions` |
 | `Bork2d.Engine.Platform` | `IWindow`, `ITime` |
 
-`GameEngine`, `Transform`, `Renderable2D`, `Camera`, `SpriteRender`, `LineRender`, `AssetService`,
-`FrameSnapshot`, `ShaderRenderData`, the typed render-data buffers/producers/definitions,
-`RenderableRegistry`, and the projection and sprite-bounds math are internal.
+`GameEngine`, `Transform`, `Renderable2D`, `Camera`, `SpriteRender`, `LineRender`, `FontRender`,
+`FontRenderData`, `FontLayoutData`, `FontSnapshot`, `FontRenderableDefinition`, `FontBounds`,
+`AssetService`, `FrameSnapshot`, `ShaderRenderData`, the typed render-data
+buffers/producers/definitions, `RenderableRegistry`, and the projection and sprite-bounds math are
+internal.
 `Bork2d.Engine.Assets.Pack` exposes only the pack writer and its compression enum; everything else
 there is implementation.
 
 ## Game and engine
 
 The game is a caller-constructed `IGame<TLayer>`: `Setup` runs once before the first tick, `Tick`
-once per tick, and `Teardown` once before shutdown. All three run on the tick thread and are never
-concurrent. Exceptions propagate to `Bork2dApp.Run` after cleanup.
+once per tick, and `Teardown` once before shutdown. `Setup` returns a `Task` that the host blocks on
+before renderer readiness and the first tick. The host invokes the callbacks on the tick thread and
+they are never concurrent: no `Tick` or `Teardown` starts while `Setup` runs, although a continuation
+after an `await` inside `Setup` may resume on another thread. Exceptions, including a faulted setup
+task, propagate to `Bork2dApp.Run` after cleanup; a `Setup` failure runs no `Tick` and no `Teardown`.
 
 `IEngine<TLayer>` provides `Time`, `Window`, `Input`, `Assets`, `LoggerFactory`, `Root`,
-`RenderStats`, `CreateTransform`, `CreateCamera`, `CreateSpriteRender`, `SetGlobalUniform` (float,
-`Vector2`, `Vector3`, `Vector4`, and `Color` overloads), `ResetGlobalUniforms`, `CaptureFrameAsync`,
-and `Exit`. Access rules differ by mode:
+`RenderStats`, `CreateTransform`, `CreateCamera`, `CreateSpriteRender`, `CreateLineRender`,
+`CreateFontRender`, `SetGlobalUniform` (float, `Vector2`, `Vector3`, `Vector4`, and `Color`
+overloads), `ResetGlobalUniforms`, `CaptureFrameAsync`, and `Exit`. Access rules differ by mode:
 
 | Member | Windowed | Offscreen | Headless |
 | --- | --- | --- | --- |
@@ -59,9 +64,9 @@ not a user global; the frame's time is captured separately from `ITime.Time`.
 The renderer applies a captured user global to each shader run's 144-byte global block by its ordinal
 name when the shader declares the same type, and uses the declaration's shader default when the name
 is absent. A type mismatch between the engine value and a shader declaration makes that custom shader
-fall back to its kind's default (`shader/sprite` for a sprite, `shader/line` for a line) for the frame
-with a one-time warning; the stored bytes are never reinterpreted. The frame time always occupies the
-block's `time.x`.
+fall back to its kind's default (`shader/sprite` for a sprite, `shader/line` for a line, or
+`shader/sdf` for a font) for the frame with a one-time warning; the stored bytes are never
+reinterpreted. The frame time always occupies the block's `time.x`.
 
 ### Frame capture
 
@@ -79,8 +84,9 @@ requests may be outstanding at once, including requests already taken by an in-f
 request beyond the limit faults with `Bork2dException` instead of blocking the caller or being
 dropped, and a slot returns only when its request completes, faults, or is cancelled. Cancellation is
 checked first and faults the task with `OperationCanceledException`; a renderer stop or fatal faults
-pending requests. Waiting for the task synchronously inside `Setup` or `Tick` before the snapshot that
-serves the request is published can block the producer needed to generate that frame.
+pending requests. Waiting for the task synchronously inside `Tick`, or awaiting it inside `Setup`,
+before the snapshot that serves the request is published can block the producer needed to generate
+that frame.
 
 ## Scene model
 
@@ -104,8 +110,8 @@ framebuffer, so the helpers throw `InvalidOperationException`. A camera's world 
 (within `1e-4`), and its matrix must be invertible; otherwise the camera is skipped. Camera defaults
 are a full viewport, size `10`, all layers, color clear to black, and `ZIndex` `0`.
 
-Sprites and lines implement `IRenderable<TLayer>`, the shared 2D renderable contract. It adds the
-linear RGBA `Color`, the optional custom fragment `Shader`, the one-bit `Layer`, the shared
+Sprites, lines, and fonts implement `IRenderable<TLayer>`, the shared 2D renderable contract. It adds
+the linear RGBA `Color`, the optional custom fragment `Shader`, the one-bit `Layer`, the shared
 `ZIndex`, and the instance uniform members (`SetUniform` overloads and `ResetUniforms`) on top of
 `IBoundedTransform`. A camera is only an `IBoundedTransform`; it is not drawn.
 
@@ -114,9 +120,9 @@ Sprite renderables are transforms plus `Sprite`, the shared `IRenderable<TLayer>
 normalized UVs (top-left, top-right, bottom-right, bottom-left), a per-axis `Vector2` world `Scale`,
 a normalized pivot, a topology, and optional indices. The renderer derives the quad; there is no
 vertex array. Quad world size is `(maxU - minU) * Scale.X` by `(maxV - minV) * Scale.Y`, so texture
-pixel dimensions never affect geometry. `ZIndex` is the shared 2D draw order for sprites and lines:
-higher draws later, it is not layer-scoped, and equal values fall back to per-camera screen-space Y
-then X. `Layer` is only a camera culling bit and never affects the order.
+pixel dimensions never affect geometry. `ZIndex` is the shared 2D draw order for sprites, lines, and
+fonts: higher draws later, it is not layer-scoped, and equal values fall back to per-camera
+screen-space Y then X. `Layer` is only a camera culling bit and never affects the order.
 
 A sprite renderable also has an optional custom fragment `Shader` and up to four additional texture
 references (`AdditionalTextures`). The `AdditionalTextures` setter clones the array and `null`
@@ -134,8 +140,8 @@ resolved positionally in the first four `AdditionalTextures` slots; a still-load
 skips the sprite, a failed or absent one samples the bindless placeholder, references beyond the
 shader's declared slot count are not loaded, and references beyond four are ignored with a one-time
 warning. A catalog mount reloads a custom path from the new winning entry on its next sighting,
-retries a previously failed path, and reloads both default shaders while keeping each active until
-its replacement is ready.
+retries a previously failed path, and reloads all three default shaders while keeping each active
+until its replacement is ready.
 
 Instance uniform values are strict. The `SetUniform` overloads validate immediately against the
 currently assigned shader's frozen metadata: with no shader assigned, an undeclared name, a
@@ -181,14 +187,59 @@ and capture applies only values whose name and type still match. A line without 
 a zero instance-uniform block in the snapshot; the renderer seeds it from `shader/line`'s declared
 default block, so a pack that shadows the line default with declarations behaves correctly.
 
-Cameras, sprites, and lines are `IBoundedTransform`s and expose a read-only world-space `Bounds`
-AABB for conservative renderer culling. Sprites and lines are also `IRenderable<TLayer>`s; a camera
-is not drawn. A camera's bounds contain its transformed visible rectangle; a sprite's bounds contain
-the drawn quad, derived from the frozen render data, pivot, flips, and composed world matrix; a
-line's bounds contain its expanded geometry, including half the width and every miter or bevel
-extent. All return `Bounds.Empty` for an invalid renderable, a headless or shut-down app, or a
-renderable with no drawable content, and reading them never throws for those cases. Empty bounds
-mean "unknown": the renderer must not treat them as "outside".
+Font renderables are transforms plus a frozen `FontAsset`, `Text`, `Size` (world units per em),
+`Alignment`, and `LineSpacing` (a multiplier of the default line height), together with the shared
+`IRenderable<TLayer>` draw state. Defaults are no font, empty text, size `1`, left alignment,
+spacing `1`, white, no shader, layer `0`, and z-index `0`. The local origin is the first line's
+baseline at `y = 0`; lines advance downward by
+`(Ascent - Descent + LineGap) * Size * LineSpacing`, and each line is shifted around `x = 0` by its
+alignment: left starts at zero, center shifts by minus half its advance width, and right shifts by
+minus the whole width. `\n`, `\r\n`, and a lone `\r` start a new line, and a trailing break
+contributes a final empty line to measurement and height. Layout uses the frozen metrics, glyph
+plane bounds, advances, and kerning; the bearing is descriptive only. It is cached and rebuilt only
+when `Font`, `Text`, `Size`, `Alignment`, or `LineSpacing` changes, so transform, color, layer,
+z-index, shader, and uniform changes never rebuild it and a warm capture or bounds read allocates
+nothing.
+
+A missing codepoint renders `?` when the frozen font has that glyph; otherwise the codepoint is
+skipped and one warning per codepoint per renderable is logged. A skipped codepoint is absent for
+kerning. A non-finite or non-positive `Size` or `LineSpacing`, a non-finite metric, or a
+non-positive line height produces an empty layout and one warning, and never makes capture or
+bounds throw. An undefined `TextAlignment` value behaves as left.
+
+Assigning a font freezes its atlas reference, metrics, glyphs, and kerning once; mutating the asset
+afterwards cannot change a cached layout, a bounds read, or a published snapshot, and re-assigning
+the same asset keeps the first frozen values. `FontRender.Bounds` is the world-space AABB of the
+laid-out glyph quads, not the layout box; empty text, a null font, an empty layout, or a layout with
+no drawable quads returns `Bounds.Empty`.
+
+A font's `Shader` uses the same freeze rule as a sprite's or line's, so capture carries only the
+frozen `ShaderRenderData`. A font without a custom shader resolves to the built-in `shader/sdf`; a
+custom fragment shader is drawn with the font glyph instance ABI, and a failed or invalid custom
+shader falls back to `shader/sdf` with a one-time warning. Instance uniform values follow the same
+strict rules: `SetUniform` validates immediately against the frozen declarations, `ResetUniforms`
+clears them, reassigning `Shader` keeps them, and capture applies only values whose name and type
+still match. A font without a custom shader has a zero instance-uniform block; the renderer seeds
+the SDF default's declared defaults. A still-loading custom shader or atlas page skips the font
+for that frame and counts in `RenderStats.SkippedFonts`; submitted glyph instances count in
+`RenderStats.Glyphs`, while an empty layout draws nothing and is not a skip.
+
+`FontAsset.MeasureText(ReadOnlySpan<char>, float)` returns the layout box for a text and size: X is
+the widest line's advance width including kerning and spaces, and Y is the line count times the
+default line height. It ignores alignment and uses a line-spacing multiplier of `1`, uses the same
+`?`/skip missing-glyph rules without logging, reads the asset's current fields (there is no frozen
+cache), and returns `Vector2.Zero` for empty or invalid input. It is the layout box, not the tight
+glyph AABB.
+
+Cameras, sprites, lines, and fonts are `IBoundedTransform`s and expose a read-only world-space
+`Bounds` AABB for conservative renderer culling. Sprites, lines, and fonts are also
+`IRenderable<TLayer>`s; a camera is not drawn. A camera's bounds contain its transformed visible
+rectangle; a sprite's bounds contain the drawn quad, derived from the frozen render data, pivot,
+flips, and composed world matrix; a line's bounds contain its expanded geometry, including half the
+width and every miter or bevel extent; a font's bounds contain its laid-out glyph quads. All return
+`Bounds.Empty` for an invalid renderable, a headless or shut-down app, or a renderable with no
+drawable content, and reading them never throws for those cases. Empty bounds mean "unknown": the
+renderer must not treat them as "outside".
 
 `SpriteAsset` is a mutable authoring and loading DTO, but rendering reads only an immutable frozen
 copy of its draw fields. Assigning an asset to a renderable freezes it once; mutating the asset
@@ -208,12 +259,12 @@ are ignored. The declaration arrays are non-null and empty by default. The loade
 names, types, offsets, overlaps, or the layout version; freezing tolerates malformed declarations,
 and the renderer owns rejecting or falling back from them.
 
-Like `SpriteAsset`, `ShaderAsset` freezes once per asset instance when assigned to a sprite or line
-renderable: mutating it afterwards (including replacing or editing its declaration arrays) does not
-change a published snapshot, and re-assigning the same asset keeps the first frozen values. Freezing
-is tolerant of malformed metadata: null arrays become empty, null and duplicate names are skipped
-with the first declaration winning, and invalid offsets or unknown types contribute no lanes. The
-renderer owns rejecting or falling back from malformed declarations.
+Like `SpriteAsset`, `ShaderAsset` freezes once per asset instance when assigned to a sprite, line, or
+font renderable: mutating it afterwards (including replacing or editing its declaration arrays) does
+not change a published snapshot, and re-assigning the same asset keeps the first frozen values.
+Freezing is tolerant of malformed metadata: null arrays become empty, null and duplicate names are
+skipped with the first declaration winning, and invalid offsets or unknown types contribute no lanes.
+The renderer owns rejecting or falling back from malformed declarations.
 
 Layer enums must be `int`-backed `[Flags]` enums with 1-32 named single-bit values; `None = 0` is
 allowed. Invalid layer types fail at build/host creation.
@@ -377,6 +428,40 @@ built-in `shader/sdf` fragment shader and assign it to the sprite like any other
 sprite itself stays a normal `SpriteAsset`; there is no SVG renderable or other new public engine
 type.
 
+### Fonts
+
+`FontAsset` is a generated-shape MessagePack asset that describes one baked font atlas:
+
+| Field | Meaning |
+| --- | --- |
+| `Atlas` | `AssetRef<TextureDescriptor>` for the linear MSDF atlas. |
+| `PixelsPerEm` | The derived em size in atlas pixels. |
+| `Ascent`, `Descent`, `LineGap` | Font metrics in em units; ascent is positive and descent is negative. |
+| `Glyphs` | The selected glyphs, sorted by codepoint. |
+| `Kerning` | Nonzero pair adjustments in em units, sorted by `(LeftCodepoint, RightCodepoint)`. |
+| `DistanceRange` | The MSDF distance spread in atlas pixels. |
+
+`FontGlyph` is a value-only record: `Codepoint`, `Advance` in em units, `Bearing` (pen to quad
+bottom-left in em units), `PlaneBounds` (the cell quad in em units including the MSDF field margin),
+and `AtlasBounds` (normalized U0/V0/U1/V1 with a top-left origin and V down). `Bearing` equals the
+first two components of `PlaneBounds`. `Kerning` is a value-only record of a left codepoint, a right
+codepoint, and an em-unit adjustment.
+
+The atlas is fixed and square: its `Width` and `Height` are equal, its format is linear `Rgb8` with
+alpha forced to `255`, and it has a full mip chain. A glyph that has no drawable outline (for example
+a space) keeps its advance and has zero plane and atlas bounds. Codepoints that share a font glyph
+share the same cell and measurements, and the bake selects only the codepoints the atlas actually
+contains. `FontAsset` is a data description only; loading it neither reads nor decodes the atlas
+payload.
+
+`FontAsset.MeasureText(ReadOnlySpan<char>, float)` computes the layout box from the asset's current
+fields without freezing or mutating it. `X` is the widest line's advance width, including kerning and
+spaces, and `Y` is the line count times the default line height. The method ignores alignment and
+uses a line-spacing multiplier of `1`; a trailing line break contributes a final empty line. Missing
+codepoints use the same `?` substitution or skip rule as a font renderable, but `MeasureText` does not
+log. Empty text, a non-finite or non-positive size, and any result that is not finite return
+`Vector2.Zero`. The result is the layout box, not the tight AABB of the drawable glyph quads.
+
 ### Pack format
 
 A pack is a v1 `BORK2DPK` file: a 28-byte prefix, a maximum-quality Zstd-compressed MessagePack
@@ -395,21 +480,22 @@ every node's world matrix is composed exactly once as its local matrix times the
 matrix, and a deep hierarchy cannot exhaust the call stack. Each node is read under one acquisition
 of its per-object lock, and world-matrix composition happens outside that lock.
 
-Capture is driven by registered typed producers, not a central type switch. The camera, sprite, and
-line renderables are `CameraRenderableDefinition<TLayer>`/`SpriteRenderableDefinition<TLayer>`/
-`LineRenderableDefinition<TLayer>`; each is both the renderable factory and its
+Capture is driven by registered typed producers, not a central type switch. The camera, sprite,
+line, and font renderables are `CameraRenderableDefinition<TLayer>`/
+`SpriteRenderableDefinition<TLayer>`/`LineRenderableDefinition<TLayer>`/
+`FontRenderableDefinition<TLayer>`; each is both the renderable factory and its
 `IRenderDataProducer`. `RenderableRegistry` assigns every producer a render-data slot and keeps the
 ordered producer list, and `SnapshotCapture` offers each traversed node to those producers in
 registration order: the first match captures the node and returns its world matrix, and a node that
 matches no producer uses the plain transform path so its children still compose. The camera, sprite,
-and line producers own the reserved slots `0`, `1`, and `2`; a custom renderable producer owns a slot
-at or above `3`. Transforms are traversed, but only renderables produce records; the layer enum is
-flattened to a raw 32-bit mask. Each sprite record carries the immutable `SpriteRenderData` frozen
-when the asset was assigned, never the live `SpriteAsset`, and the world-space AABB computed from
-that data when the capture composed the world matrix. It also carries the immutable
-`ShaderRenderData` frozen when the shader was assigned (or null), the four `Vector4` lanes of the
-instance uniform block (`SpriteSnapshot.Uniform0` through `Uniform3`) built from the frozen declared
-defaults and matching stored overrides, the first four additional texture references
+line, and font producers own the reserved slots `0`, `1`, `2`, and `3`; a custom renderable producer
+owns a slot at or above `4`. Transforms are traversed, but only renderables produce records; the layer
+enum is flattened to a raw 32-bit mask. Each sprite record carries the immutable
+`SpriteRenderData` frozen when the asset was assigned, never the live `SpriteAsset`, and the
+world-space AABB computed from that data when the capture composed the world matrix. It also carries
+the immutable `ShaderRenderData` frozen when the shader was assigned (or null), the four `Vector4`
+lanes of the instance uniform block (`SpriteSnapshot.Uniform0` through `Uniform3`) built from the
+frozen declared defaults and matching stored overrides, the first four additional texture references
 (`ExtraTexture0` through `ExtraTexture3`), and the total additional-texture count
 (`AdditionalTextureCount`). Only stored instance uniforms still declared with the same name and type
 are applied; malformed declarations contribute nothing at capture and are left for the renderer to
@@ -417,15 +503,18 @@ reject or fall back from. Each line record carries only its immutable cached loc
 `LineGeometryData` (null when the line is not drawable), the composed world matrix, the linear color,
 the flattened layer, `ZIndex`, the anti-alias flag, the authored width for diagnostics, the frozen
 `ShaderRenderData` (or null), the four instance-uniform lanes, and the world-space AABB computed from
-the geometry bounds and world matrix. The renderer culls with those bounds without reading the
-scene.
+the geometry bounds and world matrix. Each font record carries the immutable `FontRenderData` frozen
+when the asset was assigned, the cached `FontLayoutData`, the composed world matrix, the linear color,
+the flattened layer, `ZIndex`, the frozen `ShaderRenderData` (or null), the four instance-uniform
+lanes, and the world-space AABB of the laid-out glyph quads. The renderer culls with those bounds
+without reading the scene.
 
 Frame buffers are compact typed pools (`RenderDataBuffer<T>`) owned by the snapshot through a
 `RenderDataBufferSet`. They start empty, grow to the observed high-water mark, and never shrink;
-resetting a slot clears every buffer's used range (not only cameras, sprites, and lines), releasing
-obsolete references without shrinking the buffers, so a warm capture allocates nothing. Adding a
-renderable kind registers one definition/producer, plus the renderer pass for its data; it adds no
-capture switch case and no engine creation method.
+resetting a slot clears every buffer's used range (not only cameras, sprites, lines, and fonts),
+releasing obsolete references without shrinking the buffers, so a warm capture allocates nothing.
+Adding a renderable kind registers one definition/producer, plus the renderer pass for its data; it
+adds no capture switch case and no engine creation method.
 
 Engine-wide user global uniforms live in a separate value-only buffer (`GlobalUniformSnapshot`:
 name, type, value) filled from the engine's global map after the scene walk. They are not renderable

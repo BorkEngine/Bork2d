@@ -8,8 +8,9 @@ namespace Bork2d.Render.TwoDimensional;
 /// <para>
 /// Draw order is <c>ZIndex</c> ascending; for equal <c>ZIndex</c> it is per-camera screen-space Y
 /// ascending in framebuffer pixels (top-left origin, so a record lower on screen draws later); for
-/// equal screen Y it is screen X ascending (a record further right draws later). <c>Layer</c> is only
-/// a camera culling bit and never participates in ordering.
+/// equal screen Y it is screen X ascending (a record further right draws later). A font expands into
+/// one key per glyph at the glyph's world top-left. <c>Layer</c> is only a camera culling bit and
+/// never participates in ordering.
 /// </para>
 /// <para>
 /// The key carries <see cref="Kind"/> and <see cref="RecordIndex"/> so the sorted keys address the

@@ -37,6 +37,7 @@ public sealed class RenderStatsPublicSurfaceTests
             "Int32 FramebufferHeight",
             "Int32 DrawCalls",
             "Int32 Instances",
+            "Int32 Glyphs",
             "Int32 Lines",
             "Int32 Cameras",
             "Int32 NonEmptyCameras",
@@ -45,6 +46,7 @@ public sealed class RenderStatsPublicSurfaceTests
             "Int32 TextureUploadsPending",
             "Int64 TextureUploadBytesPending",
             "Int64 SkippedSprites",
+            "Int64 SkippedFonts",
             "Int64 SkippedLines",
             "Int64 ValidationErrors",
             "Int64 ValidationWarnings",
@@ -113,6 +115,7 @@ public sealed class RenderStatsPublicSurfaceTests
             {
                 "CaptureFrameAsync(CancellationToken)",
                 "CreateCamera(ITransform)",
+                "CreateFontRender(ITransform)",
                 "CreateLineRender(ITransform)",
                 "CreateSpriteRender(ITransform)",
                 "CreateTransform(ITransform)",

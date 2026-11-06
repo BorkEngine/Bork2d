@@ -94,6 +94,71 @@ public sealed class RenderedRunLifecycleTests
     [Theory]
     [InlineData("Windowed")]
     [InlineData("Offscreen")]
+    public void AsyncSetupCompletesBeforeTheFirstTick(string mode)
+    {
+        var sdl = new FakeSdlApi();
+        var renderer = new FakeRenderer { AutoReady = true };
+        var factory = new FakeRendererFactory(renderer);
+        var sequence = new List<string>();
+        var game = new ScriptedGame<GameLayer>
+        {
+            OnSetupAsync = async _ =>
+            {
+                sequence.Add("setup-start");
+                await Task.Yield();
+                sequence.Add("setup-end");
+            },
+        };
+        game.OnTick = () =>
+        {
+            sequence.Add("tick");
+            game.Engine!.Exit();
+        };
+
+        using var app = Build(mode, game, factory, sdl);
+        AppTestSupport.RunToCompletion(app);
+
+        Assert.Equal(["setup-start", "setup-end", "tick"], sequence);
+        Assert.Equal(1, game.SetupCount);
+        Assert.Equal(1, game.TickCount);
+        Assert.Equal(1, game.TeardownCount);
+        Assert.Equal(1, renderer.WaitForReadyCount);
+        AssertCleanup(mode, sdl, renderer);
+    }
+
+    [Theory]
+    [InlineData("Windowed")]
+    [InlineData("Offscreen")]
+    public void AsyncSetupFailureAfterAnAwaitSkipsTeardownAndWinsOverTheRendererFailure(string mode)
+    {
+        var sdl = new FakeSdlApi();
+        var setupError = new InvalidOperationException("async setup failed after an await");
+        var rendererError = new Bork2dException("no device");
+        var renderer = new FakeRenderer { StartFailure = rendererError };
+        var factory = new FakeRendererFactory(renderer);
+        var game = new ScriptedGame<GameLayer>
+        {
+            OnSetupAsync = async _ =>
+            {
+                await Task.Yield();
+                throw setupError;
+            },
+        };
+
+        using var app = Build(mode, game, factory, sdl);
+        var failure = AppTestSupport.RunCaptured(app);
+
+        Assert.Same(setupError, failure);
+        Assert.Equal(1, game.SetupCount);
+        Assert.Equal(0, game.TickCount);
+        Assert.Equal(0, game.TeardownCount);
+        Assert.Equal(0, renderer.WaitForReadyCount);
+        AssertCleanup(mode, sdl, renderer);
+    }
+
+    [Theory]
+    [InlineData("Windowed")]
+    [InlineData("Offscreen")]
     public void ExitDuringSetupSkipsTicksAndRunsTeardownOnce(string mode)
     {
         var sdl = new FakeSdlApi();

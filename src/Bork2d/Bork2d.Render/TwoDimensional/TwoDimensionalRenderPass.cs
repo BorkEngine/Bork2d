@@ -9,9 +9,10 @@ using Silk.NET.Vulkan;
 namespace Bork2d.Render.TwoDimensional;
 
 /// <summary>
-/// The registered unified 2D render pass: it plans the snapshot's sprites and lines together through
-/// the allocation-free <see cref="TwoDimensionalFramePlanner"/>, resolves each run's cached pipeline
-/// for that run's kind and the linear scene format, and records the ordered sprite and line draws.
+/// The registered unified 2D render pass: it plans the snapshot's sprites, lines, and fonts together
+/// through the allocation-free <see cref="TwoDimensionalFramePlanner"/>, resolves each run's cached
+/// pipeline for that run's kind and the linear scene format, and records the ordered sprite, line,
+/// and glyph draws.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -89,9 +90,12 @@ internal sealed class TwoDimensionalRenderPass : IRenderPass
             DrawRun run = plan.Runs[runIndex];
             _runPipelines[runIndex] = _shaders.GetPipeline(
                 run.ShaderEntryId,
-                run.Kind == DrawKind.Sprite
-                    ? ShaderPipelineKind.Sprite
-                    : ShaderPipelineKind.Line,
+                run.Kind switch
+                {
+                    DrawKind.Sprite => ShaderPipelineKind.Sprite,
+                    DrawKind.Line => ShaderPipelineKind.Line,
+                    _ => ShaderPipelineKind.Font,
+                },
                 sceneFormat);
         }
 
@@ -100,10 +104,13 @@ internal sealed class TwoDimensionalRenderPass : IRenderPass
         stats.DrawCalls += plan.DrawCalls;
         stats.NonEmptyCameras += plan.NonEmptyCameras;
         stats.InstanceCount += plan.InstanceCount;
+        stats.GlyphCount += plan.GlyphCount;
         stats.LineCount += plan.LineCount;
         stats.SkippedSprites += plan.SkippedSprites;
+        stats.SkippedFonts += plan.SkippedFonts;
         stats.SkippedLines += plan.SkippedLines;
         stats.CulledSprites += plan.CulledSprites;
+        stats.CulledFonts += plan.CulledFonts;
         stats.CulledLines += plan.CulledLines;
     }
 

@@ -34,7 +34,7 @@ internal interface IRenderPass
     /// <param name="snapshot">The consumed snapshot; read-only and never mutated.</param>
     /// <param name="framebufferWidth">The scene/target width in pixels.</param>
     /// <param name="framebufferHeight">The scene/target height in pixels.</param>
-    /// <param name="instances">The frame's sprite instance sink, after its fence has been observed.</param>
+    /// <param name="instances">The frame's sprite/glyph instance sink, after its fence has been observed.</param>
     /// <param name="lines">The frame's line vertex/index sink, after its fence has been observed.</param>
     /// <param name="globals">
     /// The frame's global uniform sink; the 2D pass writes one block per draw run.
