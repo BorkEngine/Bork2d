@@ -16,10 +16,11 @@ public sealed class FontAtlasBleedTests
 {
     private const string FontRelativePath = "examples/pong/Pong.Assets/Assets/fonts/score.ttf";
     private const string PrintableAsciiRange = "U+0020-U+007E";
-    private const int Resolution = 384;
-    private const int Range = 8;
+    private const int Resolution = 256;
+    private const int Range = 6;
 
     [Theory]
+    [InlineData(1)]
     [InlineData(2)]
     [InlineData(0)]
     public void MsdfCellGuardBorderIsBlackInEveryChannel(int padding)

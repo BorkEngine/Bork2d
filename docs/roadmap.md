@@ -638,9 +638,9 @@ check: its corners must remain sharp at the default camera size and at a reduced
 
 ```toml
 # Assets/fonts/score.ttf.toml
-resolution = 384                   # fixed square atlas side length in pixels
-range = 8                          # distance spread in pixels
-padding = 2                        # extra pixels around the field margin
+resolution = 256                   # fixed square atlas side length in pixels
+range = 6                          # distance spread in pixels
+padding = 1                        # extra pixels around the field margin
 ranges = ["U+0020-U+007E"]         # explicit Unicode ranges
 glyphs = []                        # optional single glyphs; none in the Pong sidecar
 ```
@@ -899,7 +899,7 @@ examples/pong/Pong.Assets/Assets/
   art/wordmark.svg
   art/wordmark.svg.toml        # resolution = 512, range = 8, padding = 2, compression = "none"
   fonts/score.ttf
-  fonts/score.ttf.toml         # resolution = 384, printable ASCII, range = 8
+  fonts/score.ttf.toml         # resolution = 256, printable ASCII, range = 6, padding = 1
   shader/court.frag
   shader/court.frag.toml       # time-driven glow; border and center line use different uniforms
 ```

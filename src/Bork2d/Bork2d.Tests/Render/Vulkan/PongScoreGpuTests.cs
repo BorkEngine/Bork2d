@@ -77,7 +77,9 @@ public sealed class PongScoreGpuTests
     private const float PromptSize = 0.65f;
     private const float PromptBaselineY = -8.0f;
 
-    private const int AtlasResolution = 384;
+    private const int AtlasResolution = 256;
+    private const int AtlasRange = 6;
+    private const int AtlasPadding = 1;
     private const string PrintableAsciiRange = "U+0020-U+007E";
     private const string ScoreFontPath = "examples/pong/Pong.Assets/Assets/fonts/score.ttf";
     private const string WordmarkPath = "examples/pong/Pong.Assets/Assets/art/wordmark.svg";
@@ -261,7 +263,7 @@ public sealed class PongScoreGpuTests
         var diagnostics = new FontDiagnostics();
         FontBakeResult? result = FontBakery.Bake(
             source,
-            new FontBakeOptions(Resolution: AtlasResolution, Range: 8, Padding: 2),
+            new FontBakeOptions(Resolution: AtlasResolution, Range: AtlasRange, Padding: AtlasPadding),
             ranges: [PrintableAsciiRange],
             glyphs: [],
             atlasAssetPath: ScoreAtlasPath,

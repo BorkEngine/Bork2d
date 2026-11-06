@@ -315,9 +315,9 @@ a `FontAsset` at its base path and a linear MSDF atlas:
 The required sidecar `score.ttf.toml` carries the bake settings:
 
 ```toml
-resolution = 384                      # fixed square atlas side in pixels, 1..8192
-range = 8                             # distance spread in pixels, greater than zero
-padding = 2                           # extra pixels beyond the range margin, at least zero
+resolution = 256                      # fixed square atlas side in pixels, 1..8192
+range = 6                             # distance spread in pixels, greater than zero
+padding = 1                           # extra pixels beyond the range margin, at least zero
 ranges = ["U+0020-U+007E"]            # inclusive codepoint ranges (printable ASCII for the Pong HUD)
 glyphs = []                           # extra single codepoints
 ```
@@ -345,7 +345,7 @@ pixels and is never cropped. The bake derives the em size:
 2. For a candidate em size `E`, the cell is `ceil((R-L) * E) + 2 * (range + padding)` wide by
    `ceil((T-B) * E) + 2 * (range + padding)` high, where `L/B/R/T` are the outline bounds in em
    units.
-3. Binary-search the largest integer `E` in `[8, resolution]` whose deterministic shelf layout fits
+3. Binary-search the largest integer `E` in `[4, resolution]` whose deterministic shelf layout fits
    the atlas.
 4. Re-run the packer at the final `E` to get the cell positions.
 
@@ -355,10 +355,10 @@ added: each cell reserves the field margin on every side, and the bake clears th
 (or at least one pixel when `padding` is `0`) to black in every channel. This guard prevents linear
 filtering from blending two adjacent cells' differently saturated MSDF channels at a shared edge,
 which would otherwise draw straight lines at glyph-cell boundaries. The result is independent of
-source order, so the same selection always produces the same layout. If even the 8-pixel em size does
+source order, so the same selection always produces the same layout. If even the 4-pixel em size does
 not fit, the
 bake fails with `BK9305`, naming the glyph count and the atlas size. A selection whose codepoints all
-map to whitespace glyphs is valid: it bakes an all-outside atlas at the deterministic em size `8`, and
+map to whitespace glyphs is valid: it bakes an all-outside atlas at the deterministic em size `4`, and
 the glyph entries keep their advances with zero plane and atlas rectangles.
 
 #### Metrics, glyphs, and MSDF
