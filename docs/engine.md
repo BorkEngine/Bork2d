@@ -11,7 +11,7 @@ provider package.
 | `Bork2d.Engine` | `IEngine<TLayer>`, `IGame<TLayer>`, `Bork2dException` |
 | `Bork2d.Engine.Scene` | `ISceneRoot`, `ITransform`, `IBoundedTransform`, `IRenderable<TLayer>`, `ICamera<TLayer>`, `ISpriteRender<TLayer>`, `ILineRender<TLayer>` |
 | `Bork2d.Engine.Rendering` | `Color` (immutable linear RGBA), `RenderStats`, `ClearKind`, `FrameCaptureResult` |
-| `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `ShaderAsset`, `ShaderUniform`, `ShaderTextureSlot`, `ShaderUniformType`, `TextureDescriptor`, `TextureFormat`, `AssetRef<T>`, `DataRef`, enums |
+| `Bork2d.Engine.Assets` | `IAssets`, `SpriteAsset`, `ShaderAsset`, `ShaderUniform`, `ShaderTextureSlot`, `ShaderUniformType`, `TextureDescriptor`, `TextureFormat`, `FontAsset`, `FontGlyph`, `FontKerning`, `AssetRef<T>`, `DataRef`, enums |
 | `Bork2d.Engine.Assets.Pack` | `PackBuilder`, `PackCompressionMode` (tooling only) |
 | `Bork2d.Engine.Input` | `IInput`, `KeyCode`, `MouseButton` |
 | `Bork2d.Engine.Mathematics` | `Bounds`, `Ray2D`, `Vector2Extensions`, `Vector2ApproximatelyExtensions` |
@@ -376,6 +376,32 @@ and its texture is linear MSDF data in `Rgb8` by default (or explicit BC7), so a
 built-in `shader/sdf` fragment shader and assign it to the sprite like any other custom shader. The
 sprite itself stays a normal `SpriteAsset`; there is no SVG renderable or other new public engine
 type.
+
+### Fonts
+
+`FontAsset` is a generated-shape MessagePack asset that describes one baked font atlas:
+
+| Field | Meaning |
+| --- | --- |
+| `Atlas` | `AssetRef<TextureDescriptor>` for the linear MSDF atlas. |
+| `PixelsPerEm` | The derived em size in atlas pixels. |
+| `Ascent`, `Descent`, `LineGap` | Font metrics in em units; ascent is positive and descent is negative. |
+| `Glyphs` | The selected glyphs, sorted by codepoint. |
+| `Kerning` | Nonzero pair adjustments in em units, sorted by `(LeftCodepoint, RightCodepoint)`. |
+| `DistanceRange` | The MSDF distance spread in atlas pixels. |
+
+`FontGlyph` is a value-only record: `Codepoint`, `Advance` in em units, `Bearing` (pen to quad
+bottom-left in em units), `PlaneBounds` (the cell quad in em units including the MSDF field margin),
+and `AtlasBounds` (normalized U0/V0/U1/V1 with a top-left origin and V down). `Bearing` equals the
+first two components of `PlaneBounds`. `Kerning` is a value-only record of a left codepoint, a right
+codepoint, and an em-unit adjustment.
+
+The atlas is fixed and square: its `Width` and `Height` are equal, its format is linear `Rgb8` with
+alpha forced to `255`, and it has a full mip chain. A glyph that has no drawable outline (for example
+a space) keeps its advance and has zero plane and atlas bounds. Codepoints that share a font glyph
+share the same cell and measurements, and the bake selects only the codepoints the atlas actually
+contains. `FontAsset` is a data description only; loading it neither reads nor decodes the atlas
+payload.
 
 ### Pack format
 
