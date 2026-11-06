@@ -29,15 +29,22 @@ internal sealed class ScriptedGame<TLayer> : IGame<TLayer> where TLayer : struct
 
     public Action<IEngine<TLayer>>? OnSetup { get; set; }
 
+    /// <summary>
+    /// Gets or sets an asynchronous setup callback. It runs after <see cref="OnSetup"/> and its task
+    /// is the one <see cref="Setup"/> returns to the host.
+    /// </summary>
+    public Func<IEngine<TLayer>, Task>? OnSetupAsync { get; set; }
+
     public Action? OnTick { get; set; }
 
     public Action? OnTeardown { get; set; }
 
-    public void Setup(IEngine<TLayer> engine)
+    public Task Setup(IEngine<TLayer> engine)
     {
         SetupCount++;
         Engine = engine;
         OnSetup?.Invoke(engine);
+        return OnSetupAsync?.Invoke(engine) ?? Task.CompletedTask;
     }
 
     public void Tick()

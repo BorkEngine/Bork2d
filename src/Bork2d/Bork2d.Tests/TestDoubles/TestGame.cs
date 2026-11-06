@@ -23,10 +23,11 @@ internal sealed class TestGame<TLayer> : IGame<TLayer>
 
     public int TeardownCount { get; private set; }
 
-    public void Setup(IEngine<TLayer> engine)
+    public Task Setup(IEngine<TLayer> engine)
     {
         SetupCount++;
         _engine = engine;
+        return Task.CompletedTask;
     }
 
     public void Tick()
