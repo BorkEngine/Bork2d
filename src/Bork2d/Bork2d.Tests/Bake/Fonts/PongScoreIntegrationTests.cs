@@ -25,7 +25,7 @@ public sealed class PongScoreIntegrationTests
     private const string FontRelativePath = "examples/pong/Pong.Assets/Assets/fonts/score.ttf";
     private const string SidecarRelativePath = "examples/pong/Pong.Assets/Assets/fonts/score.ttf.toml";
     private const string AtlasPath = "fonts/score-atlas";
-    private const int AtlasResolution = 512;
+    private const int AtlasResolution = 384;
     private const int Range = 8;
     private const int Padding = 2;
     private const string PrintableAsciiRange = "U+0020-U+007E";

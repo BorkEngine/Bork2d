@@ -29,6 +29,12 @@ namespace Bork2d.Bake.Fonts;
 /// finite distance. Infinity therefore clamps to <c>0</c> (outside) or <c>255</c> (inside) exactly
 /// like any other out-of-range value; only a NaN channel is rejected.
 /// </para>
+/// <para>
+/// The outer guard border (the sidecar's <c>padding</c>, or at least one pixel when it is zero) is
+/// cleared to black in every channel after generation. Without that guard, adjacent cells can hold
+/// different saturated channels in their margins and linear filtering at the shared edge blends them
+/// into a median that crosses into the glyph, which appears as straight lines at cell boundaries.
+/// </para>
 /// </remarks>
 internal sealed class FontMsdfCell
 {
@@ -150,6 +156,31 @@ internal sealed class FontMsdfCell
                 }
 
                 pixels[offset + 3] = 255;
+            }
+        }
+
+        // The generated field saturates its three channels independently, so the field margin can
+        // hold different saturated channels on adjacent cells. Linear filtering at the shared cell
+        // boundary then blends two such margins and the median can cross into the glyph, which shows
+        // up as straight lines at glyph-cell edges. Make the guard border black in every channel:
+        // it is outside the distance range and the SDF shader only needs the median there. The
+        // padding is the extra margin beyond the range; a zero-padding sidecar still gets one guard
+        // pixel so adjacent cells can never blend their saturated channels.
+        int guard = Math.Max(border - range, 1);
+        for (int y = 0; y < cellHeight; y++)
+        {
+            for (int x = 0; x < cellWidth; x++)
+            {
+                if (x >= guard && x < cellWidth - guard
+                    && y >= guard && y < cellHeight - guard)
+                {
+                    continue;
+                }
+
+                int offset = ((y * cellWidth) + x) * 4;
+                pixels[offset] = 0;
+                pixels[offset + 1] = 0;
+                pixels[offset + 2] = 0;
             }
         }
 
