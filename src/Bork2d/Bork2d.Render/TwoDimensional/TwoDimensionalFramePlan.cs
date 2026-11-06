@@ -2,8 +2,8 @@ namespace Bork2d.Render.TwoDimensional;
 
 /// <summary>
 /// The renderer-owned result of planning one snapshot: valid cameras in ascending <c>ZIndex</c> order
-/// with their contiguous sprite, line, and draw-run ranges, plus the frame's draw/instance/line/skip/
-/// cull totals.
+/// with their contiguous sprite/glyph instance, line, and draw-run ranges, plus the frame's draw/
+/// instance/glyph/line/skip/cull totals.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -15,10 +15,18 @@ namespace Bork2d.Render.TwoDimensional;
 /// <para>
 /// <see cref="CameraCount"/> is the snapshot's captured camera count, including cameras that were
 /// invalid and skipped; <see cref="CameraPlanCount"/> is the valid subset.
-/// <see cref="DrawCalls"/> is the total number of draw runs: every sprite run records one
-/// <c>vkCmdDraw</c> and every line run one <c>vkCmdDrawIndexed</c>, so a camera with at least one run
-/// records one draw per contiguous kind/shader change. <see cref="NonEmptyCameras"/> is the number of
-/// cameras with at least one run, so <c>NonEmptyCameras &lt;= DrawCalls</c>.
+/// <see cref="DrawCalls"/> is the total number of draw runs: every sprite run and every font run
+/// records one <c>vkCmdDraw</c> and every line run one <c>vkCmdDrawIndexed</c>, so a camera with at
+/// least one run records one draw per contiguous kind/shader/font change.
+/// <see cref="NonEmptyCameras"/> is the number of cameras with at least one run, so
+/// <c>NonEmptyCameras &lt;= DrawCalls</c>.
+/// </para>
+/// <para>
+/// <see cref="InstanceCount"/> counts sprite instance records only, matching the public
+/// <c>RenderStats.Instances</c> contract; the shared instance buffer also holds
+/// <see cref="GlyphCount"/> glyph records, and each camera's
+/// <see cref="CameraDrawPlan.InstanceCount"/> covers both. <see cref="FontCount"/> is the number of
+/// captured font records, including skipped and empty ones.
 /// </para>
 /// </remarks>
 internal sealed class TwoDimensionalFramePlan
@@ -38,6 +46,12 @@ internal sealed class TwoDimensionalFramePlan
     /// <summary>Gets the total number of sprite instance records written into the frame buffer.</summary>
     internal int InstanceCount { get; set; }
 
+    /// <summary>Gets the total number of glyph instance records written into the shared frame buffer.</summary>
+    internal int GlyphCount { get; set; }
+
+    /// <summary>Gets the number of captured font records, including skipped and empty ones.</summary>
+    internal int FontCount { get; set; }
+
     /// <summary>Gets the total number of line records submitted by the frame across cameras.</summary>
     internal int LineCount { get; set; }
 
@@ -52,6 +66,12 @@ internal sealed class TwoDimensionalFramePlan
 
     /// <summary>Gets the number of sprites skipped by the frame (null/layer/non-Quad/pending).</summary>
     internal long SkippedSprites { get; set; }
+
+    /// <summary>
+    /// Gets the number of fonts skipped by the frame (null data, invalid layer, still-loading custom
+    /// shader, or still-loading atlas page). An empty layout is a normal no-draw, not a skip.
+    /// </summary>
+    internal long SkippedFonts { get; set; }
 
     /// <summary>
     /// Gets the number of lines skipped by the frame (null geometry, invalid layer, or a
@@ -69,6 +89,13 @@ internal sealed class TwoDimensionalFramePlan
     /// culled and are never counted here.
     /// </remarks>
     internal int CulledSprites { get; set; }
+
+    /// <summary>
+    /// Gets the number of fonts whose world bounds keep every layer-matching planned camera from
+    /// emitting any of their glyphs, with the same frame-level accounting as
+    /// <see cref="CulledSprites"/>.
+    /// </summary>
+    internal int CulledFonts { get; set; }
 
     /// <summary>
     /// Gets the number of lines whose world bounds keep every layer-matching planned camera from
@@ -101,13 +128,17 @@ internal sealed class TwoDimensionalFramePlan
         DrawCalls = 0;
         NonEmptyCameras = 0;
         InstanceCount = 0;
+        GlyphCount = 0;
+        FontCount = 0;
         LineCount = 0;
         LineVertexCount = 0;
         LineIndexCount = 0;
         RunCount = 0;
         SkippedSprites = 0;
+        SkippedFonts = 0;
         SkippedLines = 0;
         CulledSprites = 0;
+        CulledFonts = 0;
         CulledLines = 0;
         Cameras = [];
         Runs = [];

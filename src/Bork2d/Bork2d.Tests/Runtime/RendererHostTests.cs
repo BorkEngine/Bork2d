@@ -87,6 +87,7 @@ public sealed class RendererHostTests
             FramebufferHeight: 720,
             DrawCalls: 1,
             Instances: 3,
+            Glyphs: 4,
             Lines: 2,
             Cameras: 1,
             NonEmptyCameras: 1,
@@ -95,6 +96,7 @@ public sealed class RendererHostTests
             TextureUploadsPending: 0,
             TextureUploadBytesPending: 0,
             SkippedSprites: 0,
+            SkippedFonts: 1,
             SkippedLines: 1,
             ValidationErrors: 0,
             ValidationWarnings: 0);

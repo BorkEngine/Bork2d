@@ -8,16 +8,19 @@ using Silk.NET.Vulkan;
 namespace Bork2d.Render.Shaders;
 
 /// <summary>
-/// The renderer's fragment-shader catalog: the two built-in default entries (sprite and line), the
-/// per-path custom entries, asynchronous SPIR-V loads, validation, the engine-wide global-name
-/// registry, the content-hash module/pipeline caches, and catalog-remount retirement.
+/// The renderer's fragment-shader catalog: the three built-in default entries (sprite, line, and the
+/// font SDF shader), the per-path custom entries, asynchronous SPIR-V loads, validation, the
+/// engine-wide global-name registry, the content-hash module/pipeline caches, and catalog-remount
+/// retirement.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The built-in pack serves <see cref="DefaultShaderPath"/> (<c>shader/sprite</c>) and
-/// <see cref="LineShaderPath"/> (<c>shader/line</c>) as <see cref="ShaderAsset"/>s and their modules
-/// as raw data. Both are loaded synchronously before the first frame, and a failure of either is a
-/// fatal startup <see cref="Bork2dException"/>. A custom entry is keyed by its SPIR-V
+/// The built-in pack serves <see cref="DefaultShaderPath"/> (<c>shader/sprite</c>),
+/// <see cref="LineShaderPath"/> (<c>shader/line</c>), and <see cref="SdfShaderPath"/>
+/// (<c>shader/sdf</c>) as <see cref="ShaderAsset"/>s and their modules as raw data. All three are
+/// loaded synchronously before the first frame, and a failure of any is a fatal startup
+/// <see cref="Bork2dException"/>; the font default is required even when a game has no text. A
+/// custom entry is keyed by its SPIR-V
 /// <see cref="DataRef"/> path because a captured renderable already carries the frozen
 /// <see cref="ShaderRenderData"/>; the renderer never reloads the <see cref="ShaderAsset"/> per draw.
 /// </para>
@@ -34,16 +37,16 @@ namespace Bork2d.Render.Shaders;
 /// Loads started while planning a frame never complete that frame: <see cref="Pump"/> promotes
 /// completed loads on the next frame. That keeps one frame's bindings and run grouping deterministic.
 /// Modules are shared by shader content hash and pipelines by <c>(kind, content hash, output
-/// format)</c>, so identical content shares its module while the sprite and line graphics pipelines
-/// stay distinct. A retired entry keeps its module and pipelines until
+/// format)</c>, so identical content shares its module while the sprite, line, and font graphics
+/// pipelines stay distinct. A retired entry keeps its module and pipelines until
 /// <see cref="SafetyAgeFrames"/> frame pumps have passed since the last frame that used them, matching
 /// the two-frames-in-flight rule the texture pages use.
 /// </para>
 /// <para>
 /// The catalog observes <see cref="IAssetCatalogVersion"/> in <see cref="Pump"/>, once per frame
-/// before planning: a later mount retires every custom entry and starts a replacement load for both
-/// defaults. A previous ready default entry stays active until its replacement validates, so the
-/// default path never loses its shader; the old entry is retired after the safety age once the
+/// before planning: a later mount retires every custom entry and starts a replacement load for all
+/// three defaults. A previous ready default entry stays active until its replacement validates, so
+/// the default path never loses its shader; the old entry is retired after the safety age once the
 /// replacement is ready. A previously failed path is retried on its next sighting in the new
 /// catalog. Render-thread-only.
 /// </para>
@@ -68,6 +71,12 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     /// <summary>The canonical path of the built-in line vertex SPIR-V payload.</summary>
     internal const string LineVertexSpirVPath = "shader/line-vertex-spv";
 
+    /// <summary>The canonical path of the built-in font SDF fragment shader asset.</summary>
+    internal const string SdfShaderPath = "shader/sdf";
+
+    /// <summary>The canonical path of the built-in font SDF fragment SPIR-V payload.</summary>
+    internal const string SdfSpirVPath = "shader/sdf-spv";
+
     /// <summary>The first little-endian word of every SPIR-V module.</summary>
     internal const uint SpirVMagic = 0x07230203;
 
@@ -77,8 +86,11 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     /// <summary>The entry id of the built-in line shader, used for line fallbacks.</summary>
     internal const int LineDefaultEntryId = 1;
 
+    /// <summary>The entry id of the built-in font SDF shader, used for font fallbacks.</summary>
+    internal const int FontDefaultEntryId = 2;
+
     /// <summary>The first entry id assigned to a custom shader.</summary>
-    internal const int FirstCustomEntryId = 2;
+    internal const int FirstCustomEntryId = 3;
 
     /// <summary>
     /// The number of frame pumps a retired module and its pipelines outlive their last use.
@@ -91,6 +103,9 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
 
     private const string EntryPointName = "main";
 
+    /// <summary>The number of built-in default shader entries: sprite, line, and font SDF.</summary>
+    private const int DefaultEntryCount = FontDefaultEntryId + 1;
+
     private readonly IAssets _assets;
     private readonly IShaderModuleFactory _modules;
     private readonly ILogger _logger;
@@ -101,8 +116,8 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     private readonly List<ModuleRecord> _unreferencedModules = [];
     private readonly Dictionary<string, GlobalNameClaim> _globalNames = new(StringComparer.Ordinal);
     private readonly HashSet<string> _warnedPaths = new(StringComparer.Ordinal);
-    private readonly StoreEntry?[] _defaultEntries = new StoreEntry?[2];
-    private readonly DefaultReload?[] _defaultReloads = new DefaultReload?[2];
+    private readonly StoreEntry?[] _defaultEntries = new StoreEntry?[DefaultEntryCount];
+    private readonly DefaultReload?[] _defaultReloads = new DefaultReload?[DefaultEntryCount];
     private int _nextEntryId = FirstCustomEntryId;
     private long _catalogVersionSeen;
     private long _frameSequence;
@@ -128,8 +143,11 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     /// <summary>Gets the entry id of the built-in line shader.</summary>
     internal ShaderEntry LineDefaultEntry => DefaultEntryOrThrow(ShaderPipelineKind.Line).Entry;
 
+    /// <summary>Gets the entry id of the built-in font SDF shader.</summary>
+    internal ShaderEntry FontDefaultEntry => DefaultEntryOrThrow(ShaderPipelineKind.Font).Entry;
+
     /// <summary>
-    /// Loads and validates both built-in shaders, registers their global names, and creates their
+    /// Loads and validates the three built-in shaders, registers their global names, and creates their
     /// fragment modules.
     /// </summary>
     /// <param name="assets">The app's started asset service.</param>
@@ -168,10 +186,19 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             LineDefaultEntryId,
             LineShaderPath,
             "the built-in line shader asset");
+        StoreEntry font = CreateDefaultEntry(
+            store,
+            assets,
+            ShaderPipelineKind.Font,
+            FontDefaultEntryId,
+            SdfShaderPath,
+            "the built-in font SDF shader asset");
         store._defaultEntries[(int)ShaderPipelineKind.Sprite] = sprite;
         store._defaultEntries[(int)ShaderPipelineKind.Line] = line;
+        store._defaultEntries[(int)ShaderPipelineKind.Font] = font;
         store.AddGlobalNames(sprite);
         store.AddGlobalNames(line);
+        store.AddGlobalNames(font);
         return store;
     }
 
@@ -268,7 +295,12 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
 
     /// <inheritdoc/>
     public int GetDefaultEntryId(ShaderPipelineKind kind)
-        => kind == ShaderPipelineKind.Sprite ? DefaultEntryId : LineDefaultEntryId;
+        => kind switch
+        {
+            ShaderPipelineKind.Sprite => DefaultEntryId,
+            ShaderPipelineKind.Line => LineDefaultEntryId,
+            _ => FontDefaultEntryId,
+        };
 
     /// <inheritdoc/>
     public ShaderBinding Resolve(
@@ -313,6 +345,11 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             return DefaultEntryOrThrow(ShaderPipelineKind.Line).Entry;
         }
 
+        if (entryId == FontDefaultEntryId)
+        {
+            return DefaultEntryOrThrow(ShaderPipelineKind.Font).Entry;
+        }
+
         if (_entriesById.TryGetValue(entryId, out StoreEntry? entry))
         {
             return entry.Entry;
@@ -345,7 +382,7 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         return pipeline;
     }
 
-    /// <summary>Ensures both built-in default shaders' pipelines exist for an output format.</summary>
+    /// <summary>Ensures all three built-in default shaders' pipelines exist for an output format.</summary>
     /// <param name="outputFormat">The target's sRGB output color format.</param>
     /// <exception cref="Bork2dException">A default pipeline could not be created.</exception>
     internal void EnsureDefaultPipelines(Format outputFormat)
@@ -358,6 +395,11 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         EnsurePipeline(
             DefaultEntryOrThrow(ShaderPipelineKind.Line),
             ShaderPipelineKind.Line,
+            outputFormat,
+            fatal: true);
+        EnsurePipeline(
+            DefaultEntryOrThrow(ShaderPipelineKind.Font),
+            ShaderPipelineKind.Font,
             outputFormat,
             fatal: true);
     }
@@ -382,6 +424,7 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         CompleteLoadingEntries();
         CompleteDefaultReload(ShaderPipelineKind.Sprite);
         CompleteDefaultReload(ShaderPipelineKind.Line);
+        CompleteDefaultReload(ShaderPipelineKind.Font);
         RetireUnreferencedModules();
     }
 
@@ -422,6 +465,7 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         {
             _modules.DestroyPipelines(ShaderPipelineKind.Sprite, module.ContentHash);
             _modules.DestroyPipelines(ShaderPipelineKind.Line, module.ContentHash);
+            _modules.DestroyPipelines(ShaderPipelineKind.Font, module.ContentHash);
             _modules.DestroyModule(module.Kind, module.Module);
         }
 
@@ -465,10 +509,20 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
     }
 
     private static string Describe(ShaderPipelineKind kind)
-        => kind == ShaderPipelineKind.Sprite ? "sprite" : "line";
+        => kind switch
+        {
+            ShaderPipelineKind.Sprite => "sprite",
+            ShaderPipelineKind.Line => "line",
+            _ => "font",
+        };
 
     private static string ShaderPathFor(ShaderPipelineKind kind)
-        => kind == ShaderPipelineKind.Sprite ? DefaultShaderPath : LineShaderPath;
+        => kind switch
+        {
+            ShaderPipelineKind.Sprite => DefaultShaderPath,
+            ShaderPipelineKind.Line => LineShaderPath,
+            _ => SdfShaderPath,
+        };
 
     private StoreEntry FindEntry(int entryId)
     {
@@ -480,6 +534,11 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
         if (entryId == LineDefaultEntryId)
         {
             return DefaultEntryOrThrow(ShaderPipelineKind.Line);
+        }
+
+        if (entryId == FontDefaultEntryId)
+        {
+            return DefaultEntryOrThrow(ShaderPipelineKind.Font);
         }
 
         return _entriesById.TryGetValue(entryId, out StoreEntry? found)
@@ -843,6 +902,7 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
 
         StartDefaultReload(ShaderPipelineKind.Sprite);
         StartDefaultReload(ShaderPipelineKind.Line);
+        StartDefaultReload(ShaderPipelineKind.Font);
     }
 
     private void RetireAllCustomEntries()
@@ -941,6 +1001,7 @@ internal sealed class ShaderStore : IShaderFrameSource, IDisposable
             _ = _modulesByHash.Remove(module.ContentHash);
             _modules.DestroyPipelines(ShaderPipelineKind.Sprite, module.ContentHash);
             _modules.DestroyPipelines(ShaderPipelineKind.Line, module.ContentHash);
+            _modules.DestroyPipelines(ShaderPipelineKind.Font, module.ContentHash);
             _modules.DestroyModule(module.Kind, module.Module);
         }
     }

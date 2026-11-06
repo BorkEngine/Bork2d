@@ -1,3 +1,4 @@
+using System.Numerics;
 using Bork2d.Engine.Assets;
 using Bork2d.Render.Shaders;
 using Silk.NET.Vulkan;
@@ -9,12 +10,12 @@ namespace Bork2d.Tests.TestDoubles;
 /// <see cref="ShaderRenderData"/> to a pending, ready, or failed binding without Vulkan or I/O.
 /// </summary>
 /// <remarks>
-/// Both default entries always exist and are ready: <c>shader/sprite</c> is entry <c>0</c> and
-/// <c>shader/line</c> is entry <c>1</c>. Tests register custom entries with <see cref="Register"/>
-/// and can replace either default's metadata to model a game pack that shadows the built-in shader
-/// with declarations. An unregistered custom shader resolves as pending by default, so a test must
-/// opt every custom asset into a state. A failed binding resolves to the requesting kind's default
-/// entry, matching the production catalog's fallback.
+/// All three default entries always exist and are ready: <c>shader/sprite</c> is entry <c>0</c>,
+/// <c>shader/line</c> is entry <c>1</c>, and <c>shader/sdf</c> is entry <c>2</c>. Tests register
+/// custom entries with <see cref="Register"/> and can replace any default's metadata to model a game
+/// pack that shadows the built-in shader with declarations. An unregistered custom shader resolves as
+/// pending by default, so a test must opt every custom asset into a state. A failed binding resolves
+/// to the requesting kind's default entry, matching the production catalog's fallback.
 /// </remarks>
 internal sealed class FakeShaderFrameSource : IShaderFrameSource
 {
@@ -40,6 +41,25 @@ internal sealed class FakeShaderFrameSource : IShaderFrameSource
             LayoutVersion = ShaderLayout.CurrentVersion,
             EntryPoint = "main",
         });
+        FontDefaultMetadata = ShaderRenderData.Freeze(new ShaderAsset
+        {
+            SpirV = ShaderStore.SdfSpirVPath,
+            LayoutVersion = ShaderLayout.CurrentVersion,
+            EntryPoint = "main",
+            InstanceUniforms =
+            [
+                new ShaderUniform(
+                    "uSoftness",
+                    ShaderUniformType.Float,
+                    0,
+                    new Vector4(1f, 0f, 0f, 0f)),
+                new ShaderUniform(
+                    "uThreshold",
+                    ShaderUniformType.Float,
+                    1,
+                    new Vector4(0.5f, 0f, 0f, 0f)),
+            ],
+        });
         _entries.Add(
             DefaultEntryId,
             new ShaderEntry(
@@ -54,6 +74,13 @@ internal sealed class FakeShaderFrameSource : IShaderFrameSource
                 ShaderStore.LineShaderPath,
                 LineDefaultMetadata,
                 isDefault: true));
+        _entries.Add(
+            FontDefaultEntryId,
+            new ShaderEntry(
+                FontDefaultEntryId,
+                ShaderStore.SdfShaderPath,
+                FontDefaultMetadata,
+                isDefault: true));
     }
 
     /// <summary>Gets the entry id of the built-in sprite default.</summary>
@@ -62,11 +89,17 @@ internal sealed class FakeShaderFrameSource : IShaderFrameSource
     /// <summary>Gets the entry id of the built-in line default.</summary>
     internal int LineDefaultEntryId => ShaderStore.LineDefaultEntryId;
 
+    /// <summary>Gets the entry id of the built-in font SDF default.</summary>
+    internal int FontDefaultEntryId => ShaderStore.FontDefaultEntryId;
+
     /// <summary>Gets the current sprite default entry metadata.</summary>
     internal ShaderRenderData DefaultMetadata { get; private set; }
 
     /// <summary>Gets the current line default entry metadata.</summary>
     internal ShaderRenderData LineDefaultMetadata { get; private set; }
+
+    /// <summary>Gets the current font SDF default entry metadata.</summary>
+    internal ShaderRenderData FontDefaultMetadata { get; private set; }
 
     /// <summary>Replaces the sprite default entry's declarations (a shadowed <c>shader/sprite</c>).</summary>
     /// <param name="asset">The shader asset whose frozen declarations become the default entry's.</param>
@@ -91,6 +124,19 @@ internal sealed class FakeShaderFrameSource : IShaderFrameSource
             LineDefaultEntryId,
             ShaderStore.LineShaderPath,
             LineDefaultMetadata,
+            isDefault: true);
+    }
+
+    /// <summary>Replaces the font SDF default entry's declarations (a shadowed <c>shader/sdf</c>).</summary>
+    /// <param name="asset">The shader asset whose frozen declarations become the default entry's.</param>
+    internal void SetFontDefaultMetadata(ShaderAsset asset)
+    {
+        ArgumentNullException.ThrowIfNull(asset);
+        FontDefaultMetadata = ShaderRenderData.Freeze(asset);
+        _entries[FontDefaultEntryId] = new ShaderEntry(
+            FontDefaultEntryId,
+            ShaderStore.SdfShaderPath,
+            FontDefaultMetadata,
             isDefault: true);
     }
 
@@ -127,7 +173,12 @@ internal sealed class FakeShaderFrameSource : IShaderFrameSource
 
     /// <inheritdoc/>
     public int GetDefaultEntryId(ShaderPipelineKind kind)
-        => kind == ShaderPipelineKind.Sprite ? DefaultEntryId : LineDefaultEntryId;
+        => kind switch
+        {
+            ShaderPipelineKind.Sprite => DefaultEntryId,
+            ShaderPipelineKind.Line => LineDefaultEntryId,
+            _ => FontDefaultEntryId,
+        };
 
     /// <inheritdoc/>
     public ShaderBinding Resolve(

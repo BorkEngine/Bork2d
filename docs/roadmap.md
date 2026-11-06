@@ -245,11 +245,11 @@ Every sprite shader shares one pipeline layout and one descriptor-set layout:
 Only the fragment shader module differs per shader; the vertex module is shared. Pipelines are
 cached by `(pipeline kind, shader content hash, output color format)`. A shader module is keyed by
 content hash and its pipelines by kind, content hash, and format, so identical fragment content
-shares its module while the sprite and line pipelines stay distinct. A catalog remount that changes a
-shader creates a new entry and retires the old one after the frames that reference it complete. A
-shader that fails to load or create a pipeline falls back to its kind's default (`shader/sprite` or
-`shader/line`) with a one-time warning; a failure of either default itself is fatal at renderer
-startup.
+shares its module while the sprite, line, and font pipelines stay distinct. A catalog remount that
+changes a shader creates a new entry and retires the old one after the frames that reference it
+complete. A shader that fails to load or create a pipeline falls back to its kind's default
+(`shader/sprite`, `shader/line`, or `shader/sdf`) with a one-time warning; a failure of any default
+itself is fatal at renderer startup.
 
 The instance record grows from 96 to 176 bytes: the current six `vec4` values, one `vec4` holding
 the four additional texture indices, and four `vec4` values holding the packed instance uniforms.
@@ -274,12 +274,14 @@ wrong shader; the built-in default is ready at startup.
 
 The build produces an embedded `bork2d-builtin.pck` containing `shader/sprite`, `shader/line`, and
 `shader/sdf`. It also contains any metadata those shaders need. The runtime mounts this pack below
-the game's packs, including when `WithoutAssets()` is used.
+the game's packs, including when `WithoutAssets()` is used. All three are renderer startup defaults
+with fixed entry ids: sprite `0`, line `1`, and the font SDF default `2`; custom entries start at
+`3`. The SDF default is required startup content even when a game has no text.
 
 Consequences:
 
 - Built-ins are ordinary assets and can be shadowed by a game pack at the same path.
-- `WithoutAssets()` still has a working default sprite shader.
+- `WithoutAssets()` still has working default sprite, line, and font shaders.
 - The renderer no longer contains generated sprite SPIR-V arrays; it loads shader modules from the
   asset service like any other content.
 - The pack builder is build-time code and never enters the publish graph.
@@ -536,13 +538,14 @@ the same depth without making the order depend on which kind happened to be capt
 The existing sprite planner becomes the 2D planner:
 
 1. Build each camera's visible candidate list and sort it by `(ZIndex, screen Y, screen X)`.
-2. Build sprite instance records, line triangles, and font glyph quads.
-3. Compact contiguous runs with the same draw kind and shader.
+2. Build sprite instance records, line triangles, and one instance record per font glyph quad.
+3. Compact contiguous runs with the same draw kind, shader, and font asset.
 4. Record each run in order, binding the pipeline appropriate to the run.
 5. Apply the camera's layer mask and conservative world-AABB culling to every record.
 
 A line's bounds are the AABB of its outer geometry including half the width and miter extents. A
-font's bounds are the AABB of its glyph quads. Empty bounds mean unknown and never cull.
+font's bounds are the AABB of its glyph quads and are tested once per font record. Empty bounds mean
+unknown and never cull.
 
 ### 4. SVG and MSDF
 
@@ -593,10 +596,13 @@ extends and therefore how soft a glow can be. `padding` may be 0.
 
 #### `shader/sdf`
 
-`shader/sdf` is an ordinary built-in fragment shader. It reconstructs a signed distance from the
-three MSDF channels, applies a screen-space antialiasing width, and multiplies by the sprite color.
-It samples the main texture `.rgb` only. Its instance uniforms are `uThreshold` (default `0.5`) and
-`uSoftness` (default `1.0`); a sprite may override either through `SetUniform`.
+`shader/sdf` is the built-in font SDF fragment shader and the third renderer startup default. It
+reconstructs a signed distance from the three MSDF channels, applies a screen-space antialiasing
+width, and multiplies by the sprite or font color. It samples the main texture `.rgb` only. Its
+instance uniforms are `uThreshold` (default `0.5`) and `uSoftness` (default `1.0`); a sprite or font
+may override either through `SetUniform`. A sprite may still assign `shader/sdf` as ordinary custom
+content: it shares the SDF fragment asset and module but resolves with the sprite pipeline kind,
+while a font assigned the same shader uses the font pipeline kind.
 
 ```csharp
 SpriteAsset wordmark = engine.Assets.LoadAsset<SpriteAsset>("art/wordmark").GetAwaiter().GetResult();
@@ -749,26 +755,32 @@ The sprite pass becomes the 2D pass. For each camera it:
 
 1. Sorts each camera's visible records by `(ZIndex, screen Y, screen X)`; ties are unspecified.
 2. Applies the camera's culling mask and conservative world-AABB test.
-3. Builds sprite instance ranges, line triangle ranges, and font glyph ranges.
-4. Uploads the frame's instance, line vertex/index, and glyph buffers.
-5. Records contiguous runs in order, one pipeline bind per run.
+3. Builds sprite instance ranges, line triangle ranges, and one glyph instance record per drawable
+   font glyph quad, all in draw order.
+4. Uploads the frame's shared instance buffer and line vertex/index buffers.
+5. Records contiguous runs in order, one pipeline bind per run: a run changes on kind, shader entry,
+   or font asset.
 
 The built-in shader path stays one instanced draw per camera. The line and font paths add draw
-runs only when their pipeline or shader changes. `RenderStats` gains line and glyph counts and
-keeps its existing sprite, camera, and draw-call accounting. Frame capture records after the 2D
-pass, so it includes all three kinds.
+runs only when their pipeline, shader, or font asset changes; glyphs share the sprite instance
+buffer and the sprite vertex stage, so no dedicated glyph buffer exists. `RenderStats` gains
+`Glyphs` and `SkippedFonts` (and keeps the sprite, line, camera, and draw-call accounting); glyph
+counts are separate from the sprite-only `Instances`. Fonts that are still loading skip with a
+counter, an empty layout adds no run and is not skipped, and bounds-culled fonts are not skipped.
+Frame capture records after the 2D pass, so it includes all three kinds.
 
 ### Resource ownership
 
 - One shared pipeline layout and descriptor-set layout for sprite, line, and font pipelines.
-- One per-frame instance storage buffer for sprite instances.
+- One per-frame instance storage buffer holding both sprite and font glyph instance records.
 - One per-frame line vertex/index buffer pair.
-- One per-frame glyph instance buffer.
+- A font pipeline kind that reuses the sprite vertex stage's SPIR-V and instance ABI; a separate
+  Vulkan module handle is owned alongside the sprite and line modules.
 - A pipeline cache keyed by pipeline kind, shader content hash, and output color format.
 - A shader module cache keyed by canonical shader path and content hash.
-- Texture pages remain the single bindless texture owner; the built-in line vertex stage writes the
-  placeholder texture index `0` and zero extra indices, and a shared custom shader may sample the
-  bindless array from a line.
+- Texture pages remain the single bindless texture owner; fonts sample their atlas page through the
+  same bindless array, the built-in line vertex stage writes the placeholder texture index `0` and
+  zero extra indices, and a shared custom shader may sample the bindless array from a line.
 
 All resources are render-thread-owned. Frame buffers are fenced like the existing instance buffer;
 steady-state frames allocate nothing.
@@ -858,7 +870,8 @@ New or changed public members in 0.2:
 - `IFontRender<TLayer>`, `IEngine.CreateFontRender`, `FontAsset`, `FontGlyph`, `TextAlignment`,
   `FontAsset.MeasureText`.
 - `TextureFormat` expanded to the linear UNORM and BC values; `TextureDescriptor.MipLevels`.
-- `RenderStats` line and glyph counters.
+- `RenderStats` gains `Glyphs` and `SkippedFonts` alongside the sprite and line counters
+  (`Instances` stays sprite-only, and draw calls include font runs).
 
 `FontRender` uses the built-in `shader/sdf` when no custom `Shader` is assigned and may select a
 custom fragment shader for the font glyph instance ABI; a failed custom shader falls back to
@@ -1049,8 +1062,8 @@ Release GPU measurements cover:
 - The built-in sprite path still produces one draw per camera and no steady-state allocations.
 - A custom shader adds only boundary draws; a Pong frame stays under a small draw-call budget
   (target: 10 or fewer).
-- Instance record growth and line/font buffer traffic are measured against the existing sprite
-  path.
+- Instance record growth and shared sprite/glyph instance-buffer traffic are measured against the
+  existing sprite path.
 - KTX2 compressed pages reduce declared upload/residency bytes compared with RGBA8.
 - MSDF mips and the font atlas stay within the texture residency budget.
 

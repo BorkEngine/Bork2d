@@ -1,13 +1,13 @@
 namespace Bork2d.Render.Sprites;
 
 /// <summary>
-/// The per-frame instance sink the sprite frame planner writes into (M8 §6.6).
+/// The per-frame instance sink the sprite and font frame planner writes into (M8 §6.6).
 /// </summary>
 /// <remarks>
 /// The production implementation is the frame's mapped host-visible storage buffer
 /// (<c>FrameInstanceResources</c>); deterministic tests substitute an in-memory fake. The planner
-/// grows the buffer once per frame, after the frame fence has signaled, and then writes every
-/// record directly into the mapping; there is no CPU frame array and no staging copy.
+/// grows the buffer once per frame, after the frame fence has signaled, and then writes every sprite
+/// and glyph record directly into the mapping; there is no CPU frame array and no staging copy.
 /// </remarks>
 internal interface IInstanceBuffer
 {

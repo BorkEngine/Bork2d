@@ -5,8 +5,9 @@ namespace Bork2d.Render.TwoDimensional;
 /// </summary>
 /// <remarks>
 /// The kind participates in run grouping: two adjacent visible records share a run only when both
-/// their <see cref="DrawKind"/> and their resolved shader entry match. It never participates in the
-/// draw order, which is <c>(ZIndex, screen Y, screen X)</c> only.
+/// their <see cref="DrawKind"/> and their resolved shader entry match (and, for a font, the font
+/// asset binding). It never participates in the draw order, which is <c>(ZIndex, screen Y, screen
+/// X)</c> only.
 /// </remarks>
 internal enum DrawKind
 {
@@ -15,4 +16,7 @@ internal enum DrawKind
 
     /// <summary>A line: one indexed triangle-list draw from the frame line vertex/index buffers.</summary>
     Line,
+
+    /// <summary>A font glyph: one instanced quad draw from the shared frame instance buffer.</summary>
+    Font,
 }

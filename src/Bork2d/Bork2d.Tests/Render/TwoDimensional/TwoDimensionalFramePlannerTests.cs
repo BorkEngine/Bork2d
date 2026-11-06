@@ -1381,6 +1381,356 @@ public sealed class TwoDimensionalFramePlannerTests
         Assert.Equal(100 * expectedInstances, total);
     }
 
+    [Fact]
+    public void FontOnlyPlanEmitsOneRunOfGlyphInstances()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage(FontTestSupport.AtlasPath, 128, 128);
+        FontAsset font = FontTestSupport.CreateFont();
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddFont(snapshot, font, layer: 1u, zIndex: 0, text: "AB", size: 2f);
+
+        TwoDimensionalFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(1, plan.FontCount);
+        Assert.Equal(0, plan.SkippedFonts);
+        Assert.Equal(0, plan.CulledFonts);
+        Assert.Equal(0, plan.InstanceCount);
+        Assert.Equal(2, plan.GlyphCount);
+        Assert.Equal(1, plan.DrawCalls);
+        Assert.Equal(1, plan.RunCount);
+        Assert.Equal(1, plan.NonEmptyCameras);
+
+        DrawRun run = plan.Runs[0];
+        Assert.Equal(DrawKind.Font, run.Kind);
+        Assert.Equal(fixture.Shaders.FontDefaultEntryId, run.ShaderEntryId);
+        Assert.Equal(1, run.FontBindingId);
+        Assert.Equal(0, run.First);
+        Assert.Equal(2, run.Count);
+
+        Assert.Equal(2, fixture.Instances.WriteCount);
+        Assert.Equal(0, plan.Cameras[0].FirstInstance);
+        Assert.Equal(2, plan.Cameras[0].InstanceCount);
+        SpriteInstance first = fixture.Instances.Get(0);
+        Assert.Equal(0f, first.Misc.X);
+        Assert.Equal(0f, first.Misc.Y);
+        Assert.True(first.Misc.Z > 0f, "A ready atlas page index is written.");
+        Assert.Equal(new Vector4(1f, 0.5f, 0f, 0f), first.InstanceParams0);
+    }
+
+    [Fact]
+    public void FontGlyphsInterleaveWithSpritesByPerGlyphScreenPosition()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage(FontTestSupport.AtlasPath, 128, 128);
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        FontAsset font = FontTestSupport.CreateFont();
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0, mask: 0b11u);
+
+        // "AA" yields two same-glyph quads on one baseline: the second is further right. At the
+        // same ZIndex and screen Y, X orders them left-to-right, so a sprite between their world
+        // top-left X values breaks the glyph run.
+        AddFont(snapshot, font, layer: 1u, zIndex: 0, text: "AA", size: 2f);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 2u, zIndex: 0, x: 0.7f, y: 1.2f);
+
+        TwoDimensionalFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(3, plan.RunCount);
+        Assert.Equal(3, plan.DrawCalls);
+        Assert.Equal(DrawKind.Font, plan.Runs[0].Kind);
+        Assert.Equal(1, plan.Runs[0].Count);
+        Assert.Equal(DrawKind.Sprite, plan.Runs[1].Kind);
+        Assert.Equal(1, plan.Runs[1].Count);
+        Assert.Equal(DrawKind.Font, plan.Runs[2].Kind);
+        Assert.Equal(1, plan.Runs[2].Count);
+        Assert.Equal(1, plan.Runs[0].FontBindingId);
+        Assert.Equal(1, plan.Runs[2].FontBindingId);
+        Assert.Equal(0, plan.Runs[1].FontBindingId);
+        Assert.Equal(2, plan.GlyphCount);
+
+        // Draw order in the shared buffer is glyph, sprite, glyph.
+        Assert.Equal(3, fixture.Instances.WriteCount);
+        float firstGlyphX = fixture.Instances.Get(0).Transform1.X;
+        float spriteX = fixture.Instances.Get(1).Transform1.X;
+        float secondGlyphX = fixture.Instances.Get(2).Transform1.X;
+        Assert.True(firstGlyphX < spriteX && spriteX < secondGlyphX);
+    }
+
+    [Fact]
+    public void ContiguousGlyphRunsMergePerFontAssetAndNeverMergeAcrossAssets()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage(FontTestSupport.AtlasPath, 128, 128);
+        FontAsset first = FontTestSupport.CreateFont();
+        FontAsset second = FontTestSupport.CreateFont();
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0, mask: 1u);
+
+        // Two records of the same frozen asset are contiguous and share one run.
+        AddFont(snapshot, first, layer: 1u, zIndex: 0, x: -4f, text: "A", size: 2f);
+        AddFont(snapshot, first, layer: 1u, zIndex: 1, x: -4f, y: -3f, text: "A", size: 2f);
+        TwoDimensionalFramePlan sameAsset = fixture.Plan(snapshot, 320, 240);
+        Assert.Equal(1, sameAsset.RunCount);
+        Assert.Equal(2, sameAsset.Runs[0].Count);
+        Assert.Equal(1, sameAsset.Runs[0].FontBindingId);
+
+        AddFont(snapshot, second, layer: 1u, zIndex: 2, x: 2f, text: "A", size: 2f);
+        TwoDimensionalFramePlan differentAssets = fixture.Plan(snapshot, 320, 240);
+        Assert.Equal(2, differentAssets.RunCount);
+        Assert.Equal(2, differentAssets.Runs[0].Count);
+        Assert.Equal(1, differentAssets.Runs[0].FontBindingId);
+        Assert.Equal(1, differentAssets.Runs[1].Count);
+        Assert.Equal(2, differentAssets.Runs[1].FontBindingId);
+    }
+
+    [Fact]
+    public void SharedInstanceBufferHoldsSpritesAndGlyphsInDrawOrder()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage(FontTestSupport.AtlasPath, 128, 128);
+        fixture.MakeReadyPage("tex/a", 8, 8);
+        FontAsset font = FontTestSupport.CreateFont();
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0, mask: 0b11u);
+        AddSprite(snapshot, Sprite("tex/a"), layer: 1u, zIndex: 0, x: -5f);
+        AddFont(snapshot, font, layer: 2u, zIndex: 1, x: -2f, text: "AB", size: 2f);
+
+        TwoDimensionalFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(2, plan.RunCount);
+        Assert.Equal(1, plan.InstanceCount);
+        Assert.Equal(2, plan.GlyphCount);
+        Assert.Equal(3, plan.Cameras[0].InstanceCount);
+        Assert.Equal(0, plan.Cameras[0].FirstInstance);
+        Assert.Equal(3, fixture.Instances.LastRequiredInstances);
+        Assert.Equal(3, fixture.Instances.WriteCount);
+        Assert.Equal(-5f, fixture.Instances.Get(0).Transform1.X);
+        Assert.Equal(0f, fixture.Instances.Get(1).Misc.X);
+        Assert.Equal(0f, fixture.Instances.Get(2).Misc.X);
+    }
+
+    [Fact]
+    public void FontBoundsCullOnceAndEmptyBoundsNeverCull()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage(FontTestSupport.AtlasPath, 128, 128);
+        FontAsset font = FontTestSupport.CreateFont();
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0, mask: 0b11u);
+        AddFont(
+            snapshot,
+            font,
+            layer: 1u,
+            zIndex: 0,
+            x: 100f,
+            text: "A",
+            bounds: Box(100f, 0f, 5f));
+        AddFont(
+            snapshot,
+            font,
+            layer: 2u,
+            zIndex: 1,
+            x: 1000f,
+            text: "A",
+            bounds: Bounds.Empty);
+
+        TwoDimensionalFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(2, plan.FontCount);
+        Assert.Equal(1, plan.CulledFonts);
+        Assert.Equal(0, plan.SkippedFonts);
+        Assert.Equal(1, plan.GlyphCount);
+        Assert.Equal(1, plan.RunCount);
+    }
+
+    [Fact]
+    public void FontSkipReasonsAndCountersFollowTheApprovedRules()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage(FontTestSupport.AtlasPath, 128, 128);
+        FontAsset font = FontTestSupport.CreateFont();
+        FontAsset pendingAtlas = FontTestSupport.CreateFont();
+        pendingAtlas.Atlas = "fonts/pending-atlas";
+        ShaderRenderData pendingShader = fixture.Shaders.Register(
+            CustomShader("materials/font-pending"),
+            ShaderBindingState.Pending);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0, mask: 0b11u);
+
+        // Null frozen data, invalid layer, pending custom shader, and pending atlas all count.
+        snapshot.AddFont(new FontSnapshot(null, null, Matrix3x2.Identity, Color.White, 1u, 0));
+        AddFont(snapshot, font, layer: 0u, zIndex: 1);
+        AddFont(snapshot, font, layer: 1u, zIndex: 2, shader: pendingShader);
+        AddFont(snapshot, pendingAtlas, layer: 1u, zIndex: 3);
+
+        // Empty text is a normal no-draw, not a skip.
+        AddFont(snapshot, font, layer: 1u, zIndex: 4, text: string.Empty);
+
+        TwoDimensionalFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(5, plan.FontCount);
+        Assert.Equal(4, plan.SkippedFonts);
+        Assert.Equal(0, plan.GlyphCount);
+        Assert.Equal(0, plan.RunCount);
+        Assert.Equal(0, plan.DrawCalls);
+        Assert.Equal(
+            1,
+            fixture.Logs.Entries.Count(
+                entry => entry.Message.Contains("Font layer", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void EmptyTextIsNotSkippedAndProducesNoRun()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage(FontTestSupport.AtlasPath, 128, 128);
+        FontAsset font = FontTestSupport.CreateFont();
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddFont(snapshot, font, layer: 1u, text: string.Empty);
+
+        TwoDimensionalFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(1, plan.FontCount);
+        Assert.Equal(0, plan.SkippedFonts);
+        Assert.Equal(0, plan.GlyphCount);
+        Assert.Equal(0, plan.RunCount);
+        Assert.Equal(0, fixture.Instances.WriteCount);
+    }
+
+    [Fact]
+    public void FailedAtlasPageDrawsThePlaceholderAndIsNotSkipped()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeFailedPage("fonts/failed-atlas", 128, 128);
+        FontAsset font = FontTestSupport.CreateFont();
+        font.Atlas = "fonts/failed-atlas";
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddFont(snapshot, font, layer: 1u, text: "A", size: 2f);
+
+        TwoDimensionalFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(0, plan.SkippedFonts);
+        Assert.Equal(1, plan.GlyphCount);
+        Assert.Equal(1, plan.DrawCalls);
+        Assert.Equal(0f, fixture.Instances.Get(0).Misc.Z);
+    }
+
+    [Fact]
+    public void CustomFontGlobalMismatchFallsBackToTheSdfDefaultWithOneWarning()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage(FontTestSupport.AtlasPath, 128, 128);
+        FontAsset font = FontTestSupport.CreateFont();
+        ShaderRenderData shader = fixture.Shaders.Register(
+            CustomShader(
+                "materials/font-global",
+                globals:
+                [
+                    new ShaderUniform("gFont", ShaderUniformType.Float, 0, Vector4.Zero),
+                ]),
+            ShaderBindingState.Ready);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        snapshot.AddGlobalUniform(
+            new GlobalUniformSnapshot("gFont", ShaderUniformType.Vector2, new Vector4(1f, 2f, 0f, 0f)));
+        AddCamera(snapshot, zIndex: 0);
+        AddFont(snapshot, font, layer: 1u, text: "A", size: 2f, shader: shader);
+
+        TwoDimensionalFramePlan first = fixture.Plan(snapshot, 320, 240);
+        TwoDimensionalFramePlan second = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(1, first.GlyphCount);
+        Assert.Equal(0, first.SkippedFonts);
+        Assert.Equal(fixture.Shaders.FontDefaultEntryId, first.Runs[0].ShaderEntryId);
+        Assert.Equal(
+            1,
+            fixture.Logs.Entries.Count(
+                entry => entry.Message.Contains("materials/font-global", StringComparison.Ordinal)));
+        Assert.Equal(fixture.Shaders.FontDefaultEntryId, second.Runs[0].ShaderEntryId);
+    }
+
+    [Fact]
+    public void CustomFontShaderLanesReachTheGlyphInstances()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage(FontTestSupport.AtlasPath, 128, 128);
+        FontAsset font = FontTestSupport.CreateFont();
+        ShaderRenderData shader = fixture.Shaders.Register(
+            CustomShader(
+                "materials/font-ready",
+                instance:
+                [
+                    new ShaderUniform("uAlpha", ShaderUniformType.Float, 0, Vector4.Zero),
+                ]),
+            ShaderBindingState.Ready);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0);
+        AddFont(
+            snapshot,
+            font,
+            layer: 1u,
+            text: "A",
+            size: 2f,
+            shader: shader,
+            uniform0: new Vector4(0.25f, 0f, 0f, 0f),
+            uniform1: new Vector4(0.5f, 0f, 0f, 0f),
+            uniform2: new Vector4(0.75f, 0f, 0f, 0f),
+            uniform3: new Vector4(1f, 0f, 0f, 0f));
+
+        TwoDimensionalFramePlan plan = fixture.Plan(snapshot, 320, 240);
+
+        Assert.Equal(fixture.Shaders.EntryIdFor(shader), plan.Runs[0].ShaderEntryId);
+        SpriteInstance instance = fixture.Instances.Get(0);
+        Assert.Equal(new Vector4(0.25f, 0f, 0f, 0f), instance.InstanceParams0);
+        Assert.Equal(new Vector4(0.5f, 0f, 0f, 0f), instance.InstanceParams1);
+        Assert.Equal(new Vector4(0.75f, 0f, 0f, 0f), instance.InstanceParams2);
+        Assert.Equal(new Vector4(1f, 0f, 0f, 0f), instance.InstanceParams3);
+    }
+
+    [Fact]
+    public void WarmFontPlanAllocatesNothing()
+    {
+        using var fixture = new PlanningFixture();
+        fixture.MakeReadyPage(FontTestSupport.AtlasPath, 128, 128);
+        var snapshot = new FrameSnapshot { Sequence = 1 };
+        AddCamera(snapshot, zIndex: 0, viewport: new Vector4(0f, 0f, 0.5f, 1f), mask: 1u);
+        AddCamera(snapshot, zIndex: 1, viewport: new Vector4(0.5f, 0f, 0.5f, 1f), mask: 1u);
+        for (var index = 0; index < 40; index++)
+        {
+            FontAsset font = FontTestSupport.CreateFont();
+            AddFont(
+                snapshot,
+                font,
+                layer: 1u,
+                zIndex: index,
+                x: (index % 5) * 0.5f,
+                y: -((index / 5) * 0.5f),
+                text: "AB",
+                size: 2f);
+        }
+
+        int expectedGlyphs = fixture.Plan(snapshot, 320, 240).GlyphCount;
+        Assert.Equal(160, expectedGlyphs);
+        for (var warmup = 0; warmup < 5; warmup++)
+        {
+            _ = fixture.Plan(snapshot, 320, 240);
+        }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var total = 0;
+        for (var iteration = 0; iteration < 100; iteration++)
+        {
+            total += fixture.Plan(snapshot, 320, 240).GlyphCount;
+        }
+
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(0, allocated);
+        Assert.Equal(100 * expectedGlyphs, total);
+    }
+
     private static Bounds Box(float x, float y, float halfExtent)
         => Bounds.FromMinMax(
             new Vector2(x - halfExtent, y - halfExtent),
@@ -1493,6 +1843,47 @@ public sealed class TwoDimensionalFramePlannerTests
                 ExtraTexture3 = extraTexture3,
                 AdditionalTextureCount = additionalTextureCount,
             });
+
+    private static void AddFont(
+        FrameSnapshot snapshot,
+        FontAsset font,
+        uint layer,
+        int zIndex = 0,
+        float x = 0f,
+        float y = 0f,
+        Bounds? bounds = null,
+        ShaderRenderData? shader = null,
+        string text = "AB",
+        float size = 2f,
+        Vector4? uniform0 = null,
+        Vector4? uniform1 = null,
+        Vector4? uniform2 = null,
+        Vector4? uniform3 = null)
+    {
+        FontRenderData data = FontRenderData.Freeze(font);
+        FontLayoutData layout = FontLayoutBuilder.Build(
+            data.Glyphs,
+            data.Kerning,
+            data.Ascent,
+            data.Descent,
+            data.LineGap,
+            text,
+            size,
+            TextAlignment.Left,
+            lineSpacing: 1f,
+            missingGlyph: null);
+        Matrix3x2 world = Matrix3x2.CreateTranslation(x, y);
+        snapshot.AddFont(
+            new FontSnapshot(data, layout, world, Color.White, layer, zIndex)
+            {
+                Bounds = bounds ?? FontBounds.CreateWorldBounds(layout, world),
+                ShaderData = shader,
+                Uniform0 = uniform0 ?? Vector4.Zero,
+                Uniform1 = uniform1 ?? Vector4.Zero,
+                Uniform2 = uniform2 ?? Vector4.Zero,
+                Uniform3 = uniform3 ?? Vector4.Zero,
+            });
+    }
 
     private static void AddLine(
         FrameSnapshot snapshot,

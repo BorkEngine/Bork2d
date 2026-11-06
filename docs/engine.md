@@ -215,7 +215,10 @@ custom fragment shader is drawn with the font glyph instance ABI, and a failed o
 shader falls back to `shader/sdf` with a one-time warning. Instance uniform values follow the same
 strict rules: `SetUniform` validates immediately against the frozen declarations, `ResetUniforms`
 clears them, reassigning `Shader` keeps them, and capture applies only values whose name and type
-still match. A font without a custom shader has a zero instance-uniform block.
+still match. A font without a custom shader has a zero instance-uniform block; the renderer seeds
+the SDF default's declared defaults. A still-loading custom shader or atlas page skips the font
+for that frame and counts in `RenderStats.SkippedFonts`; submitted glyph instances count in
+`RenderStats.Glyphs`, while an empty layout draws nothing and is not a skip.
 
 `FontAsset.MeasureText(ReadOnlySpan<char>, float)` returns the layout box for a text and size: X is
 the widest line's advance width including kerning and spaces, and Y is the line count times the

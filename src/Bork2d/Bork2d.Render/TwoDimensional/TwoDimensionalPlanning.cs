@@ -28,7 +28,9 @@ namespace Bork2d.Render.TwoDimensional;
 /// texture page are skipped; an unknown topology or malformed field is fatal and never silently
 /// repaired. Line classification: null geometry, invalid layer, and a still-loading custom shader are
 /// skipped; the engine already validates line input and captures a non-drawable line as null
-/// geometry.
+/// geometry. Font classification: null frozen data and an invalid layer are skipped; an absent or
+/// empty layout is a normal no-draw and is not a skip; a still-loading custom shader or atlas page is
+/// skipped until a later frame observes it ready.
 /// </para>
 /// </remarks>
 internal static class TwoDimensionalPlanning
@@ -163,6 +165,49 @@ internal static class TwoDimensionalPlanning
         }
 
         return shaderPending ? LineSkipReason.Pending : LineSkipReason.None;
+    }
+
+    /// <summary>
+    /// Classifies one captured font for drawing, in the approved order: null frozen data, invalid
+    /// layer, empty layout, pending custom shader, pending atlas page.
+    /// </summary>
+    /// <remarks>
+    /// An absent layout and a layout with no drawable glyph quads (empty text or spaces only) are
+    /// <see cref="FontSkipReason.Empty"/>: they draw nothing and are not counted in
+    /// <c>RenderStats.SkippedFonts</c>. A failed or absent atlas page is not pending; the planner
+    /// draws it with the bindless placeholder, and a failed custom shader falls back to the SDF
+    /// default, so neither is a skip.
+    /// </remarks>
+    /// <param name="font">The captured font values.</param>
+    /// <param name="shaderPending">Whether the font's custom shader is still loading.</param>
+    /// <param name="atlasPending">Whether the font's resolved atlas page is still loading.</param>
+    /// <returns>The skip reason, or <see cref="FontSkipReason.None"/> when drawable.</returns>
+    internal static FontSkipReason ClassifyFont(
+        in FontSnapshot font,
+        bool shaderPending,
+        bool atlasPending)
+    {
+        if (font.FontData is null)
+        {
+            return FontSkipReason.Null;
+        }
+
+        if (!IsValidLayer(font.Layer))
+        {
+            return FontSkipReason.InvalidLayer;
+        }
+
+        if (font.Layout is null || font.Layout.IsEmpty)
+        {
+            return FontSkipReason.Empty;
+        }
+
+        if (shaderPending)
+        {
+            return FontSkipReason.PendingShader;
+        }
+
+        return atlasPending ? FontSkipReason.PendingAtlas : FontSkipReason.None;
     }
 
     private static void SortIndices<TSource, TOrder>(ReadOnlySpan<TSource> items, Span<int> indices)
