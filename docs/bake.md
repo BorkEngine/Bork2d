@@ -5,10 +5,11 @@ executables; it references `Bork2d.Engine` and the pack writer, but no runtime p
 it. The bake tooling, TOML parser, image decoder, KTX2 writer, block encoder, shader compiler, SVG
 parser, MSDF generator, and processors never enter a game's compile or publish graph.
 
-The built-in processors bake textures, fragment shaders, and SVG sources. An SVG source becomes a
-normal `SpriteAsset` and a linear multi-channel signed distance field (MSDF) texture. SeasonMSDF is
-a build-only dependency of `Bork2d.Bake`; it never reaches a runtime project or an AOT publish
-graph.
+The built-in processors bake textures, fragment shaders, SVG sources, and TTF/OTF font atlases. An SVG
+source becomes a normal `SpriteAsset` and a linear multi-channel signed distance field (MSDF) texture,
+and a font source becomes a `FontAsset` and its fixed square MSDF atlas. SeasonMSDF and
+StbTrueTypeSharp are build-only dependencies of `Bork2d.Bake`; they never reach a runtime project or an
+AOT publish graph.
 
 A game owns an assets executable (for example
 [Pong.Assets](../examples/pong/Pong.Assets)) whose `Program` configures `BakeApplicationBuilder`
@@ -38,15 +39,15 @@ return await new BakeApplicationBuilder()
   target passes `$(MSBuildProjectDirectory)`.
 - `WithPack(packPath, root)` adds one ordered pack. The first is the main pack; later packs are
   DLC/overlay packs whose entries shadow the main pack at runtime.
-- `UseDefaultAssets()` registers the engine authoring types (`SpriteAsset`) and attaches their
-  built-in validators.
+- `UseDefaultAssets()` registers the engine authoring types (`SpriteAsset` with its built-in validator
+  and `FontAsset` without a validator).
 - `RegisterAsset<T>()` registers one data type. `T` must carry a compiled `[GenerateShape]`; there is
   no reflection binding.
 - `RegisterAsset<T>(validator)` registers the type when it is not registered yet and appends a
   semantic validator. It never reports the duplicate-type diagnostic; multiple validators for one type
   run in registration order, and a null validator throws.
-- `UseDefaultProcessors()` registers the built-in texture, fragment shader, and SVG processors, in
-  that order.
+- `UseDefaultProcessors()` registers the built-in texture, fragment shader, SVG, and font processors,
+  in that order.
 - `WithTextureDefaults` supplies sampler state for textures without a sidecar.
 - `AddProcessor` adds a custom processor; later registrations override earlier ones for the same
   extension and report an informational diagnostic.
@@ -297,6 +298,102 @@ SeasonMSDF 0.2.0 in the bake tooling; no runtime project references it.
 Parse and bake diagnostics carry the source location when they have one (for example
 `line 2, column 5`). A source with an error emits no sprite, descriptor, or payload.
 
+### Fonts and MSDF atlases
+
+`Assets/fonts/score.ttf` (or `.otf`) is handled by the built-in font processor. A font source becomes
+a `FontAsset` at its base path and a linear MSDF atlas:
+
+- A `FontAsset` at `fonts/score` that references the `fonts/score-atlas` texture and records the
+  derived em size, the font's vertical metrics, the selected glyphs, the kerning pairs, and the
+  distance range.
+- A `TextureDescriptor` at `fonts/score-atlas` with exactly `resolution × resolution` pixels, the
+  linear `Rgb8` format (alpha forced to `255`), the full mip chain, `Filter = linear`, and
+  `Wrap = clamp`.
+- The raw KTX2 payload at `fonts/score-atlas-ktx2`.
+
+The required sidecar `score.ttf.toml` carries the bake settings:
+
+```toml
+resolution = 2048                     # fixed square atlas side in pixels, 1..8192
+range = 8                             # distance spread in pixels, greater than zero
+padding = 2                           # extra pixels beyond the range margin, at least zero
+ranges = ["U+0030-U+0039", "U+003A"]  # inclusive codepoint ranges
+glyphs = []                           # extra single codepoints
+```
+
+Every key is optional. An absent key inherits the default (`resolution = 2048`, `range = 8`,
+`padding = 2`, `ranges = ["U+0020-U+007E"]`, `glyphs = []`). A missing sidecar is created with all
+five explicit keys and reported as an informational diagnostic, matching the SVG convention. Invalid
+TOML, an unknown key, or a value of the wrong type uses the shared `BK2xxx` binder diagnostics; a value
+that binds but cannot form a bake is `BK9302`.
+
+#### Selection
+
+A range is inclusive and uses `U+XXXX` or `U+XXXX-U+YYYY`; a glyph is one `U+XXXX` value. The bake
+combines both keys, deduplicates the codepoints, and sorts them ascending. A malformed, inverted,
+surrogate, or above-`U+10FFFF` value is `BK9302`, and so is an empty selection. A selected codepoint
+that the font does not contain is reported as informational `BK9303` and skipped; the other glyphs
+still bake.
+
+#### Derived em size and packing
+
+`resolution` is the atlas's fixed side length: the atlas is always exactly `resolution × resolution`
+pixels and is never cropped. The bake derives the em size:
+
+1. Build every unique selected glyph outline in em units, with one cell per glyph.
+2. For a candidate em size `E`, the cell is `ceil((R-L) * E) + 2 * (range + padding)` wide by
+   `ceil((T-B) * E) + 2 * (range + padding)` high, where `L/B/R/T` are the outline bounds in em
+   units.
+3. Binary-search the largest integer `E` in `[8, resolution]` whose deterministic shelf layout fits
+   the atlas.
+4. Re-run the packer at the final `E` to get the cell positions.
+
+The shelf packer sorts unique glyph cells by height descending, then first codepoint ascending, then
+glyph index ascending, and fills shelves left to right and top to bottom. No spacing is added because
+each cell already reserves the field margin on every side. The result is independent of source order,
+so the same selection always produces the same layout. If even the 8-pixel em size does not fit, the
+bake fails with `BK9305`, naming the glyph count and the atlas size. A selection whose codepoints all
+map to whitespace glyphs is valid: it bakes an all-outside atlas at the deterministic em size `8`, and
+the glyph entries keep their advances with zero plane and atlas rectangles.
+
+#### Metrics, glyphs, and MSDF
+
+`Ascent`, `Descent`, and `LineGap` are the font metrics divided by units per em, so ascent is positive
+and descent is negative. `PixelsPerEm` is the derived em size, and `DistanceRange` is the sidecar's
+`range` in atlas pixels.
+
+A `FontGlyph` carries the codepoint, the advance in em units, the bearing (pen to quad bottom-left),
+the plane bounds in em units (the cell quad including the field margin), and the normalized atlas
+bounds (top-left origin, V down). The glyph array is sorted by codepoint; codepoints that share a font
+glyph share the same cell and measurements. A whitespace glyph has zero plane and atlas bounds and
+keeps its advance. `Kerning` records the nonzero pair adjustments in em units, sorted by
+`(LeftCodepoint, RightCodepoint)`; a font without pair data produces an empty array.
+
+Each non-empty glyph is rasterized into its own cell at the final em size and validated: the field must
+contain both inside and outside texels, must not contain a NaN channel, and a deterministic 16x16
+sample grid must agree with SeasonMSDF's exact signed distance. A failure is `BK9304`. An infinite
+channel is not an error: edge coloring intentionally saturates the unused channels of a smooth
+contour, and the shader median recovers the finite distance, so infinity clamps to `0` or `1`. Mip
+sign quality is covered by the renderer GPU test, not by the bake.
+
+The atlas is written as one complete KTX2 2.0 file with a full mip chain down to 1x1; a KTX2 or
+payload-write failure is `BK9306`. MSDF generation uses SeasonMSDF 0.2.0 and TrueType/CFF outline
+reading uses StbTrueTypeSharp 1.26.13; both are bake-only dependencies and no runtime project
+references them.
+
+#### Diagnostics
+
+| Code | Meaning |
+| --- | --- |
+| `BK9301` | The font source cannot be read, is not a recognized TTF/OTF container, or its outline tables cannot be initialized. |
+| `BK9302` | The font sidecar selection or bake options are invalid: an empty selection, a malformed, inverted, surrogate, or out-of-range codepoint or range, an invalid resolution/range/padding, or a margin that leaves no usable atlas. |
+| `BK9303` | A selected codepoint is absent from the font; the bake continues and emits the other glyphs. |
+| `BK9304` | A glyph's outline or MSDF field cannot be generated or validated: an invalid outline, a NaN channel, an empty or all-inside/all-outside field, or a sign mismatch against the exact distance. |
+| `BK9305` | The selected glyphs do not fit the atlas at the minimum em size, or the selection has no usable glyph. The message names the glyph count and the atlas size. |
+| `BK9306` | The KTX2 atlas payload could not be encoded or written. |
+
+A font source with an error emits no font, descriptor, or payload.
+
 ## Asset validators
 
 A registered data type can carry semantic validators. `RegisterAsset<T>(validator)` registers the type
@@ -362,6 +459,7 @@ not validate processor outputs, sidecars, or runtime-loaded assets.
 | `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tga` | `texture` | `TextureDescriptor` at the base path, KTX2 payload at `<base>-ktx2`. | Required; created with `type`/`compression` and the `WithTextureDefaults` sampler values when missing. |
 | `.frag` | `shader` | `ShaderAsset` at the base path, raw SPIR-V at `<base>-spv`. | Required; created empty when missing. |
 | `.svg` | `svg` | `SpriteAsset` at the base path, `TextureDescriptor` at `<base>-sdf`, KTX2 payload at `<base>-sdf-ktx2`. | Required; created with `resolution`, `range`, `padding`, and `compression` when missing. |
+| `.ttf`, `.otf` | `font` | `FontAsset` at the base path, `TextureDescriptor` at `<base>-atlas`, KTX2 payload at `<base>-atlas-ktx2`. | Required; created with `resolution`, `range`, `padding`, `ranges`, and `glyphs` when missing. |
 
 Implement `IAssetProcessor` for a sidecar-free source, or derive from `AssetProcessor<TSidecar>` for
 a required-sidecar source. A processor declares a stable `Name`, its extension list, and its
@@ -513,23 +611,25 @@ Codes are stable once a range is released. A diagnostic renders as
 | `BK6xxx` | MSBuild/build integration. |
 | `BK7xxx` | Processor registration and processing. |
 | `BK8xxx` | Registered semantic asset validators, including the built-in sprite validator. |
-| `BK9xxx` | Fragment shader sources and metadata: unreadable or forbidden source (`BK9001`), shaderc compilation failure (`BK9002`), invalid sidecar name/type/default/slots (`BK9003`), and instance/global uniform block overflow (`BK9004`). Also bake-side texture failures: KTX2/BC encoding or container writing (`BK9100`) and an impossible sidecar channel-type/compression mapping (`BK9101`). SVG sources and MSDF baking use `BK9200`-`BK9299`: malformed or unreadable source (`BK9201`), invalid supported content (`BK9202`), ignored features (`BK9203`), invalid SDF options (`BK9204`), no drawable geometry (`BK9205`), SDF representation/encoding failure (`BK9206`), and rejected BC7 fidelity/sign (`BK9207`). |
+| `BK9xxx` | Fragment shader sources and metadata: unreadable or forbidden source (`BK9001`), shaderc compilation failure (`BK9002`), invalid sidecar name/type/default/slots (`BK9003`), and instance/global uniform block overflow (`BK9004`). Also bake-side texture failures: KTX2/BC encoding or container writing (`BK9100`) and an impossible sidecar channel-type/compression mapping (`BK9101`). SVG sources and MSDF baking use `BK9200`-`BK9299`: malformed or unreadable source (`BK9201`), invalid supported content (`BK9202`), ignored features (`BK9203`), invalid SDF options (`BK9204`), no drawable geometry (`BK9205`), SDF representation/encoding failure (`BK9206`), and rejected BC7 fidelity/sign (`BK9207`). Font sources and MSDF atlases use `BK9300`-`BK9399`: unreadable or unrecognized source (`BK9301`), invalid selection or options (`BK9302`), missing selected codepoint (`BK9303`), unrepresentable glyph field (`BK9304`), atlas overflow or no usable glyphs (`BK9305`), and KTX2 payload failure (`BK9306`). |
 
 ## Incremental builds
 
 `bake` records a schema-3 manifest at `<project root>/obj/bork2d/bake/manifest.json`. It tracks the
 tool version, configuration hash, registered type/processor assembly closure, mode, every input
 path/hash, and every output path/hash. The configuration hash shape is
-`bork2d.bake.configuration.v4`; the manifest schema version is unchanged. The hash includes the
+`bork2d.bake.configuration.v5`; the manifest schema version is unchanged. The hash includes the
 shader tool marker `shaderc-2.23.0/layout-3/prologue-4/packer-1`, the texture tool marker
-`ktx2-1/bcn-2.3.0/mips-1`, and the SVG tool marker `svg-1/seasonmsdf-0.2.0/sdfmips-1`, so upgrading
-shaderc or BCnEncoder.Net, changing the fragment layout, prologue, uniform packer, KTX2 writer, mip
-filter, SVG parser, MSDF generator, or SDF mip handling invalidates a manifest written by the
-earlier tool. When all match, the bake prints an up-to-date summary and writes nothing. Any changed
-source, registration, processor, pack path, mode, or output triggers a full bake; `--force` bypasses
-the check, and `--check`/`validate` always run the pipeline and its validators. A missing required
-sidecar that the bake creates is re-collected as a tracked input, so the next bake can be up to date.
-`clean` removes the manifest with the packs.
+`ktx2-1/bcn-2.3.0/mips-1`, the SVG tool marker `svg-1/seasonmsdf-0.2.0/sdfmips-1`, and the font tool
+marker `font-1/stbtruetype-1.26.13/atlas-1`, so upgrading shaderc, BCnEncoder.Net, or
+StbTrueTypeSharp, changing the fragment layout, prologue, uniform packer, KTX2 writer, mip filter, SVG
+parser, MSDF generator, or SDF mip handling, or changing the font outline reading, glyph selection,
+em derivation, or atlas packing invalidates a manifest written by the earlier tool. When all match, the
+bake prints an up-to-date summary and writes nothing. Any changed source, registration, processor, pack
+path, mode, or output triggers a full bake; `--force` bypasses the check, and `--check`/`validate`
+always run the pipeline and its validators. A missing required sidecar that the bake creates is
+re-collected as a tracked input, so the next bake can be up to date. `clean` removes the manifest with
+the packs.
 
 ## MSBuild integration
 
