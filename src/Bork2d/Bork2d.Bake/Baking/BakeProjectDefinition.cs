@@ -103,7 +103,8 @@ internal sealed class BakeProjectDefinition
     }
 
     /// <summary>
-    /// Registers <c>Bork2d.Engine.Assets.SpriteAsset</c> and its built-in validator; idempotent.
+    /// Registers <c>Bork2d.Engine.Assets.SpriteAsset</c> with its built-in validator and
+    /// <c>Bork2d.Engine.Assets.FontAsset</c> without a validator; idempotent.
     /// </summary>
     internal void UseDefaultAssets()
     {
@@ -114,6 +115,7 @@ internal sealed class BakeProjectDefinition
 
         _defaultAssetsUsed = true;
         GetOrAddAssetRegistration<SpriteAsset>().AddValidator(new SpriteAssetValidator());
+        GetOrAddAssetRegistration<FontAsset>();
     }
 
     /// <summary>Records that the default processor registration was requested; idempotent.</summary>

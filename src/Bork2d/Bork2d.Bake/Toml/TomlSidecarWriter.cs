@@ -14,14 +14,14 @@ namespace Bork2d.Bake.Toml;
 /// <para>
 /// The writer is shape-driven and reflection-free: it walks the compiled properties in shape order,
 /// applies the same camelCase/<see cref="JsonPropertyNameAttribute"/>/<see cref="JsonIgnoreAttribute"/>
-/// rules as the binder, and supports scalar leaves only (bool, integer, float, double, string, enum).
-/// A nullable scalar/enum member is unwrapped to its element shape; a null member is skipped, which is
-/// how an optional setting stays absent.
+/// rules as the binder, and supports scalar leaves (bool, integer, float, double, string, enum) plus
+/// one-dimensional string arrays written as TOML arrays. A nullable scalar/enum member is unwrapped
+/// to its element shape; a null member is skipped, which is how an optional setting stays absent.
 /// </para>
 /// <para>
 /// Output is deterministic: bare keys where TOML allows them, quoted keys otherwise, LF line
-/// endings, and no trailing blank line. A nested object, collection, or reference member is an
-/// unsupported sidecar value and is reported as a writer failure.
+/// endings, and no trailing blank line. A nested object, non-string collection, or reference member
+/// is an unsupported sidecar value and is reported as a writer failure.
 /// </para>
 /// </remarks>
 internal static class TomlSidecarWriter
@@ -135,6 +135,22 @@ internal static class TomlSidecarWriter
                 formatted = EnsureFloatText(real.ToString("R", CultureInfo.InvariantCulture));
                 reason = null;
                 return true;
+
+            case IReadOnlyList<string> items:
+                if (shape.Kind != TypeShapeKind.Enumerable
+                    || shape is not IEnumerableTypeShape enumerable
+                    || enumerable.ElementType.Type != typeof(string))
+                {
+                    formatted = string.Empty;
+                    reason = $"the member type '{shape.Type.FullName}' is not a supported sidecar "
+                        + "value; sidecars accept bool, integer, float, double, string, enum, and "
+                        + "string-array settings only";
+                    return false;
+                }
+
+                formatted = FormatStringArray(items);
+                reason = null;
+                return true;
         }
 
         if (shape.Kind == TypeShapeKind.Enum)
@@ -154,8 +170,32 @@ internal static class TomlSidecarWriter
 
         formatted = string.Empty;
         reason = $"the member type '{shape.Type.FullName}' is not a supported sidecar scalar; "
-            + "sidecars accept bool, integer, float, double, string, and enum settings only";
+            + "sidecars accept bool, integer, float, double, string, enum, and string-array settings "
+            + "only";
         return false;
+    }
+
+    private static string FormatStringArray(IReadOnlyList<string> items)
+    {
+        if (items.Count == 0)
+        {
+            return "[]";
+        }
+
+        var builder = new StringBuilder();
+        builder.Append('[');
+        for (int index = 0; index < items.Count; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(", ");
+            }
+
+            builder.Append(Quote(items[index]));
+        }
+
+        builder.Append(']');
+        return builder.ToString();
     }
 
     private static string EnsureFloatText(string text)

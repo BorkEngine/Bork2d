@@ -65,7 +65,10 @@ public sealed class BakeApplicationBuilder
     }
 
     /// <summary>Registers the engine-provided authoring asset types and their built-in validators; idempotent.</summary>
-    /// <remarks>This currently registers <c>Bork2d.Engine.Assets.SpriteAsset</c> and its built-in validator.</remarks>
+    /// <remarks>
+    /// This registers <c>Bork2d.Engine.Assets.SpriteAsset</c> with its built-in validator and
+    /// <c>Bork2d.Engine.Assets.FontAsset</c> without a validator.
+    /// </remarks>
     /// <returns>This builder.</returns>
     public BakeApplicationBuilder UseDefaultAssets()
     {
@@ -113,14 +116,14 @@ public sealed class BakeApplicationBuilder
 
     /// <summary>
     /// Registers the built-in texture processor for png/jpg/jpeg/bmp/tga, the fragment shader
-    /// processor for frag, and the SVG processor for svg; idempotent.
+    /// processor for frag, the SVG processor for svg, and the font processor for ttf/otf; idempotent.
     /// </summary>
     /// <remarks>
     /// <para>
     /// The processors are added at this call position in the order <c>texture</c>, <c>shader</c>,
-    /// <c>svg</c>, so a later <see cref="AddProcessor(IAssetProcessor)"/> registration overrides one of
-    /// them for a shared extension (with an informational diagnostic), and the defaults stay first
-    /// when this call precedes the custom registrations.
+    /// <c>svg</c>, <c>font</c>, so a later <see cref="AddProcessor(IAssetProcessor)"/> registration
+    /// overrides one of them for a shared extension (with an informational diagnostic), and the
+    /// defaults stay first when this call precedes the custom registrations.
     /// </para>
     /// <para>
     /// The texture processor emits a <c>TextureDescriptor</c> and its KTX2 payload;
@@ -143,6 +146,13 @@ public sealed class BakeApplicationBuilder
     /// required sidecar is created with the default resolution, range, padding, and uncompressed
     /// format.
     /// </para>
+    /// <para>
+    /// The font processor bakes the selected TTF/OTF codepoints into a fixed square linear MSDF
+    /// atlas. It emits a <c>FontAsset</c> at the base path, a <c>TextureDescriptor</c> at
+    /// <c>&lt;base&gt;-atlas</c>, and the raw KTX2 payload at <c>&lt;base&gt;-atlas-ktx2</c>; a
+    /// missing required sidecar is created with the default resolution, range, padding, printable
+    /// ASCII selection, and no extra glyphs.
+    /// </para>
     /// </remarks>
     /// <returns>This builder.</returns>
     public BakeApplicationBuilder UseDefaultProcessors()
@@ -153,6 +163,7 @@ public sealed class BakeApplicationBuilder
             _definition.AddProcessor(new TextureProcessor(_definition.TextureDefaults));
             _definition.AddProcessor(new ShaderProcessor());
             _definition.AddProcessor(new SvgProcessor());
+            _definition.AddProcessor(new FontProcessor());
         }
 
         return this;

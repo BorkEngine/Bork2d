@@ -1,5 +1,6 @@
 using System.Globalization;
 using Bork2d.Bake.Baking;
+using Bork2d.Bake.Fonts;
 using Bork2d.Bake.Processors;
 using Bork2d.Bake.Shaders;
 using Bork2d.Bake.Svg;
@@ -20,42 +21,67 @@ namespace Bork2d.Bake.Incremental;
 /// </para>
 /// <para>
 /// The shader tool marker (<see cref="ShaderToolInfo.ConfigurationMarker"/>), the texture tool marker
-/// (<see cref="TextureToolInfo.ConfigurationMarker"/>), and the SVG tool marker
-/// (<see cref="SvgToolInfo.ConfigurationMarker"/>) are always part of the hash, so upgrading shaderc,
-/// changing the fragment layout/prologue/packer, changing the KTX2 writer, upgrading the block
-/// encoder, changing the SVG parser or MSDF generator, or changing the SDF mip handling invalidates a
-/// manifest written by the earlier tool. Fields are framed by <see cref="BakeHash.HashTextFields"/>
-/// and use a version marker, so a later hash-shape change invalidates older manifests instead of
-/// colliding with them. Processor and type assembly contents are hashed separately by
+/// (<see cref="TextureToolInfo.ConfigurationMarker"/>), the SVG tool marker
+/// (<see cref="SvgToolInfo.ConfigurationMarker"/>), and the font tool marker
+/// (<see cref="FontToolInfo.ConfigurationMarker"/>) are always part of the hash, so upgrading
+/// shaderc, changing the fragment layout/prologue/packer, changing the KTX2 writer, upgrading the
+/// block encoder, changing the SVG parser or MSDF generator, changing the SDF mip handling, changing
+/// the font outline reader, or changing the font atlas selection/packing invalidates a manifest
+/// written by the earlier tool. Fields are framed by <see cref="BakeHash.HashTextFields"/> and use a
+/// version marker, so a later hash-shape change invalidates older manifests instead of colliding with
+/// them. Processor and type assembly contents are hashed separately by
 /// <see cref="BakeAssemblyClosure"/>.
 /// </para>
 /// </remarks>
 internal static class BakeConfigurationHash
 {
-    private const string HashShape = "bork2d.bake.configuration.v4";
+    private const string HashShape = "bork2d.bake.configuration.v5";
 
     /// <summary>Computes the configuration hash of a validated project.</summary>
     /// <param name="project">The validated project configuration.</param>
     /// <returns>The 32-character uppercase hex digest.</returns>
     internal static string Compute(BakeProject project)
-        => Compute(project, TextureToolInfo.ConfigurationMarker, SvgToolInfo.ConfigurationMarker);
+        => Compute(
+            project,
+            TextureToolInfo.ConfigurationMarker,
+            SvgToolInfo.ConfigurationMarker,
+            FontToolInfo.ConfigurationMarker);
 
     /// <summary>
     /// Computes the configuration hash with an explicit texture tool marker.
     /// </summary>
     /// <remarks>
     /// The explicit-marker overload exists so a test can prove the marker participates in the hash;
-    /// production always uses <see cref="TextureToolInfo.ConfigurationMarker"/>. The SVG marker is
-    /// still <see cref="SvgToolInfo.ConfigurationMarker"/>.
+    /// production always uses <see cref="TextureToolInfo.ConfigurationMarker"/>. The SVG and font
+    /// markers are still their constants.
     /// </remarks>
     /// <param name="project">The validated project configuration.</param>
     /// <param name="textureToolMarker">The texture tool marker to hash.</param>
     /// <returns>The 32-character uppercase hex digest.</returns>
     internal static string Compute(BakeProject project, string textureToolMarker)
-        => Compute(project, textureToolMarker, SvgToolInfo.ConfigurationMarker);
+        => Compute(
+            project,
+            textureToolMarker,
+            SvgToolInfo.ConfigurationMarker,
+            FontToolInfo.ConfigurationMarker);
 
     /// <summary>
     /// Computes the configuration hash with explicit texture and SVG tool markers.
+    /// </summary>
+    /// <remarks>
+    /// The explicit-marker overload exists so a test can prove each marker participates in the hash;
+    /// production always uses the marker constants. The font marker is still
+    /// <see cref="FontToolInfo.ConfigurationMarker"/>.
+    /// </remarks>
+    /// <param name="project">The validated project configuration.</param>
+    /// <param name="textureToolMarker">The texture tool marker to hash.</param>
+    /// <param name="svgToolMarker">The SVG tool marker to hash.</param>
+    /// <returns>The 32-character uppercase hex digest.</returns>
+    internal static string Compute(BakeProject project, string textureToolMarker, string svgToolMarker)
+        => Compute(project, textureToolMarker, svgToolMarker, FontToolInfo.ConfigurationMarker);
+
+    /// <summary>
+    /// Computes the configuration hash with explicit texture, SVG, and font tool markers.
     /// </summary>
     /// <remarks>
     /// The explicit-marker overload exists so a test can prove each marker participates in the hash;
@@ -64,12 +90,18 @@ internal static class BakeConfigurationHash
     /// <param name="project">The validated project configuration.</param>
     /// <param name="textureToolMarker">The texture tool marker to hash.</param>
     /// <param name="svgToolMarker">The SVG tool marker to hash.</param>
+    /// <param name="fontToolMarker">The font tool marker to hash.</param>
     /// <returns>The 32-character uppercase hex digest.</returns>
-    internal static string Compute(BakeProject project, string textureToolMarker, string svgToolMarker)
+    internal static string Compute(
+        BakeProject project,
+        string textureToolMarker,
+        string svgToolMarker,
+        string fontToolMarker)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentException.ThrowIfNullOrWhiteSpace(textureToolMarker);
         ArgumentException.ThrowIfNullOrWhiteSpace(svgToolMarker);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fontToolMarker);
 
         var fields = new List<string>
         {
@@ -77,6 +109,7 @@ internal static class BakeConfigurationHash
             ShaderToolInfo.ConfigurationMarker,
             textureToolMarker,
             svgToolMarker,
+            fontToolMarker,
             project.ProjectRoot,
             Format(project.Packs.Count),
         };
