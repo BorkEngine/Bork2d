@@ -1,4 +1,4 @@
-resolution = 512
+resolution = 384
 range = 8
 padding = 2
 ranges = ["U+0020-U+007E"]
