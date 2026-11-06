@@ -642,7 +642,7 @@ resolution = 512                   # fixed square atlas side length in pixels
 range = 8                          # distance spread in pixels
 padding = 2                        # extra pixels around the field margin
 ranges = ["U+0020-U+007E"]         # explicit Unicode ranges
-glyphs = ["U+2605"]                # optional single glyphs
+glyphs = []                        # optional single glyphs; none in the Pong sidecar
 ```
 
 If the sidecar is absent, the bake creates one with printable ASCII, `resolution = 2048`,
