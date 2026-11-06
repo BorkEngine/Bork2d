@@ -17,7 +17,8 @@ public sealed class PongGame : IGame<GameLayer>
     private const int PaddleZIndex = 10;
     private const int BallZIndex = 20;
 
-    // The score is the only HUD content; it draws above every gameplay element.
+    // The score, match state, and control prompt are the HUD; they draw above every gameplay
+    // element.
     private const int HudZIndex = 30;
 
     // The wordmark sits behind every gameplay element; the center line draws over it.
@@ -33,6 +34,17 @@ public sealed class PongGame : IGame<GameLayer>
     private const float ScoreBaselineY = 7.2f;
     private const float ScoreGap = 0.4f;
 
+    // The state line is 1.0 world units per em. Its baseline sits at y = 6.0, so the tallest glyphs
+    // stop around y = 6.7, clear of the score baseline at y = 7.2 and the top court line at y = 9.
+    private const float StateSize = 1.0f;
+    private const float StateBaselineY = 6.0f;
+
+    // The prompt is 0.65 world units per em. Its baseline sits at y = -8.0, so its descenders stay
+    // above the bottom court line at y = -9 while the 40-character playing prompt is under 16 world
+    // units wide and stays inside the 32-unit court width.
+    private const float PromptSize = 0.65f;
+    private const float PromptBaselineY = -8.0f;
+
     // A fixed phase keeps the ball's time-driven pulse legible from the first frame instead of
     // starting at the dimmest point of its cycle.
     private const float BallPulsePhase = 0.75f;
@@ -45,12 +57,13 @@ public sealed class PongGame : IGame<GameLayer>
     private static readonly Color _clearColor = new(0.04f, 0.04f, 0.06f, 1f);
     private static readonly Color _courtColor = new(0.7f, 0.82f, 1f, 1f);
     private static readonly Color _wordmarkColor = new(0.65f, 0.78f, 1f, 0.15f);
+
+    // The prompt reuses the court color at reduced alpha so it reads as secondary HUD text.
+    private static readonly Color _promptColor = new(0.7f, 0.82f, 1f, 0.65f);
     private IEngine<GameLayer>? _engine;
     private ICamera<GameLayer>? _camera;
     private ILineRender<GameLayer>? _courtBorder;
     private ILineRender<GameLayer>? _courtCenterLine;
-    private SimulationState _lastState = default;
-    private string? _title;
     private int _lastLeftScore = -1;
     private int _lastRightScore = -1;
 
@@ -76,6 +89,12 @@ public sealed class PongGame : IGame<GameLayer>
     /// <summary>Gets the right score renderable, or <see langword="null"/> before <c>Setup</c>.</summary>
     private IFontRender<GameLayer>? RightScore { get; set; }
 
+    /// <summary>Gets the centered match-state renderable, or <see langword="null"/> before <c>Setup</c>.</summary>
+    private IFontRender<GameLayer>? StateText { get; set; }
+
+    /// <summary>Gets the centered control-prompt renderable, or <see langword="null"/> before <c>Setup</c>.</summary>
+    private IFontRender<GameLayer>? PromptText { get; set; }
+
     /// <inheritdoc/>
     public void Setup(IEngine<GameLayer> engine)
     {
@@ -90,7 +109,7 @@ public sealed class PongGame : IGame<GameLayer>
         ShaderAsset ballShader = engine.Assets.LoadAsset(settings.BallShader).GetAwaiter().GetResult();
         ShaderAsset courtShader = engine.Assets.LoadAsset(settings.CourtShader).GetAwaiter().GetResult();
         SpriteAsset wordmarkSprite = engine.Assets.LoadAsset(settings.Wordmark).GetAwaiter().GetResult();
-        FontAsset scoreFont = engine.Assets.LoadAsset(settings.ScoreFont).GetAwaiter().GetResult();
+        FontAsset hudFont = engine.Assets.LoadAsset(settings.ScoreFont).GetAwaiter().GetResult();
 
         // The built-in pack is mounted below the game packs, so the SDF shader is loaded by its
         // canonical path instead of being referenced from game_settings.toml: the game pack does not
@@ -127,18 +146,44 @@ public sealed class PongGame : IGame<GameLayer>
         Wordmark.LocalScale = new Vector2(WordmarkScale, WordmarkScale);
         Wordmark.Color = _wordmarkColor;
 
-        // The score uses the baked font and the renderer's default shader/sdf; the 2D pass orders
-        // the two HUD renderables above the gameplay layers by their shared ZIndex.
-        LeftScore = CreateScore(engine, scoreFont, settings.LeftPaddleTint, TextAlignment.Right, -ScoreGap);
-        RightScore = CreateScore(engine, scoreFont, settings.RightPaddleTint, TextAlignment.Left, ScoreGap);
+        // The HUD uses the baked font and the renderer's default shader/sdf. The 2D pass orders the
+        // score, state, and prompt above the gameplay layers; they share one ZIndex and font asset,
+        // so they stay contiguous and merge into one font run.
+        LeftScore = CreateHudText(
+            engine,
+            hudFont,
+            settings.LeftPaddleTint,
+            TextAlignment.Right,
+            ScoreSize,
+            new Vector2(-ScoreGap, ScoreBaselineY));
+        RightScore = CreateHudText(
+            engine,
+            hudFont,
+            settings.RightPaddleTint,
+            TextAlignment.Left,
+            ScoreSize,
+            new Vector2(ScoreGap, ScoreBaselineY));
+        StateText = CreateHudText(
+            engine,
+            hudFont,
+            _courtColor,
+            TextAlignment.Center,
+            StateSize,
+            new Vector2(0f, StateBaselineY));
+        PromptText = CreateHudText(
+            engine,
+            hudFont,
+            _promptColor,
+            TextAlignment.Center,
+            PromptSize,
+            new Vector2(0f, PromptBaselineY));
 
         Simulation = new PongSimulation(settings);
         Simulation.OnBallBounce += () => Ball.SetUniform("lastHit", (float)engine.Time.Time);
 
-        _title = null;
         ApplySimulation();
         UpdateScore();
-        UpdateTitle(engine, Simulation);
+        UpdateHud();
     }
 
     /// <inheritdoc/>
@@ -157,7 +202,7 @@ public sealed class PongGame : IGame<GameLayer>
         simulation.Step(deltaTime, leftInput, PongAi.Steer(simulation));
         ApplySimulation();
         UpdateScore();
-        UpdateTitle(engine, simulation);
+        UpdateHud();
     }
 
     /// <inheritdoc/>
@@ -200,18 +245,23 @@ public sealed class PongGame : IGame<GameLayer>
         }
     }
 
-    private void UpdateTitle(IEngine<GameLayer> engine, PongSimulation simulation)
+    private void UpdateHud()
     {
-        SimulationState state = simulation.CaptureState();
-        if (_lastState == state)
-        {
-            return;
-        }
-        _lastState = state;
-        string title = PongTitle.Format(state);
+        PongSimulation simulation = Simulation
+                                    ?? throw new InvalidOperationException(
+                                        "PongGame.Setup must create the simulation first.");
+        IFontRender<GameLayer> state = StateText
+                                       ?? throw new InvalidOperationException(
+                                           "PongGame.Setup must create the match-state text.");
+        IFontRender<GameLayer> prompt = PromptText
+                                        ?? throw new InvalidOperationException(
+                                            "PongGame.Setup must create the control prompt.");
 
-        engine.Window.Title = title;
-        _title = title;
+        // PongHud returns fixed literals, so this is allocation-free every frame; assigning the
+        // same text keeps the cached layout, and only a changed state word or prompt rebuilds it.
+        SimulationState snapshot = simulation.CaptureState();
+        state.Text = PongHud.State(snapshot);
+        prompt.Text = PongHud.Prompt(snapshot);
     }
 
     private void UpdateScore()
@@ -254,22 +304,23 @@ public sealed class PongGame : IGame<GameLayer>
         return paddle;
     }
 
-    private IFontRender<GameLayer> CreateScore(
+    private IFontRender<GameLayer> CreateHudText(
         IEngine<GameLayer> engine,
         FontAsset font,
         Color color,
         TextAlignment alignment,
-        float x)
+        float size,
+        Vector2 position)
     {
-        IFontRender<GameLayer> score = engine.CreateFontRender(engine.Root);
-        score.Font = font;
-        score.Layer = GameLayer.Hud;
-        score.ZIndex = HudZIndex;
-        score.Alignment = alignment;
-        score.Size = ScoreSize;
-        score.Color = color;
-        score.LocalPosition = new Vector2(x, ScoreBaselineY);
-        return score;
+        IFontRender<GameLayer> text = engine.CreateFontRender(engine.Root);
+        text.Font = font;
+        text.Layer = GameLayer.Hud;
+        text.ZIndex = HudZIndex;
+        text.Alignment = alignment;
+        text.Size = size;
+        text.Color = color;
+        text.LocalPosition = position;
+        return text;
     }
 
     private void CreateCourtLines(ShaderAsset courtShader)

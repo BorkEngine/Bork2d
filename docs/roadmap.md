@@ -5,7 +5,7 @@ five user-visible features: custom fragment shaders, KTX2 compressed textures, t
 geometry, SVG-to-MSDF assets, and TTF/OTF fonts with `FontRender`. Each feature lands with its bake
 processor, runtime asset and API, renderer path, tests, owning documentation, and a use in the Pong
 example. Pong is the integration gate: it must show a line-drawn court, compressed paddles, an SDF
-title, and a font-rendered score in one playable frame.
+wordmark, and font-rendered HUD text in one playable frame.
 
 The release is deliberately vertical rather than a set of isolated demos. A feature is done only
 when an author can produce the asset, a game can consume it through the documented API, the
@@ -23,15 +23,15 @@ owning documents; when a workstream lands, its behavior is documented as-built i
 | KTX2 textures | Semantic texture types, native BC compression, full mip chains, and a sidecar-driven bake. | Paddles are BC7 KTX2 textures. |
 | Line rendering | Open and closed polylines with world-space width, miter joins, butt caps, custom shaders, and normal 2D ordering. | The court border and center line are `LineRender`. |
 | SVG support | A shape-only SVG subset baked to a multi-channel signed distance field and drawn through `shader/sdf`. | The Pong wordmark is a baked SVG. |
-| Font support | TTF/OTF glyph selection baked to an MSDF atlas and drawn with `FontRender`. | The score uses the shipped font. |
+| Font support | TTF/OTF glyph selection baked to an MSDF atlas and drawn with `FontRender`. | The score and HUD text use the shipped font. |
 
 ## Release gates
 
 The version is complete only when all of the following are true:
 
 1. All five features are usable through documented public APIs, not only through example code.
-2. Pong runs windowed with the court, compressed paddles, SDF wordmark, and score, and remains
-   playable with the existing controls.
+2. Pong runs windowed with the court, compressed paddles, SDF wordmark, and font-rendered HUD text,
+   and remains playable with the existing controls.
 3. The example builds in Debug and Release, passes its format gate, and publishes with NativeAOT
    with zero AOT or trim warnings.
 4. The standard engine gates pass: Debug and Release builds, tests, format verification, docs link
@@ -451,7 +451,7 @@ distance-preserving downsample rather than a naive color average:
 - The base level keeps the MSDF channels; mips are generated from the same field so text and vector
   art remain stable at distance and during camera zoom.
 
-MSDF mip quality is a release gate for the Pong title and score. If the filter cannot meet the
+MSDF mip quality is a release gate for the Pong wordmark and HUD text. If the filter cannot meet the
 quality bar, the fallback is to generate MSDF mips from a higher-range field, not to disable mips
 for only some assets.
 
@@ -638,16 +638,16 @@ check: its corners must remain sharp at the default camera size and at a reduced
 
 ```toml
 # Assets/fonts/score.ttf.toml
-resolution = 2048                  # fixed square atlas side length in pixels
+resolution = 512                   # fixed square atlas side length in pixels
 range = 8                          # distance spread in pixels
 padding = 2                        # extra pixels around the field margin
 ranges = ["U+0020-U+007E"]         # explicit Unicode ranges
 glyphs = ["U+2605"]                # optional single glyphs
 ```
 
-If the sidecar is absent, the bake creates one with ASCII and the defaults above. A missing font
-source or an unreadable outline is a bake error. Ranges are inclusive and use `U+` hexadecimal
-notation. An empty selection is an error.
+If the sidecar is absent, the bake creates one with printable ASCII, `resolution = 2048`,
+`range = 8`, `padding = 2`, and no extra glyphs. A missing font source or an unreadable outline is a
+bake error. Ranges are inclusive and use `U+` hexadecimal notation. An empty selection is an error.
 
 #### Atlas and derived glyph size
 
@@ -660,10 +660,10 @@ notation. An empty selection is an error.
 4. If even 8 pixels cannot fit every selected glyph, fail the asset with a diagnostic naming the
    glyph count and atlas size.
 
-The derived em size is stored in the `FontAsset`. This makes quality predictable for small
-character sets such as Pong's digits while still failing clearly for an oversized selection. The
-atlas is packed with a deterministic shelf algorithm, sorted by glyph height and codepoint, so
-incremental bakes are stable.
+The derived em size is stored in the `FontAsset`. This makes quality predictable for a bounded
+selection such as the Pong HUD's printable ASCII while still failing clearly for an oversized
+selection. The atlas is packed with a deterministic shelf algorithm, sorted by glyph height and
+codepoint, so incremental bakes are stable.
 
 The atlas texture uses `type = "rgb"`, `compression = "none"`, and a full mip chain. MSDF distance
 data is not color data, so the generic color path's `type = "rgb"` with `compression = "auto"`
@@ -727,9 +727,12 @@ Text joins the unified 2D order as a third record type. A contiguous run of glyp
 font is merged into one draw. `FontRender.Bounds` is the world-space AABB of the laid-out glyph
 quads, not the layout box.
 
-Pong uses two `FontRender`s: the left score right-aligned and the right score left-aligned, both
-near the top center of the court. The text changes only when a point is scored, and the window
-title continues to use the existing `PongTitle` formatter.
+Pong draws every player-visible text surface with `FontRender`s: the left score right-aligned and
+the right score left-aligned near the top center of the court, a centered match-state line below
+them, and a centered control prompt above the bottom court line. The score text changes only when a
+point is scored and the state and prompt text only when the match state changes. All previously
+title-only text (the match state and the prompt) is drawn in-scene with `FontRender`s; the window
+title stays the host's static `Pong` title.
 
 ## Renderer integration
 
@@ -886,7 +889,8 @@ payload contract, the new reserved snapshot slots, and the shader asset contract
 
 ### Scene and assets
 
-Pong keeps the existing simulation, controls, camera, and window title. Its asset tree grows:
+Pong keeps the existing simulation, controls, and camera; the window title stays the host's static
+`Pong`, and the score, match state, and control prompt are all drawn in-scene. Its asset tree grows:
 
 ```text
 examples/pong/Pong.Assets/Assets/
@@ -895,18 +899,20 @@ examples/pong/Pong.Assets/Assets/
   art/wordmark.svg
   art/wordmark.svg.toml        # resolution = 512, range = 8, padding = 2, compression = "none"
   fonts/score.ttf
-  fonts/score.ttf.toml         # resolution = 2048, ASCII digits + colon, range = 8
+  fonts/score.ttf.toml         # resolution = 512, printable ASCII, range = 8
   shader/court.frag
   shader/court.frag.toml       # time-driven glow; border and center line use different uniforms
 ```
 
 The font is JetBrains Mono Regular (OFL 1.1), committed under `Pong.Assets` with its license file and
-attribution. It is a monospaced face with clear digits; no system font is required.
+attribution. It is a monospaced face with clear digits and punctuation, so the one HUD font covers
+the score, the match state, and the prompt; no system font is required.
 
-`GameSettings` gains references for the wordmark sprite, score font, and court shader. `GameLayer`
-gains `Hud = 8` for the score, and the camera culling mask includes it; the existing Court, Paddles,
-and Ball bits keep their values. The Pong `CircleProcessor` is updated to emit its generated ball
-through the KTX2 texture helper.
+`GameSettings` gains references for the wordmark sprite, the HUD font, and the court shader;
+`ScoreFont` keeps its field name and TOML key but now feeds all HUD text (score, state, and prompt).
+`GameLayer` gains `Hud = 8` for all HUD text, and the camera culling mask includes it; the existing
+Court, Paddles, and Ball bits keep their values. The Pong `CircleProcessor` is updated to emit its
+generated ball through the KTX2 texture helper.
 
 ### Rendering
 
@@ -927,15 +933,21 @@ through the KTX2 texture helper.
   court lines at `ZIndex` 5, the paddles at 10, and the ball at 20, and the center line draws over
   it. It exercises the full SVG, MSDF, linear texture, mip, and `shader/sdf` path without affecting
   the simulation, controls, or camera fitting.
-- **Score.** Two `FontRender`s show the left and right scores near the top center, right- and
-  left-aligned respectively, on the `Hud` layer at `ZIndex` 30 above every gameplay element. Each
-  uses the baked `fonts/score` font at 1.5 world units per em, the built-in `shader/sdf`, and the
-  paddle tints (`settings.LeftPaddleTint` for the left score, `settings.RightPaddleTint` for the
-  right). The first line's baseline sits at `y = 7.2`, and the left score's right alignment edge and
-  the right score's left alignment edge stay at `x = -0.4` and `x = +0.4`, so the pair stays centered
-  and a two-digit score grows away from the center while staying inside the court. Text changes only
-  when `LeftScore` or `RightScore` changes.
-- **Ordering.** Court lines, ball, paddles, wordmark, and score all use the shared `ZIndex` and
+- **HUD text.** Four `FontRender`s draw every player-visible text surface on the `Hud` layer at
+  `ZIndex` 30, above every gameplay element. The two scores sit near the top center, right- and
+  left-aligned respectively; each uses the baked `fonts/score` font at 1.5 world units per em, the
+  built-in `shader/sdf`, and the paddle tints (`settings.LeftPaddleTint` for the left score,
+  `settings.RightPaddleTint` for the right). The first line's baseline sits at `y = 7.2`, and the
+  left score's right alignment edge and the right score's left alignment edge stay at `x = -0.4` and
+  `x = +0.4`, so the pair stays centered and a two-digit score grows away from the center while
+  staying inside the court. The centered state line uses `Size = 1.0` with its baseline at `y = 6.0`
+  in the court color, and the centered prompt uses `Size = 0.65` with its baseline at `y = -8.0` in
+  the court color at 65% alpha; both stay clear of the score and the border lines and inside the
+  32x18 court. All four texts share the font asset, shader, layer, and z-index, so they stay
+  contiguous in the 2D order and merge into one font run. The score text changes only when
+  `LeftScore` or `RightScore` changes, and the state and prompt text only when the match state
+  changes. The window title is the host's static `Pong` title and is never written by the game.
+- **Ordering.** Court lines, ball, paddles, wordmark, and HUD text all use the shared `ZIndex` and
   per-camera screen-space 2D order in the unified 2D pass; `Layer` only selects cameras. No
   feature-specific pass is added.
 
@@ -945,7 +957,7 @@ through the KTX2 texture helper.
 - The whole court stays visible and correctly aligned at multiple window sizes.
 - Paddles show the compressed texture without visible block artifacts at their on-screen size.
 - The wordmark is sharp at 1280x720 and at a reduced window size.
-- The score updates on points and is legible.
+- The score, state, and prompt update and are legible.
 - Render stats show a small, stable draw-call count and no steady-state allocations.
 - The example builds, formats, and publishes with zero AOT/trim warnings.
 
@@ -990,10 +1002,10 @@ sharp at multiple sizes; unsupported SVG features are diagnosed.
 
 Deliver TTF/OTF outline reading, glyph range parsing, atlas packing and derived em size, the font
 sidecar, `FontAsset`, `FontRender`, font layout and kerning, the SDF font pipeline, and the Pong
-score.
+HUD.
 
-Exit: the shipped font bakes with digits and a colon, the score renders and updates, missing glyphs
-and oversized selections have defined behavior, and the atlas fits within `resolution`.
+Exit: the shipped font bakes with printable ASCII, the score and HUD text render and update, missing
+glyphs and oversized selections have defined behavior, and the atlas fits within `resolution`.
 
 ### M6 - Pong integration and hardening
 
@@ -1055,7 +1067,7 @@ The release-specific coverage:
 - **SVG.** Path commands, transforms, holes and fill rules, unsupported-element diagnostics,
   resolution/padding, linear sampling, and mip quality.
 - **Fonts.** Glyph range parsing, atlas derivation, metrics, kerning, line breaks, alignment,
-  missing glyphs, layout cache behavior, and score rendering.
+  missing glyphs, layout cache behavior, and HUD text rendering.
 - **2D pass.** Per-camera sort key, run grouping, camera culling, draw-run accounting, and stats.
 
 Bake tests build assets in a temporary directory; no binary fixture, generated pack, or generated
@@ -1079,8 +1091,8 @@ Release GPU measurements cover:
 | --- | --- | --- |
 | KTX2 container or DFD details are wrong. | Textures fail to upload or render incorrectly. | Keep the profile narrow, validate against the KTX2 specification and an independent tool where available, and add GPU round-trip tests. |
 | BC support is absent on a device. | Startup fails for that device. | Treat `textureCompressionBC` as a documented requirement, query every requested format, and fail with a clear message; no silent fallback. |
-| MSDF mip filtering degrades text or vector edges. | Blurry or broken glyphs. | Use a distance-preserving downsample, test at 0.5x/0.25x, and make Pong's wordmark and score release checks. |
-| Font atlas cannot fit the selected glyphs. | Bake fails or quality drops. | Derive em size by binary search, fail with the glyph count and atlas size, and keep Pong's set small. |
+| MSDF mip filtering degrades text or vector edges. | Blurry or broken glyphs. | Use a distance-preserving downsample, test at 0.5x/0.25x, and make Pong's wordmark and HUD text release checks. |
+| Font atlas cannot fit the selected glyphs. | Bake fails or quality drops. | Derive em size by binary search, fail with the glyph count and atlas size, and keep Pong's selection a bounded printable-ASCII set. |
 | SVG arcs, transforms, or even-odd holes are mishandled. | Wrong silhouettes. | Limit the subset, add focused path/transform/hole tests, and reject rather than approximate silently. |
 | Shader varying or uniform limits are exceeded. | Pipeline creation fails. | Bake-side size checks, a versioned fixed interface, and a GPU test that creates every built-in pipeline. |
 | The unified 2D pass is more complex than the current sprite pass. | Schedule or performance regression. | Keep the built-in shader path on the existing instance/run model, benchmark each milestone, and preserve the one-draw-per-camera default. |

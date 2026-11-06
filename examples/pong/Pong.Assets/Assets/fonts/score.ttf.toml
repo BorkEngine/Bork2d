@@ -1,5 +1,5 @@
 resolution = 512
 range = 8
 padding = 2
-ranges = ["U+0030-U+0039", "U+003A"]
+ranges = ["U+0020-U+007E"]
 glyphs = []
