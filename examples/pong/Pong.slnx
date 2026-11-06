@@ -1,4 +1,12 @@
 <Solution>
+  <!--
+    Keep the engine projects in this solution so a Release solution build configures their project
+    references as Release too; otherwise they fall back to Debug and a Release app carries a Debug
+    runtime assembly and prints Debug-level logs.
+  -->
+  <Project Path="../../src/Bork2d/Bork2d.Engine/Bork2d.Engine.csproj" />
+  <Project Path="../../src/Bork2d/Bork2d.Render/Bork2d.Render.csproj" />
+  <Project Path="../../src/Bork2d/Bork2d.Runtime/Bork2d.Runtime.csproj" />
   <Project Path="Pong.Assets/Pong.Assets.csproj" />
   <Project Path="Pong.Common/Pong.Common.csproj" />
   <!--
