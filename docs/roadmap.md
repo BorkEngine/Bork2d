@@ -931,10 +931,10 @@ through the KTX2 texture helper.
   left-aligned respectively, on the `Hud` layer at `ZIndex` 30 above every gameplay element. Each
   uses the baked `fonts/score` font at 1.5 world units per em, the built-in `shader/sdf`, and the
   paddle tints (`settings.LeftPaddleTint` for the left score, `settings.RightPaddleTint` for the
-  right). The first line's baseline sits at `y = 7.2`, and the left score's right edge and the
-  right score's left edge stay at `x = -0.4` and `x = +0.4`, so the pair stays centered and a
-  two-digit score grows away from the center while staying inside the court. Text changes only when
-  `LeftScore` or `RightScore` changes.
+  right). The first line's baseline sits at `y = 7.2`, and the left score's right alignment edge and
+  the right score's left alignment edge stay at `x = -0.4` and `x = +0.4`, so the pair stays centered
+  and a two-digit score grows away from the center while staying inside the court. Text changes only
+  when `LeftScore` or `RightScore` changes.
 - **Ordering.** Court lines, ball, paddles, wordmark, and score all use the shared `ZIndex` and
   per-camera screen-space 2D order in the unified 2D pass; `Layer` only selects cameras. No
   feature-specific pass is added.
