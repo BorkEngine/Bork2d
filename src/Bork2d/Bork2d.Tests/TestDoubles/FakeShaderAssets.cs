@@ -5,12 +5,12 @@ namespace Bork2d.Tests.TestDoubles;
 
 /// <summary>
 /// A deterministic <see cref="IAssets"/> and catalog seam for GPU-free shader-catalog tests: the
-/// default shader asset is mutable, custom SPIR-V payloads are completed explicitly, and incrementing
-/// <see cref="CatalogVersion"/> models an overlay mount.
+/// three default shader assets are mutable, custom SPIR-V payloads are completed explicitly, and
+/// incrementing <see cref="CatalogVersion"/> models an overlay mount.
 /// </summary>
 /// <remarks>
 /// Custom shader assets are never loaded by the renderer (the sprite carries the frozen metadata),
-/// so only the default path serves a <see cref="ShaderAsset"/>. Every SPIR-V path serves a
+/// so only the default paths serve a <see cref="ShaderAsset"/>. Every SPIR-V path serves a
 /// controllable task, so a test can keep a shader pending, complete it with valid bytes, or fault
 /// it without sleeps.
 /// </remarks>
@@ -33,6 +33,16 @@ internal sealed class FakeShaderAssets : IAssets, IAssetCatalogVersion
     internal ShaderAsset? LineDefaultAsset { get; set; } = new()
     {
         SpirV = "shader/line-spv",
+        LayoutVersion = ShaderLayout.CurrentVersion,
+        EntryPoint = "main",
+    };
+
+    /// <summary>
+    /// Gets or sets the built-in font SDF default shader asset served at <c>shader/sdf</c>.
+    /// </summary>
+    internal ShaderAsset? SdfDefaultAsset { get; set; } = new()
+    {
+        SpirV = "shader/sdf-spv",
         LayoutVersion = ShaderLayout.CurrentVersion,
         EntryPoint = "main",
     };
@@ -121,12 +131,26 @@ internal sealed class FakeShaderAssets : IAssets, IAssetCatalogVersion
                     $"No shader asset at '{assetPath}'."));
         }
 
-        ShaderAsset? asset = string.Equals(
+        ShaderAsset? asset;
+        if (string.Equals(
             assetPath,
             Bork2d.Render.Shaders.ShaderStore.LineShaderPath,
-            StringComparison.Ordinal)
-            ? LineDefaultAsset
-            : DefaultAsset;
+            StringComparison.Ordinal))
+        {
+            asset = LineDefaultAsset;
+        }
+        else if (string.Equals(
+            assetPath,
+            Bork2d.Render.Shaders.ShaderStore.SdfShaderPath,
+            StringComparison.Ordinal))
+        {
+            asset = SdfDefaultAsset;
+        }
+        else
+        {
+            asset = DefaultAsset;
+        }
+
         if (asset is null)
         {
             return Task.FromException<T>(

@@ -12,11 +12,12 @@ namespace Bork2d.Render.Vulkan;
 /// <remarks>
 /// <para>
 /// A pass reads only the members it needs: the 2D pass records into the linear
-/// <paramref name="SceneView"/>/<paramref name="SceneImage"/> with the frame descriptor sets, the frame
-/// line vertex/index buffers, and the scene format; the present pass samples the scene image and
-/// records into the final <paramref name="TargetView"/>/<paramref name="TargetImage"/> with the
-/// per-frame present descriptor set and the target format. No member exposes another pass's plan or
-/// the aggregate statistics, so recording cannot mutate planning.
+/// <paramref name="SceneView"/>/<paramref name="SceneImage"/> with the frame descriptor sets (the
+/// shared sprite/glyph instance buffer), the frame line vertex/index buffers, and the scene format;
+/// the present pass samples the scene image and records into the final
+/// <paramref name="TargetView"/>/<paramref name="TargetImage"/> with the per-frame present descriptor
+/// set and the target format. No member exposes another pass's plan or the aggregate statistics, so
+/// recording cannot mutate planning.
 /// </para>
 /// <para>
 /// The context is a value with no ownership: the target driver owns every handle and keeps it alive

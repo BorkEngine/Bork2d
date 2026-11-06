@@ -9,37 +9,38 @@ using Silk.NET.Vulkan;
 namespace Bork2d.Render.TwoDimensional;
 
 /// <summary>
-/// The internal 2D pipeline: descriptor-set layouts, the pipeline layout, both engine vertex modules
-/// (sprite and line), one graphics pipeline per <c>(kind, shader content hash, output format)</c>,
-/// and the cached page samplers.
+/// The internal 2D pipeline: descriptor-set layouts, the pipeline layout, the three engine vertex
+/// modules (sprite, line, and font glyph), one graphics pipeline per
+/// <c>(kind, shader content hash, output format)</c>, and the cached page samplers.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Descriptor set 0 has binding 0 (the per-frame sprite instance storage buffer, read by the sprite
-/// vertex stage) and binding 1 (the bindless combined image sampler array, read by the fragment
-/// stage). Binding 1 is partially bound, updated after bind, and uses a variable descriptor count so
-/// page capacity can grow without recreating the pipeline layout; it is the highest binding in its
-/// set, as Vulkan requires for a variable descriptor count. Descriptor set 1 has binding 2 (the
-/// per-frame dynamic uniform buffer holding the global block, read by the fragment stage); it is a
-/// separate set because a set containing an update-after-bind binding may not also contain a dynamic
-/// uniform buffer. The pipeline layout carries descriptor sets 0 and 1 and a 64-byte view-projection
-/// push constant shared by both kinds.
+/// and font vertex stages) and binding 1 (the bindless combined image sampler array, read by the
+/// fragment stage). Binding 1 is partially bound, updated after bind, and uses a variable descriptor
+/// count so page capacity can grow without recreating the pipeline layout; it is the highest binding
+/// in its set, as Vulkan requires for a variable descriptor count. Descriptor set 1 has binding 2
+/// (the per-frame dynamic uniform buffer holding the global block, read by the fragment stage); it
+/// is a separate set because a set containing an update-after-bind binding may not also contain a
+/// dynamic uniform buffer. The pipeline layout carries descriptor sets 0 and 1 and a 64-byte
+/// view-projection push constant shared by every kind.
 /// </para>
 /// <para>
-/// The sprite vertex module is created from the built-in pack's <c>shader/vertex-spv</c> and the line
-/// vertex module from <c>shader/line-vertex-spv</c>; the pipeline owns both. A fragment module comes
-/// from the shader catalog, which owns it, and the pipeline cache is keyed by the vertex-stage kind,
-/// the shader content hash, and the output format, so identical content shares one fragment module
-/// while a sprite and a line pipeline stay distinct and a swapchain format change lazily creates that
-/// format's pipeline.
+/// The sprite vertex module is created from the built-in pack's <c>shader/vertex-spv</c>, the line
+/// vertex module from <c>shader/line-vertex-spv</c>, and the font vertex module from the same
+/// <c>shader/vertex-spv</c> bytes as the sprite stage (a separate Vulkan handle, identical code and
+/// instance ABI); the pipeline owns all three. A fragment module comes from the shader catalog, which
+/// owns it, and the pipeline cache is keyed by the vertex-stage kind, the shader content hash, and
+/// the output format, so identical content shares one fragment module while the sprite, line, and
+/// font pipelines stay distinct and a swapchain format change lazily creates that format's pipeline.
 /// </para>
 /// <para>
-/// Both graphics pipelines use dynamic rendering with one linear UNORM scene color attachment, no
+/// All graphics pipelines use dynamic rendering with one linear UNORM scene color attachment, no
 /// depth/stencil, dynamic viewport/scissor, disabled culling and depth test/write, and straight alpha
-/// blending. The sprite pipeline has no vertex input and uses triangle-strip topology with four
-/// generated quad corners per instance. The line pipeline uses triangle-list topology and a 112-byte
-/// vertex stride with attribute locations 0-7 (position, line UV, color, misc, and the four instance
-/// uniform lanes).
+/// blending. The sprite and font pipelines have no vertex input and use triangle-strip topology with
+/// four generated quad corners per instance. The line pipeline uses triangle-list topology and a
+/// 112-byte vertex stride with attribute locations 0-7 (position, line UV, color, misc, and the four
+/// instance uniform lanes).
 /// </para>
 /// <para>
 /// All objects are render-thread-owned and created once at renderer startup (or when a new output
@@ -70,7 +71,7 @@ internal sealed unsafe class TwoDimensionalPipeline : IDisposable, IShaderModule
     private readonly Device _device;
     private readonly ILogger _logger;
     private readonly IVulkanInstance? _instance;
-    private readonly ShaderModule[] _vertexModules = new ShaderModule[2];
+    private readonly ShaderModule[] _vertexModules = new ShaderModule[3];
     private readonly DescriptorSetLayout _descriptorSetLayout;
     private readonly DescriptorSetLayout _globalSetLayout;
     private readonly PipelineLayout _pipelineLayout;
@@ -87,6 +88,7 @@ internal sealed unsafe class TwoDimensionalPipeline : IDisposable, IShaderModule
         IVulkanInstance? instance,
         ShaderModule spriteVertexModule,
         ShaderModule lineVertexModule,
+        ShaderModule fontVertexModule,
         DescriptorSetLayout descriptorSetLayout,
         DescriptorSetLayout globalSetLayout,
         PipelineLayout pipelineLayout,
@@ -98,6 +100,7 @@ internal sealed unsafe class TwoDimensionalPipeline : IDisposable, IShaderModule
         _instance = instance;
         _vertexModules[(int)ShaderPipelineKind.Sprite] = spriteVertexModule;
         _vertexModules[(int)ShaderPipelineKind.Line] = lineVertexModule;
+        _vertexModules[(int)ShaderPipelineKind.Font] = fontVertexModule;
         _descriptorSetLayout = descriptorSetLayout;
         _globalSetLayout = globalSetLayout;
         _pipelineLayout = pipelineLayout;
@@ -121,8 +124,8 @@ internal sealed unsafe class TwoDimensionalPipeline : IDisposable, IShaderModule
     internal uint MaxTexturePages => _maxTexturePages;
 
     /// <summary>
-    /// Creates both vertex modules, descriptor-set layouts, and the pipeline layout. A Vulkan failure
-    /// throws a <see cref="Bork2dException"/> so renderer startup fails cleanly (D-M6-14).
+    /// Creates the three vertex modules, descriptor-set layouts, and the pipeline layout. A Vulkan
+    /// failure throws a <see cref="Bork2dException"/> so renderer startup fails cleanly (D-M6-14).
     /// </summary>
     /// <param name="device">The selected device; its API object owns the created handles.</param>
     /// <param name="instance">The instance seam used for debug labels; may be <see langword="null"/>.</param>
@@ -165,6 +168,7 @@ internal sealed unsafe class TwoDimensionalPipeline : IDisposable, IShaderModule
         Device logicalDevice = device.Device;
         var spriteVertexModule = default(ShaderModule);
         var lineVertexModule = default(ShaderModule);
+        var fontVertexModule = default(ShaderModule);
         var descriptorSetLayout = default(DescriptorSetLayout);
         var globalSetLayout = default(DescriptorSetLayout);
         var pipelineLayout = default(PipelineLayout);
@@ -180,6 +184,15 @@ internal sealed unsafe class TwoDimensionalPipeline : IDisposable, IShaderModule
                 logicalDevice,
                 lineVertexSpirV,
                 ShaderStore.LineVertexSpirVPath);
+
+            // The font pipeline uses the sprite vertex stage's bytes and instance ABI. A second
+            // module handle keeps vertex-module ownership symmetric and makes the font pipeline a
+            // distinct cache key without a dedicated glyph buffer or vertex asset.
+            fontVertexModule = CreateShaderModule(
+                vk,
+                logicalDevice,
+                spriteVertexSpirV,
+                ShaderStore.VertexSpirVPath);
             descriptorSetLayout = CreateDescriptorSetLayout(vk, logicalDevice, maxTexturePages);
             globalSetLayout = CreateGlobalSetLayout(vk, logicalDevice);
             pipelineLayout = CreatePipelineLayout(
@@ -195,6 +208,7 @@ internal sealed unsafe class TwoDimensionalPipeline : IDisposable, IShaderModule
                 instance,
                 spriteVertexModule,
                 lineVertexModule,
+                fontVertexModule,
                 descriptorSetLayout,
                 globalSetLayout,
                 pipelineLayout,
@@ -212,7 +226,8 @@ internal sealed unsafe class TwoDimensionalPipeline : IDisposable, IShaderModule
                 descriptorSetLayout,
                 globalSetLayout,
                 spriteVertexModule,
-                lineVertexModule);
+                lineVertexModule,
+                fontVertexModule);
             throw;
         }
     }
@@ -455,15 +470,22 @@ internal sealed unsafe class TwoDimensionalPipeline : IDisposable, IShaderModule
 
         DestroyShaderModule(_vertexModules[(int)ShaderPipelineKind.Sprite], "sprite vertex");
         DestroyShaderModule(_vertexModules[(int)ShaderPipelineKind.Line], "line vertex");
+        DestroyShaderModule(_vertexModules[(int)ShaderPipelineKind.Font], "font vertex");
         _vertexModules[(int)ShaderPipelineKind.Sprite] = default;
         _vertexModules[(int)ShaderPipelineKind.Line] = default;
+        _vertexModules[(int)ShaderPipelineKind.Font] = default;
         DestroyPipelineLayout(_pipelineLayout);
         DestroyDescriptorSetLayout(_descriptorSetLayout);
         DestroyDescriptorSetLayout(_globalSetLayout);
     }
 
     private static string Describe(ShaderPipelineKind kind)
-        => kind == ShaderPipelineKind.Sprite ? "sprite" : "line";
+        => kind switch
+        {
+            ShaderPipelineKind.Sprite => "sprite",
+            ShaderPipelineKind.Line => "line",
+            _ => "font",
+        };
 
     private Pipeline CreateGraphicsPipeline(
         ShaderPipelineKind kind,
@@ -734,6 +756,11 @@ internal sealed unsafe class TwoDimensionalPipeline : IDisposable, IShaderModule
             "Bork2d line vertex shader");
         _instance.SetObjectName(
             device,
+            ObjectType.ShaderModule,
+            (nint)_vertexModules[(int)ShaderPipelineKind.Font].Handle,
+            "Bork2d font vertex shader");
+        _instance.SetObjectName(
+            device,
             ObjectType.DescriptorSetLayout,
             (nint)_descriptorSetLayout.Handle,
             "Bork2d 2D descriptor set layout");
@@ -997,7 +1024,8 @@ internal sealed unsafe class TwoDimensionalPipeline : IDisposable, IShaderModule
         DescriptorSetLayout descriptorSetLayout,
         DescriptorSetLayout globalSetLayout,
         ShaderModule spriteVertexModule,
-        ShaderModule lineVertexModule)
+        ShaderModule lineVertexModule,
+        ShaderModule fontVertexModule)
     {
         if (pipelineLayout.Handle != 0)
         {
@@ -1039,6 +1067,7 @@ internal sealed unsafe class TwoDimensionalPipeline : IDisposable, IShaderModule
 
         DestroyShaderModuleBestEffort(vk, device, logger, spriteVertexModule, "sprite vertex");
         DestroyShaderModuleBestEffort(vk, device, logger, lineVertexModule, "line vertex");
+        DestroyShaderModuleBestEffort(vk, device, logger, fontVertexModule, "font vertex");
     }
 
     private static void DestroyShaderModuleBestEffort(

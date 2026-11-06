@@ -3,6 +3,7 @@ using Bork2d.Engine;
 using Bork2d.Engine.Assets;
 using Bork2d.Engine.Mathematics;
 using Bork2d.Engine.Rendering;
+using Bork2d.Engine.Scene;
 using Bork2d.Render.Sprites;
 using Bork2d.Render.TwoDimensional;
 using Xunit;
@@ -388,6 +389,80 @@ public sealed class TwoDimensionalPlanningTests
 
         Assert.Contains("Indices", exception.Message, StringComparison.Ordinal);
         Assert.Contains("textures/player", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ClassifyFontSkipsNullInvalidAndPendingButNotEmpty()
+    {
+        FontAsset asset = Bork2d.Tests.TestSupport.FontTestSupport.CreateFont();
+        FontRenderData data = FontRenderData.Freeze(asset);
+        FontLayoutData empty = FontLayoutData.Empty;
+        FontLayoutData layout = FontLayoutBuilder.Build(
+            data.Glyphs,
+            data.Kerning,
+            data.Ascent,
+            data.Descent,
+            data.LineGap,
+            "A",
+            size: 2f,
+            TextAlignment.Left,
+            lineSpacing: 1f,
+            missingGlyph: null);
+
+        FontSnapshot nullFont = new(null, layout, Matrix3x2.Identity, Color.White, 1u, 0);
+        FontSnapshot invalidLayer = new(data, layout, Matrix3x2.Identity, Color.White, 0u, 0);
+        FontSnapshot emptyLayout = new(data, empty, Matrix3x2.Identity, Color.White, 1u, 0);
+        FontSnapshot drawable = new(data, layout, Matrix3x2.Identity, Color.White, 1u, 0);
+
+        Assert.Equal(
+            FontSkipReason.Null,
+            TwoDimensionalPlanning.ClassifyFont(nullFont, shaderPending: true, atlasPending: true));
+        Assert.Equal(
+            FontSkipReason.InvalidLayer,
+            TwoDimensionalPlanning.ClassifyFont(
+                invalidLayer,
+                shaderPending: false,
+                atlasPending: false));
+        Assert.Equal(
+            FontSkipReason.Empty,
+            TwoDimensionalPlanning.ClassifyFont(
+                emptyLayout,
+                shaderPending: true,
+                atlasPending: true));
+        Assert.Equal(
+            FontSkipReason.PendingShader,
+            TwoDimensionalPlanning.ClassifyFont(
+                drawable,
+                shaderPending: true,
+                atlasPending: false));
+        Assert.Equal(
+            FontSkipReason.PendingAtlas,
+            TwoDimensionalPlanning.ClassifyFont(
+                drawable,
+                shaderPending: false,
+                atlasPending: true));
+        Assert.Equal(
+            FontSkipReason.None,
+            TwoDimensionalPlanning.ClassifyFont(
+                drawable,
+                shaderPending: false,
+                atlasPending: false));
+    }
+
+    [Fact]
+    public void SortKeyOrdersFontGlyphsByZIndexThenScreenYThenScreenX()
+    {
+        TwoDimensionalSortKey[] keys =
+        [
+            new(zIndex: 1, screenY: 10f, screenX: 30f, DrawKind.Font, 2),
+            new(zIndex: 1, screenY: 10f, screenX: 10f, DrawKind.Font, 0),
+            new(zIndex: 1, screenY: 10f, screenX: 20f, DrawKind.Font, 1),
+            new(zIndex: 0, screenY: 50f, screenX: 0f, DrawKind.Font, 3),
+        ];
+
+        Array.Sort(keys);
+
+        Assert.Equal([3, 0, 1, 2], keys.Select(key => key.RecordIndex));
     }
 
     private static LineGeometryData BuildGeometry()

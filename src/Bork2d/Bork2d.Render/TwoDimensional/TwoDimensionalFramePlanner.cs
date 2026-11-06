@@ -13,7 +13,7 @@ using Silk.NET.Vulkan;
 namespace Bork2d.Render.TwoDimensional;
 
 /// <summary>
-/// The render-thread-owned, allocation-free unified 2D frame planner (sprites and lines).
+/// The render-thread-owned, allocation-free unified 2D frame planner (sprites, lines, and fonts).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -21,52 +21,61 @@ namespace Bork2d.Render.TwoDimensional;
 /// </para>
 /// <list type="number">
 /// <item>
-/// Pre-pass every sprite and line once: skip classification, malformed sprite-field validation,
-/// shader binding resolution, a sprite's declared additional textures, the sprite's camera-
-/// independent instance record, and the line's resolved entry and seeded uniform block.
+/// Pre-pass every sprite, line, and font once: skip classification, malformed sprite-field
+/// validation, shader binding resolution, a sprite's declared additional textures, the sprite's
+/// camera-independent instance record, the line's resolved entry and seeded uniform block, and the
+/// font's resolved entry, atlas page, and per-glyph instance records.
 /// </item>
 /// <item>Sort camera indices by <c>ZIndex</c>, resolve each projection, and skip invalid cameras.</item>
 /// <item>
 /// Per camera, build the visible candidate list (layer + conservative bounds), project each record's
-/// world-space origin to that camera's framebuffer pixels, sort the candidates by
-/// <c>(ZIndex, screen Y, screen X)</c>, and group the sorted records into contiguous
-/// <see cref="DrawRun"/>s. A run changes only when two adjacent visible records differ in
-/// <see cref="DrawKind"/> or resolved shader entry.
+/// world-space origin — or, for a font, each glyph's world top-left — to that camera's framebuffer
+/// pixels, sort the candidates by <c>(ZIndex, screen Y, screen X)</c>, and group the sorted records
+/// into contiguous <see cref="DrawRun"/>s. A run changes only when two adjacent visible records
+/// differ in <see cref="DrawKind"/>, resolved shader entry, or font asset binding.
 /// </item>
 /// <item>
 /// Validate the accumulated frame totals against <see cref="int.MaxValue"/>, write one 144-byte global
-/// block per run, grow the instance/line buffers once, and write the precomputed sprite records and
-/// the world-transformed line vertices/indices in draw order.
+/// block per run, grow the instance/line buffers once, and write the precomputed sprite and glyph
+/// instance records and the world-transformed line vertices/indices in draw order.
 /// </item>
 /// </list>
 /// <para>
 /// Draw order is <c>ZIndex</c> ascending; for equal <c>ZIndex</c> it is per-camera screen-space Y
 /// ascending in framebuffer pixels (top-left origin, so a record lower on screen draws later), then
-/// screen X ascending. <c>Layer</c> is only a camera culling bit and never participates in ordering,
-/// and <c>ZIndex</c> is not layer-scoped.
+/// screen X ascending. A font expands into one record per drawable glyph, so glyphs of one font with
+/// increasing screen X sort left-to-right. <c>Layer</c> is only a camera culling bit and never
+/// participates in ordering, and <c>ZIndex</c> is not layer-scoped.
 /// </para>
 /// <para>
-/// A custom shader that is still loading skips the record for the frame. A custom shader that failed
-/// validation, loading, module/pipeline creation, or conflicts with an engine-wide global name draws
-/// with the requesting kind's default entry instead and is not skipped. Additional textures resolve
-/// positionally against a sprite shader's declared slots; pending extra page skips the whole sprite,
-/// a failed or absent page uses the bindless placeholder index <c>0</c>, and paths beyond the declared
-/// slot count are never loaded. Lines have no main or additional textures.
+/// Sprites and glyphs share one frame instance buffer and the sprite vertex stage; there is no
+/// dedicated glyph buffer, descriptor binding, or engine-owned vertex shader asset. A font with no
+/// custom shader uses the built-in <c>shader/sdf</c> default entry and seeds its declared instance
+/// uniforms; a custom fragment shader resolves through the normal catalog with
+/// <see cref="ShaderPipelineKind.Font"/>. A custom shader that is still loading skips the font for the
+/// frame. A custom shader that failed validation, loading, module/pipeline creation, or conflicts with
+/// an engine-wide global name draws with <c>shader/sdf</c> instead and is not skipped.
+/// </para>
+/// <para>
+/// A font with an empty layout (for example empty text or spaces only) draws nothing and is not a
+/// skip. A font drawn with the bindless placeholder atlas (an absent or failed page) or with the SDF
+/// fallback is not skipped. Fonts have no additional textures; their extra texture indices stay zero.
 /// </para>
 /// <para>
 /// Bounds culling is always on and conservative: a record is skipped for a camera only when its
-/// non-empty world AABB does not intersect the camera's world AABB. Empty bounds mean "unknown", so
-/// they never cull. A record is counted as culled once per frame when it matched the layer mask of at
-/// least one planned camera and no planned camera emitted it.
+/// non-empty world AABB does not intersect the camera's world AABB. A font uses the tight world AABB
+/// of its laid-out glyph quads once per font record, and a font whose layer matches at least one
+/// planned camera but whose bounds reject every camera counts once in <c>CulledFonts</c>; culled
+/// fonts are never counted as skipped. Empty bounds mean "unknown", so they never cull.
 /// </para>
 /// <para>
 /// Every per-record, per-run, and per-frame array is renderer-owned and preallocated; after warm-up
-/// the plan allocates nothing. Diagnostics are throttled: invalid-camera reasons, invalid sprite
-/// layers, invalid line layers, and missing line geometry log once per renderer, a non-Quad asset logs
-/// once per asset path, and a shader global-type mismatch logs once per shader path. Malformed sprite
-/// fields throw a fatal <see cref="Bork2dException"/> naming the field and texture reference; they are
-/// never silently repaired. Frame totals accumulate in <see cref="long"/> and are validated before
-/// they are narrowed, so a multi-camera frame faults instead of overflowing.
+/// the plan allocates nothing. Diagnostics are throttled: invalid-camera reasons, invalid sprite/
+/// line/font layers, and missing line geometry log once per renderer, a non-Quad asset logs once per
+/// asset path, and a shader global-type mismatch logs once per shader path. Malformed sprite fields
+/// throw a fatal <see cref="Bork2dException"/> naming the field and texture reference; they are never
+/// silently repaired. Frame totals accumulate in <see cref="long"/> and are validated before they are
+/// narrowed, so a multi-camera frame faults instead of overflowing.
 /// </para>
 /// </remarks>
 internal sealed class TwoDimensionalFramePlanner
@@ -89,7 +98,7 @@ internal sealed class TwoDimensionalFramePlanner
     private readonly HashSet<string> _loggedNonQuadAssets = new(StringComparer.Ordinal);
     private readonly HashSet<string> _loggedGlobalTypeMismatches = new(StringComparer.Ordinal);
     private readonly TwoDimensionalFramePlan _plan = new();
-    private readonly ShaderEntry?[] _defaultEntries = new ShaderEntry?[2];
+    private readonly ShaderEntry?[] _defaultEntries = new ShaderEntry?[3];
     private SpriteInstance[] _spriteInstances = [];
     private int[] _spriteEntryIds = [];
     private bool[] _spriteDrawable = [];
@@ -102,6 +111,14 @@ internal sealed class TwoDimensionalFramePlanner
     private Vector4[] _lineParams1 = [];
     private Vector4[] _lineParams2 = [];
     private Vector4[] _lineParams3 = [];
+    private int[] _fontFirstGlyph = [];
+    private int[] _fontGlyphCount = [];
+    private bool[] _fontDrawable = [];
+    private byte[] _fontVisibility = [];
+    private PlannedGlyph[] _glyphs = [];
+    private FontRenderData?[] _fontBindings = [];
+    private int _fontBindingCount;
+    private int _plannedGlyphCount;
     private TwoDimensionalSortKey[] _sortKeys = [];
     private VisibleRecord[] _visibleRecords = [];
     private DrawRun[] _runs = [];
@@ -110,6 +127,7 @@ internal sealed class TwoDimensionalFramePlanner
     private uint _loggedCameraReasons;
     private bool _loggedInvalidSpriteLayer;
     private bool _loggedInvalidLineLayer;
+    private bool _loggedInvalidFontLayer;
     private bool _loggedLineGeometry;
     private bool _loggedDepthClear;
     private bool _loggedExtraTextureOverflow;
@@ -132,14 +150,14 @@ internal sealed class TwoDimensionalFramePlanner
     }
 
     /// <summary>
-    /// Plans one snapshot, writes one global uniform block per draw run, and writes its sprite
-    /// instances and line vertices/indices into the frame buffers.
+    /// Plans one snapshot, writes one global uniform block per draw run, and writes its sprite and
+    /// glyph instances and line vertices/indices into the frame buffers.
     /// </summary>
     /// <param name="snapshot">The consumed snapshot; read-only and never mutated.</param>
     /// <param name="framebufferWidth">The target/framebuffer width in pixels.</param>
     /// <param name="framebufferHeight">The target/framebuffer height in pixels.</param>
-    /// <param name="instances">The frame's sprite instance sink, after its fence has been observed.</param>
-    /// <param name="lines">The frame's line vertex/index sink, after its fence has been observed.</param>
+    /// <param name="instances">The frame's sprite/glyph instance sink, after its fence was observed.</param>
+    /// <param name="lines">The frame's line vertex/index sink, after its fence was observed.</param>
     /// <param name="globals">
     /// The frame's global uniform sink. Exactly one 144-byte block is written per draw run with the
     /// frame time in <c>time.x</c>, the declared engine-wide user values for that run's shader, and
@@ -167,16 +185,15 @@ internal sealed class TwoDimensionalFramePlanner
 
         ReadOnlySpan<SpriteSnapshot> sprites = snapshot.Sprites;
         ReadOnlySpan<LineSnapshot> lineRecords = snapshot.Lines;
+        ReadOnlySpan<FontSnapshot> fontRecords = snapshot.Fonts;
         ReadOnlySpan<GlobalUniformSnapshot> globalUniforms = snapshot.GlobalUniforms;
         int spriteCount = sprites.Length;
         int lineCount = lineRecords.Length;
-        int recordCount = spriteCount + lineCount;
-        _defaultEntries[0] = null;
-        _defaultEntries[1] = null;
+        int fontCount = fontRecords.Length;
+        Array.Clear(_defaultEntries);
         EnsureSpriteArrays(spriteCount);
         EnsureLineArrays(lineCount);
-        EnsureSortKeyCapacity(recordCount);
-        EnsureVisibleRecordCapacity(recordCount);
+        EnsureFontArrays(fontCount);
 
         long skippedSprites = 0;
         for (var index = 0; index < spriteCount; index++)
@@ -213,11 +230,33 @@ internal sealed class TwoDimensionalFramePlanner
             }
         }
 
+        Array.Clear(_fontBindings, 0, _fontBindingCount);
+        _fontBindingCount = 0;
+        _plannedGlyphCount = 0;
+        long skippedFonts = 0;
+        for (var index = 0; index < fontCount; index++)
+        {
+            FontSkipReason reason = ResolveFont(
+                fontRecords[index],
+                index,
+                sceneFormat,
+                globalUniforms);
+            _fontDrawable[index] = reason == FontSkipReason.None;
+            if (reason is not (FontSkipReason.None or FontSkipReason.Empty))
+            {
+                skippedFonts++;
+            }
+        }
+
         _spriteVisibility.AsSpan(0, spriteCount).Clear();
         _lineVisibility.AsSpan(0, lineCount).Clear();
+        _fontVisibility.AsSpan(0, fontCount).Clear();
 
         ReadOnlySpan<CameraSnapshot> cameras = snapshot.Cameras;
         int cameraCount = cameras.Length;
+        int recordCount = spriteCount + lineCount + _plannedGlyphCount;
+        EnsureSortKeyCapacity(recordCount);
+        EnsureVisibleRecordCapacity(recordCount);
         EnsureCameraArrays(cameraCount);
         Span<int> cameraOrder = _cameraIndices.AsSpan(0, cameraCount);
         TwoDimensionalPlanning.SortCameras(cameras, cameraOrder);
@@ -265,13 +304,15 @@ internal sealed class TwoDimensionalFramePlanner
         var vertexCursor = 0;
         var indexCursor = 0;
         long frameInstanceCount = 0;
+        long frameSpriteCount = 0;
+        long frameGlyphCount = 0;
         long frameLineCount = 0;
         long frameVertexCount = 0;
         long frameIndexCount = 0;
         for (var cameraIndex = 0; cameraIndex < cameraPlanCount; cameraIndex++)
         {
             CameraDrawPlan camera = _cameras[cameraIndex];
-            int candidateCount = BuildCandidates(camera, sprites, lineRecords);
+            int candidateCount = BuildCandidates(camera, sprites, lineRecords, fontRecords);
             Span<TwoDimensionalSortKey> candidates = _sortKeys.AsSpan(0, candidateCount);
             candidates.Sort();
 
@@ -280,19 +321,37 @@ internal sealed class TwoDimensionalFramePlanner
             int cameraFirstIndex = indexCursor;
             int cameraFirstRun = runIndex;
             var cameraLineCount = 0;
+            var cameraSpriteCount = 0;
+            var cameraGlyphCount = 0;
             var runActive = false;
             var runKind = DrawKind.Sprite;
             var runEntry = -1;
+            var runFontBinding = 0;
             var runFirst = 0;
             var runAccumulated = 0;
             for (var position = 0; position < candidates.Length; position++)
             {
                 TwoDimensionalSortKey key = candidates[position];
                 int recordIndex = key.RecordIndex;
-                int entryId = key.Kind == DrawKind.Sprite
-                    ? _spriteEntryIds[recordIndex]
-                    : _lineEntryIds[recordIndex];
-                if (!runActive || key.Kind != runKind || entryId != runEntry)
+                int entryId;
+                var fontBinding = 0;
+                if (key.Kind == DrawKind.Sprite)
+                {
+                    entryId = _spriteEntryIds[recordIndex];
+                }
+                else if (key.Kind == DrawKind.Line)
+                {
+                    entryId = _lineEntryIds[recordIndex];
+                }
+                else
+                {
+                    PlannedGlyph glyph = _glyphs[recordIndex];
+                    entryId = glyph.EntryId;
+                    fontBinding = glyph.FontBindingId;
+                }
+
+                bool fontBindingChanged = key.Kind == DrawKind.Font && fontBinding != runFontBinding;
+                if (!runActive || key.Kind != runKind || entryId != runEntry || fontBindingChanged)
                 {
                     if (runActive)
                     {
@@ -302,13 +361,15 @@ internal sealed class TwoDimensionalFramePlanner
                             runEntry,
                             runFirst,
                             runAccumulated,
-                            GlobalBlockOffset: 0);
+                            GlobalBlockOffset: 0,
+                            runFontBinding);
                     }
 
                     runActive = true;
                     runKind = key.Kind;
                     runEntry = entryId;
-                    runFirst = key.Kind == DrawKind.Sprite ? instanceCursor : indexCursor;
+                    runFontBinding = key.Kind == DrawKind.Font ? fontBinding : 0;
+                    runFirst = key.Kind == DrawKind.Line ? indexCursor : instanceCursor;
                     runAccumulated = 0;
                 }
 
@@ -319,8 +380,9 @@ internal sealed class TwoDimensionalFramePlanner
                     _visibleRecords[visibleCount++] = new VisibleRecord(DrawKind.Sprite, recordIndex);
                     instanceCursor++;
                     runAccumulated++;
+                    cameraSpriteCount++;
                 }
-                else
+                else if (key.Kind == DrawKind.Line)
                 {
                     LineGeometryData geometry = _lineGeometries[recordIndex]!;
                     _lineVisibility[recordIndex] = VisibilityDrawn;
@@ -330,6 +392,15 @@ internal sealed class TwoDimensionalFramePlanner
                     vertexCursor += geometry.VertexCount;
                     indexCursor += geometry.IndexCount;
                     runAccumulated += geometry.IndexCount;
+                }
+                else
+                {
+                    _fontVisibility[_glyphs[recordIndex].FontRecordIndex] = VisibilityDrawn;
+                    EnsureVisibleRecordCapacity(visibleCount + 1);
+                    _visibleRecords[visibleCount++] = new VisibleRecord(DrawKind.Font, recordIndex);
+                    instanceCursor++;
+                    runAccumulated++;
+                    cameraGlyphCount++;
                 }
             }
 
@@ -341,7 +412,8 @@ internal sealed class TwoDimensionalFramePlanner
                     runEntry,
                     runFirst,
                     runAccumulated,
-                    GlobalBlockOffset: 0);
+                    GlobalBlockOffset: 0,
+                    runFontBinding);
             }
 
             int cameraRunCount = runIndex - cameraFirstRun;
@@ -360,6 +432,8 @@ internal sealed class TwoDimensionalFramePlanner
                 RunCount = cameraRunCount,
             };
             frameInstanceCount += cameraInstanceCount;
+            frameSpriteCount += cameraSpriteCount;
+            frameGlyphCount += cameraGlyphCount;
             frameLineCount += cameraLineCount;
             frameVertexCount += cameraVertexCount;
             frameIndexCount += cameraIndexCount;
@@ -371,6 +445,8 @@ internal sealed class TwoDimensionalFramePlanner
         }
 
         int instanceCount = ValidateInstanceCount(frameInstanceCount);
+        int spriteInstanceCount = ValidateInstanceCount(frameSpriteCount);
+        int glyphCount = ValidateInstanceCount(frameGlyphCount);
         int lineCountTotal = ValidateFrameCount(frameLineCount, "line records");
         int vertexCount = ValidateFrameCount(frameVertexCount, "line vertices");
         int indexCount = ValidateFrameCount(frameIndexCount, "line indices");
@@ -381,6 +457,15 @@ internal sealed class TwoDimensionalFramePlanner
             if (_spriteDrawable[index] && _spriteVisibility[index] == VisibilityCandidate)
             {
                 culledSprites++;
+            }
+        }
+
+        var culledFonts = 0;
+        for (var index = 0; index < fontCount; index++)
+        {
+            if (_fontDrawable[index] && _fontVisibility[index] == VisibilityCandidate)
+            {
+                culledFonts++;
             }
         }
 
@@ -418,14 +503,18 @@ internal sealed class TwoDimensionalFramePlanner
         _plan.CameraPlanCount = cameraPlanCount;
         _plan.DrawCalls = runIndex;
         _plan.NonEmptyCameras = nonEmptyCameras;
-        _plan.InstanceCount = instanceCount;
+        _plan.InstanceCount = spriteInstanceCount;
+        _plan.GlyphCount = glyphCount;
+        _plan.FontCount = fontCount;
         _plan.LineCount = lineCountTotal;
         _plan.LineVertexCount = vertexCount;
         _plan.LineIndexCount = indexCount;
         _plan.RunCount = runIndex;
         _plan.SkippedSprites = skippedSprites;
+        _plan.SkippedFonts = skippedFonts;
         _plan.SkippedLines = skippedLines;
         _plan.CulledSprites = culledSprites;
+        _plan.CulledFonts = culledFonts;
         _plan.CulledLines = culledLines;
         _plan.Cameras = _cameras;
         _plan.Runs = _runs;
@@ -433,8 +522,8 @@ internal sealed class TwoDimensionalFramePlanner
     }
 
     /// <summary>
-    /// Validates a frame's accumulated instance total before it is narrowed to the buffer's index
-    /// type.
+    /// Validates a frame's accumulated sprite/glyph instance total before it is narrowed to the
+    /// buffer's index type.
     /// </summary>
     /// <remarks>
     /// The total is accumulated in <see cref="long"/> because a multi-camera frame can exceed the
@@ -458,7 +547,7 @@ internal sealed class TwoDimensionalFramePlanner
 
     private static Bork2dException CreateInstanceCountException(long instanceCount)
         => new(
-            $"The frame requires {instanceCount} sprite instances, which exceeds the "
+            $"The frame requires {instanceCount} sprite and glyph instances, which exceeds the "
                 + $"{int.MaxValue}-record maximum the instance buffer can address. No instance "
                 + "is truncated.");
 
@@ -573,8 +662,11 @@ internal sealed class TwoDimensionalFramePlanner
     private int BuildCandidates(
         in CameraDrawPlan camera,
         ReadOnlySpan<SpriteSnapshot> sprites,
-        ReadOnlySpan<LineSnapshot> lineRecords)
+        ReadOnlySpan<LineSnapshot> lineRecords,
+        ReadOnlySpan<FontSnapshot> fontRecords)
     {
+        // The caller sized the key array for sprites, lines, and every planned glyph, so the written
+        // count never exceeds its length.
         Span<TwoDimensionalSortKey> keys = _sortKeys;
         var count = 0;
         for (var index = 0; index < sprites.Length; index++)
@@ -635,6 +727,46 @@ internal sealed class TwoDimensionalFramePlanner
                 index);
         }
 
+        for (var index = 0; index < fontRecords.Length; index++)
+        {
+            if (!_fontDrawable[index])
+            {
+                continue;
+            }
+
+            FontSnapshot font = fontRecords[index];
+            if (!TwoDimensionalPlanning.LayerMatches(camera.CullingMask, font.Layer))
+            {
+                continue;
+            }
+
+            // The font snapshot's bounds are the tight laid-out quad AABB, so one test covers every
+            // glyph of the font. A rejecting font becomes a cull candidate once.
+            if (!TwoDimensionalPlanning.BoundsIntersect(camera.WorldBounds, font.Bounds))
+            {
+                MarkCandidate(_fontVisibility, index);
+                continue;
+            }
+
+            int firstGlyph = _fontFirstGlyph[index];
+            int glyphCount = _fontGlyphCount[index];
+            for (var glyphOffset = 0; glyphOffset < glyphCount; glyphOffset++)
+            {
+                int glyphIndex = firstGlyph + glyphOffset;
+                SpriteInstance instance = _glyphs[glyphIndex].Instance;
+                var worldTopLeft = new Vector2(instance.Transform1.X, instance.Transform1.Y);
+                Vector2 screen = CameraProjection.WorldToFramebuffer(
+                    camera.Projection,
+                    worldTopLeft);
+                keys[count++] = new TwoDimensionalSortKey(
+                    font.ZIndex,
+                    screen.Y,
+                    screen.X,
+                    DrawKind.Font,
+                    glyphIndex);
+            }
+        }
+
         return count;
     }
 
@@ -653,6 +785,13 @@ internal sealed class TwoDimensionalFramePlanner
             if (record.Kind == DrawKind.Sprite)
             {
                 instances.WriteInstance(instanceIndex++, in _spriteInstances[record.Index]);
+                continue;
+            }
+
+            if (record.Kind == DrawKind.Font)
+            {
+                SpriteInstance instance = _glyphs[record.Index].Instance;
+                instances.WriteInstance(instanceIndex++, in instance);
                 continue;
             }
 
@@ -842,6 +981,113 @@ internal sealed class TwoDimensionalFramePlanner
         return LineSkipReason.None;
     }
 
+    private FontSkipReason ResolveFont(
+        in FontSnapshot font,
+        int fontIndex,
+        Format sceneFormat,
+        ReadOnlySpan<GlobalUniformSnapshot> globalUniforms)
+    {
+        _fontFirstGlyph[fontIndex] = 0;
+        _fontGlyphCount[fontIndex] = 0;
+
+        FontSkipReason reason = TwoDimensionalPlanning.ClassifyFont(
+            font,
+            shaderPending: false,
+            atlasPending: false);
+        switch (reason)
+        {
+            case FontSkipReason.InvalidLayer:
+                LogInvalidFontLayer(font.Layer);
+                return reason;
+
+            case FontSkipReason.Null:
+            case FontSkipReason.Empty:
+                return reason;
+
+            default:
+                break;
+        }
+
+        ShaderEntry entry;
+        if (font.ShaderData is null)
+        {
+            entry = GetDefaultEntry(ShaderPipelineKind.Font, sceneFormat);
+        }
+        else
+        {
+            ShaderBinding binding = _shaders.Resolve(
+                font.ShaderData,
+                ShaderPipelineKind.Font,
+                sceneFormat);
+            if (binding.State == ShaderBindingState.Pending)
+            {
+                return FontSkipReason.PendingShader;
+            }
+
+            entry = binding.State == ShaderBindingState.Failed
+                ? GetDefaultEntry(ShaderPipelineKind.Font, sceneFormat)
+                : _shaders.GetEntry(binding.EntryId);
+        }
+
+        entry = ApplyGlobalCompatibility(
+            entry,
+            globalUniforms,
+            ShaderPipelineKind.Font,
+            sceneFormat);
+
+        FontRenderData data = font.FontData!;
+        TexturePageLookup lookup = _pages.EnsurePage(data.Atlas.Path);
+        if (lookup.Kind == TexturePageLookupKind.Pending)
+        {
+            return FontSkipReason.PendingAtlas;
+        }
+
+        uint atlasIndex = lookup.Kind == TexturePageLookupKind.Ready ? (uint)lookup.Index : 0u;
+        Vector4 params0;
+        Vector4 params1;
+        Vector4 params2;
+        Vector4 params3;
+        if (entry.IsDefault)
+        {
+            // A game pack may shadow shader/sdf with declarations, so seed the default block from the
+            // default entry's declared defaults instead of assuming it declares only uThreshold and
+            // uSoftness.
+            ReadOnlySpan<Vector4> block = entry.Metadata.DefaultInstanceUniformBlock;
+            params0 = block[0];
+            params1 = block[1];
+            params2 = block[2];
+            params3 = block[3];
+        }
+        else
+        {
+            params0 = font.Uniform0;
+            params1 = font.Uniform1;
+            params2 = font.Uniform2;
+            params3 = font.Uniform3;
+        }
+
+        ReadOnlySpan<FontGlyphQuad> glyphs = font.Layout!.Glyphs;
+        int bindingId = GetOrAddFontBinding(data);
+        int firstGlyph = _plannedGlyphCount;
+        EnsureGlyphCapacity(firstGlyph + glyphs.Length);
+        for (var index = 0; index < glyphs.Length; index++)
+        {
+            SpriteInstance instance = FontInstanceBuilder.Create(
+                font,
+                glyphs[index],
+                atlasIndex,
+                params0,
+                params1,
+                params2,
+                params3);
+            _glyphs[_plannedGlyphCount++] = new PlannedGlyph(instance, entry.Id, bindingId, fontIndex);
+        }
+
+        _fontFirstGlyph[fontIndex] = firstGlyph;
+        _fontGlyphCount[fontIndex] = glyphs.Length;
+        return FontSkipReason.None;
+    }
+
     private ShaderEntry GetDefaultEntry(ShaderPipelineKind kind, Format sceneFormat)
     {
         ShaderEntry? cached = _defaultEntries[(int)kind];
@@ -882,6 +1128,28 @@ internal sealed class TwoDimensionalFramePlanner
         }
 
         return defaultEntry;
+    }
+
+    private int GetOrAddFontBinding(FontRenderData data)
+    {
+        for (var index = 0; index < _fontBindingCount; index++)
+        {
+            if (ReferenceEquals(_fontBindings[index], data))
+            {
+                return index + 1;
+            }
+        }
+
+        if (_fontBindings.Length <= _fontBindingCount)
+        {
+            int capacity = Math.Max(
+                _fontBindingCount + 1,
+                Math.Max(MinimumCapacity, _fontBindings.Length * 2));
+            Array.Resize(ref _fontBindings, capacity);
+        }
+
+        _fontBindings[_fontBindingCount] = data;
+        return ++_fontBindingCount;
     }
 
     private static SpriteSnapshot SeedDefaultUniforms(in SpriteSnapshot sprite, ShaderEntry entry)
@@ -990,6 +1258,20 @@ internal sealed class TwoDimensionalFramePlanner
         _loggedInvalidLineLayer = true;
         _logger.LogWarning(
             "Line layer {Layer} is not a single non-zero layer bit; the line is skipped. This "
+                + "diagnostic is logged once per renderer and the frame counter keeps the total.",
+            layer);
+    }
+
+    private void LogInvalidFontLayer(uint layer)
+    {
+        if (_loggedInvalidFontLayer)
+        {
+            return;
+        }
+
+        _loggedInvalidFontLayer = true;
+        _logger.LogWarning(
+            "Font layer {Layer} is not a single non-zero layer bit; the font is skipped. This "
                 + "diagnostic is logged once per renderer and the frame counter keeps the total.",
             layer);
     }
@@ -1114,6 +1396,31 @@ internal sealed class TwoDimensionalFramePlanner
         Array.Resize(ref _lineParams3, capacity);
     }
 
+    private void EnsureFontArrays(int count)
+    {
+        if (_fontFirstGlyph.Length >= count)
+        {
+            return;
+        }
+
+        int capacity = Math.Max(count, Math.Max(MinimumCapacity, _fontFirstGlyph.Length * 2));
+        Array.Resize(ref _fontFirstGlyph, capacity);
+        Array.Resize(ref _fontGlyphCount, capacity);
+        Array.Resize(ref _fontDrawable, capacity);
+        Array.Resize(ref _fontVisibility, capacity);
+    }
+
+    private void EnsureGlyphCapacity(int required)
+    {
+        if (_glyphs.Length >= required)
+        {
+            return;
+        }
+
+        int capacity = Math.Max(required, Math.Max(MinimumCapacity, _glyphs.Length * 2));
+        Array.Resize(ref _glyphs, capacity);
+    }
+
     private void EnsureSortKeyCapacity(int count)
     {
         if (_sortKeys.Length >= count)
@@ -1159,8 +1466,25 @@ internal sealed class TwoDimensionalFramePlanner
         Array.Resize(ref _cameras, capacity);
     }
 
-    /// <summary>One camera-visible record: its kind and its index in that kind's captured list.</summary>
+    /// <summary>One camera-visible record: its kind and its index in that kind's planned list.</summary>
     /// <param name="Kind">The renderable kind.</param>
-    /// <param name="Index">The index into the captured sprite or line list.</param>
+    /// <param name="Index">
+    /// The index into the captured sprite list, the captured line list, or the flat planned glyph
+    /// list.
+    /// </param>
     private readonly record struct VisibleRecord(DrawKind Kind, int Index);
+
+    /// <summary>
+    /// One planned glyph record: the shared instance values, the resolved entry, the font binding, and
+    /// the captured font it came from (for per-font visibility accounting).
+    /// </summary>
+    /// <param name="Instance">The glyph's instance record.</param>
+    /// <param name="EntryId">The resolved shader entry identity used for run grouping.</param>
+    /// <param name="FontBindingId">The per-plan font asset binding; at least <c>1</c>.</param>
+    /// <param name="FontRecordIndex">The captured font record index, used for culling accounting.</param>
+    private readonly record struct PlannedGlyph(
+        SpriteInstance Instance,
+        int EntryId,
+        int FontBindingId,
+        int FontRecordIndex);
 }

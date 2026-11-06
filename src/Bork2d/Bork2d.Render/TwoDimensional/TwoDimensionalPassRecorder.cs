@@ -7,7 +7,7 @@ namespace Bork2d.Render.TwoDimensional;
 
 /// <summary>
 /// Records the frame's full-target opaque-black clear and the approved per-camera dynamic-rendering
-/// passes with one instanced sprite draw or one indexed line draw per contiguous draw run.
+/// passes with one instanced sprite or font draw or one indexed line draw per contiguous draw run.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -24,10 +24,10 @@ namespace Bork2d.Render.TwoDimensional;
 /// color; <c>Clear.None</c>/<c>Clear.Depth</c> use <c>LOAD</c> and never touch depth. A camera with
 /// at least one run sets its viewport/scissor once, pushes the 64-byte view-projection once, then
 /// binds each run's pipeline and descriptor sets with that run's global-block dynamic offset and
-/// issues the kind's draw: <c>vkCmdDraw(4, InstanceCount, 0, FirstInstance)</c> for a sprite run, or
-/// <c>vkCmdDrawIndexed(IndexCount, 1, FirstIndex, 0, 0)</c> for a line run. The line vertex and index
-/// buffers are bound once per camera before the first line run. Consecutive runs that share both the
-/// pipeline and the dynamic offset skip the redundant binds.
+/// issues the kind's draw: <c>vkCmdDraw(4, InstanceCount, 0, FirstInstance)</c> for a sprite or font
+/// run, or <c>vkCmdDrawIndexed(IndexCount, 1, FirstIndex, 0, 0)</c> for a line run. The line vertex
+/// and index buffers are bound once per camera before the first line run. Consecutive runs that share
+/// both the pipeline and the dynamic offset skip the redundant binds.
 /// </para>
 /// <para>
 /// A scene color-attachment barrier runs before every camera pass so its <c>LOAD</c> observes the
@@ -273,8 +273,10 @@ internal static unsafe class TwoDimensionalPassRecorder
                     run.GlobalBlockOffset);
             }
 
-            if (run.Kind == DrawKind.Sprite)
+            if (run.Kind != DrawKind.Line)
             {
+                // Sprite and font runs both draw one generated quad per instance record; the only
+                // difference is the pipeline resolved for the run's kind.
                 vk.CmdDraw(
                     commandBuffer,
                     QuadVertexCount,

@@ -7,12 +7,13 @@ namespace Bork2d.Engine.Rendering;
 /// <para>
 /// The values describe the last completed frame, except <see cref="ValidationErrors"/> and
 /// <see cref="ValidationWarnings"/>, which are cumulative for the run. <see cref="DrawCalls"/> counts
-/// the frame's contiguous draw runs (one <c>vkCmdDraw</c> per sprite run and one
+/// the frame's contiguous draw runs (one <c>vkCmdDraw</c> per sprite or font run and one
 /// <c>vkCmdDrawIndexed</c> per line run) plus the final fullscreen present draw, so a default-only
-/// camera records two draws (its run and the present) while a camera that alternates kinds or shaders
-/// records one per contiguous group plus the present; <see cref="NonEmptyCameras"/> counts the cameras
-/// with at least one run. <see cref="Instances"/> counts sprite instance records and
-/// <see cref="Lines"/> counts line records submitted by the frame, both across cameras.
+/// camera records two draws (its run and the present) while a camera that alternates kinds, shaders,
+/// or fonts records one per contiguous group plus the present; <see cref="NonEmptyCameras"/> counts
+/// the cameras with at least one run. <see cref="Instances"/> counts sprite instance records,
+/// <see cref="Glyphs"/> counts submitted glyph instance records, and <see cref="Lines"/> counts line
+/// records submitted by the frame, all across cameras.
 /// <see cref="TexturePages"/>
 /// and <see cref="TexturePageCapacity"/> are current for that frame and include the placeholder at
 /// index <c>0</c>; <see cref="TexturePages"/> counts the ready pages of the current asset catalog, so
@@ -22,9 +23,11 @@ namespace Bork2d.Engine.Rendering;
 /// later frame. <see cref="SkippedSprites"/> counts the null, invalid-layer, non-<c>Quad</c>, and
 /// still-loading sprites (a loading custom shader, main texture, or declared additional texture)
 /// skipped by that frame; a sprite drawn with the placeholder or the default shader fallback is not
-/// skipped. <see cref="SkippedLines"/> counts the null-geometry, invalid-layer, and still-loading
-/// lines skipped by that frame; a line drawn with the built-in line shader or the line default
-/// fallback is not skipped.
+/// skipped. <see cref="SkippedFonts"/> counts the null-data, invalid-layer, and still-loading fonts
+/// (a loading custom shader or atlas page) skipped by that frame; a font with an empty layout, a
+/// placeholder-drawn page, or the SDF fallback is not skipped. <see cref="SkippedLines"/> counts the
+/// null-geometry, invalid-layer, and still-loading lines skipped by that frame; a line drawn with the
+/// built-in line shader or the line default fallback is not skipped.
 /// </para>
 /// <para>
 /// The type is a value, so reading <c>IEngine.RenderStats</c> allocates nothing and cannot throw.
@@ -37,10 +40,11 @@ namespace Bork2d.Engine.Rendering;
 /// <param name="FramebufferWidth">The last completed frame's framebuffer/target width in pixels.</param>
 /// <param name="FramebufferHeight">The last completed frame's framebuffer/target height in pixels.</param>
 /// <param name="DrawCalls">
-/// The number of draw calls recorded by the frame: one per sprite or line draw run plus the final
-/// fullscreen present draw.
+/// The number of draw calls recorded by the frame: one per sprite, line, or font draw run plus the
+/// final fullscreen present draw.
 /// </param>
 /// <param name="Instances">The number of sprite instance records submitted by the frame.</param>
+/// <param name="Glyphs">The number of glyph instance records submitted by the frame.</param>
 /// <param name="Lines">The number of line records submitted by the frame.</param>
 /// <param name="Cameras">The number of cameras captured for the frame.</param>
 /// <param name="NonEmptyCameras">The number of cameras that recorded at least one draw run.</param>
@@ -61,6 +65,10 @@ namespace Bork2d.Engine.Rendering;
 /// The sprites skipped by the frame (null, invalid layer, non-<c>Quad</c>, or a still-loading shader,
 /// main texture, or additional texture page).
 /// </param>
+/// <param name="SkippedFonts">
+/// The fonts skipped by the frame (null data, invalid layer, or a still-loading custom shader or
+/// atlas page). An empty layout is not a skip.
+/// </param>
 /// <param name="SkippedLines">
 /// The lines skipped by the frame (null/invalid geometry, invalid layer, or a still-loading custom
 /// shader).
@@ -73,6 +81,7 @@ public readonly record struct RenderStats(
     int FramebufferHeight,
     int DrawCalls,
     int Instances,
+    int Glyphs,
     int Lines,
     int Cameras,
     int NonEmptyCameras,
@@ -81,6 +90,7 @@ public readonly record struct RenderStats(
     int TextureUploadsPending,
     long TextureUploadBytesPending,
     long SkippedSprites,
+    long SkippedFonts,
     long SkippedLines,
     long ValidationErrors,
     long ValidationWarnings);
