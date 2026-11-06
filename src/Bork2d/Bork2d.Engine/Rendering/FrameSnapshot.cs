@@ -7,21 +7,22 @@ namespace Bork2d.Engine.Rendering;
 /// <para>
 /// A frame snapshot is mutable only while its slot is <c>Writing</c>. The tick thread resets and
 /// fills it, the slot is published as <c>Ready</c> with a release, and the renderer reads it only
-/// while the slot is <c>Rendering</c>; nothing writes it after publication. Cameras, sprites, and
-/// lines live in compact typed <see cref="RenderDataBuffer{T}"/> pools at the reserved
-/// <see cref="CameraSlot"/>, <see cref="SpriteSlot"/>, and <see cref="LineSlot"/>; a registered
-/// renderable producer owns a slot at or above <see cref="ReservedSlotCount"/>. Every pool starts
-/// empty, grows to the observed high-water mark, and never shrinks (Q6=Z1), so a warm capture
-/// appends values without allocating. Resetting a slot clears every buffer's used range, releasing
-/// obsolete references without shrinking the buffers. Capture uses no LINQ, boxing, or per-node
-/// allocation.
+/// while the slot is <c>Rendering</c>; nothing writes it after publication. Cameras, sprites, lines,
+/// and fonts live in compact typed <see cref="RenderDataBuffer{T}"/> pools at the reserved
+/// <see cref="CameraSlot"/>, <see cref="SpriteSlot"/>, <see cref="LineSlot"/>, and
+/// <see cref="FontSlot"/>; a registered renderable producer owns a slot at or above
+/// <see cref="ReservedSlotCount"/>. Every pool starts empty, grows to the observed high-water mark,
+/// and never shrinks (Q6=Z1), so a warm capture appends values without allocating. Resetting a slot
+/// clears every buffer's used range, releasing obsolete references without shrinking the buffers.
+/// Capture uses no LINQ, boxing, or per-node allocation.
 /// </para>
 /// <para>
 /// The snapshot is asset-agnostic: each sprite carries the immutable <see cref="Assets.SpriteRenderData"/>
 /// frozen when its asset was assigned and the immutable <see cref="Assets.ShaderRenderData"/> frozen
 /// when its shader was assigned, and no live scene entity, mutable <see cref="Assets.SpriteAsset"/>,
 /// or mutable <see cref="Assets.ShaderAsset"/> crosses the boundary. Each line carries only its
-/// cached immutable <see cref="LineGeometryData"/> and frozen shader metadata.
+/// cached immutable <see cref="LineGeometryData"/> and frozen shader metadata, and each font carries
+/// only its immutable <see cref="Assets.FontRenderData"/> and cached <see cref="FontLayoutData"/>.
 /// </para>
 /// <para>
 /// Engine-wide user uniforms live in their own value-only buffer and are not a renderable producer
@@ -40,11 +41,14 @@ internal sealed class FrameSnapshot
     /// <summary>The reserved buffer slot that holds the captured lines.</summary>
     internal const int LineSlot = 2;
 
+    /// <summary>The reserved buffer slot that holds the captured font renderables.</summary>
+    internal const int FontSlot = 3;
+
     /// <summary>
     /// The number of reserved slots. A custom renderable producer's slot is at or above this value,
-    /// so it can never collide with the camera, sprite, or line buffers.
+    /// so it can never collide with the camera, sprite, line, or font buffers.
     /// </summary>
-    internal const int ReservedSlotCount = 3;
+    internal const int ReservedSlotCount = 4;
 
     private readonly RenderDataBufferSet _buffers = new();
     private readonly RenderDataBuffer<GlobalUniformSnapshot> _globalUniforms = new();
@@ -56,6 +60,7 @@ internal sealed class FrameSnapshot
         _ = _buffers.Get<CameraSnapshot>(CameraSlot);
         _ = _buffers.Get<SpriteSnapshot>(SpriteSlot);
         _ = _buffers.Get<LineSnapshot>(LineSlot);
+        _ = _buffers.Get<FontSnapshot>(FontSlot);
     }
 
     /// <summary>
@@ -78,6 +83,9 @@ internal sealed class FrameSnapshot
     /// <summary>Gets the number of captured lines.</summary>
     internal int LineCount => _buffers.Get<LineSnapshot>(LineSlot).Count;
 
+    /// <summary>Gets the number of captured font renderables.</summary>
+    internal int FontCount => _buffers.Get<FontSnapshot>(FontSlot).Count;
+
     /// <summary>Gets the number of captured engine-wide user uniforms.</summary>
     internal int GlobalUniformCount => _globalUniforms.Count;
 
@@ -99,6 +107,12 @@ internal sealed class FrameSnapshot
     /// </summary>
     internal int LineCapacity => _buffers.Get<LineSnapshot>(LineSlot).Capacity;
 
+    /// <summary>
+    /// Gets the current font buffer capacity. Starts at zero, grows to the high-water mark, and
+    /// never shrinks (Q6=Z1).
+    /// </summary>
+    internal int FontCapacity => _buffers.Get<FontSnapshot>(FontSlot).Capacity;
+
     /// <summary>Gets the captured cameras in capture order (unordered, renderer sorts in M8).</summary>
     internal ReadOnlySpan<CameraSnapshot> Cameras
         => _buffers.Get<CameraSnapshot>(CameraSlot).Items;
@@ -111,6 +125,10 @@ internal sealed class FrameSnapshot
     internal ReadOnlySpan<LineSnapshot> Lines
         => _buffers.Get<LineSnapshot>(LineSlot).Items;
 
+    /// <summary>Gets the captured fonts in capture order (unordered; the 2D planner sorts later).</summary>
+    internal ReadOnlySpan<FontSnapshot> Fonts
+        => _buffers.Get<FontSnapshot>(FontSlot).Items;
+
     /// <summary>Gets the captured engine-wide user uniforms in capture order.</summary>
     internal ReadOnlySpan<GlobalUniformSnapshot> GlobalUniforms => _globalUniforms.Items;
 
@@ -120,7 +138,7 @@ internal sealed class FrameSnapshot
     /// <remarks>
     /// A producer writes its records through this accessor, so no capture code has to know the
     /// concrete renderable or data type. Slots below <see cref="ReservedSlotCount"/> belong to the
-    /// engine's cameras, sprites, and lines; a custom producer uses a slot at or above it.
+    /// engine's cameras, sprites, lines, and fonts; a custom producer uses a slot at or above it.
     /// </remarks>
     /// <typeparam name="T">The value record type the slot stores.</typeparam>
     /// <param name="slot">The producer's assigned render-data slot.</param>
@@ -167,6 +185,14 @@ internal sealed class FrameSnapshot
     /// <param name="line">The line values to copy.</param>
     internal void AddLine(in LineSnapshot line)
         => _buffers.Get<LineSnapshot>(LineSlot).Add(line);
+
+    /// <summary>
+    /// Appends one font renderable to the reserved font buffer, growing it when the high-water mark
+    /// rises.
+    /// </summary>
+    /// <param name="font">The font values to copy.</param>
+    internal void AddFont(in FontSnapshot font)
+        => _buffers.Get<FontSnapshot>(FontSlot).Add(font);
 
     /// <summary>
     /// Appends one user global uniform to the non-renderable global buffer, growing it when the

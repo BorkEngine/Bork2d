@@ -23,11 +23,11 @@ namespace Bork2d.Engine.Scene;
 /// </para>
 /// <para>
 /// Renderable creation and capture are registry-driven: the engine constructs one
-/// <see cref="RenderableRegistry"/> with the camera, sprite, and line definitions, delegates
-/// <see cref="CreateCamera"/>, <see cref="CreateSpriteRender"/>, and <see cref="CreateLineRender"/>
-/// to it, and passes its ordered producer list to the capture pass. Adding a renderable kind
-/// therefore registers a definition instead of editing the engine's creation methods or a capture
-/// switch.
+/// <see cref="RenderableRegistry"/> with the camera, sprite, line, and font definitions, delegates
+/// <see cref="CreateCamera"/>, <see cref="CreateSpriteRender"/>, <see cref="CreateLineRender"/>, and
+/// <see cref="CreateFontRender"/> to it, and passes its ordered producer list to the capture pass.
+/// Adding a renderable kind therefore registers a definition instead of editing the engine's
+/// creation methods or a capture switch.
 /// </para>
 /// <para>
 /// The window and input implementations are injected by the composition root: a windowed app gets
@@ -83,13 +83,15 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
         LayerValidation.Validate<TLayer>();
 
         _root = new SceneRoot(_structuralLock);
+        _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+        ILogger fontLogger = _loggerFactory.CreateLogger("Bork2d.Engine.Scene.Font");
         _renderables = new RenderableRegistry(
             FrameSnapshot.ReservedSlotCount,
             new CameraRenderableDefinition<TLayer>(_structuralLock, window),
             new SpriteRenderableDefinition<TLayer>(_structuralLock),
-            new LineRenderableDefinition<TLayer>(_structuralLock));
+            new LineRenderableDefinition<TLayer>(_structuralLock),
+            new FontRenderableDefinition<TLayer>(_structuralLock, fontLogger));
         _capture = new SnapshotCapture(_structuralLock, _root, _renderables.Producers);
-        _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _input = input;
         Time = time;
         Window = window;
@@ -284,6 +286,14 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
             parentNode);
     }
 
+    public IFontRender<TLayer> CreateFontRender(ITransform parent)
+    {
+        var parentNode = RequireEngineNode(parent);
+        return (IFontRender<TLayer>)_renderables.Create(
+            typeof(FontRender<TLayer>),
+            parentNode);
+    }
+
     /// <inheritdoc/>
     public void SetGlobalUniform(string name, float value)
         => SetGlobalUniformCore(name, ShaderUniformType.Float, new Vector4(value, 0f, 0f, 0f));
@@ -401,7 +411,7 @@ internal sealed class GameEngine<TLayer> : IEngine<TLayer>
     /// traversal is iterative and parent-first under the structural lock: each node is read under
     /// one per-object lock acquisition, and its world matrix is composed once by the registered
     /// producer that matches it (or by the plain transform fallback). The engine's camera, sprite,
-    /// and line producers are registered first and fill the reserved snapshot buffers.
+    /// line, and font producers are registered first and fill the reserved snapshot buffers.
     /// </para>
     /// </remarks>
     /// <param name="snapshot">The slot-owned snapshot to reset and fill.</param>

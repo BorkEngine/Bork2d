@@ -64,6 +64,24 @@ public sealed class FontPublicSurfaceTests
     }
 
     [Fact]
+    public void FontAssetExposesMeasureTextWithTheApprovedSignature()
+    {
+        MethodInfo method = Assert.IsAssignableFrom<MethodInfo>(
+            typeof(FontAsset).GetMethod(
+                "MeasureText",
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly));
+
+        Assert.True(method.IsPublic);
+        Assert.Equal(typeof(Vector2), method.ReturnType);
+        ParameterInfo[] parameters = method.GetParameters();
+        Assert.Equal(2, parameters.Length);
+        Assert.Equal(typeof(ReadOnlySpan<char>), parameters[0].ParameterType);
+        Assert.Equal("text", parameters[0].Name);
+        Assert.Equal(typeof(float), parameters[1].ParameterType);
+        Assert.Equal("size", parameters[1].Name);
+    }
+
+    [Fact]
     public void FontGlyphIsAReadOnlyRecordStructWithTheApprovedFields()
     {
         Type type = typeof(FontGlyph);

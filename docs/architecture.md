@@ -66,9 +66,9 @@ snapshot:
 2. It freezes input, advances the clock, dispatches text, and calls `IGame.Tick`.
 3. It walks the rooted scene once with an iterative, parent-first traversal that composes one world
    matrix and takes one per-object lock per node, and runs the registered typed renderable producers,
-   which capture every camera, sprite, line, and custom renderable into its typed buffer in the slot
-   as value-only records. After the walk it copies the engine-wide user shader uniforms into their own
-   value-only snapshot buffer.
+   which capture every camera, sprite, line, font, and custom renderable into its typed buffer in the
+   slot as value-only records. After the walk it copies the engine-wide user shader uniforms into
+   their own value-only snapshot buffer.
 4. It publishes the slot as the newest snapshot. A newer publish supersedes the previous `Ready`
    slot, never a `Rendering` one.
 5. The render thread takes the latest `Ready` snapshot, plans the frame, records it, and releases
@@ -112,6 +112,10 @@ Assets are built ahead of time, not loaded from loose files at runtime:
 6. The render thread prefetches texture descriptors/payloads through `IAssets` and uploads them to
    bindless texture pages without blocking on a load.
 
+Fonts are ordinary assets: a `FontAsset` plus its linear MSDF atlas texture, baked at build time and
+loaded through the same catalog. The runtime engine adds no font library or other dependency; the
+build-only TTF/OTF reader stays in `Bork2d.Bake`.
+
 ## Invariants
 
 - **Scene ownership.** The root is a read-only identity transform. Parents hold children strongly;
@@ -119,23 +123,26 @@ Assets are built ahead of time, not loaded from loose files at runtime:
   and the detached node keeps its world transform; re-attach the same object later.
 - **Coordinates.** World space is +X right, +Y up, in absolute world units. `Camera.Size` is the
   half visible height; viewports are normalized with a top-left origin.
-- **2D renderables.** Sprites and lines implement the shared `IRenderable<TLayer>` contract over
-  `IBoundedTransform`: custom shader, linear RGBA color, one-bit layer, shared z-index, and instance
-  uniforms. Cameras implement only `IBoundedTransform` because they are not drawn.
+- **2D renderables.** Sprites, lines, and fonts implement the shared `IRenderable<TLayer>` contract
+  over `IBoundedTransform`: custom shader, linear RGBA color, one-bit layer, shared z-index, and
+  instance uniforms. Cameras implement only `IBoundedTransform` because they are not drawn. Fonts
+  carry frozen font data and a cached glyph layout; font glyph records follow the same layer,
+  z-index, and conservative bounds rules as sprites and lines.
 - **Layers and culling.** A layer type is an `int`-backed `[Flags]` enum with 1-32 named single-bit
-  values (`None = 0` allowed). A sprite or line uses exactly one bit; a camera culls with a mask.
-  `Layer` is only a camera culling bit and never participates in draw order. After the mask, culling
-  is a conservative world-space AABB test: the camera's visible rectangle and the record's world AABB
-  are compared, and a record is skipped only when its known bounds do not intersect the camera's.
-  Empty bounds mean "unknown" and never cull; there is no spatial index and no culling toggle. The
-  masked, in-bounds records of both kinds are ordered per camera by the shared `ZIndex` ascending,
-  then framebuffer screen-space Y ascending, then screen X ascending; `ZIndex` is not layer-scoped
-  and equal keys are unspecified.
+  values (`None = 0` allowed). A sprite, line, or font uses exactly one bit; a camera culls with a
+  mask. `Layer` is only a camera culling bit and never participates in draw order. After the mask,
+  culling is a conservative world-space AABB test: the camera's visible rectangle and the record's
+  world AABB are compared, and a record is skipped only when its known bounds do not intersect the
+  camera's. Empty bounds mean "unknown" and never cull; there is no spatial index and no culling
+  toggle. The masked, in-bounds records of every kind are ordered per camera by the shared `ZIndex`
+  ascending, then framebuffer screen-space Y ascending, then screen X ascending; `ZIndex` is not
+  layer-scoped and equal keys are unspecified.
 - **Snapshots.** Capture contains no live scene entities. The only object references that cross the
-  tick/render boundary are immutable sprite render data, immutable line geometry, and immutable shader
-  render data, frozen from the loaded `SpriteAsset`/`ShaderAsset` when it was assigned; the mutable
-  assets themselves are never captured. Reusing a slot clears every typed render-data buffer's used
-  range and the user global-uniform buffer, so it retains no obsolete render data or names.
+  tick/render boundary are immutable sprite render data, immutable line geometry, immutable font
+  render data and cached font layout, and immutable shader render data, frozen from the loaded
+  `SpriteAsset`/`FontAsset`/`ShaderAsset` when it was assigned; the mutable assets themselves are
+  never captured. Reusing a slot clears every typed render-data buffer's used range and the user
+  global-uniform buffer, so it retains no obsolete render data or names.
 - **AOT.** Generated shapes are required; there is no reflection-shape fallback or runtime TOML.
   Runtime projects enable trim and AOT analyzers.
 - **Tooling isolation.** The bake tooling, TOML parser, image decoder, KTX2 writer, block encoder,

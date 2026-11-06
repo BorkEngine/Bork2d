@@ -19,24 +19,28 @@ public sealed class FrameSnapshotTests
         Assert.Equal(0, snapshot.CameraCount);
         Assert.Equal(0, snapshot.SpriteCount);
         Assert.Equal(0, snapshot.LineCount);
+        Assert.Equal(0, snapshot.FontCount);
         Assert.Equal(0, snapshot.CameraCapacity);
         Assert.Equal(0, snapshot.SpriteCapacity);
         Assert.Equal(0, snapshot.LineCapacity);
+        Assert.Equal(0, snapshot.FontCapacity);
         Assert.Equal(0, snapshot.Sequence);
         Assert.Equal(0d, snapshot.Time);
         Assert.Equal(0d, snapshot.DeltaTime);
         Assert.True(snapshot.Cameras.IsEmpty);
         Assert.True(snapshot.Sprites.IsEmpty);
         Assert.True(snapshot.Lines.IsEmpty);
+        Assert.True(snapshot.Fonts.IsEmpty);
     }
 
     [Fact]
-    public void ReservedSlotsAreCameraSpriteAndLine()
+    public void ReservedSlotsAreCameraSpriteLineAndFont()
     {
         Assert.Equal(0, FrameSnapshot.CameraSlot);
         Assert.Equal(1, FrameSnapshot.SpriteSlot);
         Assert.Equal(2, FrameSnapshot.LineSlot);
-        Assert.Equal(3, FrameSnapshot.ReservedSlotCount);
+        Assert.Equal(3, FrameSnapshot.FontSlot);
+        Assert.Equal(4, FrameSnapshot.ReservedSlotCount);
     }
 
     [Fact]
@@ -46,24 +50,28 @@ public sealed class FrameSnapshotTests
         snapshot.AddCamera(Camera());
         snapshot.AddSprite(Sprite());
         snapshot.AddLine(Line());
+        snapshot.AddFont(Font());
         snapshot.Sequence = 12;
         snapshot.Time = 1.5;
         snapshot.DeltaTime = 0.25;
         var cameraCapacity = snapshot.CameraCapacity;
         var spriteCapacity = snapshot.SpriteCapacity;
         var lineCapacity = snapshot.LineCapacity;
+        var fontCapacity = snapshot.FontCapacity;
 
         snapshot.Reset();
 
         Assert.Equal(0, snapshot.CameraCount);
         Assert.Equal(0, snapshot.SpriteCount);
         Assert.Equal(0, snapshot.LineCount);
+        Assert.Equal(0, snapshot.FontCount);
         Assert.Equal(0, snapshot.Sequence);
         Assert.Equal(0d, snapshot.Time);
         Assert.Equal(0d, snapshot.DeltaTime);
         Assert.Equal(cameraCapacity, snapshot.CameraCapacity);
         Assert.Equal(spriteCapacity, snapshot.SpriteCapacity);
         Assert.Equal(lineCapacity, snapshot.LineCapacity);
+        Assert.Equal(fontCapacity, snapshot.FontCapacity);
     }
 
     [Fact]
@@ -83,6 +91,10 @@ public sealed class FrameSnapshotTests
         snapshot.AddLine(Line());
         Assert.True(snapshot.LineCapacity >= 1);
         Assert.Equal(1, snapshot.LineCount);
+
+        snapshot.AddFont(Font());
+        Assert.True(snapshot.FontCapacity >= 1);
+        Assert.Equal(1, snapshot.FontCount);
 
         var capacity = snapshot.SpriteCapacity;
         for (var index = 0; index < 64; index++)
@@ -104,20 +116,24 @@ public sealed class FrameSnapshotTests
             snapshot.AddSprite(Sprite());
             snapshot.AddCamera(Camera());
             snapshot.AddLine(Line());
+            snapshot.AddFont(Font());
         }
 
         var cameraCapacity = snapshot.CameraCapacity;
         var spriteCapacity = snapshot.SpriteCapacity;
         var lineCapacity = snapshot.LineCapacity;
+        var fontCapacity = snapshot.FontCapacity;
 
         snapshot.Reset();
         snapshot.AddSprite(Sprite());
         snapshot.AddCamera(Camera());
         snapshot.AddLine(Line());
+        snapshot.AddFont(Font());
 
         Assert.Equal(cameraCapacity, snapshot.CameraCapacity);
         Assert.Equal(spriteCapacity, snapshot.SpriteCapacity);
         Assert.Equal(lineCapacity, snapshot.LineCapacity);
+        Assert.Equal(fontCapacity, snapshot.FontCapacity);
     }
 
     [Fact]
@@ -128,6 +144,7 @@ public sealed class FrameSnapshotTests
         snapshot.AddCamera(Camera(zIndex: -1));
         snapshot.AddSprite(Sprite(zIndex: 9));
         snapshot.AddLine(Line(zIndex: 4));
+        snapshot.AddFont(Font(zIndex: 6));
 
         Assert.Equal(2, snapshot.Cameras.Length);
         Assert.Equal(5, snapshot.Cameras[0].ZIndex);
@@ -136,6 +153,8 @@ public sealed class FrameSnapshotTests
         Assert.Equal(9, snapshot.Sprites[0].ZIndex);
         Assert.Equal(1, snapshot.Lines.Length);
         Assert.Equal(4, snapshot.Lines[0].ZIndex);
+        Assert.Equal(1, snapshot.Fonts.Length);
+        Assert.Equal(6, snapshot.Fonts[0].ZIndex);
     }
 
     [Fact]
@@ -166,6 +185,8 @@ public sealed class FrameSnapshotTests
             () => snapshot.GetBuffer<TestRecord>(FrameSnapshot.CameraSlot));
         Assert.Throws<Bork2dException>(
             () => snapshot.GetBuffer<TestRecord>(FrameSnapshot.LineSlot));
+        Assert.Throws<Bork2dException>(
+            () => snapshot.GetBuffer<TestRecord>(FrameSnapshot.FontSlot));
     }
 
     private static CameraSnapshot Camera(int zIndex = 0)
@@ -176,6 +197,9 @@ public sealed class FrameSnapshotTests
 
     private static LineSnapshot Line(int zIndex = 0)
         => new(null, Matrix3x2.Identity, Color.White, 1u, zIndex, AntiAlias: true);
+
+    private static FontSnapshot Font(int zIndex = 0)
+        => new(null, null, Matrix3x2.Identity, Color.White, 1u, zIndex);
 
     private readonly record struct TestRecord(int Value);
 }

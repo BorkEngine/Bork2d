@@ -113,6 +113,7 @@ public sealed class RenderStatsPublicSurfaceTests
             {
                 "CaptureFrameAsync(CancellationToken)",
                 "CreateCamera(ITransform)",
+                "CreateFontRender(ITransform)",
                 "CreateLineRender(ITransform)",
                 "CreateSpriteRender(ITransform)",
                 "CreateTransform(ITransform)",
