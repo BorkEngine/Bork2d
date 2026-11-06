@@ -5,7 +5,7 @@ namespace Pong.Common;
 /// </summary>
 /// <remarks>
 /// A renderable owns exactly one bit and the camera renders the combined mask, so the court
-/// (including the wordmark), paddles, and ball can be filtered and ordered independently.
+/// (including the wordmark), paddles, ball, and score can be filtered and ordered independently.
 /// </remarks>
 [Flags]
 public enum GameLayer
@@ -21,4 +21,7 @@ public enum GameLayer
 
     /// <summary>The ball layer.</summary>
     Ball = 4,
+
+    /// <summary>The score layer; the HUD draws above every gameplay element.</summary>
+    Hud = 8,
 }

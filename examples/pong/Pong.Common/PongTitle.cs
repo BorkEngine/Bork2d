@@ -1,14 +1,14 @@
 namespace Pong.Common;
 
 /// <summary>
-/// Formats the window title that carries the score, the match state, and the input prompt until the
-/// renderer (and a later UI milestone) can draw them.
+/// Formats the window title that carries the score, the match state, and the input prompt alongside
+/// the score drawn on the court.
 /// </summary>
 /// <remarks>
-/// The title is the only player-visible surface in windowed mode, so its text is part of the game
-/// contract. The forms are stable and ASCII-only: an ASCII hyphen separates the score from the
-/// state, and the score is surrounded by spaces. Call this only when the title should be compared
-/// with the previous value; never assign the title every frame.
+/// The title still carries the match state and the input prompt in windowed mode, so its text is
+/// part of the game contract. The forms are stable and ASCII-only: an ASCII hyphen separates the
+/// score from the state, and the score is surrounded by spaces. Call this only when the title should
+/// be compared with the previous value; never assign the title every frame.
 /// </remarks>
 public static class PongTitle
 {

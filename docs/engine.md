@@ -61,9 +61,9 @@ not a user global; the frame's time is captured separately from `ITime.Time`.
 The renderer applies a captured user global to each shader run's 144-byte global block by its ordinal
 name when the shader declares the same type, and uses the declaration's shader default when the name
 is absent. A type mismatch between the engine value and a shader declaration makes that custom shader
-fall back to its kind's default (`shader/sprite` for a sprite, `shader/line` for a line) for the frame
-with a one-time warning; the stored bytes are never reinterpreted. The frame time always occupies the
-block's `time.x`.
+fall back to its kind's default (`shader/sprite` for a sprite, `shader/line` for a line, or
+`shader/sdf` for a font) for the frame with a one-time warning; the stored bytes are never
+reinterpreted. The frame time always occupies the block's `time.x`.
 
 ### Frame capture
 
@@ -136,8 +136,8 @@ resolved positionally in the first four `AdditionalTextures` slots; a still-load
 skips the sprite, a failed or absent one samples the bindless placeholder, references beyond the
 shader's declared slot count are not loaded, and references beyond four are ignored with a one-time
 warning. A catalog mount reloads a custom path from the new winning entry on its next sighting,
-retries a previously failed path, and reloads both default shaders while keeping each active until
-its replacement is ready.
+retries a previously failed path, and reloads all three default shaders while keeping each active
+until its replacement is ready.
 
 Instance uniform values are strict. The `SetUniform` overloads validate immediately against the
 currently assigned shader's frozen metadata: with no shader assigned, an undeclared name, a

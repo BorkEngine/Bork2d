@@ -3,6 +3,7 @@ ball = "sprites/ball"
 ballShader = "shader/pulse"
 courtShader = "shader/court"
 wordmark = "art/wordmark"
+scoreFont = "fonts/score"
 paddleSpeed = 14.0
 paddleSpeedMultiplier = 0.05
 ballSpeed = 12.0

@@ -17,7 +17,7 @@ build/Bork2d.BuiltInAssets ─────────> Bork2d.Bake, Bork2d.Engi
 | Project | Role |
 | --- | --- |
 | [Bork2d.Engine](../src/Bork2d/Bork2d.Engine) | Public contract and implementation: scene, time, input/platform seams, assets, pack reader/writer. No GPU, OS, or logging-provider dependency. |
-| [Bork2d.Render](../src/Bork2d/Bork2d.Render) | Internal Vulkan implementation: device selection, swapchain/offscreen target, linear scene image, the unified 2D (sprite and line) and present pipelines, texture pages, snapshot handoff, capture. |
+| [Bork2d.Render](../src/Bork2d/Bork2d.Render) | Internal Vulkan implementation: device selection, swapchain/offscreen target, linear scene image, the unified 2D (sprite, line, and font) and present pipelines, texture pages, snapshot handoff, capture. |
 | [Bork2d.Runtime](../src/Bork2d/Bork2d.Runtime) | Public host: builder, modes, SDL window/input, Vulkan instance/surface, renderer composition, logging. Embeds the built-in asset pack. |
 | [Bork2d.Bake](../src/Bork2d/Bork2d.Bake) | Build-time JIT tooling: TOML binding, processors, texture decode/encode, SVG parse and MSDF generation (SeasonMSDF), TTF/OTF outline reading (StbTrueTypeSharp), pack composition, incremental manifest, CLI. |
 | [Bork2d.BuiltInAssets](../build/Bork2d.BuiltInAssets/Bork2d.BuiltInAssets.csproj) | Build-only JIT generator for the embedded built-in asset pack (the default shaders, the SDF shader, and the bindless placeholder). Outside the runtime solution and never referenced by a runtime project. |
