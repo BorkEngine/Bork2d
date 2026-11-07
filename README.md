@@ -186,4 +186,4 @@ See [Bake](docs/bake.md) for processors, multiple packs, and MSBuild integration
 - [Render](docs/render.md) - the Vulkan renderer and the unified sprite/line/font 2D pipeline.
 - [Runtime](docs/runtime.md) - the builder, host loop, window, and input.
 - [Bake](docs/bake.md) - the build-time asset pipeline and CLI.
-- [Roadmap](docs/roadmap.md) - the 0.2 design and milestones for shaders, KTX2, lines, SVG, and fonts.
+- [Roadmap](docs/roadmap.md) - the 0.3 overview and links to the gamepad, audio, render-pass, Linux, macOS, and release documents.
